@@ -359,6 +359,12 @@ def get_config():
         "lip_sync_modes": ["auto", "overlay", "generation", "skip"],
         "dialogue_voice_modes": ["overlay", "native"],
         "api_engine_defaults": {
+            "KLING_3_0": {
+                "enabled": True, "duration": "5",
+            },
+            "SEEDANCE": {
+                "enabled": True, "resolution": "720p",
+            },
             "KLING_NATIVE": {
                 "enabled": True, "duration": "5", "face_consistency": True,
                 "storyboard_mode": False,

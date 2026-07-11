@@ -1,6 +1,8 @@
 # Video Generation API Reference
 
-## Kling 3.0 Native (`kling_native.py`)
+## Kling Native — LEGACY kling-v1-6 (`kling_native.py`)
+
+**⚠️ Fallback-only since 2026-07-11**: the portrait/medium primary is now the fal Kling v3 Pro route (`fal-ai/kling-video/v3/pro/image-to-video`, KLING_3_0 engine) — best-ranked Kling (#11 AA i2v arena), identity via `elements` (frontal + ≤3 reference images, addressed as `@Element1`). This native client still sends v1.6-era params (`face_consistency`, `image_reference`) that no v3-era doc lists; its `kling-v3` bump is deferred pending a live-key param check (native docs geo-blocked HTTP 446).
 
 **Auth**: JWT (HS256) via `KLING_ACCESS_KEY` + `KLING_SECRET_KEY`. Tokens cached 30 min, auto-refresh at <5 min remaining.
 
@@ -28,7 +30,7 @@
 - 5s is the sweet spot — longer durations increase temporal drift
 - Always use `pro` mode for character content
 - 2–3 additional reference angles (profile, 3/4 view) significantly improve consistency
-- Subject binding + face_consistency together = strongest identity lock of all APIs
+- (v1.6-era) subject binding + face_consistency was the strongest identity lock; on v3 the identity mechanism is `elements` on the fal route — see the header note
 - Tasks typically complete in 30–90s after submission
 
 ---
@@ -168,7 +170,7 @@ When native APIs fail, these FAL endpoints provide redundancy:
 
 | API | FAL Model ID | Notes |
 |-----|-------------|-------|
-| Kling | `fal-ai/kling-video/v3/pro/image-to-video` | Subject binding supported |
+| Kling | `fal-ai/kling-video/v3/pro/image-to-video` | Portrait/medium PRIMARY since 2026-07-11; `elements` identity, $0.112/s audio-off (parity with native pricing) |
 | Sora | `fal-ai/sora-2/image-to-video` | 25s continuous generation (retires 2026-09-24) |
 | Veo | `fal-ai/veo3.1/reference-to-video` | Reference images supported |
 | Seedance | `bytedance/seedance-2.0/image-to-video` | Action primary; 4-15s, 480p-4k, 9:16 OK; `.../reference-to-video` takes ≤9 ref images ($0.3024/s @720p standard) |

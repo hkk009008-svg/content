@@ -1696,7 +1696,7 @@ class ShotController:
 
             # F1a Lane V #18 §1 fix (consumer-side): when has_dialogue is True, the
             # resolved target_api MUST carry native_audio for the native-audio path to
-            # work.  The optimizer's suggestion for dialogue_close_up returns KLING_NATIVE
+            # work.  The optimizer's suggestion for dialogue_close_up returns KLING_3_0
             # (first video-modality entry in PURPOSE_API_RANKING before VEO_NATIVE), which
             # has no native_audio.  Override to the first native_audio video engine in the
             # purpose ranking.  If none exists (policy change in API_REGISTRY), fall through

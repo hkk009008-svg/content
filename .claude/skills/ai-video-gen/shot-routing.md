@@ -38,8 +38,8 @@ pag_scale:                 3.0    # Sharpen face details without oversaturation
 controlnet_depth_strength: 0.35
 ip_adapter_weight:         0.25   # Minimal style transfer
 denoise_default:           0.25   # Tighter temporal consistency
-target_api:                KLING_NATIVE
-video_fallbacks:           ['RUNWAY_GEN4', 'SORA_NATIVE', 'KLING_3_0']
+target_api:                KLING_3_0  # fal Kling v3 Pro — best-ranked Kling (#11 AA i2v arena); `elements` identity binding
+video_fallbacks:           ['KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE']  # native = legacy kling-v1-6, proven identity fallback
 ```
 
 ### Medium (Waist-up balanced)
@@ -55,8 +55,8 @@ pag_scale:                 3.0    # Enhance mid-range detail (clothing, backgrou
 controlnet_depth_strength: 0.40
 ip_adapter_weight:         0.30
 denoise_default:           0.35
-target_api:                KLING_NATIVE
-video_fallbacks:           [RUNWAY_GEN4, SORA_NATIVE, LTX]
+target_api:                KLING_3_0  # fal Kling v3 Pro (see portrait note)
+video_fallbacks:           [KLING_NATIVE, RUNWAY_GEN4, SEEDANCE, LTX]
 ```
 
 ### Wide (Establishing shot, environment-primary)
@@ -73,7 +73,7 @@ controlnet_depth_strength: 0.50   # Strongest spatial lock
 ip_adapter_weight:         0.35
 denoise_default:           0.45
 target_api:                LTX    # 4K, 3D camera, depth-aware, cheapest
-video_fallbacks:           [VEO_NATIVE, KLING_NATIVE, RUNWAY_GEN4]
+video_fallbacks:           [VEO_NATIVE, KLING_3_0, RUNWAY_GEN4]
 ```
 
 ### Action (Dynamic movement)
@@ -90,7 +90,7 @@ controlnet_depth_strength: 0.30   # Light spatial guidance
 ip_adapter_weight:         0.25
 denoise_default:           0.40
 target_api:                SEEDANCE  # #1 AA i2v arena (2026-07); multi-ref (≤9 images) binds multi-character; Sora retires 2026-09-24
-video_fallbacks:           ['SORA_NATIVE', 'KLING_NATIVE', 'RUNWAY_GEN4', 'LTX']  # Sora first fallback until the sunset, then errors fast and cascades
+video_fallbacks:           ['SORA_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']  # Sora first fallback until the sunset, then errors fast and cascades
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -107,7 +107,7 @@ controlnet_depth_strength: 0.55   # Strong spatial lock
 ip_adapter_weight:         0.40   # Max style transfer
 denoise_default:           0.55
 target_api:                LTX    # 4K, no face, cheapest, best environments
-video_fallbacks:           [VEO_NATIVE, KLING_NATIVE]
+video_fallbacks:           [VEO_NATIVE, KLING_3_0]
 ```
 
 ---

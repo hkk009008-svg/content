@@ -46,6 +46,16 @@ SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "me
 # action primary, so a missing fal client degrades the whole run, not one clip.
 _FAL_MISSING_WARNED = False
 
+# Default engine cascade for generate_ai_video when the caller passes no
+# video_fallbacks — quality order. Module-level so tests pin the REAL list
+# (the old test kept a local copy that silently drifted for two migrations).
+# SEEDANCE leads since the Sora sunset (2026-09-24); KLING_3_0 (fal v3 Pro,
+# #11 AA i2v arena) outranks the legacy kling-v1-6 KLING_NATIVE route.
+DEFAULT_VIDEO_CASCADE = [
+    "SEEDANCE", "KLING_3_0", "SORA_NATIVE", "RUNWAY_GEN4",
+    "LTX", "VEO_NATIVE", "KLING_NATIVE", "SORA_2", "VEO", "RUNWAY",
+]
+
 
 def _veo_quota_blocked() -> bool:
     """True if a recent VEO 429 means we should still cascade past VEO.
@@ -180,13 +190,7 @@ def generate_ai_video(
         if video_fallbacks:
             fallback_list = video_fallbacks
         else:
-            # Default cascade: all engines in quality order. SEEDANCE added
-            # 2026-07-11 (fal-based, action primary) so the default chain
-            # keeps a top-quality member after the Sora sunset (2026-09-24).
-            fallback_list = [
-                "SEEDANCE", "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
-                "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
-            ]
+            fallback_list = list(DEFAULT_VIDEO_CASCADE)
 
         # Filter cascade to engines the operator has enabled.
         # Missing key → treat as enabled (permissive). Explicit enabled:False → drop.
@@ -252,7 +256,10 @@ def generate_ai_video(
             extra={"retry": _cascade_retries + 1, "max_cascade_retries": MAX_CASCADE_RETRIES},
         )
         time.sleep(30)
-        first_api = (video_fallbacks or ["KLING_NATIVE"])[0]
+        # Seed the post-cooldown pass from the SAME default the first pass
+        # used — a hardcoded legacy engine here made the retry pass diverge
+        # from DEFAULT_VIDEO_CASCADE (review finding, 2026-07-11).
+        first_api = (video_fallbacks or DEFAULT_VIDEO_CASCADE)[0]
         return generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, [], multi_angle_refs, _cascade_retries=_cascade_retries + 1,
@@ -304,7 +311,9 @@ def generate_ai_video(
     # ═══════════════════════════════════════════════════════════════
 
     if target_api.upper() == "KLING_NATIVE":
-        # Native Kling 3.0 — JWT auth, subject binding, face_consistency
+        # LEGACY native Kling (kling-v1-6) — JWT auth; fallback-only since
+        # 2026-07-11 (primary = KLING_3_0 fal v3 Pro). Sends v1.6-era
+        # subject-binding params; see kling_native.py's module docstring.
         try:
             from kling_native import KlingNativeAPI
             kling = KlingNativeAPI()
@@ -681,7 +690,11 @@ def generate_ai_video(
             return try_next_api()
             
     elif target_api.upper() == "KLING_3_0":
-        # Kling 3.0 Pro via fal.ai — with subject binding + multi-angle references
+        # Kling v3 Pro via fal.ai (fal-ai/kling-video/v3/pro) — portrait/medium
+        # PRIMARY since 2026-07-11 (best-ranked Kling: #11 AA i2v arena, Elo
+        # 1070). Identity via the v3-era `elements` mechanism (frontal +
+        # reference images, addressed as @Element1 in the prompt); the legacy
+        # KLING_NATIVE (kling-v1-6) route stays first fallback.
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             max_attempts = 2
@@ -729,7 +742,9 @@ def generate_ai_video(
                         if valid_refs:
                             frontal_url = fal_client.upload_file(valid_refs[0])
                             extra_urls = []
-                            for ref_path in valid_refs[1:6]:  # Up to 5 additional angles  # Max 3 additional angles
+                            # Kling image elements take 2-4 images each (native
+                            # schema mirror, 2026-07-11): frontal + <=3 refs.
+                            for ref_path in valid_refs[1:4]:
                                 try:
                                     extra_urls.append(fal_client.upload_file(ref_path))
                                 except (OSError, RuntimeError) as e:
@@ -781,6 +796,15 @@ def generate_ai_video(
                         continue
                     return try_next_api()
         else:
+            global _FAL_MISSING_WARNED
+            if not _FAL_MISSING_WARNED:
+                _FAL_MISSING_WARNED = True
+                logger.warning(
+                    "STRUCTURAL: fal client unavailable — the fal primaries "
+                    "(KLING_3_0 portrait/medium, SEEDANCE action) are disabled "
+                    "for this entire run",
+                    extra={"engine": "KLING_3_0"},
+                )
             logger.warning("FAL_KEY missing for Kling — cascading", extra={"engine": "KLING_3_0"})
             return try_next_api()
 
@@ -994,7 +1018,8 @@ def generate_ai_video(
                 logger.warning("Seedance API error", extra={"engine": "SEEDANCE", "error": str(e)})
                 return try_next_api()
         else:
-            global _FAL_MISSING_WARNED
+            # (global _FAL_MISSING_WARNED is declared once in the KLING_3_0
+            # branch above — one declaration covers the whole function scope.)
             if not _FAL_MISSING_WARNED:
                 _FAL_MISSING_WARNED = True
                 logger.warning(

@@ -1,7 +1,18 @@
 """
-Kling 3.0 Native API Client
+Kling Native API Client — LEGACY kling-v1-6 route (fallback-only since 2026-07-11).
+
 Direct integration with Kling's image-to-video and storyboard APIs.
 Uses JWT (HS256) authentication with access/secret key pairs.
+
+Despite the historical "Kling 3.0" label, every request here defaults to
+``model_name="kling-v1-6"``. The primary Kling route is now the fal v3 Pro
+branch (KLING_3_0 in phase_c_ffmpeg — #11 AA i2v arena, `elements` identity).
+Bumping this client to ``kling-v3`` is DEFERRED pending a live-key test:
+the native i2v docs are geo-blocked (HTTP 446, 2026-07-11) and no v3-era doc
+lists the ``face_consistency`` / ``image_reference`` params this client sends
+— identity on v3 is the `elements` mechanism, and multi-image reference is a
+separate ``/v1/videos/multi-image2video`` endpoint (kling-v1-6 only). Do not
+flip the default model without verifying those params against a real call.
 
 Requirements:
     pip install PyJWT requests
@@ -17,7 +28,7 @@ from config.settings import settings
 
 
 class KlingNativeAPI:
-    """Native client for the Kling 3.0 video generation API."""
+    """Native client for the Kling video API (legacy kling-v1-6 defaults)."""
 
     BASE_URL = "https://api.klingai.com"
 

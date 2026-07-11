@@ -32,8 +32,12 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.35,  # Subtle spatial lock from previous shot
         "ip_adapter_weight": 0.25, # Minimal style transfer — face is priority
         "denoise_default": 0.25,   # Lower denoise = tighter temporal consistency in img2img
-        "target_api": "KLING_NATIVE",  # Best face: subject binding + face_consistency
-        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "KLING_3_0"],
+        # KLING_3_0 = fal Kling v3 Pro, the best-ranked Kling (#11 AA i2v arena,
+        # 2026-07-11) with `elements` identity binding. KLING_NATIVE stays first
+        # fallback: it is the legacy kling-v1-6 route (proven identity path;
+        # native kling-v3 bump deferred — v3 param compat unverifiable offline).
+        "target_api": "KLING_3_0",
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"],
         "description": "Close-up portrait — max face fidelity, 25 steps, DPM++ 2M + PAG",
     },
     "medium": {
@@ -48,8 +52,10 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.40,  # Moderate spatial lock
         "ip_adapter_weight": 0.30, # Balanced style transfer
         "denoise_default": 0.35,
-        "target_api": "KLING_NATIVE",  # Good face + scene balance
-        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "LTX"],
+        # fal Kling v3 Pro (elements identity); native v1.6 first fallback —
+        # see the portrait entry for the full rationale.
+        "target_api": "KLING_3_0",
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "Medium shot — balanced face + scene, 20 steps, DPM++ 2M + PAG",
     },
     "wide": {
@@ -65,7 +71,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "ip_adapter_weight": 0.35, # Higher style transfer — lock environment atmosphere
         "denoise_default": 0.45,
         "target_api": "LTX",            # 4K, 3D camera, depth-aware, cheapest
-        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"],
         "description": "Wide establishing shot — environment-first, 20 steps, DPM++ 2M + PAG",
     },
     "action": {
@@ -87,7 +93,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "target_api": "SEEDANCE",
         # SORA_NATIVE stays first fallback (best motion physics) until the
         # shutdown date; after it, the call errors fast and cascades on.
-        "video_fallbacks": ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
+        "video_fallbacks": ["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
     },
     "landscape": {
@@ -103,7 +109,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "ip_adapter_weight": 0.40, # Max style transfer — lock atmosphere and color grade
         "denoise_default": 0.55,
         "target_api": "LTX",            # 4K, no face needed, cheapest, best environments
-        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0"],
         "description": "Pure landscape — no PuLID, 25 steps, max detail + PAG",
     },
     # NOTE: "dialogue" is not a ComfyUI image-gen template — dialogue shots use
@@ -188,8 +194,10 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_steps": 40,
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
-        "target_api": "KLING_NATIVE",
-        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "VEO_NATIVE"],
+        # fal Kling v3 Pro primary; native v1.6 first fallback (see the
+        # production portrait entry for the rationale).
+        "target_api": "KLING_3_0",
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "VEO_NATIVE"],
         "description": "MAX portrait — 4-layer identity, full CN+Redux, N=8 halt@0.92, all post-passes",
     },
     "medium": {
@@ -234,8 +242,9 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_steps": 40,
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
-        "target_api": "KLING_NATIVE",
-        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "LTX"],
+        # fal Kling v3 Pro primary; native v1.6 first fallback.
+        "target_api": "KLING_3_0",
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "MAX medium — same identity stack, slightly relaxed thresholds",
     },
     "wide": {
@@ -281,7 +290,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
         "target_api": "LTX",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"],
         "description": "MAX wide — face too small for FaceDetailer; CN spatial dominant",
     },
     "action": {
@@ -329,7 +338,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         # SEEDANCE primary since the Sora sunset (2026-09-24) — see the
         # production-template action entry for the full rationale.
         "target_api": "SEEDANCE",
-        "video_fallbacks": ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
+        "video_fallbacks": ["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
         "description": "MAX action — softer guidance for motion, lower CN strength to allow movement",
     },
     "landscape": {
@@ -375,7 +384,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
         "target_api": "LTX",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0"],
         "description": "MAX landscape — no identity stack, max CN + PAG + SLG for architecture/atmosphere",
     },
 }

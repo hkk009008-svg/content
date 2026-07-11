@@ -516,7 +516,12 @@ class TestRecordAPICall:
         ("VEO", "google"),
         ("FLUX_PULID", "fal"),
         ("RUNWAY_GEN4", "runway"),
-        ("KLING_3_0", "kling"),
+        # KLING_3_0 is fal-billed (fal-ai/kling-video/v3/pro) — attributed to
+        # "fal" since 2026-07-11 so the breakdown matches the fal invoice;
+        # the bare "KLING" prefix (native JWT route) still maps to "kling".
+        ("KLING_3_0", "fal"),
+        ("KLING_NATIVE", "kling"),
+        ("SEEDANCE", "fal"),
         ("TOTALLY_UNKNOWN_API_XYZ", "unknown"),
     ])
     def test_record_api_call_provider_derivation(self, cost_tracker, api_name, expected_provider):
@@ -753,6 +758,23 @@ class TestVerifiedPricePins:
         # read 2026-07-11): $0.3024/s → $1.512 per ~5s clip. The pre-migration
         # 0.30 was ~5x low and would under-gate the new action-primary route.
         assert API_COST_USD["SEEDANCE"] == 1.51
+
+    def test_kling_3_0_price_is_the_verified_2026_07_11_value(self):
+        from cost_tracker import API_COST_USD
+        # fal kling-video/v3/pro i2v: $0.112/s audio-off (fal model page;
+        # exact parity with kling.ai/dev/pricing native units, read
+        # 2026-07-11) → $0.56 per ~5s clip. Old 0.40 predated the promotion
+        # of this route to portrait/medium primary.
+        assert API_COST_USD["KLING_3_0"] == 0.56
+
+    def test_kling_registry_cost_matches_api_cost_usd(self):
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        assert API_REGISTRY["KLING_3_0"]["per_shot_cost"] == API_COST_USD["KLING_3_0"]
+        # Legacy route too — its planner figure sat 30% under the gate figure
+        # (0.35 vs 0.50) until the 2026-07-11 review caught it.
+        assert API_REGISTRY["KLING_NATIVE"]["per_shot_cost"] == API_COST_USD["KLING_NATIVE"]
+
 
     def test_seedance_registry_cost_matches_api_cost_usd(self):
         # API_REGISTRY.per_shot_cost is the LLM-facing planning figure; drift

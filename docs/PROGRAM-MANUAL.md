@@ -118,7 +118,7 @@ One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`) 
 
 ### 1.4 Headline capabilities
 
-- **Multi-API video generation with a fallback cascade.** A single entry point, `generate_ai_video` (`phase_c_ffmpeg.py:58`), routes each shot to an optimal engine and fails over through an ordered list — `SEEDANCE → KLING_NATIVE → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_3_0 → SORA_2 → VEO (FAL) → RUNWAY` (`phase_c_ffmpeg.py:175`; SEEDANCE leads since the 2026-07-11 Sora-sunset migration) — so one vendor outage doesn't stall a render. Eleven-plus engines are integrated behind native SDKs and FAL proxies; the winning engine's provenance is recorded on every take.
+- **Multi-API video generation with a fallback cascade.** A single entry point, `generate_ai_video` (`phase_c_ffmpeg.py:58`), routes each shot to an optimal engine and fails over through an ordered list — `SEEDANCE → KLING_3_0 → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_NATIVE → SORA_2 → VEO (FAL) → RUNWAY` (`phase_c_ffmpeg.py:175`; SEEDANCE leads since the 2026-07-11 Sora-sunset migration) — so one vendor outage doesn't stall a render. Eleven-plus engines are integrated behind native SDKs and FAL proxies; the winning engine's provenance is recorded on every take.
 
 - **Character consistency.** Keyframes are face-locked with PuLID in a ComfyUI workflow; an `IdentityValidator` (`identity/validator.py`) scores every generated frame against the character's reference embedding (GhostFaceNet/ArcFace), and a rolling-stats feedback loop adapts the PuLID weight per character (`workflow_selector.py:545`). Locations stay consistent via a persisted per-location seed (`domain/location_manager.py`).
 
@@ -532,7 +532,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `stitch_modules` | `phase_c_ffmpeg.py:997` | Concat demuxer (`-c copy`). |
 | `split_video_into_segments` | `phase_c_ffmpeg.py:1031` | Storyboard splitter (last segment to EOF). |
 | `classify_shot_type` | `workflow_selector.py:417` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
-| `WORKFLOW_TEMPLATES` | `workflow_selector.py:22` | Per-shot-type primary API + fallback list + render params (e.g. portrait→KLING_NATIVE; wide/landscape→LTX; action→SORA_NATIVE). |
+| `WORKFLOW_TEMPLATES` | `workflow_selector.py:22` | Per-shot-type primary API + fallback list + render params (e.g. portrait→KLING_3_0 fal Kling v3 Pro; wide/landscape→LTX; action→SEEDANCE). |
 | `VeoNativeAPI.generate_video` | `veo_native.py:138` | Vertex-preferred / Gemini-fallback. **Bug #4:** `reference_images` accepted but dropped (Vertex exclusivity). `driving_video_path` accepted but unwired. Duration clamped to (4,6,8). |
 | `_extract_video_bytes` | `veo_native.py:85` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini). Cycle-17 native-audio fix path. |
 | `_clamp_image_to_video_duration` | `veo_native.py:38` | Duration clamp (5s→6). |
@@ -911,7 +911,7 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 - **Dialogue override (F1a):** if `has_dialogue=True`, scan `PURPOSE_API_RANKING[purpose]` for the first entry with `native_audio=True AND modality=="video" AND status=="live"` — currently **VEO_NATIVE** — and pin it; `video_fallbacks` is nulled only in `dialogue_voice_mode="native"` — the overlay default keeps the template fallbacks so a Veo RAI-block cascades to a silent engine and F1b overlays the voice. VEO_NATIVE is the *only* engine with `native_audio: True` (`domain/scene_decomposer.py:43`).
 - Explicit `target_api` → use as-is, no fallbacks.
 
-*Fallback cascade* (`try_next_api`, default order `phase_c_ffmpeg.py:165`): `KLING_NATIVE → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_3_0 → SORA_2 → VEO → RUNWAY`. The cascade filters already-attempted engines and any disabled via `ctx.api_engines[engine].enabled == False`. On total exhaustion it sleeps 30s and retries the whole list up to `MAX_CASCADE_RETRIES` (default 1, override `cascade_retry_limit`).
+*Fallback cascade* (`try_next_api`, default order = the module-level `DEFAULT_VIDEO_CASCADE`): `SEEDANCE → KLING_3_0 → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_NATIVE → SORA_2 → VEO → RUNWAY`. The cascade filters already-attempted engines and any disabled via `ctx.api_engines[engine].enabled == False`. On total exhaustion it sleeps 30s and retries the whole list up to `MAX_CASCADE_RETRIES` (default 1, override `cascade_retry_limit`).
 
 *Per-engine duration / behavior highlights:*
 
@@ -1108,11 +1108,11 @@ The router classifies each shot via `classify_shot_type` (`workflow_selector.py:
 
 | shot_type | Primary video API | Fallback cascade |
 |---|---|---|
-| portrait | `KLING_NATIVE` | RUNWAY_GEN4 → SEEDANCE → KLING_3_0 |
-| medium | `KLING_NATIVE` | RUNWAY_GEN4 → SEEDANCE → LTX |
-| wide | `LTX` | VEO_NATIVE → KLING_NATIVE → RUNWAY_GEN4 |
-| action | `SEEDANCE` | SORA_NATIVE → KLING_NATIVE → RUNWAY_GEN4 → LTX |
-| landscape | `LTX` | VEO_NATIVE → KLING_NATIVE |
+| portrait | `KLING_3_0` (fal Kling v3 Pro) | KLING_NATIVE (legacy v1.6) → RUNWAY_GEN4 → SEEDANCE |
+| medium | `KLING_3_0` (fal Kling v3 Pro) | KLING_NATIVE (legacy v1.6) → RUNWAY_GEN4 → SEEDANCE → LTX |
+| wide | `LTX` | VEO_NATIVE → KLING_3_0 → RUNWAY_GEN4 |
+| action | `SEEDANCE` | SORA_NATIVE → KLING_3_0 → RUNWAY_GEN4 → LTX |
+| landscape | `LTX` | VEO_NATIVE → KLING_3_0 |
 
 The cascade is fault-tolerant: `generate_ai_video` (`phase_c_ffmpeg.py:58`) tries the primary, and on failure walks the fallback list (`try_next_api`, `phase_c_ffmpeg.py:165`), skipping already-attempted engines. On total exhaustion it sleeps 30 s and retries up to `cascade_retry_limit` (default 1).
 
@@ -1447,7 +1447,7 @@ Video generation is the most fault-tolerant subsystem because vendor APIs fail, 
 
 **Resolution → attempt → fallback** flows like this:
 
-1. **Routing (caller side, `ShotController`).** For `target_api == "AUTO"`, the controller checks the optimizer's `suggested_video_api`, else falls to the shot-type template's primary + fallback list (`WORKFLOW_TEMPLATES[shot_type]`, e.g. portrait → `KLING_NATIVE` with fallbacks `RUNWAY_GEN4, SORA_NATIVE, KLING_3_0`). For an explicit `target_api`, it uses that and sets `video_fallbacks = None`.
+1. **Routing (caller side, `ShotController`).** For `target_api == "AUTO"`, the controller checks the optimizer's `suggested_video_api`, else falls to the shot-type template's primary + fallback list (`WORKFLOW_TEMPLATES[shot_type]`, e.g. portrait → `KLING_3_0` with fallbacks `KLING_NATIVE, RUNWAY_GEN4, SEEDANCE`). For an explicit `target_api`, it uses that and sets `video_fallbacks = None`.
 2. **Dialogue override (F1a).** If `has_dialogue`, the controller scans `PURPOSE_API_RANKING[purpose]` for the first engine with `native_audio=True AND modality=="video" AND status=="live"` (today: `VEO_NATIVE`) and overrides `target_api` to it. Fallback handling depends on `dialogue_voice_mode` (default `"overlay"`): overlay mode **keeps the template `video_fallbacks`** so a Veo RAI-block cascades to a silent engine and the F1b TTS overlay still fires; native mode **sets `video_fallbacks = None`** so a cross-engine fallback can't silently route to a non-native-audio engine and drop the embedded voice (`cinema/shots/controller.py:133-180` helper; call site + rationale `:1348-1370`).
 3. **Engine-disabled short-circuit.** Before attempting the targeted engine, `generate_ai_video` reads `api_engines` from `ctx`; if the operator set `{ENGINE: {enabled: false}}`, it delegates straight to `try_next_api` (respects "if I disabled X, don't use X even when explicitly targeted").
 4. **Attempt the engine.** Each engine has its own handler branch (native: Kling/Veo/Sora/LTX; FAL-proxy: VEO/SORA_2/KLING_3_0/FAL_SVD; plus Runway). On success, `_record_video_cascade(api_name)` writes `{engine, attempts}` into `_cascade_out["cascade_metadata"]` and returns the path.
@@ -1787,7 +1787,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `ANTHROPIC_API_KEY` | Yes | — | LLMEnsemble, ChiefDirector, CinemaDirector (primary provider) |
 | `OPENAI_API_KEY` | Yes | — | LLMEnsemble fallback, style director, dialogue writer, scene decompose |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Optional | — | Gemini judge / Veo Gemini-fallback path |
-| `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Recommended | — | KLING_NATIVE (JWT auth); primary video engine |
+| `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional | — | KLING_NATIVE — legacy kling-v1-6 JWT fallback + storyboard mode (primary Kling = fal KLING_3_0 via FAL_KEY since 2026-07-11) |
 | `FAL_KEY` | Recommended | — | Seedance (action primary since 2026-07-11), Sora, Veo-proxy, Kling 3.0, LTX-proxy, Hedra, all lipsync, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | — | LTX native (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | — | Runway Gen-4 / gen3a_turbo, Act-One performance |

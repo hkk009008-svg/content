@@ -20,13 +20,13 @@ Choose the primary API based on shot type. Each has an ordered fallback cascade:
 
 | Shot Type | Primary API | Why | Fallback Chain |
 |-----------|------------|-----|----------------|
-| **Portrait** | KLING_NATIVE | Subject binding + `face_consistency=True` flag | Runway Gen-4 → Sora → Kling 3.0 |
-| **Medium** | KLING_NATIVE | Good face + scene balance | Runway Gen-4 → Sora → LTX |
-| **Wide** | LTX | 4K, depth-aware, cheapest | Veo → Kling → Runway |
-| **Action** | SORA_NATIVE | Best motion physics, cloth sim, body momentum | Kling → Runway → LTX → Seedance |
-| **Landscape** | LTX | No face needed, 4K, lowest cost | Veo → Kling |
+| **Portrait** | KLING_3_0 (fal Kling v3 Pro) | Best-ranked Kling (#11 AA i2v arena); `elements` identity binding (frontal + ≤3 refs) | Kling Native (legacy v1.6) → Runway Gen-4 → Seedance |
+| **Medium** | KLING_3_0 (fal Kling v3 Pro) | Good face + scene balance, `elements` binding | Kling Native → Runway Gen-4 → Seedance → LTX |
+| **Wide** | LTX | 4K, depth-aware, cheapest | Veo → Kling v3 Pro → Runway |
+| **Action** | SEEDANCE | #1 AA i2v arena (2026-07); multi-reference (≤9 images) binds multi-character action | Sora → Kling v3 Pro → Runway → LTX |
+| **Landscape** | LTX | No face needed, 4K, lowest cost | Veo → Kling v3 Pro |
 
-Seedance sits last in the action chain because its multi-reference input (up to 9 images) is the only cascade member that handles multi-character action shots well (`workflow_selector.py`).
+Seedance became the action primary in the 2026-07-11 Sora-sunset migration (OpenAI retires Sora 2 + the Videos API on 2026-09-24; Sora stays first action fallback until then). The Seedance dispatch is fal-based: `bytedance/seedance-2.0/image-to-video`, or `.../reference-to-video` (keyframe first, ≤9 images) when multi-angle refs exist (`phase_c_ffmpeg.py`, `workflow_selector.py`).
 
 **Cascade logic**: Try primary → on failure, next in chain → if all exhausted, wait 30s for quota refresh → retry 1 additional full cycle by default (`MAX_CASCADE_RETRIES = 1` in `phase_c_ffmpeg.py`; the `cascade_retry_limit` UI knob raises it per project).
 

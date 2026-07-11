@@ -77,7 +77,7 @@ Schema:
   "purpose":                string,  // one of: dialogue_close_up | talking_head_full | action_motion | static_portrait | establishing_shot | macro_detail | style_locked_sequence | product_hero | product_in_scene | product_reveal_motion
   "shot_type":              string,  // one of: portrait | medium | wide | action | landscape
   "suggested_image_api":    string,  // FLUX_DEV | HIDREAM_I1 | SD3_5_LARGE
-  "suggested_video_api":    string,  // KLING_NATIVE | SEEDANCE | SORA_NATIVE | VEO_NATIVE | LTX | RUNWAY_GEN4 | AUTO
+  "suggested_video_api":    string,  // KLING_3_0 | KLING_NATIVE | SEEDANCE | SORA_NATIVE | VEO_NATIVE | LTX | RUNWAY_GEN4 | AUTO
   "suggested_lipsync":      string,  // HEDRA_C3 | SYNC_SO_V3 | MUSETALK | OMNIHUMAN_V1_5 | LATENTSYNC | null
   "negative_constraints":   string,  // what to avoid: "plastic skin, identity drift, oversaturated, deformed hands, off-brand product, mis-shaped logo"
   "identity_anchor":        string,  // critical visual features to preserve — for objects: brand color, logo, distinctive geometry; for characters: face/hair/build
@@ -94,10 +94,10 @@ GUIDELINES (apply rigorously):
    movement (static, dolly, tracking, crane).
 
 2. PURPOSE → API RECOMMENDATION:
-   - dialogue_close_up: video_api=KLING_NATIVE or VEO_NATIVE; lipsync=HEDRA_C3
+   - dialogue_close_up: video_api=KLING_3_0 or VEO_NATIVE; lipsync=HEDRA_C3
    - talking_head_full: video_api=VEO_NATIVE; lipsync=HEDRA_C3 or OMNIHUMAN_V1_5
    - action_motion: video_api=SEEDANCE (multi-character: it binds up to 9 refs; Sora retires 2026-09-24); lipsync=null
-   - static_portrait: video_api=KLING_NATIVE; lipsync=null
+   - static_portrait: video_api=KLING_3_0 (Kling v3 Pro on fal; KLING_NATIVE is the legacy v1.6 fallback); lipsync=null
    - establishing_shot: video_api=LTX or VEO_NATIVE; lipsync=null
    - macro_detail: video_api=SORA_NATIVE or LTX; lipsync=null
    - style_locked_sequence: video_api=RUNWAY_GEN4; lipsync per dialogue need

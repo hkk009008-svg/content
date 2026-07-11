@@ -146,7 +146,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:81](web_server.py:81) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:73](web_server.py:73) |
 | `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:111-112](web_server.py:111) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:774-775](web_server.py:774) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:782-783](web_server.py:782) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1606](web_server.py:1606)).
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:1676](web_server.py:1676)) does
+  `api_stream` ([web_server.py:1682](web_server.py:1682)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -637,7 +637,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1462](web_server.py:1462) — uses the
+`api_generate_dialogue` at [web_server.py:1468](web_server.py:1468) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1004,7 +1004,7 @@ per-char validation and the capability scorecard are unchanged from slice 1.
 A shot whose prompt carries a landscape keyword (`landscape`/`aerial`/`drone`/
 `skyline`/`panoramic`/`environment`/`scenery`/`no character`) **but has a
 registered character** is mis-classified `landscape` by the shared seam
-[`workflow_selector.classify_shot_type`](workflow_selector.py:417): the landscape
+[`workflow_selector.classify_shot_type`](workflow_selector.py:431): the landscape
 keyword bucket ([`SHOT_TYPE_KEYWORDS`](workflow_selector.py:113)) wins even when
 `characters_in_frame` is non-empty (rule 1's "no characters → landscape" shortcut
 is bypassed, but the keyword scan still returns `landscape`). The scan is
@@ -1082,26 +1082,32 @@ bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 
 ## 9. Video routing — 5 templates × 11 engines
 
-### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:22-110](workflow_selector.py:22))
+### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:22-144](workflow_selector.py:22))
 
 | Shot type | `target_api` | `video_fallbacks` |
 |---|---|---|
-| `portrait` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SEEDANCE", "KLING_3_0"]` |
-| `medium` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SEEDANCE", "LTX"]` |
-| `wide` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"]` |
-| `action` | `SEEDANCE` | `["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"]` |
-| `landscape` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE"]` |
+| `portrait` | `KLING_3_0` | `["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"]` |
+| `medium` | `KLING_3_0` | `["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"]` |
+| `wide` | `LTX` | `["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"]` |
+| `action` | `SEEDANCE` | `["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"]` |
+| `landscape` | `LTX` | `["VEO_NATIVE", "KLING_3_0"]` |
 
-A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:144-376](workflow_selector.py:144)
+A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:154-390](workflow_selector.py:154)
 mirrors these with different fallback orderings.
 
-**SEEDANCE is the `action` primary and the portrait/medium second fallback**
-(2026-07-11 Sora-sunset migration — OpenAI retires Sora 2 + the Videos API on
-2026-09-24; `SORA_NATIVE` stays first action fallback until then, erroring
-fast and cascading after). Two-character dialogue shots classify as `medium`
-and route Kling → Runway → Seedance → LTX.
+**SEEDANCE is the `action` primary** (2026-07-11 Sora-sunset migration —
+OpenAI retires Sora 2 + the Videos API on 2026-09-24; `SORA_NATIVE` stays
+first action fallback until then, erroring fast and cascading after) and a
+portrait/medium fallback. **KLING_3_0 (fal Kling v3 Pro) is the
+portrait/medium primary** (2026-07-11 Kling promotion — best-ranked Kling,
+#11 AA i2v arena Elo 1070, `elements` identity binding; `KLING_NATIVE` is the
+legacy kling-v1-6 JWT route kept as first fallback — the proven pre-v3
+identity path; its `kling-v3` bump is deferred pending a live-key param
+check, see kling_native.py's module docstring). Two-character dialogue shots
+classify as `medium` and route Kling v3 Pro → Kling Native → Runway →
+Seedance → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:417-461](workflow_selector.py:417))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:431-476](workflow_selector.py:431))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1114,7 +1120,7 @@ prompt + camera into a search string, first containment match wins; default `med
 | `landscape` | landscape, aerial, drone, skyline, panoramic, environment, scenery, no character |
 | `medium` | medium, 50mm, mid-shot, waist, hip, american shot, cowboy shot, two-shot |
 
-### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:401-408](workflow_selector.py:401))
+### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:415-422](workflow_selector.py:415))
 
 | Shot type | Floor |
 |---|---|
@@ -1129,34 +1135,38 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:71-1010](phase_c_ffmpeg.py:71))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:81-1036](phase_c_ffmpeg.py:81))
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :306 | `kling_native.KlingNativeAPI` | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :345 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
-| `VEO_NATIVE` | :391 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
-| `LTX` | :430 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :476 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :537 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
-| `VEO` | :594 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :683 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/...")` | FAL_KEY |
-| `FAL_SVD` | :787 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
-| `RUNWAY` | :866 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :908 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
+| `KLING_NATIVE` | :313 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :354 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
+| `VEO_NATIVE` | :400 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `LTX` | :439 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :485 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :546 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
+| `VEO` | :603 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :692 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")` — portrait/medium PRIMARY since 2026-07-11; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
+| `FAL_SVD` | :811 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
+| `RUNWAY` | :890 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :932 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default cascade (when `video_fallbacks=None`)
 
-[phase_c_ffmpeg.py:186-189](phase_c_ffmpeg.py:186):
+[phase_c_ffmpeg.py:54-57](phase_c_ffmpeg.py:54):
 ```python
-fallback_list = [
-    "SEEDANCE", "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
-    "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
+DEFAULT_VIDEO_CASCADE = [
+    "SEEDANCE", "KLING_3_0", "SORA_NATIVE", "RUNWAY_GEN4",
+    "LTX", "VEO_NATIVE", "KLING_NATIVE", "SORA_2", "VEO", "RUNWAY",
 ]
 ```
 
-`FAL_SVD` is reachable only via explicit `target_api=`. `SEEDANCE` (since the
-2026-07-11 fal migration) leads the default cascade and is the `action` primary.
+The list is the module-level `DEFAULT_VIDEO_CASCADE` constant (extracted
+2026-07-11 so tests pin the real list; `try_next_api` copies it). `FAL_SVD` is
+reachable only via explicit `target_api=`. `SEEDANCE` (since the 2026-07-11 fal
+migration) leads the default cascade and is the `action` primary; `KLING_3_0`
+(fal v3 Pro) outranks the legacy `KLING_NATIVE` since the same-day Kling
+promotion.
 
 **FAL client timeouts (2026-06-10):** every production `fal_client.subscribe`
 call — the inline engines above plus lipsync, LTX, assembly FLUX fallbacks,
@@ -1175,8 +1185,8 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:23](phase_c_ffmpeg.py:23))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:24](phase_c_ffmpeg.py:24))
-- Check: `_veo_quota_blocked()` ([:50-56](phase_c_ffmpeg.py:50))
-- Set on 429/quota error ([:671](phase_c_ffmpeg.py:671))
+- Check: `_veo_quota_blocked()` ([:60-66](phase_c_ffmpeg.py:60))
+- Set on 429/quota error ([:680](phase_c_ffmpeg.py:680))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
@@ -1657,16 +1667,16 @@ Output schema (7 keys): `director_vision`, `cinematography_rules`,
 ### 13.6 `prompt_optimizer.py`
 
 `optimize_shot_prompt(...)` runs `competitive_generate(task_type="decompose", json_mode=True)`.
-Output schema requires `suggested_video_api ∈ {KLING_NATIVE, SORA_NATIVE,
-VEO_NATIVE, LTX, RUNWAY_GEN4, AUTO}`. Sanitized via `_coerce_to_valid_keys`
+Output schema requires `suggested_video_api ∈ {KLING_3_0, KLING_NATIVE,
+SEEDANCE, SORA_NATIVE, VEO_NATIVE, LTX, RUNWAY_GEN4, AUTO}`. Sanitized via `_coerce_to_valid_keys`
 — unrecognized values collapse to `"AUTO"`.
 
 LLM guidance table in `_OPTIMIZER_SYSTEM_PROMPT`:
 ```
-dialogue_close_up:     KLING_NATIVE or VEO_NATIVE; lipsync=HEDRA_C3
+dialogue_close_up:     KLING_3_0 or VEO_NATIVE; lipsync=HEDRA_C3
 talking_head_full:     VEO_NATIVE;     lipsync=HEDRA_C3 or OMNIHUMAN_V1_5
-action_motion:         SORA_NATIVE;    lipsync=null
-static_portrait:       KLING_NATIVE;   lipsync=null
+action_motion:         SEEDANCE;       lipsync=null
+static_portrait:       KLING_3_0;      lipsync=null
 establishing_shot:     LTX or VEO_NATIVE; lipsync=null
 macro_detail:          SORA_NATIVE or LTX; lipsync=null
 style_locked_sequence: RUNWAY_GEN4;    lipsync per dialogue need

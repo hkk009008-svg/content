@@ -49,8 +49,8 @@ from typing import Optional
 
 API_COST_USD: dict[str, float] = {
     # Video APIs (per ~5s clip)
-    "KLING_NATIVE":  0.50,
-    "KLING_3_0":     0.40,
+    "KLING_NATIVE":  0.50,    # legacy kling-v1-6 native route (fallback-only since 2026-07-11); price is a pre-v3 estimate
+    "KLING_3_0":     0.56,    # per ~5s clip: fal kling-video/v3/pro $0.112/s audio-off (fal model page + kling.ai/dev/pricing parity, read 2026-07-11)
     "SORA_NATIVE":   0.80,
     "SORA_2":        0.60,
     "VEO_NATIVE":    0.30,
@@ -417,6 +417,10 @@ class CostTracker:
         # tell "ran on the pod" from "fell back to FAL". QUALITY_MAX is the N=8
         # best-of, which also runs on the pod.
         _provider_map = {
+            # KLING_3_0 is fal-billed (fal-ai/kling-video/v3/pro) — must sit
+            # BEFORE the "KLING" prefix (first-prefix-wins) or the fal invoice
+            # files under 'kling' (review finding 2026-07-11).
+            "KLING_3_0": "fal",
             "KLING": "kling", "SORA": "openai", "VEO": "google",
             "LTX": "ltx", "RUNWAY": "runway",
             "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
@@ -656,7 +660,7 @@ class CostTracker:
 
         if not within_budget:
             alternatives = [
-                "Switch portrait shots from KLING_NATIVE ($0.15/shot) to LTX ($0.05/shot)",
+                "Switch portrait shots from KLING_3_0 ($0.56/shot) to LTX ($0.10/shot)",  # prices = API_COST_USD rows
                 "Use GPT-4.1-nano instead of GPT-4o for classification tasks",
                 "Reduce output token budget by requesting shorter responses",
                 "Batch similar operations to reduce per-call overhead",

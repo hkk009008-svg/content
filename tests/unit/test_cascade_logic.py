@@ -63,32 +63,42 @@ class TestCascadeFallbackOrder:
 
 
 class TestCascadeRetryLogic:
-    """Test try_next_api() behavior via mocked generate_ai_video."""
+    """Test try_next_api() behavior via mocked generate_ai_video.
 
-    DEFAULT_CASCADE = [
-        "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
-        "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
-    ]
+    Pins the PRODUCTION DEFAULT_VIDEO_CASCADE constant — the previous local
+    copy silently drifted from production through two migrations (the Sora
+    sunset and the Kling v3 Pro promotion) because it never imported it.
+    """
+
+    def _default_cascade(self):
+        from phase_c_ffmpeg import DEFAULT_VIDEO_CASCADE
+        return DEFAULT_VIDEO_CASCADE
 
     def test_default_cascade_order_matches(self):
-        """Verify the hardcoded default cascade matches expectations."""
-        # This tests the constant embedded in phase_c_ffmpeg.py try_next_api()
-        expected = self.DEFAULT_CASCADE
-        assert len(expected) == 9, "Default cascade should have 9 APIs"
-        assert expected[0] == "KLING_NATIVE", "First fallback should be KLING_NATIVE"
+        """Pin the production default cascade head + membership."""
+        cascade = self._default_cascade()
+        assert len(cascade) == 10, "Default cascade should have 10 APIs"
+        # SEEDANCE leads since the Sora sunset (2026-09-24); KLING_3_0
+        # (fal v3 Pro) outranks the legacy kling-v1-6 native route.
+        assert cascade[0] == "SEEDANCE", f"head should be SEEDANCE, got {cascade[0]}"
+        assert cascade[1] == "KLING_3_0", f"second should be KLING_3_0, got {cascade[1]}"
+        assert cascade.index("KLING_3_0") < cascade.index("KLING_NATIVE"), (
+            "fal Kling v3 Pro must outrank the legacy kling-v1-6 native route"
+        )
 
     def test_attempted_apis_prevents_retry(self):
         """APIs in attempted_apis set should be skipped."""
-        attempted = {"KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4"}
-        fallbacks = self.DEFAULT_CASCADE
-        remaining = [api for api in fallbacks if api not in attempted]
-        assert remaining[0] == "LTX", "Next API after skipping first 3 should be LTX"
-        assert "KLING_NATIVE" not in remaining
+        cascade = self._default_cascade()
+        attempted = set(cascade[:3])
+        remaining = [api for api in cascade if api not in attempted]
+        assert remaining[0] == cascade[3], "Next API should be the 4th cascade member"
+        assert cascade[0] not in remaining
 
     def test_all_apis_exhausted_triggers_retry(self):
         """When all APIs are in attempted_apis, cascade should trigger retry logic."""
-        attempted = set(self.DEFAULT_CASCADE)
-        remaining = [api for api in self.DEFAULT_CASCADE if api not in attempted]
+        cascade = self._default_cascade()
+        attempted = set(cascade)
+        remaining = [api for api in cascade if api not in attempted]
         assert len(remaining) == 0, "No APIs left — should trigger retry"
 
     def test_cascade_retries_max_is_two(self):
@@ -200,3 +210,19 @@ class TestCascadeIntegration:
             f"SORA_NATIVE should lead action fallbacks until the 2026-09-24 "
             f"sunset, got {template['video_fallbacks']}"
         )
+
+    def test_identity_shots_use_fal_kling_v3_pro_primary(self):
+        """Portrait/medium primaries must be the fal Kling v3 Pro route, with
+        the legacy kling-v1-6 native route as FIRST fallback (2026-07-11
+        promotion — the native client silently ran kling-v1-6 for two years
+        because no test pinned the routing; this pin closes that hole)."""
+        for shot_type in ("portrait", "medium"):
+            template = WORKFLOW_TEMPLATES[shot_type]
+            assert template["target_api"] == "KLING_3_0", (
+                f"{shot_type} primary should be KLING_3_0 (fal v3 Pro), "
+                f"got {template['target_api']}"
+            )
+            assert template["video_fallbacks"][0] == "KLING_NATIVE", (
+                f"{shot_type} first fallback should be the proven legacy "
+                f"KLING_NATIVE route, got {template['video_fallbacks']}"
+            )
