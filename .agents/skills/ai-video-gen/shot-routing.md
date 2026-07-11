@@ -38,8 +38,8 @@ pag_scale:                 3.0    # Sharpen face details without oversaturation
 controlnet_depth_strength: 0.35
 ip_adapter_weight:         0.25   # Minimal style transfer
 denoise_default:           0.25   # Tighter temporal consistency
-target_api:                KLING_NATIVE
-video_fallbacks:           [RUNWAY_GEN4, SORA_NATIVE, KLING_FAL]
+target_api:                KLING_3_0  # fal Kling v3 Pro — best-ranked Kling (#11 AA i2v arena); `elements` identity binding
+video_fallbacks:           ['KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE']  # native = legacy kling-v1-6, proven identity fallback
 ```
 
 ### Medium (Waist-up balanced)
@@ -55,8 +55,8 @@ pag_scale:                 3.0    # Enhance mid-range detail (clothing, backgrou
 controlnet_depth_strength: 0.40
 ip_adapter_weight:         0.30
 denoise_default:           0.35
-target_api:                KLING_NATIVE
-video_fallbacks:           [RUNWAY_GEN4, SORA_NATIVE, LTX]
+target_api:                KLING_3_0  # fal Kling v3 Pro (see portrait note)
+video_fallbacks:           [KLING_NATIVE, RUNWAY_GEN4, SEEDANCE, LTX]
 ```
 
 ### Wide (Establishing shot, environment-primary)
@@ -73,7 +73,7 @@ controlnet_depth_strength: 0.50   # Strongest spatial lock
 ip_adapter_weight:         0.35
 denoise_default:           0.45
 target_api:                LTX    # 4K, 3D camera, depth-aware, cheapest
-video_fallbacks:           [VEO_NATIVE, KLING_NATIVE, RUNWAY_GEN4]
+video_fallbacks:           [VEO_NATIVE, KLING_3_0, RUNWAY_GEN4]
 ```
 
 ### Action (Dynamic movement)
@@ -89,8 +89,8 @@ pag_scale:                 2.0    # Lower — motion needs softness not crispnes
 controlnet_depth_strength: 0.30   # Light spatial guidance
 ip_adapter_weight:         0.25
 denoise_default:           0.40
-target_api:                SORA_NATIVE  # Best motion physics, body momentum, cloth
-video_fallbacks:           [KLING_NATIVE, RUNWAY_GEN4, LTX]
+target_api:                SEEDANCE  # #1 AA i2v arena (2026-07); multi-ref (≤9 images) binds multi-character; Sora retires 2026-09-24
+video_fallbacks:           ['SORA_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']  # Sora first fallback until the sunset, then errors fast and cascades
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -107,7 +107,7 @@ controlnet_depth_strength: 0.55   # Strong spatial lock
 ip_adapter_weight:         0.40   # Max style transfer
 denoise_default:           0.55
 target_api:                LTX    # 4K, no face, cheapest, best environments
-video_fallbacks:           [VEO_NATIVE, KLING_NATIVE]
+video_fallbacks:           [VEO_NATIVE, KLING_3_0]
 ```
 
 ---
@@ -118,14 +118,14 @@ From `phase_c_ffmpeg.py:generate_ai_video()`:
 
 1. Try primary API (from `target_api`)
 2. On failure → try next in `video_fallbacks` list
-3. If ALL APIs exhausted → wait **2 minutes** for quota refresh
-4. Retry up to **2 full cascade cycles**
+3. If ALL APIs exhausted → wait **30 seconds** (`time.sleep(30)`) for quota refresh
+4. Retry up to **1 extra cascade cycle** by default (`MAX_CASCADE_RETRIES = 1`), raisable via the `cascade_retry_limit` UI knob
 5. Track `attempted_apis` set to prevent retry loops
-6. After 2 complete cycles → return None (hard failure)
+6. After max retries exceeded → return None (hard failure)
 
 **Error handling**: Each API wrapped in try/catch. On exception → `try_next_api()`. Detailed logging per attempt.
 
-**Global quota flags**: Some APIs (Veo) set `_veo_quota_exhausted = True` to prevent ALL subsequent shots from wasting time on a known-dead endpoint.
+**Global quota flags**: Veo uses a TTL timestamp (`_VEO_QUOTA_EXHAUSTED_UNTIL`, auto-expires after 1800s) checked via `_veo_quota_blocked()` — not a simple boolean flag.
 
 ---
 
@@ -135,13 +135,16 @@ From `workflow_selector.py:get_adaptive_pulid_weight()`:
 
 ```
 base_weight = WORKFLOW_TEMPLATES[shot_type]["pulid_weight"]
-rolling_stats = identity_validator.get_rolling_stats(character_id, window=10)
+rolling_stats = identity_validator.get_rolling_stats(character_id)  # window=10 is the default; not passed explicitly at call sites
 
-if rolling_stats.success_rate < 0.7:
-    # Identity failing → boost PuLID
+if rolling_stats.success_rate < 0.5:
+    # Identity failing hard → boost PuLID
     delta = +0.10
-elif rolling_stats.mean_similarity > 0.8:
-    # Identity passing strongly → allow flexibility
+elif rolling_stats.success_rate < 0.8:
+    # Identity below target → moderate boost
+    delta = +0.05
+elif rolling_stats.success_rate == 1.0 and rolling_stats.mean_similarity > 0.80:
+    # Identity great → allow more creativity
     delta = -0.05
 else:
     delta = 0.0
@@ -165,9 +168,10 @@ This creates a feedback loop: poor identity scores automatically tighten PuLID o
 2. **Kling** — $$  (subject binding premium)
 3. **Veo** — $$$  (reference images add cost)
 4. **Runway** — $$$  (10s fixed, moderate cost)
-5. **Sora** — $$$$  (highest cost, best motion)
+5. **Sora** — $$$$  (best motion; retires 2026-09-24)
+6. **Seedance** — $$$$$  (~$1.51 per 5s clip @720p standard; #1 arena quality, multi-reference)
 
-**Cost strategy**: Use LTX for all wide/landscape/environment shots. Reserve Sora for scenes where physics/motion quality is critical. Kling is the best value for character-driven shots.
+**Cost strategy**: Use LTX for all wide/landscape/environment shots. Reserve Seedance (Sora until its sunset) for scenes where physics/motion quality or multi-character binding is critical. Kling is the best value for character-driven shots.
 
 ---
 
