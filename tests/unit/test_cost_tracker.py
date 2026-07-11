@@ -767,6 +767,20 @@ class TestVerifiedPricePins:
         # of this route to portrait/medium primary.
         assert API_COST_USD["KLING_3_0"] == 0.56
 
+    def test_ltx_price_is_the_verified_2026_07_11_value(self):
+        from cost_tracker import API_COST_USD
+        # fal ltx-2.3 i2v: $0.06/s audio-off @1080p (fal OpenAPI + model page,
+        # read 2026-07-11) x the 6s MINIMUM duration. The old 0.10 predated
+        # the 2.3 bump and its 6s floor.
+        assert API_COST_USD["LTX"] == 0.36
+
+    def test_ltx_registry_cost_matches_api_cost_usd(self):
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        # The registry used to carry the PER-SECOND figure (0.06) in the
+        # per_shot_cost field — a units bug the 2026-07-11 review caught.
+        assert API_REGISTRY["LTX"]["per_shot_cost"] == API_COST_USD["LTX"]
+
     def test_kling_registry_cost_matches_api_cost_usd(self):
         from cost_tracker import API_COST_USD
         from domain.scene_decomposer import API_REGISTRY

@@ -27,7 +27,13 @@ class LTXVideoAPI:
     Designed for easy swap to native endpoint when key arrives.
     """
 
-    FAL_MODEL_ID = "fal-ai/ltx-2/image-to-video"
+    # LTX-2.3 (bumped 2026-07-11 from fal-ai/ltx-2; schema from fal's OpenAPI
+    # spec): params are image_url + string resolution + int duration enum
+    # {6,8,10}; NO num_frames/width/height, NO camera_motion param (prompt-text
+    # only), NO negative_prompt; generate_audio defaults true (+~$0.02/s
+    # apparent surcharge — we send False; assembly owns audio). Fast tier
+    # (fal-ai/ltx-2.3/image-to-video/fast) unlocks 12-20s at 25fps/1080p only.
+    FAL_MODEL_ID = "fal-ai/ltx-2.3/image-to-video"
 
     # Native LTX Video API — https://docs.ltx.video
     NATIVE_BASE_URL = "https://api.ltx.video/v1"
@@ -39,6 +45,25 @@ class LTXVideoAPI:
         "4k": {"width": 3840, "height": 2160},
         "4K": {"width": 3840, "height": 2160},
     }
+
+    # fal-ai/ltx-2.3 resolution enum is 1080p/1440p/2160p (strings). Map from
+    # the native width/height dicts; 1080p is the floor (same capability-
+    # positive upgrade as RESOLUTION_MAP's 720p row).
+    _FAL_RESOLUTION_BY_HEIGHT = {2160: "2160p", 1440: "1440p"}
+
+    @classmethod
+    def _fal_resolution(cls, resolution: dict) -> str:
+        return cls._FAL_RESOLUTION_BY_HEIGHT.get(resolution.get("height"), "1080p")
+
+    @staticmethod
+    def _fal_duration(num_frames: int) -> int:
+        """Snap a frame count to the fal-ai/ltx-2.3 duration enum {6, 8, 10}s."""
+        seconds = max(1, num_frames // 24)
+        if seconds <= 6:
+            return 6
+        if seconds <= 8:
+            return 8
+        return 10
 
     CAMERA_MOTIONS = [
         "dolly_in", "dolly_out", "jib_up", "jib_down",
@@ -58,7 +83,7 @@ class LTXVideoAPI:
             print("[LTX] Using native LTX Video API (api.ltx.video)")
         elif self.fal_key and FAL_AVAILABLE:
             self.mode = "fal"
-            print("[LTX] Using FAL.ai proxy (fal-ai/ltx-2/image-to-video)")
+            print("[LTX] Using FAL.ai proxy (fal-ai/ltx-2.3/image-to-video)")
         else:
             print("[LTX] WARNING: No LTX_API_KEY or FAL_KEY found. Video generation disabled.")
 
@@ -124,17 +149,21 @@ class LTXVideoAPI:
         try:
             image_url = self._upload_to_fal(image_path)
 
+            # ltx-2.3 has no camera_motion param — fold valid motions into
+            # the prompt text (the model steers camera from language now).
+            if camera_motion and camera_motion in self.CAMERA_MOTIONS:
+                prompt = f"{prompt}. Camera: {camera_motion.replace('_', ' ')}."
+                print(f"[LTX] Camera motion (prompt-folded): {camera_motion}")
+
             arguments = {
                 "prompt": prompt,
                 "image_url": image_url,
-                "num_frames": num_frames,
-                "width": resolution["width"],
-                "height": resolution["height"],
+                "duration": self._fal_duration(num_frames),
+                "resolution": self._fal_resolution(resolution),
+                # Assembly owns audio (TTS/BGM/foley); default true carries an
+                # apparent ~$0.02/s surcharge on the playground rates.
+                "generate_audio": False,
             }
-
-            if camera_motion and camera_motion in self.CAMERA_MOTIONS:
-                arguments["camera_motion"] = camera_motion
-                print(f"[LTX] Camera motion: {camera_motion}")
 
             result = fal_client.subscribe(
                 self.FAL_MODEL_ID,
@@ -168,13 +197,15 @@ class LTXVideoAPI:
             start_url = self._upload_to_fal(start_frame_path)
             end_url = self._upload_to_fal(end_frame_path)
 
+            # Same fal-ai/ltx-2.3 endpoint handles first+last-frame
+            # transitions (image_url + end_image_url together).
             arguments = {
                 "prompt": prompt,
                 "image_url": start_url,
                 "end_image_url": end_url,
-                "num_frames": num_frames,
-                "width": 1280,
-                "height": 720,
+                "duration": self._fal_duration(num_frames),
+                "resolution": "1080p",
+                "generate_audio": False,
             }
 
             result = fal_client.subscribe(

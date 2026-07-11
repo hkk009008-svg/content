@@ -1382,6 +1382,64 @@ class ShotController:
             )
         return video_path
 
+    def _motion_cost_kwargs(self, engine: object, resolved_shot_type: str) -> dict:
+        """Per-engine cost overrides for a motion generation record.
+
+        SEEDANCE is per-second-billed with shot-type-dependent durations;
+        API_COST_USD["SEEDANCE"] is per ~5s, so recompute for the requested
+        duration (8s action clips under-record by 38% on the flat figure).
+        Other engines use the table default (empty kwargs).
+        """
+        if str(engine).upper() == "SEEDANCE":
+            from cost_tracker import API_COST_USD
+            from phase_c_ffmpeg import SEEDANCE_DURATIONS
+            _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
+            return {"cost_usd": round(API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4)}
+        return {}
+
+    def _record_billed_rejects(
+        self,
+        billed_attempts: Optional[list],
+        winner_engine: Optional[str],
+        shot_id: str,
+        resolved_shot_type: str,
+    ) -> None:
+        """Record spend for billed-but-REJECTED generation attempts.
+
+        A provider bills once it returns a video; download failures and
+        aspect-backstop rejections previously cascaded with ZERO record
+        (money-gate finding 2026-07-11) — invisible spend, and the blind
+        spot got expensive once the fal primaries became the priciest
+        engines. The dispatch notes every billed attempt in the cascade-out
+        dict (phase_c_ffmpeg._download_video_or_cascade); the winner's own
+        attempt is recorded separately (winner-keyed), so ONE occurrence of
+        it is subtracted here. Best-effort like the sibling records.
+        """
+        rejects = [str(e).upper() for e in (billed_attempts or [])]
+        if winner_engine:
+            _w = str(winner_engine).upper()
+            if _w in rejects:
+                rejects.remove(_w)
+        for engine in rejects:
+            try:
+                self.cost_tracker.record_api_call(
+                    engine,
+                    operation="motion_generation_rejected",
+                    shot_id=shot_id,
+                    video_id=self.project.get("id", ""),
+                    **self._motion_cost_kwargs(engine, resolved_shot_type),
+                )
+                logger.info(
+                    "billed-but-rejected attempt recorded",
+                    extra={"shot_id": shot_id, "engine": engine},
+                )
+            except Exception:
+                logger.warning(
+                    "billed-reject cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "engine": engine},
+                )
+
     def _finalize_motion_take(
         self,
         scene: dict,
@@ -1559,24 +1617,12 @@ class ShotController:
                     (take.get("cascade_metadata") or {}).get("engine")
                     or target_api
                 )
-                _cost_kwargs = {}
-                if str(_motion_engine).upper() == "SEEDANCE":
-                    # Per-second-billed engine with shot-type-dependent
-                    # durations; API_COST_USD["SEEDANCE"] is per ~5s, so
-                    # recompute for the requested duration (8s action clips
-                    # under-record by 38% on the flat figure).
-                    from cost_tracker import API_COST_USD
-                    from phase_c_ffmpeg import SEEDANCE_DURATIONS
-                    _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
-                    _cost_kwargs["cost_usd"] = round(
-                        API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4
-                    )
                 self.cost_tracker.record_api_call(
                     _motion_engine,
                     operation="motion_generation",
                     shot_id=shot_id,
                     video_id=video_id,
-                    **_cost_kwargs,
+                    **self._motion_cost_kwargs(_motion_engine, resolved_shot_type),
                 )
             except Exception:
                 logger.warning(
@@ -1584,6 +1630,16 @@ class ShotController:
                     exc_info=True,
                     extra={"shot_id": shot_id},
                 )
+            # Billed-but-REJECTED attempts (provider returned a video that the
+            # download or aspect backstop then discarded) bill the invoice but
+            # never become the winner — record them too (money-gate finding
+            # 2026-07-11; previously accumulated $0).
+            self._record_billed_rejects(
+                (take.get("cascade_metadata") or {}).get("billed_attempts"),
+                (take.get("cascade_metadata") or {}).get("engine") or target_api,
+                shot_id,
+                resolved_shot_type,
+            )
 
         # 9. Budget gate
         if self.cost_tracker.is_over_budget():
@@ -1878,9 +1934,24 @@ class ShotController:
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):
+            # Total cascade failure can still carry BILLED attempts (a provider
+            # returned a video that then failed download / aspect backstop).
+            # Record them before bailing or the spend is invisible to the gate.
+            self._record_billed_rejects(
+                _video_cascade.get("billed_attempts"), None, shot_id, resolved_shot_type,
+            )
             return {"success": False, "error": "Video generation failed"}
         if "cascade_metadata" in _video_cascade:
             take["cascade_metadata"] = _video_cascade["cascade_metadata"]
+        # Billed-attempt trail rides along for the finalize cost record —
+        # UNCONDITIONALLY (money-gate NIT 2026-07-11): a leftover aspect-
+        # rejected file can reach finalize with billed attempts but NO
+        # winner metadata; gating the copy under cascade_metadata dropped
+        # those rejects.
+        if _video_cascade.get("billed_attempts"):
+            take.setdefault("cascade_metadata", {})["billed_attempts"] = list(
+                _video_cascade["billed_attempts"]
+            )
 
         # F1a: Tag the take when the winning engine carries embedded voice audio.
         # Check the API_REGISTRY native_audio flag rather than hardcoding a name.

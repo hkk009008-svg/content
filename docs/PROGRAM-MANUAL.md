@@ -1193,7 +1193,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 | `quality_judge_llm` | `"auto"` (claude-sonnet) | `"claude-opus"` (best judge) (`llm/ensemble.py:113`) |
 | `max_quality_parallel_workers` | 1 | up to 4 (faster N=8, more pod CPU) |
 | `budget_limit_usd` | set a cap | `0`/null = uncapped |
-| video API | `LTX` ($0.06–0.10/shot) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
+| video API | `LTX` (~$0.36/shot — 6s minimum @$0.06/s on fal ltx-2.3) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
 **Budget governance** — three caveats that bite operators:
 1. `budget_limit_usd` gates image/video generation and performance capture through `ShotController` pre-spend checks; **standalone audio API costs can still run uncapped** when audio helpers create isolated `CostTracker()` instances that log to the DB but do not update the core tracker's `spent_usd`.

@@ -26,6 +26,14 @@ def _run_finalize(take_extra: dict, target_api: str = "KLING_NATIVE", shot_type:
     mock_self.cost_tracker.is_over_budget.return_value = False
     mock_self.project = {"id": "vid-test"}
     mock_self._maybe_auto_rife.return_value = "/tmp/out.mp4"
+    # Bind the REAL cost helpers — a MagicMock _motion_cost_kwargs unpacks
+    # as empty kwargs and silently drops the duration-aware cost under test.
+    mock_self._motion_cost_kwargs = (
+        lambda engine, st: ShotController._motion_cost_kwargs(mock_self, engine, st)
+    )
+    mock_self._record_billed_rejects = (
+        lambda *a, **k: ShotController._record_billed_rejects(mock_self, *a, **k)
+    )
 
     take = {"id": "take1", "metadata": {}}
     take.update(take_extra)
@@ -87,6 +95,71 @@ class TestMotionCostWinnerKey:
         call = mock_self.cost_tracker.record_api_call.call_args
         assert call.args[0] == "LTX"
         assert "cost_usd" not in call.kwargs
+
+
+class TestBilledButRejectedRecording:
+    """A provider bills once it returns a video; rejects (download fail /
+    aspect backstop) previously accumulated $0 (money-gate finding
+    2026-07-11). The dispatch notes billed attempts; the finalize record
+    subtracts one winner occurrence and records the rest."""
+
+    def test_rejected_attempt_recorded_alongside_winner(self):
+        """KLING_3_0 billed then rejected, SEEDANCE won → two records: the
+        winner (motion_generation) and the reject (motion_generation_rejected)."""
+        mock_self = _run_finalize({
+            "cascade_metadata": {
+                "engine": "SEEDANCE",
+                "billed_attempts": ["KLING_3_0", "SEEDANCE"],
+            }
+        })
+        calls = mock_self.cost_tracker.record_api_call.call_args_list
+        by_op = {c.kwargs.get("operation"): c for c in calls}
+        assert "motion_generation" in by_op and "motion_generation_rejected" in by_op, (
+            f"expected winner + reject records; got {calls}"
+        )
+        assert by_op["motion_generation"].args[0] == "SEEDANCE"
+        assert by_op["motion_generation_rejected"].args[0] == "KLING_3_0"
+        # Non-SEEDANCE reject uses the flat table figure (no override).
+        assert "cost_usd" not in by_op["motion_generation_rejected"].kwargs
+
+    def test_duplicate_winner_attempts_record_one_reject(self):
+        """Retry pass can bill the same engine twice for one win — exactly
+        one occurrence is the winner; the other is a duration-aware reject."""
+        mock_self = _run_finalize({
+            "cascade_metadata": {
+                "engine": "SEEDANCE",
+                "billed_attempts": ["SEEDANCE", "SEEDANCE"],
+            }
+        })
+        calls = mock_self.cost_tracker.record_api_call.call_args_list
+        rejected = [c for c in calls if c.kwargs.get("operation") == "motion_generation_rejected"]
+        assert len(rejected) == 1, f"expected exactly one reject record; got {calls}"
+        assert rejected[0].args[0] == "SEEDANCE"
+        # SEEDANCE rejects carry the duration-aware cost like the winner does.
+        assert rejected[0].kwargs.get("cost_usd") == pytest.approx(2.416)
+
+    def test_no_billed_attempts_records_winner_only(self):
+        """Clean primary win → exactly one record."""
+        mock_self = _run_finalize({
+            "cascade_metadata": {"engine": "SEEDANCE", "billed_attempts": ["SEEDANCE"]}
+        })
+        calls = mock_self.cost_tracker.record_api_call.call_args_list
+        assert len(calls) == 1 and calls[0].kwargs.get("operation") == "motion_generation"
+
+    def test_total_failure_helper_records_all_attempts(self):
+        """Exhausted cascade with billed attempts (winner=None) → every
+        attempt recorded as a reject (the generate_motion_take early-return
+        path calls this helper before bailing)."""
+        from cinema.shots.controller import ShotController
+        mock_self = MagicMock()
+        mock_self.project = {"id": "vid-test"}
+        mock_self._motion_cost_kwargs.return_value = {}
+        ShotController._record_billed_rejects(
+            mock_self, ["SEEDANCE", "KLING_3_0"], None, "shot1", "action"
+        )
+        calls = mock_self.cost_tracker.record_api_call.call_args_list
+        assert [c.args[0] for c in calls] == ["SEEDANCE", "KLING_3_0"]
+        assert all(c.kwargs.get("operation") == "motion_generation_rejected" for c in calls)
 
 
 if __name__ == "__main__":

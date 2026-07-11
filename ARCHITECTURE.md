@@ -1135,21 +1135,21 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:81-1036](phase_c_ffmpeg.py:81))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:81-1045](phase_c_ffmpeg.py:81))
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :313 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :354 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
-| `VEO_NATIVE` | :400 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
-| `LTX` | :439 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :485 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :546 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
-| `VEO` | :603 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :692 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")` — portrait/medium PRIMARY since 2026-07-11; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
-| `FAL_SVD` | :811 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
-| `RUNWAY` | :890 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :932 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
+| `KLING_NATIVE` | :322 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :363 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
+| `VEO_NATIVE` | :409 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `LTX` | :448 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :494 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :555 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
+| `VEO` | :612 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :701 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")` — portrait/medium PRIMARY since 2026-07-11; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
+| `FAL_SVD` | :820 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
+| `RUNWAY` | :899 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :941 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default cascade (when `video_fallbacks=None`)
 
@@ -1186,7 +1186,7 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:23](phase_c_ffmpeg.py:23))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:24](phase_c_ffmpeg.py:24))
 - Check: `_veo_quota_blocked()` ([:60-66](phase_c_ffmpeg.py:60))
-- Set on 429/quota error ([:680](phase_c_ffmpeg.py:680))
+- Set on 429/quota error ([:689](phase_c_ffmpeg.py:689))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
@@ -1697,7 +1697,7 @@ Consumers (as of T6, 2026-06-06):
 
 `@dataclass(frozen=True) Settings` ([config/settings.py:48](config/settings.py:48)).
 **Env-derived API keys + paths ONLY. No UI knobs.** Cached as `@lru_cache(maxsize=1)`
-singleton via `get_settings()` ([:137-139](config/settings.py:137)).
+singleton via `get_settings()` ([:140-142](config/settings.py:140)).
 
 Reading project UI knobs from `settings` is a silent-failure bug
 (`getattr(settings, "tts_provider", "DEFAULT")` returns the default because

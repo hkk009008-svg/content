@@ -152,9 +152,18 @@ def generate_ai_video(
             }
 
     def _download_video_or_cascade(video_url: str, engine: str) -> bool:
+        # Reaching here means the provider RETURNED a video — the generation
+        # is billed regardless of what happens next (download failure, aspect
+        # reject). Note every billed attempt so the caller can record spend
+        # for billed-but-rejected attempts too (money-gate finding 2026-07-11:
+        # rejects previously accumulated $0 while fal invoiced the full clip).
+        # _cascade_out threads through the cascade recursion, so attempts
+        # accumulate across engine hops; the winner is subtracted caller-side.
+        if _cascade_out is not None:
+            _cascade_out.setdefault("billed_attempts", []).append(engine.upper())
         if safe_download(video_url, output_mp4) is None:
             logger.warning(
-                "Generated video download failed — cascading",
+                "Generated video download failed — cascading (spend still billed)",
                 extra={"engine": engine, "output_mp4": output_mp4},
             )
             return False

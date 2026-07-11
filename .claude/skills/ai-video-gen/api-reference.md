@@ -98,7 +98,7 @@
 
 **Auth**: Hybrid mode
 - Primary: `LTX_API_KEY` → native API at `https://api.ltx.video/v1`
-- Fallback: `FAL_KEY` → FAL proxy at `fal-ai/ltx-2/image-to-video`
+- Fallback: `FAL_KEY` → FAL proxy at `fal-ai/ltx-2.3/image-to-video` (bumped 2026-07-11; duration enum {6,8,10}s — fast tier `.../fast` unlocks 12-20s at 25fps/1080p; NO camera_motion param on fal — prompt-folded; generate_audio=False, audio carries ~$0.02/s surcharge)
 - Auto-detects at init; tries native first
 
 **Image-to-Video (native)**:

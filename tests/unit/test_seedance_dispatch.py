@@ -35,6 +35,8 @@ def _run_seedance(
     fal_key: str = "fk-test-key",
     multi_angle_refs: list | None = None,
     shot_type: str = "action",
+    download_ok: bool = True,
+    cascade_out: dict | None = None,
 ):
     """Drive generate_ai_video(SEEDANCE) with a stubbed fal_client; return
     (stub_fal, result)."""
@@ -60,7 +62,11 @@ def _run_seedance(
             phase_c_ffmpeg.time.sleep = lambda *_: None  # cascade retry pause
             # Same boundary as the VEO/SORA fal tests: stub safe_download so the
             # subscribe-returned URL isn't really downloaded (offline + no cascade).
-            phase_c_ffmpeg.safe_download = lambda url, out: out
+            # download_ok=False simulates a BILLED generation whose download
+            # fails (safe_download contract: None on failure).
+            phase_c_ffmpeg.safe_download = (
+                (lambda url, out: out) if download_ok else (lambda url, out: None)
+            )
             result = phase_c_ffmpeg.generate_ai_video(
                 image_path="/tmp/keyframe.png",
                 camera_motion="tracking_shot",
@@ -70,6 +76,7 @@ def _run_seedance(
                 multi_angle_refs=multi_angle_refs,
                 video_fallbacks=["SEEDANCE"],  # nothing else to try → clean exhaust
                 ctx=_ctx(aspect),
+                _cascade_out=cascade_out,
             )
     finally:
         sys.modules.pop("phase_c_ffmpeg", None)
@@ -167,6 +174,33 @@ class TestSeedancePayloadContract:
         assert arguments.get("aspect_ratio") == "16:9", (
             f"Expected aspect_ratio='16:9'; got: {arguments}"
         )
+
+
+class TestBilledAttemptProducer:
+    """Producer-side pin for the billed-but-rejected recording (money-gate
+    NIT-1, 2026-07-11): the DISPATCH must note every billed generation
+    (provider returned a video) in _cascade_out['billed_attempts'] — even
+    when the download then fails — or the controller-side reject recording
+    silently dies with every test staying green."""
+
+    def test_download_failure_still_notes_billed_attempt(self):
+        cascade: dict = {}
+        _, result = _run_seedance(download_ok=False, cascade_out=cascade)
+        # TWO attempts: the first billed generation fails its download, the
+        # cascade exhausts, and MAX_CASCADE_RETRIES=1 re-runs the full cycle
+        # — billing a SECOND generation that also fails. Both are real fal
+        # invoices and both must be visible to the budget gate.
+        assert cascade.get("billed_attempts") == ["SEEDANCE", "SEEDANCE"], (
+            f"billed generations with failed downloads must ALL be noted; "
+            f"got {cascade!r}"
+        )
+        assert result is None  # exhausted after the retry cycle
+
+    def test_successful_win_notes_attempt_and_metadata(self):
+        cascade: dict = {}
+        _run_seedance(cascade_out=cascade)
+        assert cascade.get("billed_attempts") == ["SEEDANCE"]
+        assert cascade.get("cascade_metadata", {}).get("engine") == "SEEDANCE"
 
 
 class TestSeedancePortraitCapable:

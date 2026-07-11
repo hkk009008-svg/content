@@ -127,8 +127,8 @@ def test_resolution_720p_maps_to_1080p_in_fal(monkeypatch, tmp_path):
 
 def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_path):
     """When generate_video is called with resolution='720p' in fal mode, the
-    subscribe arguments carry width=1920, height=1080, not 1280x720.
-    DOCUMENTED-INTENTIONAL: LTX has no true 720p; capability-positive upgrade.
+    subscribe arguments carry resolution='1080p' (the fal-ai/ltx-2.3 enum
+    floor — same capability-positive upgrade as the native map).
     """
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(fal_key="fal-key")
@@ -149,10 +149,39 @@ def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_pa
     )
 
     args = subscribe_mock.call_args
+    # 2026-07-11 bump: endpoint is fal-ai/ltx-2.3, payload uses the string
+    # resolution enum — no width/height/num_frames (old ltx-2 shape).
+    assert args.args[0] == "fal-ai/ltx-2.3/image-to-video"
     subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    # width/height are 1920x1080 for "720p" input (intentional upgrade, see G(ltx)3)
-    assert subscribe_arguments["width"] == 1920
-    assert subscribe_arguments["height"] == 1080
+    assert subscribe_arguments["resolution"] == "1080p"
+    for legacy_key in ("width", "height", "num_frames"):
+        assert legacy_key not in subscribe_arguments, (
+            f"legacy ltx-2 param {legacy_key!r} sent to the 2.3 endpoint"
+        )
+    assert subscribe_arguments["generate_audio"] is False
+
+
+def test_fal_duration_snaps_to_ltx23_enum(monkeypatch, tmp_path):
+    """fal-ai/ltx-2.3 duration enum is {6, 8, 10} seconds — the default 4s
+    request snaps UP to 6 (the enum floor), 7-8s to 8, 9s+ to 10."""
+    assert ltx_native.LTXVideoAPI._fal_duration(4 * 24) == 6
+    assert ltx_native.LTXVideoAPI._fal_duration(8 * 24) == 8
+    assert ltx_native.LTXVideoAPI._fal_duration(12 * 24) == 10
+
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, path: None)
+
+    api.generate_video(
+        image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+    )
+    subscribe_arguments = subscribe_mock.call_args.kwargs.get("arguments", {})
+    assert subscribe_arguments["duration"] == 6
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +237,8 @@ def test_fal_no_video_url_returns_none(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_fal_valid_camera_motion_included(monkeypatch, tmp_path):
-    """A recognised camera_motion string is forwarded to fal_client.subscribe."""
+    """A recognised camera_motion is folded into the PROMPT (fal-ai/ltx-2.3
+    has no camera_motion parameter — language-steered camera only)."""
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(fal_key="fal-key")
     img = tmp_path / "frame.jpg"
@@ -229,7 +259,10 @@ def test_fal_valid_camera_motion_included(monkeypatch, tmp_path):
 
     args = subscribe_mock.call_args
     subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    assert subscribe_arguments.get("camera_motion") == "dolly_in"
+    assert "camera_motion" not in subscribe_arguments, (
+        "ltx-2.3 has no camera_motion param — must be prompt-folded"
+    )
+    assert "dolly in" in subscribe_arguments["prompt"]
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +292,9 @@ def test_fal_invalid_camera_motion_excluded(monkeypatch, tmp_path):
     args = subscribe_mock.call_args
     subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
     assert "camera_motion" not in subscribe_arguments
+    assert "hover_rotate" not in subscribe_arguments["prompt"], (
+        "invalid camera motion must not leak into the prompt"
+    )
 
 
 # ---------------------------------------------------------------------------

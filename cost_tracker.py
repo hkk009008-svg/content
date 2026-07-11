@@ -55,7 +55,7 @@ API_COST_USD: dict[str, float] = {
     "SORA_2":        0.60,
     "VEO_NATIVE":    0.30,
     "VEO":           0.25,
-    "LTX":           0.10,
+    "LTX":           0.36,   # per clip: fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
     "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
@@ -399,7 +399,11 @@ class CostTracker:
         supplied. Updates ``self.spent_usd`` (in-process accumulator) and
         persists to SQLite.  Returns the cost recorded.
 
-        Only call on the *success* path — never for failed API attempts.
+        Call for spend the provider actually BILLED: successful generations
+        (winner-keyed) and billed-but-rejected attempts (the provider
+        returned a video that download/aspect checks then discarded —
+        operation="motion_generation_rejected", 2026-07-11). Never call for
+        attempts that failed BEFORE the provider produced output.
         """
         api_upper = api_name.upper()
         if cost_usd is None:

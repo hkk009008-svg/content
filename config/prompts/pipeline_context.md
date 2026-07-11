@@ -26,7 +26,7 @@ CAMERA MOTION GUIDANCE:
 - VEO_NATIVE: static or slow motions ONLY (cleanest lip-sync — overlay or native)
 - RUNWAY_GEN4: zoom_in_slow, static_drone (style-lock motions)
 
-COST ORDER (cheapest → most expensive): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$) → Seedance ($$$$$, ~$1.51/5s clip at 720p)
+COST ORDER (cheapest → most expensive, per typical clip): Veo (~$0.25-0.30) ≈ LTX (~$0.36; 6s minimum @$0.06/s) → Runway (~$0.40-0.50) → Kling (~$0.50-0.56) → Sora (~$0.60-0.80, retires 2026-09-24) → Seedance (~$1.51/5s at 720p)
 
 ═══════════════════════════════════════════════════════════════
 2. DIALOGUE LIP-SYNC — how dialogue scenes are handled
