@@ -3180,3 +3180,59 @@ Evidence:
 ..                                                                       [100%]
 2 passed in 0.03s
 ```
+
+## ADR-066: AdaFace embedding adapter behind the EMBED_MODEL chokepoint (P5 item 1)
+
+Date: 2026-07-11
+(ADR-065 is claimed by the skill-twin body-parity gate on `claude/cranky-kapitsa-89eae8`;
+number skipped here to avoid a merge collision.)
+
+Context: P5 (docs/RESEARCH-2026-07-10-component-upgrades.md) recommends AdaFace (MIT)
+for identity QC — better on degraded/low-quality faces (IJB-B TAR@FAR=0.01% 95.67 vs
+ArcFace 94.25, R100/MS1MV2), matching over-cooked-render scoring. AdaFace is NOT a
+DeepFace built-in. This session builds on the 2026-07-11 EMBED_MODEL chokepoint
+(ported into this branch from the shared-tree WIP, byte-identical).
+
+Decision:
+- **Adapter at the repo's own chokepoint, not a DeepFace-registry patch.** The vendored
+  official net (`identity/adaface_net.py`, verbatim MIT `net.py` — structural edits break
+  checkpoint loading) plus `identity/adaface.py` are dispatched inside
+  `identity.validator.represent_deterministic` (now public). The domain represent
+  siblings (`character_manager.compute_face_embedding`, `continuity_engine`) reroute
+  through it — the chokepoint is strengthened from shared CONSTANT to shared FUNCTION,
+  because a direct `DeepFace.represent(model_name="AdaFace")` would crash.
+- **Same-detector policy.** Detection/alignment stays on `DeepFace.extract_faces`
+  (same backend, same `enforce_detection=False` whole-image-fallback semantics that
+  `_classify_face_detection` DEGENERATE logic depends on). Only the embedding backbone
+  swaps, so the P5 item-2 paired calibration measures exactly one changed variable.
+- **The BGR pitfall is owned by one function.** `preprocess_face` implements the official
+  112×112 BGR `(x/255−0.5)/0.5` convention (opposite channel order from the DeepFace
+  stack) and is unit-pinned — a silent RGB feed degrades scores without crashing.
+- **Fail LOUD at resolve time.** A selected-but-missing checkpoint raises RuntimeError in
+  `_resolve_embed_model` (startup) naming `scripts/download_adaface_ckpt.py`. Per-call
+  failure would be swallowed by `_get_embedding` and validations would silently SKIP
+  (passed=True) — the silent-gate-degradation class.
+- **Model-keyed disk cache.** Non-default backbones cache as `emb_<key>__<model>.npy`;
+  GhostFaceNet keeps the legacy name. A warm GhostFaceNet cache served to an AdaFace
+  run would produce meaningless cosines, silently.
+- **Dual-channel structural warning (NEW general finding).** The TF/Keras chain — loaded
+  by `from deepface import DeepFace`, which runs BEFORE EMBED_MODEL resolves — fronts a
+  blanket `('ignore', None, Warning, None, 0)` on the global filters: `warnings.warn`
+  after DeepFace loads reaches NOBODY, even under `-W error` (verified 2026-07-11).
+  The STRUCTURAL uncalibrated warning therefore also prints to stderr. This applies to
+  ANY `warnings.warn` issued after DeepFace/TF import anywhere in the pipeline.
+- **Default UNCHANGED (GhostFaceNet).** AdaFace is opt-in via `IDENTITY_EMBED_MODEL=AdaFace`
+  and stays UNCALIBRATED until the pod paired measurement on the ADR-025 reference sets
+  (P5 item 2) re-derives thresholds. Do NOT flip the default before that lands.
+
+Evidence:
+- `pytest tests/unit/test_adaface_adapter.py tests/unit/test_identity_embed_model.py
+  tests/unit/test_embedding_determinism_routing.py -q` → 22 passed.
+- Full unit suite → 3403 passed, 2 skipped (pre-stderr-fix run; final run re-executed at
+  commit time).
+- Checkpoint `adaface_ir101_ms1mv2.ckpt`: 436,798,739 bytes, sha256
+  `4a26839460d8e1a5e8a13a0d7968e919d464f482aa0f8350f9e2cec84fe37481`, loads STRICT into
+  the vendored ir_101 (pinned in scripts/download_adaface_ckpt.py).
+- E2E through the production chokepoint (`IDENTITY_EMBED_MODEL=AdaFace`, man-ref image):
+  2 detections (matches the documented MAN_REF fact), 512-d L2-normalized embeddings,
+  byte-identical across runs, `validate_image(ref, ref)` → 1.0000 passed.

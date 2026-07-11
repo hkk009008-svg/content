@@ -70,6 +70,10 @@ logs/*
 # (ADR-027 FIX-5 / R-MEASURE), not a local scratch render.
 !logs/product-oracle-*.json
 
+# Model weights (downloaded, never committed — e.g. AdaFace checkpoints via
+# scripts/download_adaface_ckpt.py)
+models/
+
 # GitNexus index
 .gitnexus
 

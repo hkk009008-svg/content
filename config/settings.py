@@ -63,6 +63,12 @@ class Settings:
     # — ALL calibrated identity thresholds assume its score distribution; see
     # identity/validator.py EMBED_MODEL before changing.
     identity_embed_model: str
+    # AdaFace adapter knobs (only consulted when identity_embed_model=AdaFace):
+    # checkpoint path ("" → models/adaface/adaface_ir101_ms1mv2.ckpt at repo
+    # root; download via scripts/download_adaface_ckpt.py) and vendored-net
+    # arch (must match the checkpoint).
+    identity_adaface_ckpt: str
+    identity_adaface_arch: str
 
     # Audio / TTS
     elevenlabs_api_key: str
@@ -112,6 +118,8 @@ class Settings:
             ltx_api_key=_env("LTX_API_KEY"),
             runwayml_api_secret=_env("RUNWAYML_API_SECRET"),
             identity_embed_model=_env("IDENTITY_EMBED_MODEL", "GhostFaceNet"),
+            identity_adaface_ckpt=_env("IDENTITY_ADAFACE_CKPT", ""),
+            identity_adaface_arch=_env("IDENTITY_ADAFACE_ARCH", "ir_101"),
             elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
             cartesia_api_key=_env("CARTESIA_API_KEY"),
             stability_api_key=_env("STABILITY_API_KEY"),
