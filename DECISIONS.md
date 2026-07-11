@@ -3180,3 +3180,41 @@ Evidence:
 ..                                                                       [100%]
 2 passed in 0.03s
 ```
+
+## ADR-065 — Skill-twin body-parity gate in ci_smoke (.agents ↔ .claude)
+
+Date: 2026-07-11
+
+Context: `.agents/skills/` holds the Codex-seat twins of the maintained
+`.claude/skills/` project-knowledge skills, and AGENTS.md's R-SKILL rule routes
+live Codex seats at them as authoritative doctrine. Two rot incidents proved the
+twins decay silently: (1) the ai-video-gen twins froze at `7682c128` and missed
+four `.claude`-only maintenance commits plus both 2026-07-11 routing migrations
+(`cb58109d` Seedance action-primary, `32b85fe3` fal Kling v3 Pro) — synced in
+`9ba9cc92`; (2) comfyui-mastery's `a24-integration.md` + `nodes-face-identity.md`
+froze at the initial `3cb5db9d` blobs and missed the ApplyPulidFlux / 22-node-graph
+corrections (`1d80411a`, `48ad08bf`) — synced alongside this ADR. The rot was
+masked because shared commits kept *partially* touching both trees, so the twins
+never looked abandoned. A stale twin is worse than none: R-SKILL grants it
+authority, and the rotted post-processing twin documented functions that do not
+exist (`normalize_clip`, `execute_master_ffmpeg_assembly`) and a never-implemented
+transition subsystem.
+
+Decision: `scripts/check_skill_twin_parity.py`, wired into `scripts/ci_smoke.py`
+as a hard-fail locally AND in CI (unlike anchor drift, twin drift only arises
+from a skill edit that skipped the sync; the fix is a same-commit `cp` — no
+false-positive pressure). The gate checks, for `GATED_DIRS = (ai-video-gen,
+comfyui-mastery)`: the `*.md` file sets match on both sides, and every common
+file's body is byte-identical after stripping a leading YAML frontmatter block.
+Frontmatter is exempt by design (the Codex twins quote YAML values and add
+Codex-only fields like `disable-model-invocation`). Exempt entirely: the
+seat-doctrine skills (four-seat-protocol, seat-coordinator, seat-director,
+seat-operator, create-regression-pin, wave-gate — deliberate Codex forks, see
+`7d189987`), dirs existing on one side only, non-`.md` files (scripts
+self-reference their own path, e.g. seat_status.py's usage string), and
+`.claude/skill-eval/` snapshots (ADR-063).
+
+Evidence: RED→GREEN executed 2026-07-11 — standalone run green at parity
+(exit 0, both dirs PASS); body-mutation of a gated file → exit 1 naming the
+file; removing a twin file → exit 1 "missing from .agents twin"; reverted, full
+`scripts/ci_smoke.py` → `OK` with the gate wired in.

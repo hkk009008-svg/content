@@ -2147,11 +2147,20 @@ The script verifies the runtime-executable subset of the invariants above
 test-suite checks; see the script's module docstring for the split
 rationale. Exit 0 = invariants hold; exit 1 = drift.
 
+Beyond §15, the script also runs the repo-hygiene gates: doc-anchor drift
+(`check_doc_claims` — hard-fail locally, warn in CI), coordination state
+(`check_coordination`), ceremony detection (`check_no_ceremony`, ADR-028),
+reviewer-result schema (`consume_reviewer_result`, ADR-032), and skill-twin
+body-parity (`check_skill_twin_parity`, ADR-065 — the `.agents/skills/`
+Codex twins of `ai-video-gen` + `comfyui-mastery` must stay body-identical
+to the maintained `.claude/skills/` copies; frontmatter and the
+seat-doctrine Codex forks are exempt).
+
 This script is also the smoke job's command in
 [.github/workflows/ci.yml](.github/workflows/ci.yml). If you change the
 script, the local check + CI move together.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-07-11*
 
 ---
 
