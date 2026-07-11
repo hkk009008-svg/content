@@ -34,6 +34,7 @@ but the budget gate uses the fast in-memory counter.
 import math
 import sqlite3
 import os
+import sys
 import threading
 import warnings
 from dataclasses import dataclass, field
@@ -143,6 +144,30 @@ def _detect_provider(model: str) -> str:
     if "gemini" in model_lower:
         return "google"
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Operator-visible warning helper
+# ---------------------------------------------------------------------------
+
+def _warn_operator(msg: str, stacklevel: int = 2) -> None:
+    """Emit a load-bearing operator warning on BOTH channels (ADR-066/067).
+
+    ``warnings.warn`` alone is invisible in the production process: the
+    TF/Keras import chain (loaded whenever ``from deepface import DeepFace``
+    executes — identity/validator, domain/character_manager,
+    domain/continuity_engine, phase_c_vision) fronts a blanket
+    ('ignore', None, Warning, None, 0) filter, silencing every later warning
+    even under ``-W error`` (verified 2026-07-11; pytest.warns still sees
+    them because it installs its own filter context — tests stay green while
+    production goes silent). stderr survives that stomp, so every money-lane
+    warning in this module goes through here.
+
+    ``stacklevel`` is relative to the caller, as if ``warnings.warn`` were
+    called inline (the +1 below compensates for this frame).
+    """
+    print(msg, file=sys.stderr)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +311,7 @@ class CostTracker:
         # the gate ALIVE for real subsequent spend) and emit a WARNING so
         # operators can diagnose the upstream source of the bad cost value.
         if not math.isfinite(cost_usd):
-            warnings.warn(
+            _warn_operator(
                 f"[cost_tracker] Non-finite cost_usd={cost_usd!r} coerced to 0.0 "
                 f"in log() (operation={operation!r}); upstream cost calculation "
                 f"produced NaN/inf — check the caller for division by zero or "
@@ -336,18 +361,17 @@ class CostTracker:
         Log an LLM call.
 
         Automatically detects the provider and calculates cost from the
-        PRICING table. If the model is unknown, emits a warning AND prints
-        a banner so the cost is not silently lost (previously this defaulted
-        to $0.00 with no signal, breaking budget governance).
+        PRICING table. If the model is unknown, warns on both channels
+        (warnings + stderr, via _warn_operator) so the cost is not silently
+        lost (previously this defaulted to $0.00 with no signal, breaking
+        budget governance).
         """
         provider = _detect_provider(model)
         if model not in PRICING:
-            warnings.warn(
+            _warn_operator(
                 f"[cost_tracker] Unknown model {model!r}; recording $0.00 cost. "
                 f"Add it to PRICING in cost_tracker.py for accurate budgeting.",
-                stacklevel=2,
             )
-            print(f"⚠️ [COST] Unknown model {model!r} — cost not tracked.")
         pricing = PRICING.get(model, {"input": 0.0, "output": 0.0})
         cost_usd = (
             (input_tokens / 1_000_000) * pricing["input"]
@@ -409,10 +433,9 @@ class CostTracker:
         if cost_usd is None:
             cost_usd = API_COST_USD.get(api_upper, 0.0)
             if cost_usd == 0.0 and api_upper not in API_COST_USD:
-                warnings.warn(
+                _warn_operator(
                     f"[cost_tracker] Unknown API {api_name!r}; recording $0.00 cost. "
                     f"Add it to API_COST_USD in cost_tracker.py for accurate budgeting.",
-                    stacklevel=2,
                 )
 
         # Derive a human-readable provider name from the API key.
@@ -569,10 +592,9 @@ class CostTracker:
             except (TypeError, ValueError, OverflowError):
                 spent = float("inf")
             if not math.isfinite(spent):
-                warnings.warn(
+                _warn_operator(
                     f"[cost_tracker] Non-finite persisted spend total={total!r} "
                     f"for video_id={video_id!r}; budget gate will fail closed.",
-                    stacklevel=2,
                 )
                 spent = float("inf")
             self.spent_usd = spent
