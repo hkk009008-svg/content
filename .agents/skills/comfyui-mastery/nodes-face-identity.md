@@ -68,6 +68,41 @@ Fine-grained control over projection and fidelity settings.
 
 **Note:** `ortho_v2` with `fidelity: 8` is equivalent to the standard node's `fidelity` method.
 
+### ApplyPulidFlux  ⭐ this project's production node (FLUX-native)
+
+**This is the node `pulid_max.json` / `pulid.json` actually use** (node 100), from the
+PuLID-Flux custom pack — distinct from `ApplyPulid` / `ApplyPulidAdvanced` above, which
+are the SD1.5/SDXL-era PuLID nodes (`ApplyPulidAdvanced` is *not* the FLUX route, despite
+its `attn_mask`). Verified from the live graph + the 2026-06-13 pod census (`ea2eaee`,
+`scripts/_passb_census.py`).
+
+| Input | Type | As wired in pulid_max.json (node 100) | Description |
+|-------|------|----------|-------------|
+| model | MODEL | `['700', 0]` (LoRA loader → **global** patch, upstream of PuLID) | Base diffusion model |
+| pulid_flux | PULID | from `PulidFluxModelLoader` | FLUX PuLID model |
+| eva_clip | EVA_CLIP | from `PulidFluxEvaClipLoader` | EVA-CLIP encoder |
+| face_analysis | INSIGHTFACE | from `PulidInsightFaceLoader` | InsightFace model |
+| image | IMAGE | reference face | Reference face image |
+| weight | FLOAT | 0.85 | Identity conditioning strength |
+| start_at | FLOAT | 0.0 | Start timestep (% of sampling) |
+| end_at | FLOAT | 0.9 | End timestep (% of sampling) |
+| fusion | COMBO | `mean` | Multi-embedding fusion mode |
+| fusion_weight_max / min | FLOAT | 1.0 / 0.0 | Fusion weight bounds |
+| train_step | INT | 1000 | — |
+| use_gray | BOOL | True | Grayscale preprocessing of the ref |
+| attn_mask | MASK | optional (census-verified present) | **Region mask — spatially gates only this PuLID injection** |
+
+**Multi-identity + masking mechanism (this project's dual-character path):** a second
+`ApplyPulidFlux` (node 103) is spliced in series after node 100 — `103.model = ['100', 0]`
+— each with its own `image` and (optionally) its own `attn_mask`. The masks restrict *where
+each PuLID identity is injected* via cross-attention, so two faces land on two halves.
+**Critical:** `attn_mask` gates only the per-node PuLID cross-attention. Any LoRA on the
+upstream `model` chain (node 700) is a **global weight patch — NOT spatially masked**, so a
+character LoRA's trigger features bleed across the whole frame regardless of the masks.
+Effective mask polarity is **inverted** vs naïve "white = apply": white = *exclude* the
+identity from that region (empirically resolved, 2026-06-13; see
+`scripts/_max_passBa_masked_pulid.py`).
+
 ### PuLID Models
 | Model | Architecture | Notes |
 |-------|-------------|-------|
