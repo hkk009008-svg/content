@@ -1,6 +1,8 @@
 # Video Generation API Reference
 
-## Kling 3.0 Native (`kling_native.py`)
+## Kling Native — LEGACY kling-v1-6 (`kling_native.py`)
+
+**⚠️ Fallback-only since 2026-07-11**: the portrait/medium primary is now the fal Kling v3 Pro route (`fal-ai/kling-video/v3/pro/image-to-video`, KLING_3_0 engine) — best-ranked Kling (#11 AA i2v arena), identity via `elements` (frontal + ≤3 reference images, addressed as `@Element1`). This native client still sends v1.6-era params (`face_consistency`, `image_reference`) that no v3-era doc lists; its `kling-v3` bump is deferred pending a live-key param check (native docs geo-blocked HTTP 446).
 
 **Auth**: JWT (HS256) via `KLING_ACCESS_KEY` + `KLING_SECRET_KEY`. Tokens cached 30 min, auto-refresh at <5 min remaining.
 
@@ -28,12 +30,14 @@
 - 5s is the sweet spot — longer durations increase temporal drift
 - Always use `pro` mode for character content
 - 2–3 additional reference angles (profile, 3/4 view) significantly improve consistency
-- Subject binding + face_consistency together = strongest identity lock of all APIs
+- (v1.6-era) subject binding + face_consistency was the strongest identity lock; on v3 the identity mechanism is `elements` on the fal route — see the header note
 - Tasks typically complete in 30–90s after submission
 
 ---
 
 ## Sora 2 Native (`sora_native.py`)
+
+**⚠️ Sunset**: OpenAI retires Sora 2 and the Videos API on **2026-09-24** — action primary moved to Seedance 2.0 (fal) on 2026-07-11; Sora remains a fallback until shutdown.
 
 **Auth**: OpenAI API key via `OPENAI_API_KEY`
 
@@ -43,7 +47,7 @@
 - Model: `"sora-2"`
 - Duration: **must be exactly** `4`, `8`, `12`, `16`, or `20` (integer seconds) — invalid values default to 4
 - Resolution: `"480p"`, `"720p"`, or `"1080p"`
-- Input images auto-resized to **1280x720** (LANCZOS, JPEG quality 90)
+- Input images auto-resized to the resolved resolution (1280x720 landscape OR 720x1280 portrait, after sora-2 clamps to 720p) (LANCZOS, JPEG quality 90)
 - Uses `client.videos.create_and_poll()` — SDK handles polling automatically
 - Download: `client.videos.download_content(video.id)` with streaming iter_bytes
 
@@ -65,18 +69,18 @@
 **SDK**: `google.genai` with `types.Image.from_file(location=path)`
 
 **Image-to-Video**:
-- Model: `"veo-3.1-generate-preview"`
-- Duration: `"5s"`, `"6s"`, or `"8s"` (string with 's' suffix)
+- Model: `"veo-3.1-generate-preview"` (Gemini API key backend) or `"veo-3.1-generate-001"` (Vertex AI backend — preferred, supports native audio)
+- Duration: `"4s"`, `"6s"`, or `"8s"` (string with 's' suffix); `"5s"` is server-rejected (INVALID_ARGUMENT) and the code clamps to nearest valid value (5 → 6)
 - Resolution: `"720p"` or `"1080p"`
 - Aspect ratio: `"16:9"` (hardcoded)
 - `person_generation`: `"allow_adult"`
-- `reference_images`: Up to **3** character preservation images
+- `reference_images`: Parameter accepted for interface compatibility, but NOT applied on the image-to-video path — server rejects them when a start image is provided ("Image and reference images cannot be both set.")
 - `generate_audio`: Boolean — native synced audio generation
 
 **First + Last Frame Control** (unique to Veo):
-- `generate_video_with_frames(first_frame, last_frame, prompt, duration)`
-- Veo smoothly interpolates between start and end compositions
+- Veo smoothly interpolates between start and end compositions via keyframe-controlled generation
 - Deterministic endpoints — ideal for shot-to-shot transitions
+- Note: a dedicated `generate_video_with_frames()` helper does not exist; keyframe control is achieved through the start image and prompt composition
 
 **Polling**: Manual 10s intervals, logging every 60s. No explicit timeout cap.
 
@@ -86,7 +90,7 @@
 - `"6s"` is the sweet spot for cinematic pacing
 - Native audio is useful for dialogue/narration scenes
 - Best for landscape/environment shots and keyframe-controlled transitions
-- Quota issues occur — pipeline tracks `_veo_quota_exhausted` globally
+- Quota issues occur — pipeline tracks via TTL timestamp `_VEO_QUOTA_EXHAUSTED_UNTIL` (float, 0 = no cooldown), checked via `_veo_quota_blocked()`, auto-expires after `_VEO_QUOTA_TTL_S = 1800s` (30 min)
 
 ---
 
@@ -108,8 +112,8 @@
 - `generate_transition(start_frame, end_frame, prompt, duration)`
 - Smooth interpolation between two compositions
 
-**4K Convenience**:
-- `generate_4k(image_path, prompt)` — auto-selects 4K resolution, 4s duration
+**4K Support**:
+- Pass `resolution="4k"` to `generate_video()` — no separate `generate_4k()` convenience wrapper exists
 
 **Wisdom**:
 - **Cheapest** cost per video across all APIs
@@ -127,12 +131,12 @@
 **Auth**: RunwayML SDK via `RUNWAYML_API_SECRET`
 
 **Image-to-Video**:
-- Model: `"gen4"`
+- Model: `"gen4_turbo"` (primary); a secondary path uses `"gen3a_turbo"`
 - Duration: 10 seconds
 - Ratio: `"16:9"`
 - Image input: base64 data URI (`data:image/jpeg;base64,...`)
 - Style lock: up to **3 reference images** for style consistency
-- Poll: `client.tasks.retrieve(task_id)` with 5s intervals
+- Poll: `client.tasks.retrieve(id=task.id)` (keyword arg); gen4_turbo block polls at 10s intervals
 
 **Wisdom**:
 - Strong style lock with reference images
@@ -144,11 +148,11 @@
 
 ## API Capabilities Matrix
 
-| Feature | Kling 3.0 | Sora 2 | Veo 3.1 | LTX 2.3 | Runway Gen-4 |
+| Feature | Kling 3.0 | Sora 2 | Veo 3.1 | LTX 2.3 | Runway Gen-4 Turbo |
 |---------|-----------|--------|---------|---------|-------------|
 | Character Binding | Subject binding | Prompt only | References (3) | Prompt only | Style lock (3) |
 | Face Consistency Flag | Boolean | No | No | No | No |
-| Duration | 5s optimal | 4,8,12,16,20 | 5s,6s,8s | Flexible | 10s fixed |
+| Duration | 5s optimal | 4,8,12,16,20 | 4s,6s,8s | Flexible | 10s fixed |
 | Max Resolution | 1080p | 1080p | 1080p | **4K** | 1080p |
 | Storyboard | 6 shots/15s | No | No | No | No |
 | First+Last Frame | No | No | Yes | Yes | No |
@@ -166,9 +170,10 @@ When native APIs fail, these FAL endpoints provide redundancy:
 
 | API | FAL Model ID | Notes |
 |-----|-------------|-------|
-| Kling | `fal-ai/kling-video/v3/pro/image-to-video` | Subject binding supported |
-| Sora | `fal-ai/openai/sora-2/image-to-video` | 25s continuous generation |
-| Veo | `fal-ai/google/veo/image-to-video` | Reference images supported |
+| Kling | `fal-ai/kling-video/v3/pro/image-to-video` | Portrait/medium PRIMARY since 2026-07-11; `elements` identity, $0.112/s audio-off (parity with native pricing) |
+| Sora | `fal-ai/sora-2/image-to-video` | 25s continuous generation (retires 2026-09-24) |
+| Veo | `fal-ai/veo3.1/reference-to-video` | Reference images supported |
+| Seedance | `bytedance/seedance-2.0/image-to-video` | Action primary; 4-15s, 480p-4k, 9:16 OK; `.../reference-to-video` takes ≤9 ref images ($0.3024/s @720p standard) |
 
 All FAL proxies use `FAL_KEY` environment variable and `fal_client.subscribe()` with polling.
 
