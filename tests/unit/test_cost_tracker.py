@@ -776,6 +776,44 @@ class TestVerifiedPricePins:
         assert API_REGISTRY["KLING_NATIVE"]["per_shot_cost"] == API_COST_USD["KLING_NATIVE"]
 
 
+    def test_lipsync_prices_are_the_verified_2026_07_11_values(self):
+        from cost_tracker import API_COST_USD
+        # sync-3: $0.107-0.133/s (sync.so docs; fal $8/min) -> ~5s clip. The
+        # old 0.05 under-gated the OVERLAY PRIMARY by ~13x.
+        assert API_COST_USD["LIPSYNC_SYNCSOV3"] == 0.67
+        # OmniHuman v1.5: $0.16/s (fal model page) -> 5s. Old 0.10 was 8x low.
+        assert API_COST_USD["LIPSYNC_OMNIHUMAN"] == 0.80
+
+    def test_driving_face_estimator_matches_table_row(self):
+        # The gate precheck and the write site both use the ESTIMATOR, not the
+        # table row (which has no runtime consumer) — pin them together so a
+        # revert of the driving_video.py rates can't silently under-gate
+        # while the row pin stays green.
+        from cost_tracker import API_COST_USD
+        from performance.driving_video import estimate_driving_face_cost
+        assert estimate_driving_face_cost("hedra", 5.0) == pytest.approx(
+            API_COST_USD["PERFORMANCE_DRIVING_HEDRA"]
+        )
+        assert estimate_driving_face_cost("sadtalker", 5.0) == pytest.approx(
+            API_COST_USD["PERFORMANCE_DRIVING_SADTALKER"]
+        )
+
+    @pytest.mark.parametrize("registry_key,cost_key", [
+        ("SYNC_SO_V3", "LIPSYNC_SYNCSOV3"),
+        ("SYNC_V2", "LIPSYNC_SYNCV2"),
+        ("OMNIHUMAN_V1_5", "LIPSYNC_OMNIHUMAN"),
+        ("HEDRA_C3", "LIPSYNC_HEDRA"),
+        ("MUSETALK", "LIPSYNC_MUSETALK"),
+        ("LATENTSYNC", "LIPSYNC_LATENTSYNC"),
+        ("KLING_LIPSYNC_2", "LIPSYNC_KLING"),
+    ])
+    def test_lipsync_registry_costs_match_api_cost_usd(self, registry_key, cost_key):
+        # Planner figure (API_REGISTRY) and gate figure (API_COST_USD) must
+        # agree for the same lipsync engine.
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        assert API_REGISTRY[registry_key]["per_shot_cost"] == API_COST_USD[cost_key]
+
     def test_seedance_registry_cost_matches_api_cost_usd(self):
         # API_REGISTRY.per_shot_cost is the LLM-facing planning figure; drift
         # from the gated API_COST_USD figure lets the planner and the budget
@@ -806,7 +844,9 @@ class TestApiCostUsdCompleteness:
     @pytest.mark.parametrize(
         "api_name, expected",
         [
-            ("PERFORMANCE_DRIVING_HEDRA", 0.075),
+            # Hedra re-verified 2026-07-11: $0.06/s upper tier x 5s (was
+            # 0.075 from the old base+per-second estimate — 4x low).
+            ("PERFORMANCE_DRIVING_HEDRA", 0.30),
             ("PERFORMANCE_DRIVING_SADTALKER", 0.045),
         ],
     )

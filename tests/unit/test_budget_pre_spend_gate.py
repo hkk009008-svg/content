@@ -508,7 +508,7 @@ class TestPerformancePreSpendBudgetGate:
                 provider="hedra",
                 model="driving_face",
                 operation="performance_capture_driving",
-                cost_usd=0.075,
+                cost_usd=0.30,  # matches estimate_driving_face_cost('hedra', 5s) since 2026-07-11
             )
             return str(driving), "hedra"
 

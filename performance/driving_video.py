@@ -30,8 +30,13 @@ _HEDRA_POLL_INTERVAL_S = 3
 _SADTALKER_POLL_TIMEOUT_S = 240
 _SADTALKER_POLL_INTERVAL_S = 2
 
-_DRIVING_FACE_BASE_COST_USD = {"hedra": 0.05, "sadtalker": 0.02}
-_DRIVING_FACE_COST_PER_SECOND_USD = 0.005
+# Per-provider estimate shape: base + per-second. Hedra re-verified
+# 2026-07-11 against hedra.com/pricing: Character-3 = 6 credits/s =
+# $0.031-0.060/s by subscription tier -> upper bound $0.06/s, no base fee
+# (the old 0.05 + $0.005/s under-estimated a 5s clip 4x). SadTalker rates
+# unchanged (GPU-time estimate).
+_DRIVING_FACE_BASE_COST_USD = {"hedra": 0.0, "sadtalker": 0.02}
+_DRIVING_FACE_COST_PER_SECOND_USD = {"hedra": 0.06, "sadtalker": 0.005}
 
 
 def estimate_driving_face_cost(provider: str, duration_s: float) -> float:
@@ -44,7 +49,8 @@ def estimate_driving_face_cost(provider: str, duration_s: float) -> float:
         duration = 5.0
     provider_key = (provider or "sadtalker").lower()
     base = _DRIVING_FACE_BASE_COST_USD.get(provider_key, _DRIVING_FACE_BASE_COST_USD["sadtalker"])
-    return round(base + _DRIVING_FACE_COST_PER_SECOND_USD * duration, 4)
+    per_s = _DRIVING_FACE_COST_PER_SECOND_USD.get(provider_key, _DRIVING_FACE_COST_PER_SECOND_USD["sadtalker"])
+    return round(base + per_s * duration, 4)
 
 
 def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str, cost_tracker=None) -> None:

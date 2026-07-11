@@ -550,8 +550,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:438](domain/scene_decomposer.py:438)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:628](domain/scene_decomposer.py:628)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:440](domain/scene_decomposer.py:440)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:630](domain/scene_decomposer.py:630)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1248,7 +1248,7 @@ poll timeouts bound the overall hold time (300s in act_one/live_portrait/viggle,
 | **Cache hit** | n/a | Content-hash match | Skip API entirely |
 
 Cache key: `SHA256(audio_bytes + keyframe_bytes + rounded_duration)`. Stored
-under `data/cache/driving/`. Avoids re-charging Hedra (~$0.05/shot) on
+under `data/cache/driving/`. Avoids re-charging Hedra (~$0.30/5s shot) on
 regenerate when inputs unchanged.
 
 Return: `Optional[Tuple[str, str]]` — `(path, provider_name)` where

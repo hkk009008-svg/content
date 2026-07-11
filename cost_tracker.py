@@ -64,7 +64,7 @@ API_COST_USD: dict[str, float] = {
     "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
-    "PERFORMANCE_DRIVING_HEDRA":      0.075,  # Mode-B Hedra driving face, 5s estimate.
+    "PERFORMANCE_DRIVING_HEDRA":      0.30,   # Mode-B Hedra driving face, 5s: Character-3 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11), upper bound.
     "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
@@ -91,15 +91,15 @@ API_COST_USD: dict[str, float] = {
     # colliding with same-named video engines, e.g. lipsync "kling" vs video
     # KLING_NATIVE). Lipsync is MANDATORY for dialogue shots (F1b), so an unpriced
     # cascade silently undercounts the budget gate. Estimates; calibrate vs invoice.
-    "LIPSYNC_SYNCSOV3":    0.05,   # sync.so v3 overlay (best generalist) via FAL
+    "LIPSYNC_SYNCSOV3":    0.67,   # sync-3 overlay via FAL: $0.107-0.133/s (sync.so docs + fal $8/min, read 2026-07-11) -> ~5s clip
     "LIPSYNC_MUSETALK":    0.02,   # MuseTalk mouth-only overlay via FAL
     "LIPSYNC_LATENTSYNC":  0.03,   # LatentSync overlay fallback via FAL
-    "LIPSYNC_SYNCV2":      0.10,   # Sync Lipsync v2 (premium) overlay via FAL
-    "LIPSYNC_HEDRA":       0.10,   # Hedra Character-3 generation (native API)
+    "LIPSYNC_SYNCV2":      0.23,   # Sync lipsync-2 (LEGACY tier: 512x512 face region) via FAL: $0.04-0.05/s (sync.so docs 2026-07-11) -> ~5s clip
+    "LIPSYNC_HEDRA":       0.30,   # Hedra Character-3 (native API): 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11) -> ~5s, upper bound
     "LIPSYNC_KLING":       0.05,   # Kling lipsync generation via FAL
-    "LIPSYNC_OMNIHUMAN":   0.10,   # Omnihuman v1.5 generation via FAL
+    "LIPSYNC_OMNIHUMAN":   0.80,   # OmniHuman v1.5 via FAL: $0.16/s (fal model page 2026-07-11) -> 5s clip
     "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL
-    "LIPSYNC_DEFAULT":     0.05,   # fallback when the cascade reports no engine name
+    "LIPSYNC_DEFAULT":     0.67,   # fallback when the cascade reports no engine name — assume the sync-3 primary won (undercounting the likely winner is the worse error)
 }
 
 
