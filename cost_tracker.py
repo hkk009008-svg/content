@@ -421,11 +421,17 @@ class CostTracker:
         # tell "ran on the pod" from "fell back to FAL". QUALITY_MAX is the N=8
         # best-of, which also runs on the pod.
         _provider_map = {
-            # KLING_3_0 is fal-billed (fal-ai/kling-video/v3/pro) — must sit
-            # BEFORE the "KLING" prefix (first-prefix-wins) or the fal invoice
-            # files under 'kling' (review finding 2026-07-11).
+            # Fal-proxy engines that share a prefix with a native provider must
+            # sit BEFORE that prefix (first-prefix-wins) or the fal invoice
+            # files under the native provider (review finding 2026-07-11,
+            # extended to SORA_2/VEO by the ultrareview symmetric-audit):
+            #   KLING_3_0/SORA_2/VEO are fal-billed; KLING_NATIVE→kling,
+            #   SORA_NATIVE→openai, VEO_NATIVE→google are the genuine natives.
             "KLING_3_0": "fal",
-            "KLING": "kling", "SORA": "openai", "VEO": "google",
+            "SORA_2": "fal",        # fal-ai/sora-2 — before "SORA"→openai
+            "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
+            "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
+            "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",
             "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
             "POLLINATIONS": "pollinations",

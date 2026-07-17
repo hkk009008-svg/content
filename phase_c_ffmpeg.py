@@ -151,16 +151,21 @@ def generate_ai_video(
                 "attempts": list(attempted_apis),
             }
 
-    def _download_video_or_cascade(video_url: str, engine: str) -> bool:
-        # Reaching here means the provider RETURNED a video — the generation
-        # is billed regardless of what happens next (download failure, aspect
-        # reject). Note every billed attempt so the caller can record spend
-        # for billed-but-rejected attempts too (money-gate finding 2026-07-11:
-        # rejects previously accumulated $0 while fal invoiced the full clip).
-        # _cascade_out threads through the cascade recursion, so attempts
-        # accumulate across engine hops; the winner is subtracted caller-side.
+    def _note_billed_attempt(engine: str) -> None:
+        # A provider that RETURNED a video is billed regardless of what
+        # happens next (download failure, aspect reject). Note every billed
+        # attempt so the caller records spend for billed-but-rejected ones too
+        # (money-gate finding 2026-07-11: rejects previously accumulated $0
+        # while the provider invoiced the full clip). Native branches call
+        # this directly (they write via output_path=, bypassing the download
+        # helper); fal/URL branches note through _download_video_or_cascade.
+        # _cascade_out threads through the cascade recursion so attempts
+        # accumulate across hops; the winner is subtracted caller-side.
         if _cascade_out is not None:
             _cascade_out.setdefault("billed_attempts", []).append(engine.upper())
+
+    def _download_video_or_cascade(video_url: str, engine: str) -> bool:
+        _note_billed_attempt(engine)
         if safe_download(video_url, output_mp4) is None:
             logger.warning(
                 "Generated video download failed — cascading (spend still billed)",
@@ -344,6 +349,9 @@ def generate_ai_video(
                 mode="pro",
             )
             if result:
+                # Native branch wrote output_mp4 directly (billed) — note it
+                # before the aspect backstop so a reject still records spend.
+                _note_billed_attempt(target_api.upper())
                 # Aspect backstop (also at the other 10 cascade success sites): probe output_mp4 —
                 # the file the provider wrote (result==output_mp4 for native branches; see the
                 # _accept_or_reject caller contract). Wrong orientation → cascade; no-op for landscape.
@@ -393,6 +401,9 @@ def generate_ai_video(
                 aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
+                # Native branch wrote output_mp4 directly (billed) — note it
+                # before the aspect backstop so a reject still records spend.
+                _note_billed_attempt(target_api.upper())
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -432,6 +443,9 @@ def generate_ai_video(
                 aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
+                # Native branch wrote output_mp4 directly (billed) — note it
+                # before the aspect backstop so a reject still records spend.
+                _note_billed_attempt(target_api.upper())
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -478,6 +492,9 @@ def generate_ai_video(
                 resolution=ltx_resolution,
             )
             if result:
+                # Native branch wrote output_mp4 directly (billed) — note it
+                # before the aspect backstop so a reject still records spend.
+                _note_billed_attempt(target_api.upper())
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",

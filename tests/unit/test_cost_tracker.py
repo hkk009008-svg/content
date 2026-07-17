@@ -512,8 +512,13 @@ class TestRecordAPICall:
         assert cost > 0.0, f"{api_name} priced at $0 — budget gate would undercount"
 
     @pytest.mark.parametrize("api_name,expected_provider", [
-        ("SORA_2", "openai"),
-        ("VEO", "google"),
+        # Fal-proxy engines file under "fal" (they bill fal, not the native
+        # provider their prefix would otherwise match) — ultrareview
+        # symmetric-audit fix 2026-07-11, mirroring KLING_3_0.
+        ("SORA_2", "fal"),
+        ("SORA_NATIVE", "openai"),   # genuine native OpenAI
+        ("VEO", "fal"),
+        ("VEO_NATIVE", "google"),    # genuine native Vertex/Gemini
         ("FLUX_PULID", "fal"),
         ("RUNWAY_GEN4", "runway"),
         # KLING_3_0 is fal-billed (fal-ai/kling-video/v3/pro) — attributed to
