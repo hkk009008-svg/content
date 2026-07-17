@@ -178,7 +178,7 @@ def estimate_short_cost(
     has_dialogue: bool = True,
     dialogue_shot_ratio: float = 0.5,
     quality_tier: str = "production",
-    candidate_count: int = 1,   # >1 only for max tier
+    candidate_count: int = 1,   # kept for signature compat; no longer branches (max tier retired)
 ) -> dict:
     """Rough cost estimate for a 60-shot short. Returns per-category breakdown.
 
@@ -186,8 +186,10 @@ def estimate_short_cost(
         shot_count: Total shots in the short.
         has_dialogue: Whether any shots have spoken dialogue.
         dialogue_shot_ratio: Fraction of shots that are dialogue shots.
-        quality_tier: 'production' (single attempt) | 'max' (N candidates × all post-passes).
-        candidate_count: For max tier, N from best-of-N. Multiplies image gen cost.
+        quality_tier: retained for signature compat only — production is the sole
+            tier now (max tier retired, WS1 Task 2); no longer branches on this value.
+        candidate_count: retained for signature compat only; still multiplies image
+            gen cost if a caller passes >1, but nothing in the live pipeline does.
 
     Returns:
         {
@@ -201,12 +203,8 @@ def estimate_short_cost(
     dialogue_shots = int(shot_count * dialogue_shot_ratio) if has_dialogue else 0
     notes = []
 
-    is_max = quality_tier == "max"
-
     # ----- Image gen (always, one per shot, multiplied by candidate count for max) -----
     img_cost_per = API_REGISTRY["FLUX_DEV"]["per_shot_cost"]
-    if is_max:
-        img_cost_per += API_REGISTRY["SUPIR_V0Q"]["per_shot_cost"]  # SUPIR post-pass
     image_total = img_cost_per * shot_count * candidate_count
 
     # ----- Video gen (one per shot, no candidate multiplier — only one video per shot) -----
@@ -233,7 +231,7 @@ def estimate_short_cost(
     foley_total = API_REGISTRY["STABLE_AUDIO_FOLEY"]["per_shot_cost"] * (shot_count // 3)
 
     # ----- Video upscale (final master pass) -----
-    upscale_total = API_REGISTRY["SEEDVR2"]["per_shot_cost"] if is_max else 0.0
+    upscale_total = 0.0  # video upscale not counted in the production estimate
 
     # ----- LLM (script + decompose + per-shot prompt optimizer) -----
     # Claude/GPT-4o pricing is per token. Rough estimate: ~$0.50 per short for
@@ -267,8 +265,6 @@ def estimate_short_cost(
         "with_dialogue": round(img_cost_per * candidate_count + lipsync_per + tts_per_line * 4, 3),
     }
 
-    if is_max and candidate_count > 1:
-        notes.append(f"Max tier with N={candidate_count} multiplies image gen cost {candidate_count}x")
     if not has_dialogue:
         notes.append("Dialogue costs excluded (no dialogue in this short)")
 

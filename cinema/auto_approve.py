@@ -116,7 +116,6 @@ class AutoApproveConfig:
         """
         gs: dict = project.get("global_settings") or {}
         raw: dict = gs.get("auto_approve") or {}
-        quality_tier = gs.get("quality_tier", "production")
 
         def _get(key: str, default):
             v = raw.get(key, default)
@@ -129,12 +128,13 @@ class AutoApproveConfig:
                 return _finite_or(v, default)
             return v
 
-        # Tier-aware composite default: max-tier writes a real ``composite`` (~0.92-0.97),
-        # so the 0.97 class default fits. Production-tier never writes composite — the gate's
-        # _best_take_composite falls back to identity_score (~0.6-0.8) — so a 0.97 bar would
-        # veto every production keyframe; default to the keyframe identity threshold (0.60).
-        # An explicit project ``auto_approve.image_min_composite`` still overrides either.
-        composite_default = cls.image_min_composite if quality_tier == "max" else 0.60
+        # Production is the only tier now (max tier retired, WS1 Task 2). Production
+        # never writes a real ``composite`` — the gate's _best_take_composite falls
+        # back to identity_score (~0.6-0.8) — so the class default (0.97, calibrated
+        # for the retired max-tier composite range) would veto every production
+        # keyframe; default to the keyframe identity threshold (0.60) instead.
+        # An explicit project ``auto_approve.image_min_composite`` still overrides this.
+        composite_default = 0.60
 
         return cls(
             enabled=_get("enabled", cls.enabled),

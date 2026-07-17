@@ -295,9 +295,9 @@ class TestConfigFromProject:
         config = AutoApproveConfig.from_project(project)
         defaults = AutoApproveConfig()
         assert config.enabled == defaults.enabled
-        # image_min_composite is tier-aware (see TestFromProjectTierAwareCompositeDefault):
-        # an empty/production project uses the production identity-fallback bar (0.60),
-        # NOT the class default 0.97 (which is the max-tier composite bar).
+        # image_min_composite defaults to the production identity-fallback bar
+        # (0.60), not the class default 0.97 (the retired max-tier composite bar
+        # — see TestFromProjectTierAwareCompositeDefault).
         assert config.image_min_composite == 0.60
         assert config.motion_min_identity == defaults.motion_min_identity
         assert config.final_min_lipsync == defaults.final_min_lipsync
@@ -1310,11 +1310,14 @@ class TestBestTakeCompositeIdentityFallback:
 
 
 class TestFromProjectTierAwareCompositeDefault:
-    """The image_min_composite DEFAULT must be tier-aware. Production-tier takes
-    write only identity_score (composite absent → _best_take_composite falls back to
-    identity ~0.6-0.8), so the flat 0.97 class default would veto every production
-    keyframe. Max-tier writes a real composite (~0.92-0.97), so 0.97 fits there.
-    Explicit project overrides always win over the tier default."""
+    """The image_min_composite DEFAULT is production-only now (max tier retired,
+    WS1 Task 2 — workflow_selector.MAX_QUALITY_TEMPLATES/get_max_quality_params
+    removed). Production-tier takes write only identity_score (composite absent →
+    _best_take_composite falls back to identity ~0.6-0.8), so the flat 0.97 class
+    default would veto every production keyframe; the default is always 0.60
+    regardless of the project's quality_tier setting (that setting no longer
+    changes this default — it is dormant state, see cinema/context.py).
+    Explicit project overrides always win over the default."""
 
     def test_production_tier_default_is_identity_bar(self):
         cfg = AutoApproveConfig.from_project({"global_settings": {"quality_tier": "production"}})
@@ -1324,9 +1327,11 @@ class TestFromProjectTierAwareCompositeDefault:
         cfg = AutoApproveConfig.from_project({"global_settings": {}})
         assert cfg.image_min_composite == 0.60
 
-    def test_max_tier_default_stays_high(self):
+    def test_max_tier_setting_no_longer_raises_default(self):
+        # quality_tier="max" is a retired/dormant setting now — it must NOT
+        # push image_min_composite back up to the old 0.97 max-tier bar.
         cfg = AutoApproveConfig.from_project({"global_settings": {"quality_tier": "max"}})
-        assert cfg.image_min_composite == 0.97
+        assert cfg.image_min_composite == 0.60
 
     def test_explicit_value_overrides_tier_default(self):
         cfg = AutoApproveConfig.from_project(

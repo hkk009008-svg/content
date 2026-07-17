@@ -3,6 +3,14 @@ import pytest
 from cinema.capability_scorecard import build_capability_scorecard
 
 
+def test_max_quality_templates_removed():
+    """WS1 Task 2: MAX_QUALITY_TEMPLATES + its accessor are fully retired from
+    workflow_selector — production (WORKFLOW_TEMPLATES) is the sole tier."""
+    import workflow_selector
+    assert not hasattr(workflow_selector, "MAX_QUALITY_TEMPLATES")
+    assert not hasattr(workflow_selector, "get_max_quality_params")
+
+
 def _make_project(**over):
     """Minimal project dict with one scene + shots/takes."""
     shot = {

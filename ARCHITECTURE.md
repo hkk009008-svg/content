@@ -550,8 +550,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:439](domain/scene_decomposer.py:439)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:629](domain/scene_decomposer.py:629)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:435](domain/scene_decomposer.py:435)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:625](domain/scene_decomposer.py:625)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1004,7 +1004,7 @@ per-char validation and the capability scorecard are unchanged from slice 1.
 A shot whose prompt carries a landscape keyword (`landscape`/`aerial`/`drone`/
 `skyline`/`panoramic`/`environment`/`scenery`/`no character`) **but has a
 registered character** is mis-classified `landscape` by the shared seam
-[`workflow_selector.classify_shot_type`](workflow_selector.py:431): the landscape
+[`workflow_selector.classify_shot_type`](workflow_selector.py:174): the landscape
 keyword bucket ([`SHOT_TYPE_KEYWORDS`](workflow_selector.py:113)) wins even when
 `characters_in_frame` is non-empty (rule 1's "no characters → landscape" shortcut
 is bypassed, but the keyword scan still returns `landscape`). The scan is
@@ -1107,7 +1107,7 @@ check, see kling_native.py's module docstring). Two-character dialogue shots
 classify as `medium` and route Kling v3 Pro → Kling Native → Runway →
 Seedance → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:431-476](workflow_selector.py:431))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:174-219](workflow_selector.py:174))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1120,7 +1120,7 @@ prompt + camera into a search string, first containment match wins; default `med
 | `landscape` | landscape, aerial, drone, skyline, panoramic, environment, scenery, no character |
 | `medium` | medium, 50mm, mid-shot, waist, hip, american shot, cowboy shot, two-shot |
 
-### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:415-422](workflow_selector.py:415))
+### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:158-165](workflow_selector.py:158))
 
 | Shot type | Floor |
 |---|---|
