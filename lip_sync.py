@@ -41,8 +41,6 @@ try:
 except ImportError:
     FAL_AVAILABLE = False
 
-from hedra_native import HedraAPI as _HedraAPI
-
 
 # ─────────────────────────────────────────────────────────────
 # PREREQUISITES CHECKER
@@ -747,28 +745,8 @@ def _sync_gate_settings(settings: Optional[dict] = None) -> tuple:
 
 
 # ─────────────────────────────────────────────────────────────
-# MODE 2: GENERATION (Hedra Character-3 → Omnihuman → Kling → Aurora)
+# MODE 2: GENERATION (Kling → Omnihuman → Aurora)
 # ─────────────────────────────────────────────────────────────
-
-def _hedra_aspect_ratio_from_image(image_path: str) -> str:
-    """Map portrait aspect ratio to Hedra's accepted strings.
-    Hedra accepts: '16:9' | '9:16' | '1:1'. We pick the closest match
-    rather than failing on odd source ratios — Hedra crops gracefully.
-    """
-    try:
-        from PIL import Image
-        img = Image.open(image_path)
-        w, h = img.size
-        ratio = w / h
-    except Exception:
-        return "9:16"  # safest default for portraits
-
-    if ratio > 1.4:
-        return "16:9"
-    if ratio < 0.75:
-        return "9:16"
-    return "1:1"
-
 
 def lipsync_generation(
     character_image_path: str,
@@ -784,7 +762,7 @@ def lipsync_generation(
     Generates head movement, gestures, expressions correlated with speech.
     WARNING: This REPLACES any existing video — use only for dedicated dialogue shots.
 
-    Fallback chain: Hedra Character-3 → Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
+    Fallback chain: Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
 
     _cascade_out: optional mutable dict — if provided, caller receives
         cascade_metadata written into it on return (both success and fallback).
@@ -827,8 +805,8 @@ def lipsync_generation(
         """
         gen_attempts.append(engine_name)
         # M-1 twin: orientation backstop. These FAL avatar endpoints take no aspect
-        # param (only Hedra threads one), and the SyncNet gate below scores lip-sync
-        # quality, NOT orientation — so without this, a portrait project could keep a
+        # param, and the SyncNet gate below scores lip-sync quality, NOT orientation
+        # — so without this, a portrait project could keep a
         # wrong-orientation avatar clip. Reuse the SAME _accept_or_reject fence the
         # per-shot video path uses: landscape → unconditional accept (no-op,
         # byte-identical); portrait → reject a non-portrait clip and fall through to
@@ -876,35 +854,7 @@ def lipsync_generation(
             )
         return False
 
-    # ATTEMPT 0: Hedra Character-3 (Q=0.93, SOTA portrait talking head)
-    # Direct api.hedra.com (fal-ai/hedra/character-3 returns HTTP 404 — dead).
-    # Uses LOCAL image/audio paths (own asset upload), NOT the fal-uploaded urls.
-    # Best emotional micro-expressions + head movement correlated with speech.
-    # Native full-body output, handles off-axis angles better than Omnihuman.
-    try:
-        aspect = _hedra_aspect_ratio_from_image(character_image_path)
-        logger.info(
-            "generation attempt: Hedra Character-3 via direct API",
-            extra={"engine": "hedra", "aspect": aspect, "resolution": resolution},
-        )
-        hedra_result = _HedraAPI().generate_talking_head(
-            character_image_path=character_image_path,
-            audio_path=audio_path,
-            output_path=output_path,
-            resolution=resolution,
-            aspect_ratio=aspect,
-        )
-        if hedra_result and os.path.exists(output_path):
-            if _gate_or_stash("Hedra"):
-                logger.info("generation success", extra={"engine": "hedra", "output_path": output_path})
-                return output_path
-        else:
-            logger.warning("Hedra Character-3 returned no output", extra={"engine": "hedra"})
-    except Exception as e:
-        # Graceful fallback — caller will try the next engine below.
-        logger.warning("Hedra Character-3 failed", extra={"engine": "hedra", "error": str(e)})
-
-    # ATTEMPT 1: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
+    # ATTEMPT 0: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
     try:
         logger.info("generation attempt: Kling native lip sync", extra={"engine": "kling"})
         result = fal_client.subscribe(
@@ -926,7 +876,7 @@ def lipsync_generation(
     except Exception as e:
         logger.warning("Kling lip sync failed", extra={"engine": "kling", "error": str(e)})
 
-    # ATTEMPT 2: Omnihuman v1.5 (best full-body quality)
+    # ATTEMPT 1: Omnihuman v1.5 (best full-body quality)
     try:
         logger.info(
             "generation attempt: Omnihuman v1.5 full-body",
@@ -957,7 +907,7 @@ def lipsync_generation(
     except Exception as e:
         logger.warning("Omnihuman failed", extra={"engine": "omnihuman", "error": str(e)})
 
-    # ATTEMPT 3: Creatify Aurora (studio-grade avatar)
+    # ATTEMPT 2: Creatify Aurora (studio-grade avatar)
     try:
         logger.info("generation attempt: Creatify Aurora fallback", extra={"engine": "aurora"})
         result = fal_client.subscribe(

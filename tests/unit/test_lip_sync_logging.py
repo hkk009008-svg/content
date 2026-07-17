@@ -30,12 +30,9 @@ def _stub(name: str, **attrs):
     return mod
 
 
-for _dep in ["fal_client", "hedra_native"]:
+for _dep in ["fal_client"]:
     if _dep not in sys.modules:
         _stub(_dep, upload_file=MagicMock(return_value="http://fake/url"))
-
-if "hedra_native" not in sys.modules or not hasattr(sys.modules["hedra_native"], "HedraAPI"):
-    sys.modules["hedra_native"] = _stub("hedra_native", HedraAPI=MagicMock)
 
 
 # ---------------------------------------------------------------------------
@@ -45,8 +42,9 @@ if "hedra_native" not in sys.modules or not hasattr(sys.modules["hedra_native"],
 class TestCascadeStepLogsEngine:
     """lipsync_generation INFO messages include the `engine` extra field."""
 
-    def test_hedra_attempt_logs_engine_info(self, caplog):
-        """On Hedra attempt, an INFO record with engine='hedra' is emitted."""
+    def test_kling_attempt_logs_engine_info(self, caplog):
+        """On Kling attempt (ATTEMPT 0, now the front of the cascade since Hedra
+        was removed — WS4), an INFO record with engine='kling' is emitted."""
         import logging
         import lip_sync
 
@@ -55,18 +53,11 @@ class TestCascadeStepLogsEngine:
         fake_fal = MagicMock()
         fake_fal.upload_file.return_value = "http://fake/upload"
 
-        # Hedra returns no output → logs warning and falls through; we only care
-        # that the INFO attempt record appeared.
-        hedra_instance = MagicMock()
-        hedra_instance.generate_talking_head.return_value = None
-        hedra_cls = MagicMock(return_value=hedra_instance)
-
         with (
             patch("lip_sync.FAL_AVAILABLE", True),
             patch("lip_sync.ENV_SETTINGS", types.SimpleNamespace(fal_key="k")),
             patch("lip_sync.check_generation_prerequisites", return_value=prereq),
             patch("lip_sync.fal_client", fake_fal),
-            patch("lip_sync._HedraAPI", hedra_cls),
             # Make remaining FAL calls raise so we stop early
             patch("lip_sync.safe_download", return_value=None),
             caplog.at_level(logging.INFO, logger="lip_sync"),
@@ -82,8 +73,8 @@ class TestCascadeStepLogsEngine:
         info_records = [r for r in caplog.records if r.levelno == logging.INFO]
         assert info_records, "Expected at least one INFO record from lipsync_generation"
         engines = [getattr(r, "engine", None) for r in info_records]
-        assert "hedra" in engines, (
-            f"Expected engine='hedra' in INFO records; got engines={engines!r}"
+        assert "kling" in engines, (
+            f"Expected engine='kling' in INFO records; got engines={engines!r}"
         )
 
 
@@ -165,16 +156,12 @@ class TestSyncGateLogsScore:
             open(path, "wb").write(b"fake")
             return path
 
-        hedra_cls = MagicMock()
-        hedra_cls.return_value.generate_talking_head.return_value = None
-
         with (
             patch("lip_sync.FAL_AVAILABLE", True),
             patch("lip_sync.ENV_SETTINGS", types.SimpleNamespace(fal_key="k")),
             patch("lip_sync.check_generation_prerequisites", return_value=prereq),
             patch("lip_sync.fal_client", fake_fal),
             patch("lip_sync.safe_download", side_effect=_fake_download),
-            patch("lip_sync._HedraAPI", hedra_cls),
             # Gate: score above threshold so first FAL engine wins
             patch("lip_sync.validate_lipsync_quality", return_value=0.85),
             # Orientation: always accept
