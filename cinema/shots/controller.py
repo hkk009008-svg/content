@@ -1976,7 +1976,7 @@ class ShotController:
         #
         # NOTE: generate_lip_sync_video's "mode" param is "auto"/"overlay"/"generation",
         # NOT an engine name.  The optimizer cache carries suggested_lipsync (e.g.
-        # HEDRA_C3) as an engine-level hint, but there is no engine-selection knob on
+        # SYNC_SO_V3) as an engine-level hint, but there is no engine-selection knob on
         # generate_lip_sync_video — the engine cascade inside lipsync_overlay/generation
         # handles selection internally.  We pass mode="auto" (same as the manual
         # lip_sync correction action) and let the cascade choose.

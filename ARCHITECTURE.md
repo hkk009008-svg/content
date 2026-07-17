@@ -550,8 +550,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:440](domain/scene_decomposer.py:440)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:630](domain/scene_decomposer.py:630)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:439](domain/scene_decomposer.py:439)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:629](domain/scene_decomposer.py:629)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1666,8 +1666,8 @@ SEEDANCE, SORA_NATIVE, VEO_NATIVE, LTX, RUNWAY_GEN4, AUTO}`. Sanitized via `_coe
 
 LLM guidance table in `_OPTIMIZER_SYSTEM_PROMPT`:
 ```
-dialogue_close_up:     KLING_3_0 or VEO_NATIVE; lipsync=HEDRA_C3
-talking_head_full:     VEO_NATIVE;     lipsync=HEDRA_C3 or OMNIHUMAN_V1_5
+dialogue_close_up:     KLING_3_0 or VEO_NATIVE; lipsync=SYNC_SO_V3
+talking_head_full:     VEO_NATIVE;     lipsync=OMNIHUMAN_V1_5 or SYNC_SO_V3
 action_motion:         SEEDANCE;       lipsync=null
 static_portrait:       KLING_3_0;      lipsync=null
 establishing_shot:     LTX or VEO_NATIVE; lipsync=null

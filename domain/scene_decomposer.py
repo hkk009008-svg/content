@@ -57,7 +57,6 @@ API_REGISTRY = {
     "LATENTSYNC":    {"label": "LatentSync v1.6",      "category": "lipsync",   "description": "ByteDance — diffusion-based lipsync, sharper mouth than MuseTalk", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.03, "quality_score": 0.83, "latency_s": 45, "status": "live"},
     "SYNC_V2":       {"label": "Sync lipsync-2 (legacy)", "category": "lipsync", "description": "Sync Labs LEGACY — 512x512 face region, needs natural speaking motion in the input; last-resort fallback", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.23, "quality_score": 0.79, "latency_s": 40, "status": "live"},
     "SYNC_SO_V3":    {"label": "sync-3 (Sync Labs)",    "category": "lipsync", "description": "Sync Labs flagship (2026-04) — best generalist lipsync; the ONLY sync.so model that opens still/silent lips (fits the still-derived talking-head path); removes the 512x512 face cap, 4K-capable", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.67, "quality_score": 0.90, "latency_s": 50, "status": "live"},
-    "HEDRA_C3":      {"label": "Hedra Character-3",    "category": "lipsync",   "description": "SOTA portrait talking head — best emotional micro-expressions, full body", "modality": "lipsync", "best_for": ["talking_head_full", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.93, "latency_s": 90, "status": "live"},
     "KLING_LIPSYNC_2":{"label": "Kling Lip Sync 2",    "category": "lipsync",   "description": "Kuaishou's Kling-integrated lipsync — pairs natively with Kling video", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.05, "quality_score": 0.82, "latency_s": 55, "status": "planned"},
     "PIXVERSE_LS2":  {"label": "PixVerse Lip Sync v2", "category": "lipsync",   "description": "PixVerse — quick fallback, average quality", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.07, "quality_score": 0.75, "latency_s": 35, "status": "planned"},
     "REACT_1":       {"label": "sync.so react-1",       "category": "lipsync",   "description": "Full-face performance re-direction from audio — emotion-promptable (angry/sad/happy...), not just mouth; fal-ai/sync-lipsync/react-1, $0.133-0.167/s, 15s input cap (verified 2026-07-11). NOT YET WIRED.", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.84, "quality_score": 0.90, "latency_s": 60, "status": "planned"},
@@ -121,8 +120,8 @@ PURPOSE_TAGS = [
 # are ordered fallbacks. The orchestrator uses these when target_api='AUTO' or
 # when a per-purpose route is explicitly requested. Edit here, not in code.
 PURPOSE_API_RANKING = {
-    "dialogue_close_up":    ["HEDRA_C3", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "SYNC_SO_V3", "LATENTSYNC", "MUSETALK"],
-    "talking_head_full":    ["HEDRA_C3", "RUNWAY_ACT_ONE", "OMNIHUMAN_V1_5", "VEO_NATIVE", "SYNC_SO_V3"],
+    "dialogue_close_up":    ["SYNC_SO_V3", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"],
+    "talking_head_full":    ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "VEO_NATIVE", "SYNC_SO_V3"],
     "action_motion":        ["SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
     "static_portrait":      ["KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
     "establishing_shot":    ["LTX", "VEO_NATIVE"],
@@ -155,7 +154,7 @@ BILLING_PROVIDERS = {
     "FAL_AI": [
         "KLING_3_0", "SORA_2", "VEO", "RUNWAY", "SEEDANCE",
         "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
-        "SYNC_SO_V3", "HEDRA_C3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
+        "SYNC_SO_V3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",
     ],
     "KLING_DIRECT":     ["KLING_NATIVE"],
@@ -217,7 +216,7 @@ def estimate_short_cost(
 
     # ----- Lipsync (only dialogue shots) -----
     if dialogue_shots > 0:
-        lipsync_per = API_REGISTRY["HEDRA_C3"]["per_shot_cost"]  # default routed pick
+        lipsync_per = API_REGISTRY["SYNC_SO_V3"]["per_shot_cost"]  # default routed pick (sync-3, overlay primary)
     else:
         lipsync_per = 0.0
     lipsync_total = lipsync_per * dialogue_shots
