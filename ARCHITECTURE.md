@@ -858,7 +858,7 @@ to `cost_log` via `record_api_call`, so a pod generation logs
 The cost site previously hardcoded the api_name from `quality_tier`,
 mislabeling every pod generation as `fal` (e.g. cycle-17 cost_log row 1065).
 
-`RunPodComfyUI` class ([phase_c_assembly.py:37-75](phase_c_assembly.py:37)):
+`RunPodComfyUI` class ([phase_c_assembly.py:36-74](phase_c_assembly.py:36)):
 
 | Method | Endpoint | Notes |
 |---|---|---|
@@ -877,11 +877,11 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:540](phase_c_assembly.py:540)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:475](phase_c_assembly.py:475)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:501](phase_c_assembly.py:501)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:436](phase_c_assembly.py:436)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
-([phase_c_assembly.py:499](phase_c_assembly.py:499)) emits per-character `@ImageN PRESERVE` blocks with a
+([phase_c_assembly.py:460](phase_c_assembly.py:460)) emits per-character `@ImageN PRESERVE` blocks with a
 keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in

@@ -66,3 +66,13 @@ class TestResolveUiDenoise:
         assert _resolve_ui_denoise(
             SimpleNamespace(global_settings={"continuity_options": None})
         ) is None
+
+
+def test_generate_ai_broll_has_no_max_tier_branch():
+    """WS1 Task 1: the max-tier fork is retired — generate_ai_broll must never
+    import or call quality_max.generate_ai_broll_max. Production (pulid.json)
+    is the only tier."""
+    import inspect, phase_c_assembly
+    src = inspect.getsource(phase_c_assembly)
+    assert "generate_ai_broll_max" not in src
+    assert 'quality_tier == "max"' not in src

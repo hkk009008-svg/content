@@ -1,7 +1,6 @@
 import os
 import json
 import math
-import traceback
 import uuid
 import time
 
@@ -100,7 +99,17 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        init_image=None, denoise_strength=1.0, characters=None,
                        multi_angle_refs=None, identity_anchor="",
                        pulid_weight_override=None, negative_prompt="",
-                       quality_tier="production", char_lora_path=None,
+                       quality_tier="production",
+                       # char_lora_path/strength/trigger, style_reference, shot_hint:
+                       # reserved — dormant until the FLUX.2 A/B (WS3) rewires. Threaded
+                       # from the controller (cinema/shots/controller.py) but unconsumed
+                       # now that the max-tier dispatch below is gone — WS1 retired
+                       # quality_tier=="max" (ADR-024: the max graph over-cooks
+                       # structurally; production/pulid.json is the validated survivor).
+                       # Kept, not dead code. (secondary_char_refs stays LIVE below — it
+                       # still feeds the FAL Kontext multi-char fallback, unrelated to
+                       # the deleted max dispatch.)
+                       char_lora_path=None,
                        char_lora_strength=None,
                        char_lora_trigger=None,
                        secondary_char_refs=None,
@@ -108,18 +117,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     """
     Generates a cinematic image with face-identity preservation.
 
-    v3 priority chain (production tier, default):
+    Priority chain (production — the only tier since WS1's max-tier retirement):
     1. fal.ai FLUX Kontext (identity-preserving, no local GPU needed)
     2. ComfyUI + PuLID on RunPod (if models are available)
     3. fal.ai FLUX-Pro (no face-lock, last resort)
-
-    Quality tiers:
-        "production" (default) — pulid.json + parameter overrides, single-shot.
-                                 Preserves all existing caller behavior.
-        "max"                  — pulid_max.json + N=8 adaptive best-of with
-                                 ArcFace gate. Falls back to "production" if
-                                 quality_max module / pulid_max.json missing
-                                 or returns None.
 
     Args:
         prompt: Image generation prompt (enhanced by continuity engine)
@@ -129,63 +130,23 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         init_image: Previous shot image for img2img temporal chaining
         denoise_strength: 0.0-1.0, lower = more similar to init_image
         characters: List of character config dicts
-        quality_tier: "production" | "max" — selects the generation pipeline.
-        char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
-        char_lora_trigger: (max tier only) P1-1 slice 2: trigger token for the primary
-            character's LoRA (training-caption prefix). Ignored on other tiers.
+        quality_tier: informational only (WS1 retired the "max" fork below —
+            pulid.json/ComfyUI production is now the only pipeline).
+        char_lora_path: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
+        char_lora_trigger: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
         secondary_char_refs: P1-1 slice 1: additional character entries forwarded
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
-        style_reference: (max tier only) Path to style-board reference image.
-        shot_hint: (max tier only) Classification fields, MERGED over inferred defaults then ALWAYS classified — see quality_max._resolve_shot_info.
+        style_reference: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
+        shot_hint: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
 
     Returns:
         ImageGenResult(path, api_name) naming the backend that actually ran
-        (COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL | POLLINATIONS |
-        QUALITY_MAX), or None if every backend failed. Callers record
-        ``api_name`` for cost attribution so a pod generation is distinguishable
-        from a FAL fallback in cost_log.
+        (COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL | POLLINATIONS),
+        or None if every backend failed. Callers record ``api_name`` for cost
+        attribution so a pod generation is distinguishable from a FAL fallback
+        in cost_log.
     """
-    # --- MAX-TIER DISPATCH ---
-    # Try the maxed-quality path first; fall through to production on any failure
-    # so existing callers (production runs, tests) never break.
-    if quality_tier == "max":
-        try:
-            from quality_max import generate_ai_broll_max
-            result = generate_ai_broll_max(
-                prompt=prompt,
-                output_filename=output_filename,
-                seed=seed,
-                character_image=character_image,
-                init_image=init_image,
-                denoise_strength=denoise_strength,
-                characters=characters,
-                multi_angle_refs=multi_angle_refs,
-                identity_anchor=identity_anchor,
-                pulid_weight_override=pulid_weight_override,
-                negative_prompt=negative_prompt,
-                char_lora_path=char_lora_path,
-                char_lora_strength=char_lora_strength,
-                char_lora_trigger=char_lora_trigger,
-                secondary_chars=secondary_char_refs,
-                style_reference=style_reference,
-                shot_hint=shot_hint,
-                ctx=ctx,
-            )
-            if result:
-                return result
-            print("[generate_ai_broll] Max tier returned None — falling back to production tier.")
-        except ImportError as e:
-            print(f"[generate_ai_broll] quality_max unavailable ({e}) — production tier.")
-        except Exception:
-            # Broad catch keeps the graceful production-tier fallback, but print the
-            # full traceback (not just the message) so a real max-tier breakage is
-            # diagnosable instead of silently degrading every opt-in max render.
-            print(
-                "[generate_ai_broll] Max tier raised — falling back to production tier:\n"
-                + traceback.format_exc()
-            )
-
     mode = "img2img" if init_image else "txt2img"
 
     # Read per-project aspect ratio early — must be in scope at ALL six
