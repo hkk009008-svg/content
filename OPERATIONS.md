@@ -105,7 +105,7 @@ Authoritative list (every variable consumed by the pipeline):
 | Var | Required? | Used by |
 |---|---|---|
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional (legacy fallback) | KLING_NATIVE — legacy kling-v1-6 JWT route (fallback + storyboard mode; primary Kling is fal KLING_3_0 via FAL_KEY since 2026-07-11) |
-| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), Hedra, all lipsync engines, music, FLUX image fallback |
+| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | LTX_NATIVE direct (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-One performance |
 
@@ -118,7 +118,6 @@ Authoritative list (every variable consumed by the pipeline):
 | `STABILITY_API_KEY` | Optional | Stable Audio 2 foley generator (currently dormant in audio/ — see DECISIONS.md) |
 | `SUNO_API_KEY` (+ `SUNO_API_BASE`) | Optional | Suno V5 BGM (defaults to FAL Stable Audio) |
 | `VIGGLE_API_KEY` | Optional | Viggle performance capture (Mode A only) |
-| `HEDRA_API_KEY` | Optional | Direct Hedra REST fallback (FAL proxy is the preferred path) |
 
 ### Google Cloud / Vertex AI
 
@@ -515,7 +514,7 @@ Rough order-of-magnitude per shot (current 2026-05 prices, will drift):
 | Sora 2 (via FAL) | $0.30–0.60 | Action cascades hit this; longer if 8s+ |
 | Runway Gen4 | $0.30–0.40 | Premium fallback |
 | LTX | $0.05–0.15 | Cheapest video provider |
-| Hedra Character-3 | ~$0.30/5s shot ($0.06/s upper tier, hedra.com/pricing 2026-07-11) | Mode-B driving-video synthesis (cached) |
+| SadTalker | ~$0.045/5s shot (GPU-time estimate) | Mode-B driving-video synthesis (cached) |
 | Act-One performance | ~$0.10/shot | Per-shot, semaphore-limited |
 | ElevenLabs TTS | $0.005–0.02/shot | Per dialogue line |
 | FAL Stable Audio BGM | $0.05/project | Once per project, 47s loop |

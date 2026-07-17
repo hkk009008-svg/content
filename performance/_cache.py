@@ -2,7 +2,7 @@
 
 WHY THIS EXISTS
 ---------------
-Hedra Character-3 is ~$0.05/shot. The operator's "regenerate performance"
+SadTalker driving-face synth costs ~$0.045/shot. The operator's "regenerate performance"
 button currently re-synthesizes the driving face even when audio+keyframe
 haven't changed. Caching by (audio_hash, keyframe_hash, duration) avoids
 repeat charges.

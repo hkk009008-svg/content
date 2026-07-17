@@ -9,6 +9,6 @@ plain text-to-video".
   - act_one.py       — Runway Act-One (best for dialogue close-ups)
   - live_portrait.py — ComfyUI LivePortrait (budget path for dialogue)
   - viggle.py        — Viggle (full-body motion retargeting)
-  - driving_video.py — Mode B synth helpers (Hedra / SadTalker)
+  - driving_video.py — Mode B synth helpers (SadTalker)
   - _router.py       — dispatch(engine_name, ...) → calls the right adapter
 """

@@ -64,7 +64,6 @@ API_COST_USD: dict[str, float] = {
     "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
-    "PERFORMANCE_DRIVING_HEDRA":      0.30,   # Mode-B Hedra driving face, 5s: Character-3 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11), upper bound.
     "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
@@ -95,7 +94,6 @@ API_COST_USD: dict[str, float] = {
     "LIPSYNC_MUSETALK":    0.02,   # MuseTalk mouth-only overlay via FAL
     "LIPSYNC_LATENTSYNC":  0.03,   # LatentSync overlay fallback via FAL
     "LIPSYNC_SYNCV2":      0.23,   # Sync lipsync-2 (LEGACY tier: 512x512 face region) via FAL: $0.04-0.05/s (sync.so docs 2026-07-11) -> ~5s clip
-    "LIPSYNC_HEDRA":       0.30,   # Hedra Character-3 (native API): 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11) -> ~5s, upper bound
     "LIPSYNC_KLING":       0.05,   # Kling lipsync generation via FAL
     "LIPSYNC_OMNIHUMAN":   0.80,   # OmniHuman v1.5 via FAL: $0.16/s (fal model page 2026-07-11) -> 5s clip
     "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL

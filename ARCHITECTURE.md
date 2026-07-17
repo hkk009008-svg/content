@@ -104,7 +104,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
 | Image gen | [phase_c_assembly.py](phase_c_assembly.py), [quality_max.py](quality_max.py), [pulid.json](pulid.json), [pulid_max.json](pulid_max.json) | Production = RunPodComfyUI + PuLID. Max = N=8 adaptive best-of + SUPIR + 4K downsample. |
 | Video gen | [workflow_selector.py](workflow_selector.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 shot-type templates × 11-engine dispatch. Runway + Seedance dispatched inline (no adapter file). |
-| Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot Hedra-direct → SadTalker, content-hash cached. |
+| Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
 | Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (4 cloud engines). SyncNet quality gate. |
 | Audio | [audio/](audio/) — `voiceover.py`, `dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `_client.py` | ElevenLabs SDK singleton. Pedalboard hard dep. WhisperX forced alignment. |
 | Frontend | [web/src/](web/src/) | React 19 + Vite 6 + Tailwind 3. 4-mode `useState` (no router). Two strict palettes. |
@@ -1170,7 +1170,7 @@ promotion.
 
 **FAL client timeouts (2026-06-10):** every production `fal_client.subscribe`
 call — the inline engines above plus lipsync, LTX, assembly FLUX fallbacks,
-vision swap, music, character refs, and Hedra driving video — passes
+vision swap, music, and character refs — passes
 `client_timeout` from [cinema/fal_limits.py](cinema/fal_limits.py)
 (video 600s / talking-head generation 1800s / image 180s; fal_client 1.0.0
 waits **indefinitely** without it, and on expiry it cancels the remote job and
@@ -1239,20 +1239,20 @@ poll timeouts bound the overall hold time (300s in act_one/live_portrait/viggle,
   `driving_video.synth_driving_face_from_audio` BEFORE dispatch to manufacture
   the driving video from TTS audio.
 
-### 10.3 `driving_video.py` cascade ([performance/driving_video.py:220-280](performance/driving_video.py:220))
+### 10.3 `driving_video.py` cascade ([performance/driving_video.py:164-215](performance/driving_video.py:164))
 
 | Engine | Cloud/Local | Trigger | Endpoint |
 |---|---|---|---|
-| **Hedra Character-3 (direct REST)** | cloud | `engine∈("auto","hedra")` AND `HEDRA_API_KEY` set | `https://api.hedra.com/v1/audio/talking-image` |
-| **SadTalker via ComfyUI** | **local** (RunPod/Railway pod) | After Hedra paths fail | `LoadImage + LoadAudio + SadTalker` ComfyUI nodes |
+| **SadTalker via ComfyUI** | **local** (RunPod/Railway pod) | `engine∈("auto","sadtalker")` | `LoadImage + LoadAudio + SadTalker` ComfyUI nodes |
 | **Cache hit** | n/a | Content-hash match | Skip API entirely |
 
 Cache key: `SHA256(audio_bytes + keyframe_bytes + rounded_duration)`. Stored
-under `data/cache/driving/`. Avoids re-charging Hedra (~$0.30/5s shot) on
-regenerate when inputs unchanged.
+under `data/cache/driving/`. Avoids re-synthesizing (~$0.045/5s shot) on
+regenerate when inputs unchanged. (WS4, 2026-07-18: Hedra Character-3 removed
+— lapsed subscription, dead key — so SadTalker is now the sole synth engine.)
 
 Return: `Optional[Tuple[str, str]]` — `(path, provider_name)` where
-provider_name ∈ `{"hedra", "sadtalker", "cache"}`.
+provider_name ∈ `{"sadtalker", "cache"}`.
 
 ### 10.4 `motion_gate.py` (advisory only)
 
@@ -1296,25 +1296,18 @@ The flow is controlled by `dialogue_voice_mode` (see §10.7).
 | 2 | LatentSync | `fal-ai/latentsync` |
 | 3 | Sync Lipsync v2 | `fal-ai/sync-lipsync/v2` |
 
-**Generation cascade** (still image + audio → full talking-head; order-0 is a
-direct native call, orders 1–3 cloud via FAL):
+**Generation cascade** (still image + audio → full talking-head; all cloud via FAL):
 
 | Order | Engine | Endpoint |
 |---|---|---|
-| 0 | Hedra Character-3 (direct) | `api.hedra.com/web-app/public` ([`hedra_native.HedraAPI`](hedra_native.py:25)) |
-| 1 | Kling lipsync | `fal-ai/kling-video/lipsync/audio-to-video` |
-| 2 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
-| 3 | Creatify Aurora | `fal-ai/creatify/aurora` |
+| 0 | Kling native lip sync | `fal-ai/kling-video/lipsync/audio-to-video` |
+| 1 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
+| 2 | Creatify Aurora | `fal-ai/creatify/aurora` |
 
-ATTEMPT-0 is now a **direct** Character-3 call —
-[`hedra_native.HedraAPI.generate_talking_head`](hedra_native.py:60) →
-`api.hedra.com/web-app/public` (model `d1dd37a3-…`), wired `cb31207` to replace
-the **dead** `fal-ai/hedra/character-3` FAL proxy (HTTP 404). Flow: create+upload
-image asset → create+upload audio asset → POST `/generations` → poll
-`/generations/{id}/status` → download. Invoked as ATTEMPT 0 from
-[lip_sync.py:810](lip_sync.py:810); key from `settings.hedra_api_key` (`.env`
-`HEDRA_API_KEY`). On any failure it returns `None` and the cascade falls through
-to Kling → Omnihuman → Creatify.
+ATTEMPT 0: Kling / OmniHuman v1.5. (WS4, 2026-07-18: Hedra Character-3 —
+formerly a **direct** `api.hedra.com/web-app/public` REST call, `hedra_native.py`
+— removed from ATTEMPT 0; lapsed subscription, dead key. On any failure the
+surviving cascade falls through Kling → Omnihuman → Creatify.)
 
 **SyncNet quality gate** ([lip_sync.py:282](lip_sync.py:282) for overlay gate;
 [lip_sync.py:742](lip_sync.py:742) for generation gate) scores each
@@ -2229,7 +2222,7 @@ section above; this is a flat lookup table for quick reference.
 | **DetailDaemon** | Sampler wrapper injecting controlled noise during denoising to surface micro-detail. §8.3 |
 | **SUPIR** | "Scaling Up Image Restoration" V2 — final post-pass quality lift, used before 4K downsample. §8.3 |
 | **Redux** | FLUX style-reference adapter — accepts image refs to lock style (separate from PuLID identity). §8.3 |
-| **Mode A vs Mode B** (performance) | Mode A: operator pre-uploads a driving video. Mode B: orchestrator synthesizes a driving video from TTS audio via Hedra → SadTalker cascade. §10.2-10.3 |
+| **Mode A vs Mode B** (performance) | Mode A: operator pre-uploads a driving video. Mode B: orchestrator synthesizes a driving video from TTS audio via SadTalker. §10.2-10.3 |
 | **Overlay vs Generation** (lipsync) | Overlay: take existing video + audio, lip-sync over the mouth (preserves cinematography). Generation: take still + audio, create talking-head from scratch. §10.6 |
 | **Predicate-poll** | Gate model where the worker thread polls disk-state every 500ms via a predicate function. State survives crashes + SSE disconnects. ADR-002, §6. |
 | **PipelineContext** (ctx) | Per-run dataclass that ALSO implements the dict API. Carries `global_settings`, lifecycle, audio paths. Use `get_project_setting(ctx, key, default)` for project knobs. ADR-003. |
@@ -2239,7 +2232,7 @@ section above; this is a flat lookup table for quick reference.
 | **ChiefDirector** | LLM validator (Anthropic by default, OpenAI fallback). Pre-gen: returns APPROVED / REJECTED / MODIFIED for shot prompts. Post-gen: returns RETRY / ACCEPT_LENIENT / FAIL with mutation focus. §13.4 |
 | **StyleDirector** | GPT-4o only. Generates `style_rules` (cinematography, lighting, color, sound, photorealism, composition) once per project; injected into every decompose prompt. §13.5 |
 | **CineDecompose** | The system persona for scene decomposition: a strict cinematic shot decomposition engine with 5 HardConstraints + 4 Tripwires. The prompt is now in `_build_cinedecompose_system_prompt` (§7.4). |
-| **Cascade** | Ordered fallback chain. Video has a default 9-engine cascade; lipsync has 4-engine overlay + 4-engine generation; performance has Hedra/SadTalker; image gen has ComfyUI → FAL FLUX → schnell → Pollinations. |
+| **Cascade** | Ordered fallback chain. Video has a default 9-engine cascade; lipsync has 4-engine overlay + 3-engine generation; performance has SadTalker; image gen has ComfyUI → FAL FLUX → schnell → Pollinations. |
 | **SyncNet** | Lipsync quality scorer (mouth-audio sync). Used as the gate threshold in `lip_sync.py` cascade decisions. Falls back to duration-match heuristic or neutral 1.0 if scorer not installed. |
 | **Take** | A single attempt at a stage's output. Each shot has `keyframe_takes[]`, `performance_takes[]`, `motion_takes[]`, `postprocess_variants[]` — operators approve one of each. |
 | **Postprocess variant** | A take derived from another take via `apply_correction` (face_swap, lip_sync, rife, upscale, color_grade, speed). Has `source_take_id` linking back to its parent. |

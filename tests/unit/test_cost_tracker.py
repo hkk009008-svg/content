@@ -498,7 +498,7 @@ class TestRecordAPICall:
     # be priced, or the budget gate silently undercounts each dialogue shot.
     @pytest.mark.parametrize("cascade_engine", [
         "syncSoV3", "MuseTalk", "LatentSync", "SyncV2",
-        "hedra", "kling", "omnihuman", "aurora",
+        "kling", "omnihuman", "aurora",
         None,  # cascade reports no engine → controller uses "default"
     ])
     def test_record_api_call_lipsync_engine_priced(self, cost_tracker, cascade_engine):
@@ -809,12 +809,11 @@ class TestVerifiedPricePins:
         # revert of the driving_video.py rates can't silently under-gate
         # while the row pin stays green.
         #
-        # WS4 (2026-07-18): Hedra removed from Mode-B — driving_video.py's
-        # cost dicts no longer carry a "hedra" entry, so the estimator now
-        # falls back to the sadtalker rate for any unrecognized provider key
-        # (by design; see estimate_driving_face_cost's .get(..., sadtalker)
-        # fallback). PERFORMANCE_DRIVING_HEDRA in the table below is an
-        # orphaned historical row with no estimator counterpart left to pin.
+        # WS4 (2026-07-18): Hedra removed from Mode-B (client + cost rows
+        # deleted) — driving_video.py's cost dicts carry only a "sadtalker"
+        # entry, so the estimator falls back to the sadtalker rate for any
+        # unrecognized provider key (by design; see
+        # estimate_driving_face_cost's .get(..., sadtalker) fallback).
         from cost_tracker import API_COST_USD
         from performance.driving_video import estimate_driving_face_cost
         assert estimate_driving_face_cost("sadtalker", 5.0) == pytest.approx(
@@ -825,7 +824,6 @@ class TestVerifiedPricePins:
         ("SYNC_SO_V3", "LIPSYNC_SYNCSOV3"),
         ("SYNC_V2", "LIPSYNC_SYNCV2"),
         ("OMNIHUMAN_V1_5", "LIPSYNC_OMNIHUMAN"),
-        ("HEDRA_C3", "LIPSYNC_HEDRA"),
         ("MUSETALK", "LIPSYNC_MUSETALK"),
         ("LATENTSYNC", "LIPSYNC_LATENTSYNC"),
         ("KLING_LIPSYNC_2", "LIPSYNC_KLING"),
@@ -867,9 +865,6 @@ class TestApiCostUsdCompleteness:
     @pytest.mark.parametrize(
         "api_name, expected",
         [
-            # Hedra re-verified 2026-07-11: $0.06/s upper tier x 5s (was
-            # 0.075 from the old base+per-second estimate — 4x low).
-            ("PERFORMANCE_DRIVING_HEDRA", 0.30),
             ("PERFORMANCE_DRIVING_SADTALKER", 0.045),
         ],
     )
@@ -888,3 +883,10 @@ class TestEstimatedCostBudgetGate:
             assert tracker.would_exceed_cost(0.20) is False
         finally:
             tracker.close()
+
+
+def test_no_hedra_cost_rows():
+    """WS4 Task 3 — Hedra cost rows must be fully removed from cost_tracker.py."""
+    import cost_tracker
+    src = __import__("inspect").getsource(cost_tracker)
+    assert "HEDRA" not in src, "Hedra cost rows must be removed"

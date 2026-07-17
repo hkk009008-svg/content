@@ -163,7 +163,7 @@ def test_perf_cost_log_uses_passed_tracker(tmp_path):
 
     # driving_video._cost_log(provider, duration_s, shot_id, video_id, cost_tracker=...)
     t4 = CostTracker(db_path=str(tmp_path / "c4.db"), budget_usd=100.0)
-    driving_video._cost_log("hedra", 5.0, "", "", cost_tracker=t4)
+    driving_video._cost_log("sadtalker", 5.0, "", "", cost_tracker=t4)
     assert t4.spent_usd > 0.0
 
 
