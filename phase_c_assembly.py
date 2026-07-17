@@ -147,6 +147,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         attribution so a pod generation is distinguishable from a FAL fallback
         in cost_log.
     """
+
     mode = "img2img" if init_image else "txt2img"
 
     # Read per-project aspect ratio early — must be in scope at ALL six

@@ -851,8 +851,8 @@ Runway) and a live preflight confirmed all 5 providers emit a valid 9:16.
 
 Each branch returns `ImageGenResult(path, api_name)` naming the backend that
 actually ran (`COMFYUI_PULID` on the pod; `FLUX_KONTEXT`/`FLUX_PRO`/
-`FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain; `QUALITY_MAX` for the max
-tier), or `None` on total failure. `generate_keyframe_take` records `api_name`
+`FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain), or `None` on total failure.
+`generate_keyframe_take` records `api_name`
 to `cost_log` via `record_api_call`, so a pod generation logs
 `provider='comfyui'` — distinguishable from a FAL fallback (`provider='fal'`).
 The cost site previously hardcoded the api_name from `quality_tier`,
@@ -877,8 +877,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:501](phase_c_assembly.py:501)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:436](phase_c_assembly.py:436)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:502](phase_c_assembly.py:502)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:437](phase_c_assembly.py:437)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:460](phase_c_assembly.py:460)) emits per-character `@ImageN PRESERVE` blocks with a
