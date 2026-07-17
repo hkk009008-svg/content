@@ -171,9 +171,55 @@ env -u GIT_INDEX_FILE git commit -m "chore(cleanup): WS4 — delete hedra_native
 
 ---
 
+### Task 4: Purge the stale HEDRA_C3 LLM-routing catalog (added 2026-07-18, user-approved)
+
+**Context:** Tasks 1-3 removed the Hedra *engine*. The LLM-routing *catalog* still lists
+`HEDRA_C3` as `status:"live"` and ranks it FIRST for lipsync. Reviewers confirmed it is
+display/LLM-hint only (no engine-selection knob → no execution effect), but it is stale and
+misleading. **Repoint policy (user-approved):** default lipsync = `SYNC_SO_V3` (sync-3, the
+overlay/dialogue primary) / `OMNIHUMAN_V1_5` (the talking-head-generation primary).
+
+**Files:**
+- Modify: `domain/scene_decomposer.py` (delete `HEDRA_C3` `API_REGISTRY` entry L60; edit `PURPOSE_API_RANKING` L124-125; drop `HEDRA_C3` from `BILLING_PROVIDERS.FAL_AI` L158; repoint cost default L220)
+- Modify: `domain/language_defaults.py` (5 `lipsync_engine_priority` lists L54/72/95/109/125; Hedra rationale comments L34/71/77/119)
+- Modify: `llm/prompt_optimizer.py` (schema enum L81; examples L97-98)
+- Modify: `ARCHITECTURE.md` (L1669-1670 `lipsync=HEDRA_C3` lines)
+
+**Interfaces:**
+- Consumes: Tasks 1-3 (Hedra engine already gone).
+- Produces: `grep -rn HEDRA_C3 --include='*.py'` returns nothing; the catalog's default lipsync pick is `SYNC_SO_V3` / `OMNIHUMAN_V1_5`.
+
+**Exact target states (apply verbatim):**
+- `PURPOSE_API_RANKING["dialogue_close_up"] = ["SYNC_SO_V3", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"]`
+- `PURPOSE_API_RANKING["talking_head_full"] = ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "VEO_NATIVE", "SYNC_SO_V3"]`
+- L220: `lipsync_per = API_REGISTRY["SYNC_SO_V3"]["per_shot_cost"]  # default routed pick (sync-3, overlay primary)`
+- Each `language_defaults` list: delete the leading `"HEDRA_C3",` → `SYNC_SO_V3` becomes head (it is already 2nd in every list). Update the 4 Hedra-referencing comments to name sync-3 as the lead.
+- `prompt_optimizer` L81 enum → `// SYNC_SO_V3 | MUSETALK | OMNIHUMAN_V1_5 | LATENTSYNC | null`; L97 `lipsync=SYNC_SO_V3`; L98 `lipsync=OMNIHUMAN_V1_5 or SYNC_SO_V3`.
+- `ARCHITECTURE.md` L1669 `lipsync=SYNC_SO_V3`; L1670 `lipsync=OMNIHUMAN_V1_5 or SYNC_SO_V3`.
+
+- [ ] **Step 1: Write the failing test** (add to `tests/unit/test_scene_decomposer.py` or nearest):
+
+```python
+def test_hedra_c3_purged_from_catalog():
+    import domain.scene_decomposer as sd, domain.language_defaults as ld
+    assert "HEDRA_C3" not in sd.API_REGISTRY
+    assert all("HEDRA_C3" not in v for v in sd.PURPOSE_API_RANKING.values())
+    for cfg in ld.PIPELINE_LANGUAGE_DEFAULTS.values():
+        assert "HEDRA_C3" not in cfg.get("lipsync_engine_priority", [])
+    assert sd.PURPOSE_API_RANKING["dialogue_close_up"][0] == "SYNC_SO_V3"
+    assert sd.PURPOSE_API_RANKING["talking_head_full"][0] == "OMNIHUMAN_V1_5"
+```
+
+- [ ] **Step 2: Run test to verify it fails** — `.venv/bin/python -m pytest tests/unit/test_scene_decomposer.py::test_hedra_c3_purged_from_catalog -v` → FAIL (HEDRA_C3 present).
+- [ ] **Step 3: Apply the exact target states above.**
+- [ ] **Step 4: Run tests + smoke** — the new test, `test_scene_decomposer.py`, `test_language_defaults.py` (if present), and `.venv/bin/python scripts/ci_smoke.py` (doc-claim gate — ARCHITECTURE.md must stay consistent). Expected PASS + green.
+- [ ] **Step 5: Verify + commit** — `grep -rn 'HEDRA_C3' --include='*.py' .` → empty; then `env -u GIT_INDEX_FILE git add <pathspec>` + commit `chore(routing): WS4 Task 4 — purge stale HEDRA_C3 catalog, default lipsync -> sync-3 / OmniHuman`.
+
+---
+
 ## Self-Review
 
-- **Spec coverage:** WS4 acceptance criteria ("no HEDRA symbol in a live cascade path; dialogue lipsync still produces output via OmniHuman/Kling; ci_smoke green") → covered by Task 1 (lipsync sever), Task 2 (Mode-B sever), Task 3 (residue grep + smoke). ✓
+- **Spec coverage:** WS4 acceptance criteria ("no HEDRA symbol in a live cascade path; dialogue lipsync still produces output via OmniHuman/Kling; ci_smoke green") → covered by Task 1 (lipsync sever), Task 2 (Mode-B sever), Task 3 (residue grep + smoke), Task 4 (LLM-routing catalog purge + repoint). ✓
 - **Placeholder scan:** none — every step names exact files/lines and shows the edit.
 - **Type consistency:** `_synth_via_hedra`, `_HedraAPI`, `_hedra_aspect_ratio_from_image`, `PERFORMANCE_DRIVING_HEDRA`, `LIPSYNC_HEDRA` — all referenced consistently across tasks and all removed by Task 3's residue grep.
 - **Dependency order locked:** Task 1 removes the only `hedra_native` importer → Task 3 can delete `hedra_native.py`. Tasks 1 and 2 are independent and may run in either order; Task 3 must be last.
