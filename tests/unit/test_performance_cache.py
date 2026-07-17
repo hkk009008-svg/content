@@ -58,12 +58,10 @@ def test_synth_returns_cache_provider_on_hit(tmp_path, monkeypatch):
     key = driving_cache_key(str(a), str(kf), 5.0)
     store_cache(key, str(cached_video))
     out = tmp_path / "out.mp4"
-    with patch("performance.driving_video._synth_via_hedra") as mock_h, \
-         patch("performance.driving_video._synth_via_sadtalker") as mock_s:
+    with patch("performance.driving_video._synth_via_sadtalker") as mock_s:
         result = synth_driving_face_from_audio(
             audio_path=str(a), keyframe_path=str(kf),
             output_mp4=str(out), duration_s=5.0,
         )
         assert result == (str(out), "cache")
-        mock_h.assert_not_called()
         mock_s.assert_not_called()

@@ -1045,7 +1045,7 @@ class ShotController:
             from cost_tracker import API_COST_USD
             from performance.driving_video import estimate_driving_face_cost
 
-            driving_cost = estimate_driving_face_cost("hedra", duration_s)
+            driving_cost = estimate_driving_face_cost("sadtalker", duration_s)
             estimated_cost = API_COST_USD.get(engine.upper(), 0.0) + driving_cost
             would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
             if would_exceed_budget:
@@ -1121,7 +1121,7 @@ class ShotController:
                 ),
                 "audio_path": audio_path,
                 "duration_s": duration_s,
-                "driving_provider": driving_provider,  # "hedra" | "sadtalker" | "cache" | None
+                "driving_provider": driving_provider,  # "sadtalker" | "cache" | None
             },
         )
         perf_path = self._take_output_path(shot_id, take["id"], ".mp4")

@@ -6,9 +6,8 @@ The result feeds back as `driving_video_path` for LivePortrait or as a
 reference for Act-One.
 
 Provider chain (try in order, fall through on failure):
-  1. Hedra Character-3 — paid, best lip motion (~$0.05–0.10/shot)
-  2. SadTalker via ComfyUI — free on existing pod (cheaper, coarser)
-  3. None — caller falls through to a SKIP performance for this shot
+  1. SadTalker via ComfyUI — free on existing pod
+  2. None — caller falls through to a SKIP performance for this shot
 """
 
 from __future__ import annotations
@@ -23,20 +22,15 @@ from performance._poll import poll_task
 
 
 # Polling configuration — pulled to constants so timing is auditable and tunable
-# without rummaging through the body. Hedra typically returns within 60-120s;
-# SadTalker via ComfyUI is bursty, often longer.
-_HEDRA_POLL_TIMEOUT_S = 240
-_HEDRA_POLL_INTERVAL_S = 3
+# without rummaging through the body. SadTalker via ComfyUI is bursty, often
+# taking a while to return.
 _SADTALKER_POLL_TIMEOUT_S = 240
 _SADTALKER_POLL_INTERVAL_S = 2
 
-# Per-provider estimate shape: base + per-second. Hedra re-verified
-# 2026-07-11 against hedra.com/pricing: Character-3 = 6 credits/s =
-# $0.031-0.060/s by subscription tier -> upper bound $0.06/s, no base fee
-# (the old 0.05 + $0.005/s under-estimated a 5s clip 4x). SadTalker rates
-# unchanged (GPU-time estimate).
-_DRIVING_FACE_BASE_COST_USD = {"hedra": 0.0, "sadtalker": 0.02}
-_DRIVING_FACE_COST_PER_SECOND_USD = {"hedra": 0.06, "sadtalker": 0.005}
+# Per-provider estimate shape: base + per-second. SadTalker rates are a
+# GPU-time estimate.
+_DRIVING_FACE_BASE_COST_USD = {"sadtalker": 0.02}
+_DRIVING_FACE_COST_PER_SECOND_USD = {"sadtalker": 0.005}
 
 
 def estimate_driving_face_cost(provider: str, duration_s: float) -> float:
@@ -66,83 +60,11 @@ def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str, cos
         pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
 
-def _synth_via_hedra(
-    audio_path: str, keyframe_path: str, output_mp4: str, duration_s: float,
-    shot_id: str, video_id: str, cost_tracker=None,
-) -> Optional[str]:
-    """Hedra Character-3 audio→video via direct REST API.
-
-    Uses the direct api.hedra.com REST endpoint exclusively. The fal-ai/hedra/
-    character-3 FAL route is HTTP-404-dead (confirmed; see lip_sync.py:574) and
-    has been removed. Requires HEDRA_API_KEY; returns None immediately if the
-    key is absent so the caller can fall through to the SadTalker cascade without
-    burning a timeout window.
-    """
-    api_key = getattr(settings, "hedra_api_key", "") or os.environ.get("HEDRA_API_KEY", "")
-
-    if not api_key:
-        return None
-
-    # Direct Hedra REST API
-    try:
-        import requests
-        # 1) Create generation job
-        with open(keyframe_path, "rb") as kf, open(audio_path, "rb") as aud:
-            files = {"image": kf, "audio": aud}
-            r = requests.post(
-                "https://api.hedra.com/v1/audio/talking-image",
-                headers={"Authorization": f"Bearer {api_key}"},
-                files=files,
-                timeout=120,
-            )
-        if not r.ok:
-            print(f"   [DRIVING/HEDRA-DIRECT] HTTP {r.status_code}: {r.text[:200]}")
-            return None
-        body = r.json()
-        out_url = body.get("video_url") or body.get("output_url")
-        job_id = body.get("job_id") or body.get("id")
-
-        if not out_url and job_id:
-            def _get_status():
-                pr = requests.get(
-                    f"https://api.hedra.com/v1/jobs/{job_id}",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=15,
-                )
-                if not pr.ok:
-                    return {"status": "PENDING"}
-                pb = pr.json()
-                return {
-                    "status": (pb.get("status") or "").upper(),
-                    "video_url": pb.get("video_url") or pb.get("output_url"),
-                }
-
-            final = poll_task(
-                _get_status,
-                success_states={"COMPLETE", "DONE", "SUCCEEDED"},
-                terminal_states={"FAILED", "ERROR"},
-                interval_s=_HEDRA_POLL_INTERVAL_S,
-                timeout_s=_HEDRA_POLL_TIMEOUT_S,
-            )
-            out_url = final.get("video_url") if final else None
-
-        if not out_url:
-            return None
-        if not safe_download(out_url, output_mp4):
-            return None
-        _cost_log("hedra", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
-        print(f"   ✅ Hedra (direct) driving face: {output_mp4}")
-        return output_mp4
-    except Exception as e:
-        print(f"   [DRIVING/HEDRA-DIRECT] failed: {e}")
-        return None
-
-
 def _synth_via_sadtalker(
     audio_path: str, keyframe_path: str, output_mp4: str, duration_s: float,
     shot_id: str, video_id: str, cost_tracker=None,
 ) -> Optional[str]:
-    """SadTalker via ComfyUI — free fallback when no Hedra access.
+    """SadTalker via ComfyUI.
 
     Requires the ComfyUI-SadTalker custom node installed on the pod. We
     follow the same upload→queue→poll pattern as live_portrait.py.
@@ -245,7 +167,7 @@ def synth_driving_face_from_audio(
     output_mp4: str,
     *,
     duration_s: float = 5.0,
-    engine: str = "auto",     # 'auto' | 'hedra' | 'sadtalker'
+    engine: str = "auto",     # 'auto' | 'sadtalker'
     shot_id: str = "",
     video_id: str = "",
     cost_tracker=None,
@@ -256,19 +178,17 @@ def synth_driving_face_from_audio(
     The output feeds into Act-One or LivePortrait as the driving reference.
 
     Cascade:
-      'auto'  → try Hedra first, fall back to SadTalker
-      'hedra' → Hedra only
+      'auto'      → SadTalker
       'sadtalker' → SadTalker only
 
     Cache:
       Results are cached by sha256(audio) + sha256(keyframe) + duration under
       PERFORMANCE_CACHE_DIR (default: data/cache/driving/). On a cache hit the
-      function returns immediately with provider='cache' and skips all API calls,
-      avoiding repeat Hedra charges (~$0.05/shot) when inputs haven't changed.
+      function returns immediately with provider='cache' and skips all API calls.
 
     Returns:
         (path, provider_name) tuple on success — provider_name is one of
-        {"hedra", "sadtalker", "cache"}. None on full failure.
+        {"sadtalker", "cache"}. None on full failure.
     """
     if not (audio_path and os.path.exists(audio_path)):
         return None
@@ -285,14 +205,6 @@ def synth_driving_face_from_audio(
         _shutil.copyfile(cached, output_mp4)
         print(f"   ✅ Driving-video cache hit: {cached}")
         return (output_mp4, "cache")
-
-    if engine in ("auto", "hedra"):
-        r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id, cost_tracker=cost_tracker)
-        if r:
-            store_cache(key, output_mp4)
-            return (r, "hedra")
-        if engine == "hedra":
-            return None
 
     if engine in ("auto", "sadtalker"):
         r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id, cost_tracker=cost_tracker)

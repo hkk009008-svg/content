@@ -808,11 +808,15 @@ class TestVerifiedPricePins:
         # table row (which has no runtime consumer) — pin them together so a
         # revert of the driving_video.py rates can't silently under-gate
         # while the row pin stays green.
+        #
+        # WS4 (2026-07-18): Hedra removed from Mode-B — driving_video.py's
+        # cost dicts no longer carry a "hedra" entry, so the estimator now
+        # falls back to the sadtalker rate for any unrecognized provider key
+        # (by design; see estimate_driving_face_cost's .get(..., sadtalker)
+        # fallback). PERFORMANCE_DRIVING_HEDRA in the table below is an
+        # orphaned historical row with no estimator counterpart left to pin.
         from cost_tracker import API_COST_USD
         from performance.driving_video import estimate_driving_face_cost
-        assert estimate_driving_face_cost("hedra", 5.0) == pytest.approx(
-            API_COST_USD["PERFORMANCE_DRIVING_HEDRA"]
-        )
         assert estimate_driving_face_cost("sadtalker", 5.0) == pytest.approx(
             API_COST_USD["PERFORMANCE_DRIVING_SADTALKER"]
         )
