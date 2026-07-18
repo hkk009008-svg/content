@@ -527,6 +527,12 @@ class TestRecordAPICall:
         ("KLING_3_0", "fal"),
         ("KLING_NATIVE", "kling"),
         ("SEEDANCE", "fal"),
+        # GEMINI_OMNI (WS2 Google-first primary, 2026-07-18): Gemini
+        # Developer API only (no Vertex surface for this model today) —
+        # shares the "google" bucket with VEO_NATIVE, not fal. Inserted
+        # before "VEO" in _provider_map's insertion order (cost_tracker.py)
+        # so a future bare "GEMINI" catch-all can't shadow it either.
+        ("GEMINI_OMNI", "google"),
         ("TOTALLY_UNKNOWN_API_XYZ", "unknown"),
     ])
     def test_record_api_call_provider_derivation(self, cost_tracker, api_name, expected_provider):
@@ -843,6 +849,20 @@ class TestVerifiedPricePins:
         from cost_tracker import API_COST_USD
         from domain.scene_decomposer import API_REGISTRY
         assert API_REGISTRY["SEEDANCE"]["per_shot_cost"] == API_COST_USD["SEEDANCE"]
+
+    def test_gemini_omni_price_is_the_web_verified_2026_07_18_estimate(self):
+        from cost_tracker import API_COST_USD
+        # Gemini Developer API preview pricing: $0.112/s x ~5s estimate
+        # (WEB-VERIFIED NOT REPO-MEASURED per R-EVIDENCE/R-MEASURE — duration
+        # is prompt-inferred on this API, no structured duration kwarg, so
+        # this flat per-clip figure is a rough estimate pending a live-call
+        # duration probe, same caveat SEEDANCE needed fixing on 2026-07-11).
+        assert API_COST_USD["GEMINI_OMNI"] == 0.56
+
+    def test_gemini_omni_registry_cost_matches_api_cost_usd(self):
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        assert API_REGISTRY["GEMINI_OMNI"]["per_shot_cost"] == API_COST_USD["GEMINI_OMNI"]
 
 
 class TestApiCostUsdCompleteness:
