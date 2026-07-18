@@ -98,6 +98,22 @@ class KeyframeRenderPhase:
                 result = self._gen.generate_keyframe_take(scene["id"], shot["id"])
                 if result.get("success"):
                     ok_count += 1
+                elif result.get("error_kind") == "budget":
+                    # Pre-spend gate refused: stop the phase rather than
+                    # marching through every remaining shot — each would be
+                    # refused identically (no spend) but mislabeled as a
+                    # shot failure via on_failure. Not a failure: the shot
+                    # stays unapproved and regenerates once the budget is
+                    # raised. Mirrors motion_render.py / performance.py.
+                    return PhaseResult(
+                        ok=False,
+                        message=(
+                            f"budget cap reached at {shot['id']} — keyframe "
+                            f"phase stopped (ok={ok_count}, skip={skip_count}, "
+                            f"fail={fail_count})"
+                        ),
+                        elapsed_s=time.time() - start,
+                    )
                 else:
                     fail_count += 1
                     self._on_failure(scene["id"], shot["id"], result.get("error", ""))

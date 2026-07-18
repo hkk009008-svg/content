@@ -590,6 +590,11 @@ class TestGeminiImagePriorityZero:
             "continuity_config": {"primary_reference": str(char)},
         }
         core.cost_tracker = MagicMock()
+        # Pre-spend budget gate (FOLLOW-UP (a)): an unconfigured MagicMock's
+        # would_exceed(...) return value is itself a truthy MagicMock, which
+        # would spuriously trip the gate before this test's real seam (the
+        # Gemini-reject-then-FAL-winner cascade) is reached.
+        core.cost_tracker.would_exceed.return_value = False
 
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
         ctrl._take_output_path = MagicMock(return_value=img_path)

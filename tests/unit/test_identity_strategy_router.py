@@ -316,6 +316,30 @@ class StubContinuity:
         }}
 
 
+class _FakeCostTracker:
+    """Minimal cost_tracker stand-in: never gates (would_exceed always
+    False) and no-ops on record_api_call.
+
+    Pre-FOLLOW-UP(a), these tests stood cost_tracker in with a bare `None` —
+    that worked because generate_keyframe_take's post-generation cost
+    recording is wrapped in a best-effort try/except (AttributeError on
+    None silently swallowed). The FOLLOW-UP(a) pre-spend budget gate is a
+    hard precondition (unguarded, mirroring generate_motion_take /
+    generate_performance_take), so `None` no longer satisfies it — these
+    tests don't exercise cost tracking, so a permissive stand-in keeps them
+    unaffected.
+    """
+
+    spent_usd = 0.0
+    budget_usd = None
+
+    def would_exceed(self, api_name):
+        return False
+
+    def record_api_call(self, *args, **kwargs):
+        return None
+
+
 class _FakeCore:
     """Minimal PipelineCore stand-in (mirrors test_cross_controller.FakeCore)."""
 
@@ -327,7 +351,7 @@ class _FakeCore:
         self.continuity = None
         self.director = None
         self.vbench = None
-        self.cost_tracker = None
+        self.cost_tracker = _FakeCostTracker()
         self.ensemble = None
 
 

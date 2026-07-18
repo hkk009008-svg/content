@@ -668,6 +668,42 @@ class ShotController:
 
         cc = enhanced.get("continuity_config", {})
         primary_ref = cc.get("primary_reference")
+
+        # Pre-spend budget gate (mirrors the motion/performance pattern at
+        # controller.py's generate_motion_take / generate_performance_take):
+        # generate_ai_broll's backend cascade is PRIORITY-0 Gemini
+        # (GEMINI_IMAGE) whenever character_image (== primary_ref) is
+        # truthy (phase_c_assembly.py PRIORITY-0 block); otherwise the
+        # cascade's next entry point is the ComfyUI PuLID path
+        # (COMFYUI_PULID). Checked here — before make_take's progress event
+        # and the prompt-optimizer's own LLM spend below — so a refusal
+        # doesn't burn optimizer cost or emit a misleading progress event
+        # first.
+        _image_engine_estimate = "GEMINI_IMAGE" if primary_ref else "COMFYUI_PULID"
+        if self.cost_tracker.would_exceed(_image_engine_estimate):
+            self.progress(
+                "BUDGET_EXCEEDED",
+                (
+                    f"Estimated {_image_engine_estimate} cost would push spend "
+                    f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                    f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation."
+                ),
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                spent=self.cost_tracker.spent_usd,
+                budget=self.cost_tracker.budget_usd,
+            )
+            self._lifecycle.pause()
+            return {
+                "success": False,
+                "error": "Budget cap reached — keyframe generation not started",
+                # Structured kind: the keyframe phase loop keys its abort on
+                # this (cinema/phases/keyframe_render.py), not on
+                # string-parsing the human-facing error.
+                "error_kind": "budget",
+            }
+
         take = make_take(
             "keyframe",
             metadata={

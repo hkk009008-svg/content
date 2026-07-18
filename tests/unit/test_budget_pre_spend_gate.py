@@ -616,3 +616,191 @@ class TestPerformancePhaseBudgetAbort:
         assert gen.generate_performance_take.call_count == 3
         assert on_failure.call_count == 3
         assert result.ok is True
+
+
+class TestKeyframePreSpendBudgetGate:
+    """generate_keyframe_take refuses to spend when the estimated image-gen
+    cost would push spend past the budget cap (FOLLOW-UP (a) Site 1).
+
+    generate_ai_broll's backend cascade is PRIORITY-0 Gemini (GEMINI_IMAGE)
+    whenever character_image (== primary_reference) is truthy
+    (phase_c_assembly.py); otherwise the cascade's next entry point is the
+    ComfyUI PuLID path (COMFYUI_PULID). Harness mirrors
+    _build_controller_for_lora_strength() in test_char_lora_strength_thread.py
+    (lightweight seam to generate_ai_broll — no real project-dir disk I/O).
+    """
+
+    def _build_controller(self, primary_reference=None):
+        from cinema.shots.controller import ShotController
+
+        char_id = "char_1"
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": [char_id],
+            "camera": "medium_shot",
+            "target_api": "AUTO",
+        }
+        scene = {
+            "id": "scene_1",
+            "title": "T",
+            "action": "A",
+            "location_id": None,
+            "shots": [shot],
+        }
+        project = {
+            "id": "proj_kf_budget_gate",
+            "scenes": [scene],
+            "characters": [{"id": char_id, "name": "Alice"}],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        lifecycle = MagicMock()
+        lifecycle.report_progress.return_value = None
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        runstate.update_progress_pointer.return_value = None
+
+        continuity_config = {"multi_angle_refs": []}
+        if primary_reference is not None:
+            continuity_config["primary_reference"] = primary_reference
+
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_kf_budget_project"
+        core.continuity = MagicMock()
+        core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": continuity_config,
+        }
+        cost_tracker = MagicMock()
+        cost_tracker.is_over_budget.return_value = False
+        cost_tracker.would_exceed.return_value = False
+        cost_tracker.spent_usd = 0.0
+        cost_tracker.budget_usd = None
+        core.cost_tracker = cost_tracker
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        # Lightweight seam (mirrors test_char_lora_strength_thread.py): a
+        # nonexistent output path means generate_ai_broll's own return value
+        # never needs to be a real ImageGenResult — os.path.exists(img_path)
+        # fails right after the call, which is fine for these tests (they
+        # only assert on whether/how generate_ai_broll was invoked).
+        ctrl._take_output_path = MagicMock(return_value="/nonexistent/keyframe.jpg")
+        ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
+        ctrl._mutate_shot = MagicMock()
+        return ctrl, lifecycle, cost_tracker
+
+    def test_refuses_generation_when_would_exceed_with_primary_reference(self):
+        """GEMINI_IMAGE branch: primary_reference set -> gate prices GEMINI_IMAGE."""
+        ctrl, lifecycle, cost_tracker = self._build_controller(primary_reference="/fake/ref.jpg")
+        cost_tracker.would_exceed.return_value = True
+        # The gate formats these as floats — must be real numbers, not MagicMock.
+        cost_tracker.spent_usd = 0.80
+        cost_tracker.budget_usd = 1.00
+
+        gen_broll = MagicMock()
+        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+            result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert "budget" in result.get("error", "").lower()
+        # Structured kind — the keyframe phase loop keys its abort on this,
+        # not on parsing the human-facing error string.
+        assert result.get("error_kind") == "budget"
+        gen_broll.assert_not_called()
+        lifecycle.pause.assert_called_once()
+        cost_tracker.would_exceed.assert_called_once_with("GEMINI_IMAGE")
+        # The refusal must be visible to the UI: a BUDGET_EXCEEDED progress
+        # event is emitted (ctrl.progress proxies lifecycle.report_progress).
+        events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
+        assert "BUDGET_EXCEEDED" in events
+
+    def test_refuses_generation_uses_comfyui_pulid_estimate_when_no_primary_ref(self):
+        """Anti-mutation pin: absent primary_reference must price COMFYUI_PULID,
+        not silently fall back to GEMINI_IMAGE (or an unpriced 0.0 estimate)."""
+        ctrl, lifecycle, cost_tracker = self._build_controller(primary_reference=None)
+        cost_tracker.would_exceed.return_value = True
+        cost_tracker.spent_usd = 0.80
+        cost_tracker.budget_usd = 1.00
+
+        gen_broll = MagicMock()
+        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+            result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        gen_broll.assert_not_called()
+        cost_tracker.would_exceed.assert_called_once_with("COMFYUI_PULID")
+        lifecycle.pause.assert_called_once()
+
+    def test_proceeds_when_within_budget(self):
+        """Control: would_exceed False -> generation proceeds, no pause."""
+        ctrl, lifecycle, cost_tracker = self._build_controller(primary_reference="/fake/ref.jpg")
+        cost_tracker.would_exceed.return_value = False
+
+        gen_broll = MagicMock()
+        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0")
+
+        gen_broll.assert_called_once()
+        lifecycle.pause.assert_not_called()
+        cost_tracker.would_exceed.assert_called_once_with("GEMINI_IMAGE")
+
+
+class TestKeyframePhaseBudgetAbort:
+    """Phase-level behavior when the per-take gate refuses for budget
+    (FOLLOW-UP (a) Site 2). Mirrors TestBudgetPhaseAbort /
+    TestPerformancePhaseBudgetAbort for KeyframeRenderPhase.
+    """
+
+    _BUDGET_REFUSAL = {
+        "success": False,
+        "error": "Budget cap reached — keyframe generation not started",
+        "error_kind": "budget",
+    }
+
+    def _make_ctx(self):
+        lc = MagicMock()
+        lc.is_cancelled.return_value = False
+        return MagicMock(lifecycle=lc)
+
+    def _make_project(self, n_shots=3):
+        shots = [{"id": f"s1_{i}", "prompt": f"shot {i}"} for i in range(n_shots)]
+        return {"id": "proj_kf_budget_abort", "scenes": [{"id": "scene_1", "shots": shots}]}
+
+    def test_per_shot_loop_aborts_on_budget_refusal(self):
+        from cinema.phases.keyframe_render import KeyframeRenderPhase
+
+        gen = MagicMock()
+        gen.generate_keyframe_take.return_value = self._BUDGET_REFUSAL
+        on_failure = MagicMock()
+        phase = KeyframeRenderPhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_keyframe_take.call_count == 1
+        on_failure.assert_not_called()  # budget stop is not a shot failure
+        assert result.ok is False
+        assert "budget" in result.message.lower()
+
+    def test_per_shot_loop_continues_on_ordinary_failure(self):
+        """Control: failures without error_kind keep the record-and-continue path."""
+        from cinema.phases.keyframe_render import KeyframeRenderPhase
+
+        gen = MagicMock()
+        gen.generate_keyframe_take.return_value = {"success": False, "error": "boom"}
+        on_failure = MagicMock()
+        phase = KeyframeRenderPhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_keyframe_take.call_count == 3
+        assert on_failure.call_count == 3
+        assert result.ok is True

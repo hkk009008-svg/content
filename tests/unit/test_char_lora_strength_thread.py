@@ -83,6 +83,10 @@ def _build_controller_for_lora_strength():
         "continuity_config": {},
     }
     core.cost_tracker = MagicMock()
+    # Pre-spend budget gate (FOLLOW-UP (a)): an unconfigured MagicMock's
+    # would_exceed(...) return value is itself a truthy MagicMock, which
+    # would spuriously trip the gate before this helper's seam is reached.
+    core.cost_tracker.would_exceed.return_value = False
 
     ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
     ctrl._take_output_path = MagicMock(return_value="/nonexistent/keyframe.jpg")
