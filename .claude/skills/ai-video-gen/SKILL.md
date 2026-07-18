@@ -142,7 +142,7 @@ This is appended to every image generation prompt via the Style Director.
 | Sora API | `sora_native.py` |
 | Veo API | `veo_native.py` |
 | LTX API | `ltx_native.py` |
-| ComfyUI workflows | `pulid.json` (production, 22 nodes), `pulid_max.json` (max tier, 60 nodes) |
+| ComfyUI workflows | `pulid.json` (production, 22 nodes) — the only image tier since the max tier was retired (WS1; DECISIONS.md ADR-065) |
 
 ## Common Failure Modes
 
@@ -168,7 +168,7 @@ The pipeline now uses these previously-idle tools:
 ### ComfyUI Enhanced Workflow (dynamic node injection in `phase_c_assembly.py`)
 - **ControlNet Depth** (nodes 400-402): DepthAnythingV2 extracts depth map from prev shot → guides spatial consistency
 - **IP-Adapter Style Transfer** (nodes 410-411): Locks color/lighting/atmosphere from previous shot via style-only weight
-- **ReActor face swap** (nodes 610/611, `ReActorFaceSwap`, injected via `quality_max.py`): post-generation face swap as ComfyUI-native fallback
+- **ReActor face swap** (ComfyUI-native, was injected via the retired `quality_max.py` max tier — no longer available in-graph post-WS1; face swap now runs as a post-process via `phase_c_vision.py` DeepFace)
 - **img2img chaining** (nodes 200-201): VAEEncode prev shot → controlled denoise for temporal consistency
 
 ### Quality-Gated Post-Processing

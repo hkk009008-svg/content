@@ -20,7 +20,7 @@
 - §5 [Phase protocol & three phases](#5-phase-protocol--three-phases)
 - §6 [Gate mechanism — predicate-poll](#6-gate-mechanism--predicate-poll)
 - §7 [Story prep — decompose, dialogue, continuity](#7-story-prep--decompose-dialogue-continuity)
-- §8 [Image generation — production + max-tier N=8](#8-image-generation--production--max-tier-n8)
+- §8 [Image generation — production tier (max-tier retired)](#8-image-generation--production-tier-max-tier-retired)
 - §9 [Video routing — 5 templates × 11 engines](#9-video-routing--5-templates--11-engines)
 - §10 [Performance capture & lipsync](#10-performance-capture--lipsync)
 - §11 [Identity validation — GhostFaceNet singleton](#11-identity-validation--ghostfacenet-singleton)
