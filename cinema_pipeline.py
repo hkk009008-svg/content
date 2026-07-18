@@ -36,6 +36,15 @@ from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO, is_su
 
 logger = logging.getLogger(__name__)
 
+# Caller-chosen ceiling for generated BGM length — NOT a FAL/Suno API hard cap
+# (FAL Stable Audio's own default is 42s per audio/music.py:288; Suno V5 supports
+# up to 240s). 47s is a practical "long enough to cover a scene, short enough to
+# bound generation cost/latency" bound; _assemble_final truncates the mixed track
+# to the final video's length via ffmpeg -shortest (ARCHITECTURE.md §12.6), so
+# this only bounds how much BGM material generation buys, not delivered runtime.
+# Was a tracked cosmetic magic-number gap — ARCHITECTURE.md §12.5 / issue table.
+SUNO_BGM_DURATION_DEFAULT = 47
+
 
 def _normalize_filter(w: int, h: int) -> str:
     """ffmpeg -vf for clip normalization at (w,h): fit-inside + pad + 30fps.
@@ -629,7 +638,7 @@ class CinemaPipeline:
         music_mood = settings.get("music_mood", "suspense")
         bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
         if not os.path.exists(bgm_path):
-            generate_bgm(music_mood, bgm_path, duration=47, prefer_provider="AUTO", cost_tracker=self.cost_tracker)  # T5: gate audio spend; AUTO = Suno V5 → FAL fallback
+            generate_bgm(music_mood, bgm_path, duration=SUNO_BGM_DURATION_DEFAULT, prefer_provider="AUTO", cost_tracker=self.cost_tracker)  # T5: gate audio spend; AUTO = Suno V5 → FAL fallback
 
         if os.path.exists(bgm_path):
             try:

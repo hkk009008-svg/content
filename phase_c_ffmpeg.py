@@ -56,11 +56,13 @@ _FAL_MISSING_WARNED = False
 # Default engine cascade for generate_ai_video when the caller passes no
 # video_fallbacks — quality order. Module-level so tests pin the REAL list
 # (the old test kept a local copy that silently drifted for two migrations).
-# SEEDANCE leads since the Sora sunset (2026-09-24); KLING_3_0 (fal v3 Pro,
+# GEMINI_OMNI leads (Google-first, WS2) with VEO_NATIVE promoted to 2nd —
+# both Google APIs take priority over the post-Sora-sunset ordering below.
+# SEEDANCE next since the Sora sunset (2026-09-24); KLING_3_0 (fal v3 Pro,
 # #11 AA i2v arena) outranks the legacy kling-v1-6 KLING_NATIVE route.
 DEFAULT_VIDEO_CASCADE = [
-    "SEEDANCE", "KLING_3_0", "SORA_NATIVE", "RUNWAY_GEN4",
-    "LTX", "VEO_NATIVE", "KLING_NATIVE", "SORA_2", "VEO", "RUNWAY",
+    "GEMINI_OMNI", "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
+    "RUNWAY_GEN4", "LTX", "KLING_NATIVE", "SORA_2", "VEO", "RUNWAY",
 ]
 
 

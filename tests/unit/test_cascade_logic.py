@@ -78,11 +78,14 @@ class TestCascadeRetryLogic:
     def test_default_cascade_order_matches(self):
         """Pin the production default cascade head + membership."""
         cascade = self._default_cascade()
-        assert len(cascade) == 10, "Default cascade should have 10 APIs"
-        # SEEDANCE leads since the Sora sunset (2026-09-24); KLING_3_0
+        assert len(cascade) == 11, "Default cascade should have 11 APIs"
+        # Google-first (WS2): GEMINI_OMNI leads, VEO_NATIVE promoted to 2nd.
+        # SEEDANCE is next since the Sora sunset (2026-09-24); KLING_3_0
         # (fal v3 Pro) outranks the legacy kling-v1-6 native route.
-        assert cascade[0] == "SEEDANCE", f"head should be SEEDANCE, got {cascade[0]}"
-        assert cascade[1] == "KLING_3_0", f"second should be KLING_3_0, got {cascade[1]}"
+        assert cascade[0] == "GEMINI_OMNI", f"head should be GEMINI_OMNI, got {cascade[0]}"
+        assert cascade[1] == "VEO_NATIVE", f"second should be VEO_NATIVE, got {cascade[1]}"
+        assert cascade[2] == "SEEDANCE", f"third should be SEEDANCE, got {cascade[2]}"
+        assert cascade[3] == "KLING_3_0", f"fourth should be KLING_3_0, got {cascade[3]}"
         assert cascade.index("KLING_3_0") < cascade.index("KLING_NATIVE"), (
             "fal Kling v3 Pro must outrank the legacy kling-v1-6 native route"
         )

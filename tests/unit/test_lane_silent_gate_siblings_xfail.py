@@ -61,7 +61,9 @@ def test_inherit_audio_flags_warns_when_has_audio_stream_raises(monkeypatch, cap
 
 
 def test_assess_coherence_warns_when_image_unreadable(caplog):
-    pytest.importorskip("cv2")  # assess_coherence uses cv2.imread; module needs cv2 to load
+    import cv2  # noqa: F401 — opencv-python>=4.10 is a HARD dep (requirements.txt); a plain
+    # import fails loudly if the dep regresses instead of silently SKIPping (see
+    # test_mouth_energy_scorer_defects.py:47-50 for the precedent this avoids)
     import coherence_analyzer
 
     with caplog.at_level("WARNING"):
