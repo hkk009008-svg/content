@@ -830,12 +830,24 @@ Task 4 (TEARDOWN) deleted the driver + graph + tests
 parameter (informational only — `generate_ai_broll`'s docstring notes
 production is "the only tier since WS1's max-tier retirement") sourced from
 `settings.get("quality_tier", "production")` at
-[cinema/shots/controller.py:683](cinema/shots/controller.py:683); no per-shot
+[cinema/shots/controller.py:689](cinema/shots/controller.py:689); no per-shot
 heuristic. §8.3 (below) covers what the max tier did, for archaeology.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
 
-Three-priority cascade inside `generate_ai_broll`:
+Four-priority cascade inside `generate_ai_broll` (PRIORITY 0 added WS3,
+Google-first overhaul):
+0. **Gemini 2.5 Flash Image** (Nano Banana, `gemini_image_native.GeminiImageAPI`) —
+   only engages when a project opts in via `identity_backend='gemini_multiref'`
+   (`get_project_setting`, default stays `'pod'` — every existing project is
+   unaffected) AND a character reference is present. On success the image must
+   also pass the shared identity validator
+   (`phase_c_vision._get_shared_validator().validate_image`); a failing score
+   logs one JSONL line to `logs/gemini_image_arc_comparison.jsonl` (shot
+   context + score) and falls through — it does NOT return. Any exception in
+   this block is caught and logged (`[GEMINI-IMAGE] ...`); the block never
+   raises and never returns `None`, matching every other cascade tier's
+   graceful-fallthrough contract.
 1. **ComfyUI + PuLID** ([pulid.json](pulid.json)) — needs `server_url` + workflow JSON.
 2. **FAL FLUX Kontext Max Multi** — multi-image refs.
 3. **FLUX-Pro v1.1-ultra → FLUX-schnell → Pollinations** — final fallback chain.
@@ -852,13 +864,32 @@ T10 un-gated 9:16 after Phase 3 wired per-provider native video (Veo/Sora/Kling/
 Runway) and a live preflight confirmed all 5 providers emit a valid 9:16.
 
 Each branch returns `ImageGenResult(path, api_name)` naming the backend that
-actually ran (`COMFYUI_PULID` on the pod; `FLUX_KONTEXT`/`FLUX_PRO`/
-`FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain), or `None` on total failure.
-`generate_keyframe_take` records `api_name`
+actually ran (`GEMINI_IMAGE` on Nano Banana; `COMFYUI_PULID` on the pod;
+`FLUX_KONTEXT`/`FLUX_PRO`/`FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain),
+or `None` on total failure. `generate_keyframe_take` records `api_name`
 to `cost_log` via `record_api_call`, so a pod generation logs
-`provider='comfyui'` — distinguishable from a FAL fallback (`provider='fal'`).
+`provider='comfyui'` — distinguishable from a FAL fallback (`provider='fal'`)
+and from Gemini-native (`provider='google'`, shared with `GEMINI_OMNI`/
+`VEO_NATIVE` — `cost_tracker.API_COST_USD['GEMINI_IMAGE']`).
 The cost site previously hardcoded the api_name from `quality_tier`,
 mislabeling every pod generation as `fal` (e.g. cycle-17 cost_log row 1065).
+
+**Multi-reference identity (WS3, Nano Banana).** `_resolve_identity_strategy`
+tags the primary (and, under `gemini_multiref`, every secondary too)
+`fidelity='gemini_multiref'` and `mechanism_tag` in
+`{GEMINI_MULTIREF_PRIMARY_ONLY, GEMINI_MULTIREF_MULTI_CHAR}`
+([cinema/shots/strategy.py](cinema/shots/strategy.py)) instead of the
+production `'reference'`/`PRIMARY_ONLY`/`KONTEXT_MULTI_CHAR` tags — the
+Kontext-tier flat 2-secondary cap does not apply here; the combined
+primary+secondary character count is capped against
+`gemini_image_native.GEMINI_MULTIREF_MAX_REFS` (8; conservative pending a
+live-API empirical probe — the discovery-floated "~20" figure is unverified)
+minus the primary's own slot. `mechanism_actually_used` derives
+`GEMINI_IMAGE_MULTI_CHAR` from `api_name=='GEMINI_IMAGE'` +
+`strategy.secondary_specs`, mirroring the existing `FLUX_KONTEXT_MULTI_CHAR`
+derivation. A `GEMINI_IMAGE` take never carries `suggested_pulid_adjustment`/
+`identity_failure_reason` even on an identity-score fail — there is no PuLID
+node in that generation path to adjust.
 
 `RunPodComfyUI` class ([phase_c_assembly.py:36-74](phase_c_assembly.py:36)):
 
@@ -874,14 +905,14 @@ Polling: 2s × up to 300 iterations (~10 min) in production (the max tier's
 Task 4).
 
 **Multi-char keyframe flow (P1-1 slice 1).** `_resolve_identity_strategy`
-([cinema/shots/controller.py:317](cinema/shots/controller.py:317)) inspects registered characters and writes
+([cinema/shots/controller.py:330](cinema/shots/controller.py:330)) inspects registered characters and writes
 the `identity_strategy` promise into take metadata
-([cinema/shots/controller.py:675](cinema/shots/controller.py:675)); `secondary_chars` is populated in
+([cinema/shots/controller.py:694](cinema/shots/controller.py:694)); `secondary_chars` is populated in
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:504](phase_c_assembly.py:504)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:439](phase_c_assembly.py:439)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:577](phase_c_assembly.py:577)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:512](phase_c_assembly.py:512)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:460](phase_c_assembly.py:460)) emits per-character `@ImageN PRESERVE` blocks with a
@@ -1629,7 +1660,7 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:603`; call at :854) and `diagnose_clip`
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:628`; call at :854) and `diagnose_clip`
   (`cinema/shots/controller.py:2325`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`

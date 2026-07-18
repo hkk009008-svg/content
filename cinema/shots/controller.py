@@ -338,6 +338,7 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     from cinema.shots.strategy import (
         IdentityStrategy, CharIdentitySpec,
         PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
+        GEMINI_MULTIREF_PRIMARY_ONLY, GEMINI_MULTIREF_MULTI_CHAR,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
@@ -359,36 +360,60 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             unconditioned_chars=list(in_frame),
         )
 
+    # WS3: identity_backend='gemini_multiref' routes the primary through
+    # Nano Banana's multi-reference binding (identity from reference images,
+    # not a PuLID graph) — tag the spec's fidelity accordingly so downstream
+    # validation/telemetry can distinguish it from the production 'reference'
+    # (PuLID) mechanism. Any other value (including unset/'pod') keeps the
+    # existing production behavior byte-for-byte.
+    is_gemini_multiref = settings.get("identity_backend") == "gemini_multiref"
+    primary_fidelity = "gemini_multiref" if is_gemini_multiref else "reference"
+
     conditioned = [CharIdentitySpec(
         char_id=primary_char_id, reference=primary_ref,
         identity_anchor=cc.get("identity_anchor", ""),
         multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
         # WS1: the max tier is retired — every shot conditions the primary via
-        # the production PuLID graph (ApplyPulidFlux) and is tagged "reference".
-        fidelity="reference",
+        # the production PuLID graph (ApplyPulidFlux) and is tagged "reference"
+        # — UNLESS the WS3 gemini_multiref backend is selected (see above).
+        fidelity=primary_fidelity,
     )]
     conditioned_ids = {primary_char_id}
 
     # WS1: single identity-derivation path for every tier — the max-tier
     # per-secondary LoRA fork (fidelity="lora" + MAX_TIER_* tags) was retired
-    # with quality_max.py. WS3 (FLUX.2 A/B) will add a gemini_multiref branch
-    # onto this clean single-branch shape (plan Rule #13 note).
+    # with quality_max.py. WS3 grafts a gemini_multiref branch onto this clean
+    # single-branch shape (plan Rule #13 note) — NOT the deferred, separate
+    # FLUX.2 A/B track.
     if secondary:
-        # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
-        for entry in secondary[:2]:
+        if is_gemini_multiref:
+            # Nano Banana budgets REFERENCE IMAGES, not characters — cap the
+            # combined primary+secondary character count against the shared
+            # GEMINI_MULTIREF_MAX_REFS ceiling (1 slot already spent on the
+            # primary) instead of the Kontext-tier flat 2-secondary cap, which
+            # doesn't apply to this mechanism.
+            from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
+            secondary_cap = max(0, GEMINI_MULTIREF_MAX_REFS - 1)
+        else:
+            # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
+            secondary_cap = 2
+        for entry in secondary[:secondary_cap]:
             conditioned.append(CharIdentitySpec(
                 char_id=entry["char_id"], reference=entry["reference"],
                 identity_anchor=entry.get("identity_anchor", ""),
                 # V-5: without this, the Task-7 allocator's
                 # entry.get("multi_angle_refs") is ALWAYS empty via this path
-                # and secondaries can never fill their 2 slots.
+                # and secondaries can never fill their slots.
                 multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity="reference",
+                fidelity=primary_fidelity,
             ))
             conditioned_ids.add(entry["char_id"])
-        tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
+        if is_gemini_multiref:
+            tag = GEMINI_MULTIREF_MULTI_CHAR if len(conditioned) > 1 else GEMINI_MULTIREF_PRIMARY_ONLY
+        else:
+            tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
     else:
-        tag = PRIMARY_ONLY
+        tag = GEMINI_MULTIREF_PRIMARY_ONLY if is_gemini_multiref else PRIMARY_ONLY
 
     return IdentityStrategy(
         mechanism_tag=tag,
@@ -798,6 +823,11 @@ class ShotController:
             # This records EMISSION, not server honoring; S1 + per-char
             # validation cover the latter.
             actual = "FLUX_KONTEXT_MULTI_CHAR"
+        elif actual == "GEMINI_IMAGE" and strategy.secondary_specs:
+            # WS3 analog of the FLUX_KONTEXT derivation above: a successful
+            # Nano Banana call also looks identical for multi-char vs
+            # primary-only at the api_name level.
+            actual = "GEMINI_IMAGE_MULTI_CHAR"
         take["metadata"]["mechanism_actually_used"] = actual
 
         identity_score = 0.0
@@ -825,7 +855,12 @@ class ShotController:
             # operator-facing review can read failure cause and a suggested
             # PuLID weight delta from the take metadata.
             char_diag = id_result.character_results.get(primary_char_id)
-            if char_diag and not id_result.passed:
+            # A PuLID-weight suggestion is meaningless for a Nano-Banana take —
+            # there is no PuLID node in that generation path to adjust.
+            # result.api_name is the RAW backend name from ImageGenResult
+            # ("GEMINI_IMAGE"); the "_MULTI_CHAR" suffix only ever appears on
+            # the derived `actual` local above, never on result.api_name itself.
+            if char_diag and not id_result.passed and result.api_name not in ("GEMINI_IMAGE",):
                 take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
                 take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
                 # T6: deterministic remediation advisory (pure; advisory-only).

@@ -533,6 +533,12 @@ class TestRecordAPICall:
         # before "VEO" in _provider_map's insertion order (cost_tracker.py)
         # so a future bare "GEMINI" catch-all can't shadow it either.
         ("GEMINI_OMNI", "google"),
+        # GEMINI_IMAGE (WS3 Google-first, 2026-07-18): gemini-2.5-flash-image
+        # (Nano Banana), Gemini Developer API only — same "google" bucket as
+        # GEMINI_OMNI/VEO_NATIVE, not fal. This is the exact assertion shape
+        # that would have caught the money_loss_gate_source_mismatch_bug_class
+        # precedent (1591a76a) had it existed then for the video cascade.
+        ("GEMINI_IMAGE", "google"),
         ("TOTALLY_UNKNOWN_API_XYZ", "unknown"),
     ])
     def test_record_api_call_provider_derivation(self, cost_tracker, api_name, expected_provider):
@@ -570,6 +576,7 @@ class TestRecordAPICall:
         ("FLUX_PRO",      "fal"),           # FAL last-resort
         ("FLUX_SCHNELL",  "fal"),           # FAL fast fallback
         ("POLLINATIONS",  "pollinations"),  # free fallback
+        ("GEMINI_IMAGE",  "google"),        # WS3 Nano Banana — Gemini-native, not FAL
     ])
     def test_image_backend_provider_provenance(self, cost_tracker, api_name, expected_provider):
         cost_tracker.record_api_call(api_name, operation="keyframe_generation")
@@ -586,6 +593,24 @@ class TestRecordAPICall:
             assert name in API_COST_USD, f"{name} missing from API_COST_USD"
         assert API_COST_USD["COMFYUI_PULID"] > 0.0   # pod GPU time isn't free
         assert API_COST_USD["POLLINATIONS"] == 0.0   # pollinations is free
+
+    def test_gemini_image_priced_and_attributed_not_zero_or_unknown(self, cost_tracker):
+        """WS3 (2026-07-18): GEMINI_IMAGE must attribute provider=='google'
+        (not 'unknown') and cost_usd==API_COST_USD['GEMINI_IMAGE'] (not 0.0)
+        — the exact assertion shape that would have caught the
+        money_loss_gate_source_mismatch_bug_class precedent (1591a76a) had it
+        existed then for the video cascade; load-bearing, not decorative."""
+        assert "GEMINI_IMAGE" in API_COST_USD
+        assert API_COST_USD["GEMINI_IMAGE"] > 0.0
+        cost = cost_tracker.record_api_call("GEMINI_IMAGE", operation="keyframe_generation")
+        assert cost == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
+        row = cost_tracker.conn.execute(
+            "SELECT provider, cost_usd FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["provider"] == "google"
+        assert row["provider"] != "unknown"
+        assert row["cost_usd"] == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
+        assert row["cost_usd"] != 0.0
 
 
 class TestRecordAPICallAudioTracking:

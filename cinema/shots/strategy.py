@@ -2,11 +2,14 @@
 
 The router (cinema/shots/controller.py::_resolve_identity_strategy) emits one
 IdentityStrategy per keyframe take BEFORE generation; the validator and the
-capability scorecard hold generation accountable to it. Only tags whose
-mechanism is implemented are ever emitted: PRIMARY_ONLY, KONTEXT_MULTI_CHAR,
-NO_IDENTITY_ASSET. The MAX_TIER_* tags were retired with the max image-gen
-tier (WS1); the per-character LoRA fields below are kept dormant for the
-future FLUX.2 A/B (WS3).
+capability scorecard hold generation accountable to it. Tags whose mechanism
+is implemented: PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET (single
+production tier, WS1), and GEMINI_MULTIREF_PRIMARY_ONLY /
+GEMINI_MULTIREF_MULTI_CHAR (Nano Banana multi-reference identity, WS3). The
+MAX_TIER_* tags were retired with the max image-gen tier (WS1); the
+per-character LoRA fields below are kept dormant for a possible future
+FLUX.2 A/B — a separate, deferred track, NOT this WS3 (which binds identity
+via Gemini reference images, not LoRA).
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -14,6 +17,8 @@ from typing import List, Optional
 PRIMARY_ONLY = "PRIMARY_ONLY"
 KONTEXT_MULTI_CHAR = "KONTEXT_MULTI_CHAR"
 NO_IDENTITY_ASSET = "NO_IDENTITY_ASSET"
+GEMINI_MULTIREF_PRIMARY_ONLY = "GEMINI_MULTIREF_PRIMARY_ONLY"
+GEMINI_MULTIREF_MULTI_CHAR = "GEMINI_MULTIREF_MULTI_CHAR"
 
 
 @dataclass(frozen=True)
@@ -27,7 +32,9 @@ class CharIdentitySpec:
     multi_angle_refs: tuple = ()
     # P1-1 slice 2 (§3b): per-char LoRA assets — formerly populated on the max
     # tier for registered-LoRA secondaries (retired WS1). The router now leaves
-    # them None on every spec; kept dormant for the future FLUX.2 A/B (WS3).
+    # them None on every spec (including the WS3 gemini_multiref branch, which
+    # binds identity via reference images, not LoRA); kept dormant for a
+    # possible future FLUX.2 A/B — deferred, tracked separately from WS3.
     lora_path: Optional[str] = None
     lora_strength: Optional[float] = None
     # The PRIMARY's trigger rides IdentityStrategy.char_lora_trigger (the

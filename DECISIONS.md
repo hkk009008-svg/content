@@ -3206,9 +3206,11 @@ Evidence:
   MAX_TIER fork → all shots now tag `fidelity="reference"`). **PRESERVE the per-character
   LoRA-training subsystem (`prep/lora_training.py`, `prep/lora_quality.py`,
   `web_server.api_train_lora`, the `char_lora_paths` write path) DORMANT** — it is the
-  dual-character binding lever (ADR-024 / man 0.870) the future FLUX.2 A/B (WS3) will
-  reconnect; its consumer is removed, its producer and the threaded `char_lora_*` kwargs
-  stay (proven live by `test_..._threads_lora_kwargs_dormant`).
+  dual-character binding lever (ADR-024 / man 0.870) a possible future FLUX.2 A/B could
+  reconnect (a separate, deferred track — WS3 shipped Nano Banana / `gemini_multiref`
+  instead, which binds identity via reference images, not LoRA); its consumer is
+  removed, its producer and the threaded `char_lora_*` kwargs stay (proven live by
+  `test_..._threads_lora_kwargs_dormant`).
 - **Consequences.**
   - +: One image tier, ~2,000 LOC + 6 custom node packs removed, no opt-in path that
     over-cooks. Production identity is UNCHANGED — `pulid.json` still runs `ApplyPulidFlux`

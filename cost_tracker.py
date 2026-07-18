@@ -77,6 +77,7 @@ API_COST_USD: dict[str, float] = {
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
     "HIDREAM_I1":    0.06,
+    "GEMINI_IMAGE":  0.03,   # gemini-2.5-flash-image (Nano Banana); Google model-card math ($30/1M output tok x ~1290 tok/img) computes ~$0.039/img — using 0.03 per brief, recalibrate against invoice
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
     "CARTESIA_SONIC_2":  0.008,   # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
@@ -429,6 +430,7 @@ class CostTracker:
             "SORA_2": "fal",        # fal-ai/sora-2 — before "SORA"→openai
             "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
             "GEMINI_OMNI": "google",  # Gemini Developer API only (not on Vertex yet) — shares the "google" cost-log bucket with VEO_NATIVE
+            "GEMINI_IMAGE": "google",  # gemini-2.5-flash-image (Nano Banana) — Gemini Developer API only, same "google" bucket
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",

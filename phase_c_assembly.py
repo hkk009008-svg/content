@@ -21,9 +21,9 @@ class ImageGenResult(NamedTuple):
 
     ``path`` is the saved image (equals ``output_filename`` on success);
     ``api_name`` is the cost_tracker API key for the backend that ACTUALLY ran
-    (``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` | ``FLUX_SCHNELL`` |
-    ``POLLINATIONS``; ``QUALITY_MAX`` was retired WS1 Task 4 along with
-    quality_max.py). Callers record ``api_name`` so cost_log reflects where the
+    (``GEMINI_IMAGE`` | ``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` |
+    ``FLUX_SCHNELL`` | ``POLLINATIONS``; ``QUALITY_MAX`` was retired WS1 Task 4
+    along with quality_max.py). Callers record ``api_name`` so cost_log reflects where the
     image was really generated (pod vs FAL), not a tier-based guess. Backends
     return ``None`` (not this type) on failure, so the caller's ``if not
     result`` success guard is preserved (a 2-field NamedTuple is always
@@ -103,9 +103,12 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        pulid_weight_override=None, negative_prompt="",
                        quality_tier="production",
                        # char_lora_path/strength/trigger, style_reference, shot_hint:
-                       # reserved — dormant until the FLUX.2 A/B (WS3) rewires. Threaded
-                       # from the controller (cinema/shots/controller.py) but unconsumed
-                       # now that the max-tier dispatch below is gone — WS1 retired
+                       # reserved — dormant, kept for a possible future FLUX.2 A/B (a
+                       # separate, deferred track — NOT WS3, which shipped Nano Banana
+                       # / gemini_multiref instead and binds identity via reference
+                       # images, not LoRA). Threaded from the controller
+                       # (cinema/shots/controller.py) but unconsumed now that the
+                       # max-tier dispatch below is gone — WS1 retired
                        # quality_tier=="max" (ADR-024: the max graph over-cooks
                        # structurally; production/pulid.json is the validated survivor).
                        # Kept, not dead code. (secondary_char_refs stays LIVE below — it
@@ -120,9 +123,12 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     Generates a cinematic image with face-identity preservation.
 
     Priority chain (production — the only tier since WS1's max-tier retirement):
-    1. fal.ai FLUX Kontext (identity-preserving, no local GPU needed)
-    2. ComfyUI + PuLID on RunPod (if models are available)
-    3. fal.ai FLUX-Pro (no face-lock, last resort)
+    0. Gemini 2.5 Flash Image (Nano Banana, when identity_backend != pod)
+    1. ComfyUI + PuLID (pod)
+    2. FLUX Kontext
+    3. FLUX-Pro
+    4. FLUX-Schnell
+    5. Pollinations
 
     Args:
         prompt: Image generation prompt (enhanced by continuity engine)
@@ -134,20 +140,25 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         characters: List of character config dicts
         quality_tier: informational only (WS1 retired the "max" fork below —
             pulid.json/ComfyUI production is now the only pipeline).
-        char_lora_path: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
-        char_lora_trigger: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
+        char_lora_path: reserved — dormant, kept for a possible future FLUX.2
+            A/B (separate, deferred track — not WS3).
+        char_lora_trigger: reserved — dormant, kept for a possible future
+            FLUX.2 A/B (separate, deferred track — not WS3).
         secondary_char_refs: P1-1 slice 1: additional character entries forwarded
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
-        style_reference: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
-        shot_hint: reserved — dormant until the FLUX.2 A/B (WS3) rewires.
+        style_reference: reserved — dormant, kept for a possible future FLUX.2
+            A/B (separate, deferred track — not WS3).
+        shot_hint: reserved — dormant, kept for a possible future FLUX.2 A/B
+            (separate, deferred track — not WS3).
 
     Returns:
         ImageGenResult(path, api_name) naming the backend that actually ran
-        (COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL | POLLINATIONS),
-        or None if every backend failed. Callers record ``api_name`` for cost
-        attribution so a pod generation is distinguishable from a FAL fallback
-        in cost_log.
+        (GEMINI_IMAGE | COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL
+        | POLLINATIONS), or None if every backend failed. Callers record
+        ``api_name`` for cost attribution so a pod generation is
+        distinguishable from a FAL fallback (and both from a Gemini-native
+        generation) in cost_log.
     """
 
     mode = "img2img" if init_image else "txt2img"
@@ -158,6 +169,68 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # get_project_setting is a safe dict lookup with a default (never raises,
     # handles ctx=None), so it is safe to call here outside the try block.
     aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
+    # ----- PRIORITY 0: Gemini 2.5 Flash Image (Nano Banana, WS3) -----
+    # Google-first overhaul: only engages when a project explicitly opts into
+    # identity_backend='gemini_multiref' (default stays 'pod' — zero behavior
+    # change for every project that hasn't opted in). This block NEVER raises
+    # and NEVER returns None — a missing key, a generation failure, or a
+    # failed identity check all fall through into the existing PRIORITY-1 pod
+    # logic below untouched (silent-gate-degradation discipline: fall through
+    # loudly via prints, not silently).
+    identity_backend = get_project_setting(ctx, "identity_backend", "pod")
+    if (
+        (settings.google_api_key or settings.gemini_api_key)
+        and character_image
+        and os.path.exists(character_image)
+        and identity_backend != "pod"
+    ):
+        try:
+            from gemini_image_native import GeminiImageAPI
+            gemini_secondary_refs = [
+                sc.get("reference") for sc in (secondary_char_refs or []) if sc.get("reference")
+            ]
+            gemini_path = GeminiImageAPI().generate_image(
+                prompt,
+                output_filename,
+                character_image=character_image,
+                multi_angle_refs=multi_angle_refs,
+                secondary_char_refs=gemini_secondary_refs,
+                aspect_ratio=aspect_ratio,
+                negative_prompt=negative_prompt,
+            )
+            if gemini_path:
+                from phase_c_vision import _get_shared_validator
+                _chars_in_frame = (shot_hint or {}).get("characters_in_frame") or []
+                id_result = _get_shared_validator().validate_image(
+                    gemini_path, character_image,
+                    character_id=_chars_in_frame[0] if _chars_in_frame else "",
+                    threshold=get_project_setting(ctx, "identity_strictness", None),
+                )
+                if id_result.passed:
+                    print(f"   [PHASE C] Gemini 2.5 Flash Image (Nano Banana) passed identity "
+                          f"check (score={id_result.overall_score}): '{prompt[:60]}...'")
+                    return ImageGenResult(output_filename, "GEMINI_IMAGE")
+                print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
+                      f"falling back to the pod/FAL cascade")
+                try:
+                    os.makedirs("logs", exist_ok=True)
+                    with open("logs/gemini_image_arc_comparison.jsonl", "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.time(),
+                            "prompt": prompt[:200],
+                            "output_filename": output_filename,
+                            "character_image": character_image,
+                            "characters_in_frame": _chars_in_frame,
+                            "gemini_score": id_result.overall_score,
+                            "threshold": id_result.threshold_used,
+                        }) + "\n")
+                except Exception:
+                    pass  # comparison log is best-effort telemetry, never load-bearing
+            else:
+                print("   [GEMINI-IMAGE] Generation returned no image; falling back to the pod/FAL cascade")
+        except Exception as e:
+            print(f"   [GEMINI-IMAGE] PRIORITY-0 block failed ({e}); falling back to the pod/FAL cascade")
 
     # ----- Backend selection (PRIORITY order) -----
     # The previous implementation relied on a confusing if/elif/else where

@@ -4,14 +4,17 @@ Tasks 5 and 6 will extend this file with router (_resolve_identity_strategy) tes
 """
 import json
 import os
+from unittest.mock import MagicMock
 
 import pytest
 
 from cinema.shots.strategy import (
     IdentityStrategy, CharIdentitySpec,
     PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
+    GEMINI_MULTIREF_PRIMARY_ONLY, GEMINI_MULTIREF_MULTI_CHAR,
 )
 from cinema.shots.controller import _resolve_identity_strategy
+from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
 
 SETTINGS_NO_LORA = {"quality_tier": "production"}
 CC_TWO_REGISTERED = {
@@ -137,6 +140,86 @@ def test_kontext_secondary_cap_is_two():
                                    "production", SETTINGS_NO_LORA, cc)
     assert len(s.conditioned_chars) == 3          # primary + 2 (Kontext-tier cap)
     assert s.unconditioned_chars == ["char_d"]
+
+
+# ---------------------------------------------------------------------------
+# WS3: identity_backend='gemini_multiref' branch (Nano Banana)
+# ---------------------------------------------------------------------------
+
+SETTINGS_GEMINI_MULTIREF = {"quality_tier": "production", "identity_backend": "gemini_multiref"}
+
+
+def test_gemini_multiref_single_char_is_primary_only_with_gemini_fidelity():
+    s = _resolve_identity_strategy(_shot(["char_a"]), "production",
+                                   SETTINGS_GEMINI_MULTIREF, CC_PRIMARY_ONLY)
+    assert s.mechanism_tag == GEMINI_MULTIREF_PRIMARY_ONLY
+    assert s.mechanism_tag not in (PRIMARY_ONLY, KONTEXT_MULTI_CHAR)
+    assert s.conditioned_chars[0].fidelity == "gemini_multiref"
+
+
+def test_gemini_multiref_two_char_is_multi_char_with_gemini_fidelity():
+    s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "production",
+                                   SETTINGS_GEMINI_MULTIREF, CC_TWO_REGISTERED)
+    assert s.mechanism_tag == GEMINI_MULTIREF_MULTI_CHAR
+    assert s.mechanism_tag != KONTEXT_MULTI_CHAR
+    assert [c.char_id for c in s.conditioned_chars] == ["char_a", "char_b"]
+    # Both primary AND secondary are tagged gemini_multiref — the whole call
+    # is one Nano Banana multi-reference request, not a mixed mechanism.
+    assert all(c.fidelity == "gemini_multiref" for c in s.conditioned_chars)
+
+
+def test_gemini_multiref_secondary_cap_is_not_the_kontext_flat_two():
+    """The Kontext-tier flat `secondary[:2]` cap must NOT apply under
+    gemini_multiref — a combined primary+secondary budget against
+    GEMINI_MULTIREF_MAX_REFS applies instead (1 slot reserved for primary)."""
+    cc = dict(CC_TWO_REGISTERED)
+    # 10 secondaries — comfortably over both the Kontext cap (2) and the
+    # gemini budget (GEMINI_MULTIREF_MAX_REFS - 1), so this discriminates
+    # the two truncation policies unambiguously.
+    all_ids = [f"char_{i}" for i in range(10)]
+    cc["secondary_chars"] = [
+        {"char_id": cid, "reference": f"/r/{cid}.jpg",
+         "multi_angle_refs": [], "identity_anchor": ""} for cid in all_ids
+    ]
+    shot_chars = ["char_a"] + all_ids
+    s = _resolve_identity_strategy(_shot(shot_chars), "production",
+                                   SETTINGS_GEMINI_MULTIREF, cc)
+
+    expected_secondary_cap = GEMINI_MULTIREF_MAX_REFS - 1
+    assert expected_secondary_cap != 2, "test is only discriminating if the budgets differ"
+    assert len(s.conditioned_chars) == 1 + expected_secondary_cap
+    assert len(s.unconditioned_chars) == len(all_ids) - expected_secondary_cap
+    assert s.mechanism_tag == GEMINI_MULTIREF_MULTI_CHAR
+
+
+def test_gemini_multiref_no_secondary_is_primary_only():
+    s = _resolve_identity_strategy(_shot(["char_a"]), "production",
+                                   SETTINGS_GEMINI_MULTIREF,
+                                   {"primary_reference": "/r/a.jpg",
+                                    "identity_anchor": "anchor a", "secondary_chars": []})
+    assert s.mechanism_tag == GEMINI_MULTIREF_PRIMARY_ONLY
+
+
+def test_default_settings_unaffected_by_gemini_branch_addition():
+    """Regression guard: settings with NO identity_backend key (the default,
+    every project prior to WS3) must still produce exactly today's
+    PRIMARY_ONLY / KONTEXT_MULTI_CHAR / fidelity='reference' behavior."""
+    s_single = _resolve_identity_strategy(_shot(["char_a"]), "production",
+                                          SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
+    assert s_single.mechanism_tag == PRIMARY_ONLY
+    assert s_single.conditioned_chars[0].fidelity == "reference"
+
+    s_multi = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "production",
+                                         SETTINGS_NO_LORA, CC_TWO_REGISTERED)
+    assert s_multi.mechanism_tag == KONTEXT_MULTI_CHAR
+    assert all(c.fidelity == "reference" for c in s_multi.conditioned_chars)
+
+    # identity_backend explicitly set to something other than gemini_multiref
+    # (e.g. the future default 'pod') must ALSO keep production behavior.
+    s_pod = _resolve_identity_strategy(_shot(["char_a"]), "production",
+                                       {"identity_backend": "pod"}, CC_PRIMARY_ONLY)
+    assert s_pod.mechanism_tag == PRIMARY_ONLY
+    assert s_pod.conditioned_chars[0].fidelity == "reference"
 
 
 def test_no_chars_or_no_primary_ref_is_no_identity_asset():
@@ -531,3 +614,148 @@ def test_two_char_max_input_threads_lora_kwargs_dormant(
     assert "char_a" in per_char
     assert "char_b" in per_char
     assert "char_c" not in per_char
+
+
+# ---------------------------------------------------------------------------
+# WS3: GEMINI_IMAGE mechanism_actually_used derivation + suggested_pulid_
+# adjustment guard (controller.py, symmetric coverage to the FLUX_KONTEXT_
+# MULTI_CHAR derivation exercised above).
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def captured_gemini(monkeypatch, tmp_path):
+    """Like `captured`, but the fake generate_ai_broll reports GEMINI_IMAGE —
+    exercises the WS3 mechanism_actually_used branch instead of FLUX_KONTEXT."""
+    box = {}
+
+    def fake_broll(prompt, output_filename, **kwargs):
+        box["kwargs"] = kwargs
+        open(output_filename, "wb").close()  # satisfy the exists() guard
+        from phase_c_assembly import ImageGenResult
+        return ImageGenResult(output_filename, "GEMINI_IMAGE")
+
+    monkeypatch.setattr("cinema.shots.controller.generate_ai_broll", fake_broll)
+    return box
+
+
+@pytest.fixture
+def _stub_validator_failing(monkeypatch):
+    """Identity check FAILS for the primary char — exercises the
+    identity_failure_reason/suggested_pulid_adjustment code path (and its
+    GEMINI_IMAGE exemption guard). Distinct from `_stub_validator`, which
+    hardcodes passed=True and so never reaches that code path at all."""
+
+    class _FakeCharDiag:
+        def __init__(self):
+            self.primary_failure_reason = MagicMock(value="LOW_SIMILARITY")
+            self.suggested_pulid_adjustment = 0.10
+
+    class _FakeValidateResult:
+        def __init__(self):
+            self.overall_score = 0.30
+            self.passed = False
+            self.character_results = {"char_a": _FakeCharDiag()}
+
+    class _FakeValidator:
+        def validate_image(self, *args, **kwargs):
+            return _FakeValidateResult()
+
+    monkeypatch.setattr("phase_c_vision._get_shared_validator", lambda: _FakeValidator())
+
+
+def _build_gemini_project_host(tmp_path, monkeypatch, secondary_chars, characters_in_frame):
+    """Like the controller_two_chars/controller_one_char fixtures, but with
+    global_settings.identity_backend='gemini_multiref' — mirrors
+    _build_host + the project.json disk-write dance those fixtures do."""
+    proj_root = str(tmp_path / "projects")
+    os.makedirs(proj_root, exist_ok=True)
+    host = _build_host(tmp_path, secondary_chars=secondary_chars,
+                       characters_in_frame=characters_in_frame)
+    host._core.project["global_settings"]["identity_backend"] = "gemini_multiref"
+    project = host._core.project
+    proj_dir = os.path.join(proj_root, project["id"])
+    os.makedirs(proj_dir, exist_ok=True)
+    with open(os.path.join(proj_dir, "project.json"), "w") as f:
+        json.dump(project, f)
+    monkeypatch.setattr(dpm, "PROJECTS_DIR", proj_root)
+    return host._shot_ctrl
+
+
+def test_gemini_image_multi_char_mechanism_derived_from_secondary_specs(
+        tmp_path, monkeypatch, captured_gemini, _stub_validator):
+    """Symmetric to test_two_char_take_promises_kontext_multi_and_forwards_refs's
+    FLUX_KONTEXT_MULTI_CHAR pin: a successful GEMINI_IMAGE call with secondary
+    specs present must derive mechanism_actually_used == GEMINI_IMAGE_MULTI_CHAR
+    (not be left as the backend-granular, char-count-blind 'GEMINI_IMAGE')."""
+    secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
+    controller = _build_gemini_project_host(
+        tmp_path, monkeypatch, secondary_chars=secondary,
+        characters_in_frame=["char_a", "char_b", "char_c"],
+    )
+
+    controller.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller, "shot_1")
+
+    md = take["metadata"]["identity_strategy"]
+    assert md["mechanism_tag"] == GEMINI_MULTIREF_MULTI_CHAR
+    assert take["metadata"]["mechanism_actually_used"] == "GEMINI_IMAGE_MULTI_CHAR"
+
+
+def test_gemini_image_primary_only_mechanism_not_multi_char(
+        tmp_path, monkeypatch, captured_gemini, _stub_validator):
+    """Control: with NO secondary specs, a successful GEMINI_IMAGE call keeps
+    the raw backend-granular name — the _MULTI_CHAR derivation must be
+    conditioned on strategy.secondary_specs, not fire unconditionally."""
+    controller = _build_gemini_project_host(
+        tmp_path, monkeypatch, secondary_chars=[], characters_in_frame=["char_a"],
+    )
+
+    controller.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller, "shot_1")
+
+    assert take["metadata"]["identity_strategy"]["mechanism_tag"] == GEMINI_MULTIREF_PRIMARY_ONLY
+    assert take["metadata"]["mechanism_actually_used"] == "GEMINI_IMAGE"
+
+
+def test_suggested_pulid_adjustment_absent_for_gemini_image_even_on_identity_fail(
+        tmp_path, monkeypatch, captured_gemini, _stub_validator_failing):
+    """A PuLID-weight suggestion is meaningless for a Nano-Banana take: even
+    when the identity check FAILS, GEMINI_IMAGE takes must carry neither
+    identity_failure_reason nor suggested_pulid_adjustment in metadata."""
+    controller = _build_gemini_project_host(
+        tmp_path, monkeypatch, secondary_chars=[], characters_in_frame=["char_a"],
+    )
+
+    controller.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller, "shot_1")
+
+    assert take["metadata"]["mechanism_actually_used"] == "GEMINI_IMAGE"
+    assert take["metadata"]["identity_score"] == pytest.approx(0.30)  # the fail DID score
+    assert "suggested_pulid_adjustment" not in take["metadata"]
+    assert "identity_failure_reason" not in take["metadata"]
+    assert "remediation_advisory" not in take["metadata"]
+
+
+def test_suggested_pulid_adjustment_present_for_flux_kontext_identity_fail(
+        tmp_path, monkeypatch, captured, _stub_validator_failing):
+    """Control for the guard above: a non-Gemini (FLUX_KONTEXT) take with a
+    failing identity check keeps today's behavior — the fields ARE written.
+    Without this control, the absence test could pass for the wrong reason
+    (e.g. a typo'd metadata key that's never written for ANY backend)."""
+    proj_root = str(tmp_path / "projects")
+    os.makedirs(proj_root, exist_ok=True)
+    host = _build_host(tmp_path, secondary_chars=[], characters_in_frame=["char_a"])
+    project = host._core.project
+    proj_dir = os.path.join(proj_root, project["id"])
+    os.makedirs(proj_dir, exist_ok=True)
+    with open(os.path.join(proj_dir, "project.json"), "w") as f:
+        json.dump(project, f)
+    monkeypatch.setattr(dpm, "PROJECTS_DIR", proj_root)
+
+    host._shot_ctrl.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(host._shot_ctrl, "shot_1")
+
+    assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT"
+    assert take["metadata"]["suggested_pulid_adjustment"] == pytest.approx(0.10)
+    assert take["metadata"]["identity_failure_reason"] == "LOW_SIMILARITY"
