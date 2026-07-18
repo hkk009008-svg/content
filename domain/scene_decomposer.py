@@ -41,6 +41,7 @@ API_REGISTRY = {
     "KLING_NATIVE":  {"label": "Kling Native (legacy v1.6)", "category": "native", "description": "Legacy kling-v1-6 JWT route — fallback-only since 2026-07-11; kept as the proven pre-v3 identity path", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "style_locked_sequence"], "per_shot_cost": 0.50, "quality_score": 0.80, "latency_s": 90, "status": "live"},
     "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Best motion physics — body momentum, cloth sim (OpenAI retires Sora 2 + Videos API 2026-09-24)", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
     "VEO_NATIVE":    {"label": "Veo 3.1 Native",       "category": "native",    "description": "Native audio + reference images, 1080p", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "establishing_shot"], "per_shot_cost": 0.40, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
+    "GEMINI_OMNI":   {"label": "Gemini Omni Flash (Preview)", "category": "native", "description": "Google Gemini Developer API native video — Google-first primary per WS2; PREVIEW-tier (no SLA per Google Cloud's standing launch-stage policy), Gemini-API billing only (not on Vertex yet)", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "static_portrait", "action_motion", "establishing_shot"], "per_shot_cost": 0.56, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
     "RUNWAY_GEN4":   {"label": "Runway Gen-4",         "category": "native",    "description": "Style lock with 3 references, turbo preview", "modality": "video", "best_for": ["style_locked_sequence", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.82, "latency_s": 75, "status": "live"},
     "LTX":           {"label": "LTX Video 2.3",        "category": "native",    "description": "4K, keyframe interpolation, cheapest per second (~$0.06/s @1080p; 6s minimum on fal 2.3)", "modality": "video", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.36, "quality_score": 0.74, "latency_s": 60, "status": "live"},
 
@@ -120,11 +121,11 @@ PURPOSE_TAGS = [
 # are ordered fallbacks. The orchestrator uses these when target_api='AUTO' or
 # when a per-purpose route is explicitly requested. Edit here, not in code.
 PURPOSE_API_RANKING = {
-    "dialogue_close_up":    ["SYNC_SO_V3", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"],
-    "talking_head_full":    ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "VEO_NATIVE", "SYNC_SO_V3"],
-    "action_motion":        ["SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
-    "static_portrait":      ["KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
-    "establishing_shot":    ["LTX", "VEO_NATIVE"],
+    "dialogue_close_up":    ["SYNC_SO_V3", "GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"],
+    "talking_head_full":    ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "GEMINI_OMNI", "VEO_NATIVE", "SYNC_SO_V3"],
+    "action_motion":        ["GEMINI_OMNI", "SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
+    "static_portrait":      ["GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
+    "establishing_shot":    ["GEMINI_OMNI", "VEO_NATIVE", "LTX"],
     "macro_detail":         ["SORA_NATIVE", "SEEDANCE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
     "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE"],
     "narration":            ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO", "F5_TTS"],
@@ -160,6 +161,7 @@ BILLING_PROVIDERS = {
     "KLING_DIRECT":     ["KLING_NATIVE"],
     "OPENAI":           ["SORA_NATIVE", "OPENAI_AUDIO"],
     "GOOGLE_VERTEX":    ["VEO_NATIVE"],
+    "GOOGLE_GEMINI_API": ["GEMINI_OMNI"],
     "RUNWAY_DIRECT":    ["RUNWAY_GEN4"],
     "LTX_DIRECT":       ["LTX"],
     "ELEVENLABS":       ["ELEVENLABS_V3", "ELEVENLABS_DIALOGUE", "ELEVENLABS_MUSIC"],

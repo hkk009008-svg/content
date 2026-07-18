@@ -550,8 +550,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:435](domain/scene_decomposer.py:435)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:625](domain/scene_decomposer.py:625)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:437](domain/scene_decomposer.py:437)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:627](domain/scene_decomposer.py:627)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1129,7 +1129,7 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:23](phase_c_ffmpeg.py:23))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:24](phase_c_ffmpeg.py:24))
-- Check: `_veo_quota_blocked()` ([:60-66](phase_c_ffmpeg.py:60))
+- Check: `_veo_quota_blocked()` ([:67-73](phase_c_ffmpeg.py:67))
 - Set on 429/quota error ([:689](phase_c_ffmpeg.py:689))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 

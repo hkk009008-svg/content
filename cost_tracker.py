@@ -54,6 +54,7 @@ API_COST_USD: dict[str, float] = {
     "SORA_NATIVE":   0.80,
     "SORA_2":        0.60,
     "VEO_NATIVE":    0.30,
+    "GEMINI_OMNI":   0.56,   # $0.112/s x ~5s estimate (Gemini Developer API preview pricing — WEB-VERIFIED NOT REPO-MEASURED, confirm against a live billed call per R-MEASURE). Duration is prompt-inferred/variable on this API (no structured duration kwarg), so this flat per-clip estimate risks the exact under-billing pattern SEEDANCE needed fixing for on 2026-07-11 (see SEEDANCE_DURATIONS, phase_c_ffmpeg.py:38) — a duration-probe (ffprobe on the downloaded mp4) fix is recommended before this is load-bearing at scale, not shipped in this first pass.
     "VEO":           0.25,
     "LTX":           0.36,   # per clip: fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified
     "RUNWAY_GEN4":   0.50,
@@ -427,6 +428,7 @@ class CostTracker:
             "KLING_3_0": "fal",
             "SORA_2": "fal",        # fal-ai/sora-2 — before "SORA"→openai
             "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
+            "GEMINI_OMNI": "google",  # Gemini Developer API only (not on Vertex yet) — shares the "google" cost-log bucket with VEO_NATIVE
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",

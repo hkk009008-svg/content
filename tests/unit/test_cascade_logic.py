@@ -51,8 +51,9 @@ class TestCascadeFallbackOrder:
     def test_landscape_does_not_need_identity_api_first(self):
         """Landscape shots have no characters — identity APIs not mandatory."""
         target = WORKFLOW_TEMPLATES["landscape"]["target_api"]
-        # LTX or VEO are fine for landscape
-        assert target in {"LTX", "VEO_NATIVE", "SORA_NATIVE"}, (
+        # LTX, VEO, or GEMINI_OMNI (Google-first general-purpose primary, WS2)
+        # are all fine for landscape — none of them are identity-lock APIs.
+        assert target in {"LTX", "VEO_NATIVE", "SORA_NATIVE", "GEMINI_OMNI"}, (
             f"Landscape target_api should be a non-identity API, got {target}"
         )
 
@@ -200,29 +201,45 @@ class TestCascadeIntegration:
         """Action shots should prefer APIs with good motion handling."""
         template = WORKFLOW_TEMPLATES["action"]
         target = template["target_api"]
-        # SEEDANCE is action primary since the 2026-07-11 Sora-sunset
-        # migration (#1 AA i2v arena; Sora retires 2026-09-24).
-        assert target == "SEEDANCE", (
-            f"Action target should be SEEDANCE for motion, got {target}"
+        # GEMINI_OMNI is action primary since the 2026-07-18 google-first-overhaul
+        # (WS2) — Gemini Omni Flash is Google-first primary for every shot type.
+        # SEEDANCE (the prior primary since the 2026-07-11 Sora-sunset migration
+        # — #1 AA i2v arena; Sora retires 2026-09-24) is demoted to first fallback
+        # behind VEO_NATIVE, keeping motion-physics priority high in the cascade.
+        assert target == "GEMINI_OMNI", (
+            f"Action target should be GEMINI_OMNI (Google-first, WS2), got {target}"
         )
-        # Sora keeps the best-motion fallback slot until its shutdown.
-        assert template["video_fallbacks"][0] == "SORA_NATIVE", (
-            f"SORA_NATIVE should lead action fallbacks until the 2026-09-24 "
-            f"sunset, got {template['video_fallbacks']}"
+        assert template["video_fallbacks"][0] == "VEO_NATIVE", (
+            f"VEO_NATIVE should lead action fallbacks (Google-first, WS2), "
+            f"got {template['video_fallbacks']}"
+        )
+        assert template["video_fallbacks"][1] == "SEEDANCE", (
+            f"SEEDANCE should stay the first non-Google fallback for motion "
+            f"physics, got {template['video_fallbacks']}"
         )
 
     def test_identity_shots_use_fal_kling_v3_pro_primary(self):
-        """Portrait/medium primaries must be the fal Kling v3 Pro route, with
-        the legacy kling-v1-6 native route as FIRST fallback (2026-07-11
-        promotion — the native client silently ran kling-v1-6 for two years
-        because no test pinned the routing; this pin closes that hole)."""
+        """Portrait/medium primaries are GEMINI_OMNI since the 2026-07-18
+        google-first-overhaul (WS2) — Gemini Omni Flash is Google-first primary
+        for every shot type. The fal Kling v3 Pro route (2026-07-11 promotion)
+        stays the first non-Google fallback, with the legacy kling-v1-6 native
+        route right behind it — the native client silently ran kling-v1-6 for
+        two years because no test pinned the routing; this pin closes that hole."""
         for shot_type in ("portrait", "medium"):
             template = WORKFLOW_TEMPLATES[shot_type]
-            assert template["target_api"] == "KLING_3_0", (
-                f"{shot_type} primary should be KLING_3_0 (fal v3 Pro), "
+            assert template["target_api"] == "GEMINI_OMNI", (
+                f"{shot_type} primary should be GEMINI_OMNI (Google-first, WS2), "
                 f"got {template['target_api']}"
             )
-            assert template["video_fallbacks"][0] == "KLING_NATIVE", (
-                f"{shot_type} first fallback should be the proven legacy "
+            assert template["video_fallbacks"][0] == "VEO_NATIVE", (
+                f"{shot_type} first fallback should be VEO_NATIVE (Google-first, "
+                f"WS2), got {template['video_fallbacks']}"
+            )
+            assert template["video_fallbacks"][1] == "KLING_3_0", (
+                f"{shot_type} second fallback should be the fal v3 Pro route, "
+                f"got {template['video_fallbacks']}"
+            )
+            assert template["video_fallbacks"][2] == "KLING_NATIVE", (
+                f"{shot_type} third fallback should be the proven legacy "
                 f"KLING_NATIVE route, got {template['video_fallbacks']}"
             )

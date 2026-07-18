@@ -24,6 +24,8 @@ from identity.types import FailureReason
 
 # Valid target_api / video_fallback values accepted by the cinema pipeline.
 # Sourced from WORKFLOW_TEMPLATES + handoff §3.3 valid-api list.
+# GEMINI_OMNI added WS2 (google-first-overhaul): Google-first primary
+# (Gemini Omni Flash) is now target_api for every shot type.
 _VALID_APIS = {
     "KLING_NATIVE",
     "LTX",
@@ -32,6 +34,7 @@ _VALID_APIS = {
     "VEO_NATIVE",
     "KLING_3_0",
     "SEEDANCE",
+    "GEMINI_OMNI",
 }
 
 

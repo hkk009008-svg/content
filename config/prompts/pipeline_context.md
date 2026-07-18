@@ -11,12 +11,12 @@ ensures all components are aligned.
 
 | Shot Type | Primary API | Why | Fallback Chain |
 |-----------|------------|-----|----------------|
-| Portrait / close-up / headshot / 85mm | KLING_3_0 | Kling v3 Pro (fal): best-ranked Kling, `elements` identity binding (frontal + reference imgs) = strongest identity lock | Kling Native (legacy) → Runway Gen-4 → Seedance |
-| Medium / waist-up / 50mm / two-shot | KLING_3_0 | Kling v3 Pro (fal): good face + scene balance, `elements` binding available | Kling Native (legacy) → Runway Gen-4 → Seedance → LTX |
-| Wide / establishing / 24mm / full shot | LTX | 4K support, camera motion params, cheapest, depth-aware | Veo → Kling → Runway |
-| Action / tracking / chase / dynamic | SEEDANCE | #1 arena i2v (2026-07); multi-reference (≤9 images) binds multi-character action; Sora retires 2026-09-24 | Sora → Kling → Runway → LTX |
-| Landscape / aerial / drone / panoramic | LTX | 4K, no face needed, lowest cost, best environments | Veo → Kling |
-| Dialogue close-up / speaker to camera | VEO_NATIVE | Best base-video realism; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Kling → Seedance (silent) → overlay |
+| Portrait / close-up / headshot / 85mm | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then Kling v3 Pro identity lock | Veo 3.1 Native → Kling v3 Pro → Kling Native (legacy) → Runway Gen-4 → Seedance |
+| Medium / waist-up / 50mm / two-shot | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then Kling v3 Pro face + scene balance | Veo 3.1 Native → Kling v3 Pro → Kling Native (legacy) → Runway Gen-4 → Seedance → LTX |
+| Wide / establishing / 24mm / full shot | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then LTX for cheap 4K depth-aware environments | Veo 3.1 Native → LTX → Kling → Runway |
+| Action / tracking / chase / dynamic | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then Seedance (#1 arena i2v, 2026-07; multi-reference ≤9 images binds multi-character action; Sora retires 2026-09-24) | Veo 3.1 Native → Seedance → Sora → Kling → Runway → LTX |
+| Landscape / aerial / drone / panoramic | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then LTX (4K, no face needed, lowest cost) | Veo 3.1 Native → LTX → Kling |
+| Dialogue close-up / speaker to camera | GEMINI_OMNI | Google-first primary (WS2), native audio; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Veo 3.1 Native → Kling → Seedance (silent) → overlay |
 
 CAMERA MOTION GUIDANCE:
 - KLING_3_0 / KLING_NATIVE: zoom_in_slow, dolly_in_rapid (face-focused motions)
@@ -26,7 +26,7 @@ CAMERA MOTION GUIDANCE:
 - VEO_NATIVE: static or slow motions ONLY (cleanest lip-sync — overlay or native)
 - RUNWAY_GEN4: zoom_in_slow, static_drone (style-lock motions)
 
-COST ORDER (cheapest → most expensive, per typical clip): Veo (~$0.25-0.30) ≈ LTX (~$0.36; 6s minimum @$0.06/s) → Runway (~$0.40-0.50) → Kling (~$0.50-0.56) → Sora (~$0.60-0.80, retires 2026-09-24) → Seedance (~$1.51/5s at 720p)
+COST ORDER (cheapest → most expensive, per typical clip): Veo (~$0.25-0.30) ≈ LTX (~$0.36; 6s minimum @$0.06/s) → Runway (~$0.40-0.50) → Kling (~$0.50-0.56) ≈ Gemini Omni Flash (~$0.56/clip est., unverified — duration is prompt-inferred on this API, not a fixed kwarg, so this figure is rough) → Sora (~$0.60-0.80, retires 2026-09-24) → Seedance (~$1.51/5s at 720p)
 
 ═══════════════════════════════════════════════════════════════
 2. DIALOGUE LIP-SYNC — how dialogue scenes are handled
