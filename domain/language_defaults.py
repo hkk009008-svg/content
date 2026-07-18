@@ -10,7 +10,7 @@ from English defaults:
   - Lipsync engine priority — most are language-agnostic (audio-driven), but
     a few (MuseTalk) were trained primarily on English/Chinese and produce
     weaker results on Korean phonemes. Reorder to lead with multi-language
-    engines (Hedra C3, sync.so v3).
+    engines (sync.so v3, OmniHuman v1.5).
   - Per-purpose API ranking — for dialogue purposes, prefer engines with
     proven non-English performance.
 
@@ -31,7 +31,7 @@ video for perfect sync-by-construction. But for Korean dialogue specifically:
     voices per character for cinematic consistency.
   - Native-audio video gives no per-line delivery control (whispered, urgent,
     sarcastic). ElevenLabs v3 has 40+ delivery styles.
-  - Hedra Character-3 lipsync (Q=0.93) handles Korean phonemes well — sync
+  - sync-3 lipsync (Q=0.90) handles Korean phonemes well — sync
     quality is high enough that the two-stage approach matches native-audio.
 
 USE NATIVE-AUDIO VIDEO (Veo 3.1) WHEN:
@@ -51,7 +51,7 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["HEDRA_C3", "SYNC_SO_V3", "MUSETALK", "LATENTSYNC", "OMNIHUMAN_V1_5", "SYNC_V2"],
+        "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK", "LATENTSYNC", "OMNIHUMAN_V1_5", "SYNC_V2"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
         # Per-purpose video API picks for dialogue
@@ -68,13 +68,13 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",          # Korean voices have native prosody
         "dialogue_mode_enabled": True,            # multi-speaker Korean works well
         "forced_alignment_enabled": True,         # WhisperX has Korean wav2vec2
-        # Hedra leads (multi-language native). MuseTalk demoted (English/Chinese-trained).
-        "lipsync_engine_priority": ["HEDRA_C3", "SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK", "SYNC_V2"],
+        # sync-3 leads (multi-language native). MuseTalk demoted (English/Chinese-trained).
+        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK", "SYNC_V2"],
         "lipsync_quality_validation": True,
         # Slightly stricter gate for Korean — phoneme set is narrower so misses
         # are more obvious to native speakers
         "lipsync_validation_threshold": 0.70,
-        # For Korean dialogue close-ups, Kling 3.0 + Hedra C3 is the gold path.
+        # For Korean dialogue close-ups, Kling 3.0 + sync-3 is the gold path.
         # Veo 3.1 native-audio is a strong second when you need built-in sync.
         "dialogue_video_api": "KLING_NATIVE",
         "voice_pool_filter": ["korean_woman", "korean_man"],
@@ -92,7 +92,7 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["HEDRA_C3", "SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
+        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.70,
         "dialogue_video_api": "KLING_NATIVE",
@@ -106,7 +106,7 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
         # MuseTalk back to higher priority — its training set included Chinese
-        "lipsync_engine_priority": ["HEDRA_C3", "MUSETALK", "SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5"],
+        "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK", "LATENTSYNC", "OMNIHUMAN_V1_5"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
         "dialogue_video_api": "KLING_NATIVE",
@@ -116,13 +116,13 @@ PIPELINE_LANGUAGE_DEFAULTS = {
     },
 
     # Fallback for languages we haven't tuned individually. Multilingual ElevenLabs
-    # v3 + Hedra is universally reasonable — most failure modes only show up
+    # v3 + sync-3 is universally reasonable — most failure modes only show up
     # under native-speaker scrutiny.
     "_default": {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["HEDRA_C3", "SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
+        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
         "dialogue_video_api": "KLING_NATIVE",

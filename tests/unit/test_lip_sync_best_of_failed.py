@@ -27,12 +27,12 @@ class TestReturnBestOfFailedHelper:
         best = tmp_path / "best.tmp"
         best.write_bytes(b"video")
         out = str(tmp_path / "out.mp4")
-        candidates = [(0.5, str(best), "Hedra")]
+        candidates = [(0.5, str(best), "Aurora")]
 
         with patch("shutil.copyfile", side_effect=OSError("disk full")):
             result = lip_sync._return_best_of_failed(
                 candidates, out,
-                threshold=0.8, attempts=["Hedra"],
+                threshold=0.8, attempts=["Aurora"],
                 cascade_out=None, kind="generation",
             )
 
@@ -46,12 +46,12 @@ class TestReturnBestOfFailedHelper:
         other = tmp_path / "other.tmp"
         other.write_bytes(b"x")
         out = str(tmp_path / "out.mp4")
-        candidates = [(0.3, str(other), "Kling"), (0.5, str(best), "Hedra")]
+        candidates = [(0.3, str(other), "Kling"), (0.5, str(best), "Aurora")]
         cascade: dict = {}
 
         result = lip_sync._return_best_of_failed(
             candidates, out,
-            threshold=0.8, attempts=["Hedra", "Kling"],
+            threshold=0.8, attempts=["Aurora", "Kling"],
             cascade_out=cascade, kind="generation",
         )
 
@@ -59,9 +59,9 @@ class TestReturnBestOfFailedHelper:
         assert os.path.exists(out)                      # best copied to output
         assert not best.exists() and not other.exists() # all stashes cleaned
         md = cascade["cascade_metadata"]
-        assert md["engine"] == "Hedra"                  # highest score wins
+        assert md["engine"] == "Aurora"                  # highest score wins
         assert md["fallback"] is True
-        assert md["attempts"] == ["Hedra", "Kling"]
+        assert md["attempts"] == ["Aurora", "Kling"]
 
 
 class TestBothCallSitesUseHelper:

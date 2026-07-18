@@ -3180,3 +3180,49 @@ Evidence:
 ..                                                                       [100%]
 2 passed in 0.03s
 ```
+
+## ADR-065 — Retire the max image-gen tier; production is the only tier (LoRA training kept dormant)
+
+- **Date:** 2026-07-18
+- **Status:** Accepted; implemented on branch `google-first-overhaul` (WS1 of the
+  Google-first overhaul), commits: Task 1 `95d0f7df`(+`5c5b9eb5`), Task 2 `af84a170`
+  (+`2c7f971c`), Task 4 `267af0cd`(+`995329b9`), Task 3 `dea710e7`.
+- **Context.** Two shipped image tiers existed: `production` (`pulid.json`, 22 nodes,
+  clean sampler chain) and `max` (`pulid_max.json`, 60 nodes, N=8 best-of + SUPIR +
+  FaceDetailer + ReActor + ControlNet, driven by `quality_max.py`). **ADR-024 proved by
+  three independent probes that the max graph's over-cook is STRUCTURAL** (its hires-fix
+  re-diffusion + 28-step OptimalSteps sampler), i.e. the max tier paid large complexity
+  (6 of 7 custom node packs, ~2,000 LOC in `quality_max.py`/templates) for *negative*
+  photorealism benefit. The 2026-07 component-upgrade research (`docs/RESEARCH-2026-07-10`
+  + the two 2026-07-18 deep-research runs) reinforced that managed multi-reference models
+  (FLUX.2, Nano Banana) are the forward path for identity, not a heavier local graph. The
+  max tier was opt-in (`quality_tier` defaulted to `production`), so its blast radius was
+  a suspended opt-in, not the shipping default.
+- **Decision.** Retire the max image-gen tier entirely: delete `quality_max.py`,
+  `pulid_max.json`, `MAX_QUALITY_TEMPLATES`/`get_max_quality_params`, the max harness
+  scripts, and the 8 max-only tests; sever every `quality_tier=="max"` fork
+  (`phase_c_assembly.generate_ai_broll`, `workflow_selector`, `scene_decomposer`
+  cost-estimate, `auto_approve` composite threshold, and the `_resolve_identity_strategy`
+  MAX_TIER fork → all shots now tag `fidelity="reference"`). **PRESERVE the per-character
+  LoRA-training subsystem (`prep/lora_training.py`, `prep/lora_quality.py`,
+  `web_server.api_train_lora`, the `char_lora_paths` write path) DORMANT** — it is the
+  dual-character binding lever (ADR-024 / man 0.870) a possible future FLUX.2 A/B could
+  reconnect (a separate, deferred track — WS3 shipped Nano Banana / `gemini_multiref`
+  instead, which binds identity via reference images, not LoRA); its consumer is
+  removed, its producer and the threaded `char_lora_*` kwargs stay (proven live by
+  `test_..._threads_lora_kwargs_dormant`).
+- **Consequences.**
+  - +: One image tier, ~2,000 LOC + 6 custom node packs removed, no opt-in path that
+    over-cooks. Production identity is UNCHANGED — `pulid.json` still runs `ApplyPulidFlux`
+    (ADR-025: OFF 0.62 → ON 0.88); only the strategy TAG moved `"pulid"`→`"reference"`.
+  - +: `_resolve_identity_strategy` left single-branch so WS3's `gemini_multiref` grafts
+    cleanly (Rule #13).
+  - −: A `quality_tier="max"` request is now silently treated as production (accepted,
+    non-forking). The web UI's "Max Quality" toggle is vestigial — a tracked frontend
+    follow-up, out of WS1's Python scope.
+  - −: The dual-character LoRA path is suspended until WS3 validates a managed replacement;
+    the training half is retained so no capability is lost, only its (over-cooking) consumer.
+- **Cross-ref:** ADR-024 (over-cook is structural); ADR-025 (production PuLID validated);
+  `docs/superpowers/plans/2026-07-18-ws1-max-tier-retirement.md`;
+  `docs/superpowers/specs/2026-07-18-google-first-overhaul-design.md`; ARCHITECTURE.md §8
+  (production tier; §8.3 keeps the max-tier archaeology).

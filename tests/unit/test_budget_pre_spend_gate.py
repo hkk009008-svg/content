@@ -499,18 +499,23 @@ class TestPerformancePreSpendBudgetGate:
         ctrl, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
         ctrl._host._ensure_scene_audio.return_value = str(audio)
         tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.00)
-        tracker.spent_usd = 0.70
+        # WS4: Hedra removed from Mode-B (2026-07-18) — the pre-spend gate's
+        # driving-cost estimate now uses the sole surviving engine (sadtalker,
+        # $0.02 base + $0.005/s), so 0.71 spent is the smallest bump that still
+        # pushes ACT_ONE (0.25) + sadtalker driving (0.045 @ 5s) = 0.295 over
+        # the $1.00 cap (0.71 + 0.295 = 1.005 > 1.00).
+        tracker.spent_usd = 0.71
         ctrl._core.cost_tracker = tracker
 
         def _synth(**kwargs):
             driving.write_bytes(b"fake_driving")
             tracker.log_api(
-                provider="hedra",
+                provider="sadtalker",
                 model="driving_face",
                 operation="performance_capture_driving",
-                cost_usd=0.30,  # matches estimate_driving_face_cost('hedra', 5s) since 2026-07-11
+                cost_usd=0.045,  # matches estimate_driving_face_cost('sadtalker', 5s)
             )
-            return str(driving), "hedra"
+            return str(driving), "sadtalker"
 
         def _dispatch(*args, **kwargs):
             output = kwargs["output_mp4"]
@@ -536,7 +541,7 @@ class TestPerformancePreSpendBudgetGate:
             synth.assert_not_called()
             dispatch.assert_not_called()
             lifecycle.pause.assert_called_once()
-            assert tracker.spent_usd == pytest.approx(0.70)
+            assert tracker.spent_usd == pytest.approx(0.71)
             assert not driving.exists()
         finally:
             tracker.close()

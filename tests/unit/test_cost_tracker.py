@@ -498,7 +498,7 @@ class TestRecordAPICall:
     # be priced, or the budget gate silently undercounts each dialogue shot.
     @pytest.mark.parametrize("cascade_engine", [
         "syncSoV3", "MuseTalk", "LatentSync", "SyncV2",
-        "hedra", "kling", "omnihuman", "aurora",
+        "kling", "omnihuman", "aurora",
         None,  # cascade reports no engine → controller uses "default"
     ])
     def test_record_api_call_lipsync_engine_priced(self, cost_tracker, cascade_engine):
@@ -527,6 +527,18 @@ class TestRecordAPICall:
         ("KLING_3_0", "fal"),
         ("KLING_NATIVE", "kling"),
         ("SEEDANCE", "fal"),
+        # GEMINI_OMNI (WS2 Google-first primary, 2026-07-18): Gemini
+        # Developer API only (no Vertex surface for this model today) —
+        # shares the "google" bucket with VEO_NATIVE, not fal. Inserted
+        # before "VEO" in _provider_map's insertion order (cost_tracker.py)
+        # so a future bare "GEMINI" catch-all can't shadow it either.
+        ("GEMINI_OMNI", "google"),
+        # GEMINI_IMAGE (WS3 Google-first, 2026-07-18): gemini-2.5-flash-image
+        # (Nano Banana), Gemini Developer API only — same "google" bucket as
+        # GEMINI_OMNI/VEO_NATIVE, not fal. This is the exact assertion shape
+        # that would have caught the money_loss_gate_source_mismatch_bug_class
+        # precedent (1591a76a) had it existed then for the video cascade.
+        ("GEMINI_IMAGE", "google"),
         ("TOTALLY_UNKNOWN_API_XYZ", "unknown"),
     ])
     def test_record_api_call_provider_derivation(self, cost_tracker, api_name, expected_provider):
@@ -556,13 +568,15 @@ class TestRecordAPICall:
     # indistinguishable from a FAL fallback in cost_log (both provider='fal').
     # The backend that actually ran is now threaded out of generate_ai_broll
     # and recorded here; pod backends must log a provider distinct from 'fal'.
+    # QUALITY_MAX (the N=8 best-of pod row) was retired WS1 Task 4 along with
+    # quality_max.py — its cost-table entry and provider-map row are gone too.
     @pytest.mark.parametrize("api_name,expected_provider", [
         ("COMFYUI_PULID", "comfyui"),       # production pod PuLID
-        ("QUALITY_MAX",   "comfyui"),       # N=8 best-of — also the pod
         ("FLUX_KONTEXT",  "fal"),           # FAL identity-preserving fallback
         ("FLUX_PRO",      "fal"),           # FAL last-resort
         ("FLUX_SCHNELL",  "fal"),           # FAL fast fallback
         ("POLLINATIONS",  "pollinations"),  # free fallback
+        ("GEMINI_IMAGE",  "google"),        # WS3 Nano Banana — Gemini-native, not FAL
     ])
     def test_image_backend_provider_provenance(self, cost_tracker, api_name, expected_provider):
         cost_tracker.record_api_call(api_name, operation="keyframe_generation")
@@ -579,6 +593,24 @@ class TestRecordAPICall:
             assert name in API_COST_USD, f"{name} missing from API_COST_USD"
         assert API_COST_USD["COMFYUI_PULID"] > 0.0   # pod GPU time isn't free
         assert API_COST_USD["POLLINATIONS"] == 0.0   # pollinations is free
+
+    def test_gemini_image_priced_and_attributed_not_zero_or_unknown(self, cost_tracker):
+        """WS3 (2026-07-18): GEMINI_IMAGE must attribute provider=='google'
+        (not 'unknown') and cost_usd==API_COST_USD['GEMINI_IMAGE'] (not 0.0)
+        — the exact assertion shape that would have caught the
+        money_loss_gate_source_mismatch_bug_class precedent (1591a76a) had it
+        existed then for the video cascade; load-bearing, not decorative."""
+        assert "GEMINI_IMAGE" in API_COST_USD
+        assert API_COST_USD["GEMINI_IMAGE"] > 0.0
+        cost = cost_tracker.record_api_call("GEMINI_IMAGE", operation="keyframe_generation")
+        assert cost == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
+        row = cost_tracker.conn.execute(
+            "SELECT provider, cost_usd FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["provider"] == "google"
+        assert row["provider"] != "unknown"
+        assert row["cost_usd"] == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
+        assert row["cost_usd"] != 0.0
 
 
 class TestRecordAPICallAudioTracking:
@@ -808,11 +840,14 @@ class TestVerifiedPricePins:
         # table row (which has no runtime consumer) — pin them together so a
         # revert of the driving_video.py rates can't silently under-gate
         # while the row pin stays green.
+        #
+        # WS4 (2026-07-18): Hedra removed from Mode-B (client + cost rows
+        # deleted) — driving_video.py's cost dicts carry only a "sadtalker"
+        # entry, so the estimator falls back to the sadtalker rate for any
+        # unrecognized provider key (by design; see
+        # estimate_driving_face_cost's .get(..., sadtalker) fallback).
         from cost_tracker import API_COST_USD
         from performance.driving_video import estimate_driving_face_cost
-        assert estimate_driving_face_cost("hedra", 5.0) == pytest.approx(
-            API_COST_USD["PERFORMANCE_DRIVING_HEDRA"]
-        )
         assert estimate_driving_face_cost("sadtalker", 5.0) == pytest.approx(
             API_COST_USD["PERFORMANCE_DRIVING_SADTALKER"]
         )
@@ -821,7 +856,6 @@ class TestVerifiedPricePins:
         ("SYNC_SO_V3", "LIPSYNC_SYNCSOV3"),
         ("SYNC_V2", "LIPSYNC_SYNCV2"),
         ("OMNIHUMAN_V1_5", "LIPSYNC_OMNIHUMAN"),
-        ("HEDRA_C3", "LIPSYNC_HEDRA"),
         ("MUSETALK", "LIPSYNC_MUSETALK"),
         ("LATENTSYNC", "LIPSYNC_LATENTSYNC"),
         ("KLING_LIPSYNC_2", "LIPSYNC_KLING"),
@@ -840,6 +874,20 @@ class TestVerifiedPricePins:
         from cost_tracker import API_COST_USD
         from domain.scene_decomposer import API_REGISTRY
         assert API_REGISTRY["SEEDANCE"]["per_shot_cost"] == API_COST_USD["SEEDANCE"]
+
+    def test_gemini_omni_price_is_the_web_verified_2026_07_18_estimate(self):
+        from cost_tracker import API_COST_USD
+        # Gemini Developer API preview pricing: $0.112/s x ~5s estimate
+        # (WEB-VERIFIED NOT REPO-MEASURED per R-EVIDENCE/R-MEASURE — duration
+        # is prompt-inferred on this API, no structured duration kwarg, so
+        # this flat per-clip figure is a rough estimate pending a live-call
+        # duration probe, same caveat SEEDANCE needed fixing on 2026-07-11).
+        assert API_COST_USD["GEMINI_OMNI"] == 0.56
+
+    def test_gemini_omni_registry_cost_matches_api_cost_usd(self):
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        assert API_REGISTRY["GEMINI_OMNI"]["per_shot_cost"] == API_COST_USD["GEMINI_OMNI"]
 
 
 class TestApiCostUsdCompleteness:
@@ -863,9 +911,6 @@ class TestApiCostUsdCompleteness:
     @pytest.mark.parametrize(
         "api_name, expected",
         [
-            # Hedra re-verified 2026-07-11: $0.06/s upper tier x 5s (was
-            # 0.075 from the old base+per-second estimate — 4x low).
-            ("PERFORMANCE_DRIVING_HEDRA", 0.30),
             ("PERFORMANCE_DRIVING_SADTALKER", 0.045),
         ],
     )
@@ -884,3 +929,10 @@ class TestEstimatedCostBudgetGate:
             assert tracker.would_exceed_cost(0.20) is False
         finally:
             tracker.close()
+
+
+def test_no_hedra_cost_rows():
+    """WS4 Task 3 — Hedra cost rows must be fully removed from cost_tracker.py."""
+    import cost_tracker
+    src = __import__("inspect").getsource(cost_tracker)
+    assert "HEDRA" not in src, "Hedra cost rows must be removed"

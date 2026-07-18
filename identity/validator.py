@@ -129,12 +129,15 @@ def _cv2_single_thread():
     identity path (validate_image/validate_video, via represent AND
     extract_faces — both align) route through this guard.
 
-    NOTE: cv2.setNumThreads is process-global. quality_max.py scores candidates
-    in a ThreadPoolExecutor (max_quality_parallel_workers, default 1, up to 4):
-    if two threads enter here concurrently, EACH call still runs single-threaded
-    (determinism holds per-call), but the restore may land at 1 (a benign
-    process-state leak — single-threaded is the desired state for this workload).
-    If parallel_workers>1 becomes the default, gate entry with a threading.Lock.
+    NOTE: cv2.setNumThreads is process-global. quality_max.py used to score
+    candidates in a ThreadPoolExecutor (max_quality_parallel_workers, up to 4
+    workers) before that module was retired WS1 Task 4; the underlying
+    determinism fix stays valid regardless (any future concurrent caller has
+    the same property): if two threads enter here concurrently, EACH call
+    still runs single-threaded (determinism holds per-call), but the restore
+    may land at 1 (a benign process-state leak — single-threaded is the
+    desired state for this workload). If a parallel caller with >1 workers
+    returns, gate entry with a threading.Lock.
     """
     _prev_threads = cv2.getNumThreads()
     try:

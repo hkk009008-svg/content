@@ -81,15 +81,15 @@ ComfyUI is a node-based execution graph for Stable Diffusion and FLUX models. Wo
 
 The A24 Engine uses ComfyUI as the primary image generation backend:
 - **Workflows**: `pulid.json` — 22-node FLUX + PuLID production pipeline
-  (incl. PAG + RealESRGAN hires chain); `pulid_max.json` — 60-node max tier
-  (N=8 adaptive best-of + SUPIR + 4K downsample, driven by
-  `quality_max.generate_ai_broll_max`; falls back to production if absent)
+  (incl. PAG + RealESRGAN hires chain). This is the ONLY image tier — the
+  60-node `pulid_max.json` max tier + `quality_max.py` driver were retired in
+  WS1 (2026-07; DECISIONS.md ADR-065 / ADR-024: the max graph over-cooked).
 - **Server**: self-hosted ComfyUI pod at `COMFYUI_SERVER_URL` — currently a
   Novita RTX 6000 Ada (CUDA 12.4 → cu124 wheels; see OPERATIONS.md GPU/CUDA
   matrix). Host-agnostic; the `RunPodComfyUI` class name is historical.
 - **API class**: `RunPodComfyUI` in `phase_c_assembly.py`
 - **Shot optimization**: `workflow_selector.py` — 5 shot classes
-  (portrait/medium/wide/action/landscape) × two tiers (`WORKFLOW_TEMPLATES`
-  production, `MAX_QUALITY_TEMPLATES` max)
+  (portrait/medium/wide/action/landscape) via `WORKFLOW_TEMPLATES` (the single
+  production tier; `MAX_QUALITY_TEMPLATES` was removed with the max tier, WS1)
 - **Cascade**: ComfyUI → FAL.ai Kontext → FAL.ai FLUX-Pro
 - See `a24-integration.md` for full annotated architecture

@@ -1,6 +1,6 @@
 """Generic task poller for the performance/ adapters.
 
-Each external engine (Runway / Hedra / Viggle / ComfyUI) exposes a polling
+Each external engine (Runway / Viggle / ComfyUI) exposes a polling
 endpoint with its own status enum. This helper normalizes the loop:
 case-insensitive status comparison, exception-tolerant single-poll failures,
 and a clean None return on terminal-state or timeout.

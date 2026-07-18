@@ -24,7 +24,7 @@ inline `client_timeout` literals at call sites and fails any new
 FAL_TIMEOUT_VIDEO_S = 600
 
 # Talking-head GENERATION engines (Kling lipsync audio-to-video, Omnihuman
-# 1.5, Creatify Aurora, Hedra Character-3): runtime scales with AUDIO length,
+# 1.5, Creatify Aurora): runtime scales with AUDIO length,
 # and lip_sync_mode="generation" feeds scene-level audio. Measured ~40x
 # realtime locally (logs/_lipsync_gen_test.log: 3.84s audio -> 156s wall,
 # 720p, turbo off), so a contract-legal 60s job extrapolates well past 600s

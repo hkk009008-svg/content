@@ -1,7 +1,6 @@
 import os
 import json
 import math
-import traceback
 import uuid
 import time
 
@@ -22,16 +21,28 @@ class ImageGenResult(NamedTuple):
 
     ``path`` is the saved image (equals ``output_filename`` on success);
     ``api_name`` is the cost_tracker API key for the backend that ACTUALLY ran
-    (``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` | ``FLUX_SCHNELL`` |
-    ``POLLINATIONS`` | ``QUALITY_MAX``). Callers record ``api_name`` so cost_log
-    reflects where the image was really generated (pod vs FAL), not a tier-based
-    guess. Backends return ``None`` (not this type) on failure, so the caller's
-    ``if not result`` success guard is preserved (a 2-field NamedTuple is always
-    truthy).
+    (``GEMINI_IMAGE`` | ``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` |
+    ``FLUX_SCHNELL`` | ``POLLINATIONS``; ``QUALITY_MAX`` was retired WS1 Task 4
+    along with quality_max.py). Callers record ``api_name`` so cost_log reflects where the
+    image was really generated (pod vs FAL), not a tier-based guess. Backends
+    return ``None`` (not this type) on failure, so the caller's ``if not
+    result`` success guard is preserved (a populated NamedTuple is always
+    truthy regardless of field count).
+
+    ``billed_rejects`` (WS3 money-loss close-out, mirrors
+    ``cinema/shots/controller.py::_record_billed_rejects`` on the video side):
+    engines that BILLED for a real generation this call incurred but did NOT
+    win (currently only ``"GEMINI_IMAGE"`` — Nano Banana bills on generation,
+    independent of the later identity check). Defaults to ``()`` so existing
+    2-positional-arg construction (``ImageGenResult(path, api_name)``) stays
+    valid. The caller (``cinema/shots/controller.py``) records each entry
+    against cost_tracker with ``operation="image_generation_rejected"`` next
+    to the winner-keyed ``keyframe_generation`` record.
     """
 
     path: str
     api_name: str
+    billed_rejects: tuple = ()
 
 
 class RunPodComfyUI:
@@ -83,8 +94,9 @@ def _resolve_ui_denoise(ctx):
     A bare NaN survives project.json (json.load allow_nan=True); a raw
     max(0.2, min(0.6, nan)) clamp-lucks to 0.6, silently overriding the caller. The
     math.isfinite guard skips it instead. Mirrors bf1034a's same-knob guard in
-    workflow_selector and quality_max._clamp_img2img_denoise's reject-non-finite
-    policy + its isinstance(continuity_options, dict) check. Extracted (vs inline)
+    workflow_selector (formerly also quality_max._clamp_img2img_denoise's
+    reject-non-finite policy + its isinstance(continuity_options, dict) check,
+    before that module was retired WS1 Task 4). Extracted (vs inline)
     so the gate is unit-testable — drop math.isfinite and the nan test goes red."""
     if ctx is None:
         return None
@@ -100,7 +112,20 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        init_image=None, denoise_strength=1.0, characters=None,
                        multi_angle_refs=None, identity_anchor="",
                        pulid_weight_override=None, negative_prompt="",
-                       quality_tier="production", char_lora_path=None,
+                       quality_tier="production",
+                       # char_lora_path/strength/trigger, style_reference, shot_hint:
+                       # reserved — dormant, kept for a possible future FLUX.2 A/B (a
+                       # separate, deferred track — NOT WS3, which shipped Nano Banana
+                       # / gemini_multiref instead and binds identity via reference
+                       # images, not LoRA). Threaded from the controller
+                       # (cinema/shots/controller.py) but unconsumed now that the
+                       # max-tier dispatch below is gone — WS1 retired
+                       # quality_tier=="max" (ADR-024: the max graph over-cooks
+                       # structurally; production/pulid.json is the validated survivor).
+                       # Kept, not dead code. (secondary_char_refs stays LIVE below — it
+                       # still feeds the FAL Kontext multi-char fallback, unrelated to
+                       # the deleted max dispatch.)
+                       char_lora_path=None,
                        char_lora_strength=None,
                        char_lora_trigger=None,
                        secondary_char_refs=None,
@@ -108,18 +133,14 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     """
     Generates a cinematic image with face-identity preservation.
 
-    v3 priority chain (production tier, default):
-    1. fal.ai FLUX Kontext (identity-preserving, no local GPU needed)
-    2. ComfyUI + PuLID on RunPod (if models are available)
-    3. fal.ai FLUX-Pro (no face-lock, last resort)
-
-    Quality tiers:
-        "production" (default) — pulid.json + parameter overrides, single-shot.
-                                 Preserves all existing caller behavior.
-        "max"                  — pulid_max.json + N=8 adaptive best-of with
-                                 ArcFace gate. Falls back to "production" if
-                                 quality_max module / pulid_max.json missing
-                                 or returns None.
+    Priority chain (production — the only tier since WS1's max-tier retirement):
+    0. Gemini 2.5 Flash Image (Nano Banana) — PRIMARY for all projects (WS3,
+       user-confirmed); set identity_backend='pod' to opt OUT.
+    1. ComfyUI + PuLID (pod) — arc-gate fallback
+    2. FLUX Kontext
+    3. FLUX-Pro
+    4. FLUX-Schnell
+    5. Pollinations
 
     Args:
         prompt: Image generation prompt (enhanced by continuity engine)
@@ -129,62 +150,32 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         init_image: Previous shot image for img2img temporal chaining
         denoise_strength: 0.0-1.0, lower = more similar to init_image
         characters: List of character config dicts
-        quality_tier: "production" | "max" — selects the generation pipeline.
-        char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
-        char_lora_trigger: (max tier only) P1-1 slice 2: trigger token for the primary
-            character's LoRA (training-caption prefix). Ignored on other tiers.
+        quality_tier: informational only (WS1 retired the "max" fork below —
+            pulid.json/ComfyUI production is now the only pipeline).
+        char_lora_path: reserved — dormant, kept for a possible future FLUX.2
+            A/B (separate, deferred track — not WS3).
+        char_lora_trigger: reserved — dormant, kept for a possible future
+            FLUX.2 A/B (separate, deferred track — not WS3).
         secondary_char_refs: P1-1 slice 1: additional character entries forwarded
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
-        style_reference: (max tier only) Path to style-board reference image.
-        shot_hint: (max tier only) Classification fields, MERGED over inferred defaults then ALWAYS classified — see quality_max._resolve_shot_info.
+        style_reference: reserved — dormant, kept for a possible future FLUX.2
+            A/B (separate, deferred track — not WS3).
+        shot_hint: reserved — dormant, kept for a possible future FLUX.2 A/B
+            (separate, deferred track — not WS3).
 
     Returns:
-        ImageGenResult(path, api_name) naming the backend that actually ran
-        (COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL | POLLINATIONS |
-        QUALITY_MAX), or None if every backend failed. Callers record
-        ``api_name`` for cost attribution so a pod generation is distinguishable
-        from a FAL fallback in cost_log.
+        ImageGenResult(path, api_name, billed_rejects) naming the backend
+        that actually ran (GEMINI_IMAGE | COMFYUI_PULID | FLUX_KONTEXT |
+        FLUX_PRO | FLUX_SCHNELL | POLLINATIONS), or None if every backend
+        failed. Callers record ``api_name`` for cost attribution so a pod
+        generation is distinguishable from a FAL fallback (and both from a
+        Gemini-native generation) in cost_log. ``billed_rejects`` names any
+        engine that billed for a generation this call incurred but did NOT
+        win (WS3: a Gemini bill-but-identity-reject before falling through) —
+        callers must record these too or the spend is invisible to the
+        budget gate.
     """
-    # --- MAX-TIER DISPATCH ---
-    # Try the maxed-quality path first; fall through to production on any failure
-    # so existing callers (production runs, tests) never break.
-    if quality_tier == "max":
-        try:
-            from quality_max import generate_ai_broll_max
-            result = generate_ai_broll_max(
-                prompt=prompt,
-                output_filename=output_filename,
-                seed=seed,
-                character_image=character_image,
-                init_image=init_image,
-                denoise_strength=denoise_strength,
-                characters=characters,
-                multi_angle_refs=multi_angle_refs,
-                identity_anchor=identity_anchor,
-                pulid_weight_override=pulid_weight_override,
-                negative_prompt=negative_prompt,
-                char_lora_path=char_lora_path,
-                char_lora_strength=char_lora_strength,
-                char_lora_trigger=char_lora_trigger,
-                secondary_chars=secondary_char_refs,
-                style_reference=style_reference,
-                shot_hint=shot_hint,
-                ctx=ctx,
-            )
-            if result:
-                return result
-            print("[generate_ai_broll] Max tier returned None — falling back to production tier.")
-        except ImportError as e:
-            print(f"[generate_ai_broll] quality_max unavailable ({e}) — production tier.")
-        except Exception:
-            # Broad catch keeps the graceful production-tier fallback, but print the
-            # full traceback (not just the message) so a real max-tier breakage is
-            # diagnosable instead of silently degrading every opt-in max render.
-            print(
-                "[generate_ai_broll] Max tier raised — falling back to production tier:\n"
-                + traceback.format_exc()
-            )
 
     mode = "img2img" if init_image else "txt2img"
 
@@ -194,6 +185,93 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # get_project_setting is a safe dict lookup with a default (never raises,
     # handles ctx=None), so it is safe to call here outside the try block.
     aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
+    # WS3 money-loss close-out (mirrors cinema/shots/controller.py's
+    # _record_billed_rejects on the video side): Gemini can BILL a real
+    # image (Nano Banana, $0.03) that then fails identity and falls through
+    # to the pod/FAL cascade below — a billed engine that never becomes the
+    # winner. Track it here and thread it onto whichever ImageGenResult this
+    # call finally returns, so the caller's cost_tracker sees the spend even
+    # though Gemini didn't win. Only the PRIORITY-0 block below appends to
+    # this list; the Gemini SUCCESS return just below keeps it empty (there
+    # is nothing to fall through from).
+    billed_rejects = []
+
+    def _with_rejects(result):
+        """Attach any accumulated billed_rejects to a winning ImageGenResult.
+        Passes None through unchanged so the caller's `if not result`
+        failure guard is preserved."""
+        if result is not None and billed_rejects:
+            return result._replace(billed_rejects=tuple(billed_rejects))
+        return result
+
+    # ----- PRIORITY 0: Gemini 2.5 Flash Image (Nano Banana, WS3) -----
+    # Google-first overhaul: Nano Banana is the image PRIMARY for all
+    # projects (WS3, user-confirmed decision — "Nano Banana as image
+    # PRIMARY, pod demoted to first fallback"); a project sets
+    # identity_backend='pod' to opt OUT. The pod remains the arc-gate
+    # fallback below. This block NEVER raises and NEVER returns None — a
+    # missing key, a generation failure, or a failed identity check all
+    # fall through into the existing PRIORITY-1 pod logic below untouched
+    # (silent-gate-degradation discipline: fall through loudly via prints,
+    # not silently).
+    identity_backend = get_project_setting(ctx, "identity_backend", "gemini_multiref")
+    if (
+        (settings.google_api_key or settings.gemini_api_key)
+        and character_image
+        and os.path.exists(character_image)
+        and identity_backend != "pod"
+    ):
+        try:
+            from gemini_image_native import GeminiImageAPI
+            gemini_secondary_refs = [
+                sc.get("reference") for sc in (secondary_char_refs or []) if sc.get("reference")
+            ]
+            gemini_path = GeminiImageAPI().generate_image(
+                prompt,
+                output_filename,
+                character_image=character_image,
+                multi_angle_refs=multi_angle_refs,
+                secondary_char_refs=gemini_secondary_refs,
+                aspect_ratio=aspect_ratio,
+                negative_prompt=negative_prompt,
+            )
+            if gemini_path:
+                from phase_c_vision import _get_shared_validator
+                _chars_in_frame = (shot_hint or {}).get("characters_in_frame") or []
+                id_result = _get_shared_validator().validate_image(
+                    gemini_path, character_image,
+                    character_id=_chars_in_frame[0] if _chars_in_frame else "",
+                    threshold=get_project_setting(ctx, "identity_strictness", None),
+                )
+                if id_result.passed:
+                    print(f"   [PHASE C] Gemini 2.5 Flash Image (Nano Banana) passed identity "
+                          f"check (score={id_result.overall_score}): '{prompt[:60]}...'")
+                    return ImageGenResult(output_filename, "GEMINI_IMAGE")
+                print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
+                      f"falling back to the pod/FAL cascade")
+                # Google already billed this frame ($0.03) even though it
+                # lost the identity check — record it so the eventual
+                # winner's cost record doesn't make it invisible spend.
+                billed_rejects.append("GEMINI_IMAGE")
+                try:
+                    os.makedirs("logs", exist_ok=True)
+                    with open("logs/gemini_image_arc_comparison.jsonl", "a", encoding="utf-8") as f:
+                        f.write(json.dumps({
+                            "ts": time.time(),
+                            "prompt": prompt[:200],
+                            "output_filename": output_filename,
+                            "character_image": character_image,
+                            "characters_in_frame": _chars_in_frame,
+                            "gemini_score": id_result.overall_score,
+                            "threshold": id_result.threshold_used,
+                        }) + "\n")
+                except Exception:
+                    pass  # comparison log is best-effort telemetry, never load-bearing
+            else:
+                print("   [GEMINI-IMAGE] Generation returned no image; falling back to the pod/FAL cascade")
+        except Exception as e:
+            print(f"   [GEMINI-IMAGE] PRIORITY-0 block failed ({e}); falling back to the pod/FAL cascade")
 
     # ----- Backend selection (PRIORITY order) -----
     # The previous implementation relied on a confusing if/elif/else where
@@ -207,20 +285,20 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # (Same args as the old elif/else, consolidated.)
     if not (server_url and os.path.exists("pulid.json")):
         if character_image and os.path.exists(character_image) and settings.fal_key:
-            return _fal_flux_fallback(
+            return _with_rejects(_fal_flux_fallback(
                 prompt, output_filename, seed,
                 character_image=character_image,
                 multi_angle_refs=multi_angle_refs,
                 identity_anchor=identity_anchor,
                 aspect_ratio=aspect_ratio,
                 secondary_char_refs=secondary_char_refs,
-            )
-        return _fal_flux_fallback(
+            ))
+        return _with_rejects(_fal_flux_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
             aspect_ratio=aspect_ratio,
             secondary_char_refs=None,
-        )
+        ))
 
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
     print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
@@ -228,8 +306,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     try:
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
-            return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                      aspect_ratio=aspect_ratio, secondary_char_refs=None)
+            return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                      aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
         with open("pulid.json", "r") as f:
             workflow = json.load(f)
@@ -253,8 +331,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Skip ComfyUI entirely for landscape shots (no face-lock needed)
             if shot_type == "landscape" and character_image:
                 print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
-                return _fal_flux_fallback(prompt, output_filename, seed, character_image=None,
-                                          aspect_ratio=aspect_ratio, secondary_char_refs=None)
+                return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=None,
+                                          aspect_ratio=aspect_ratio, secondary_char_refs=None))
         except ImportError:
             pass  # workflow_selector not available — use defaults
 
@@ -435,7 +513,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                                 with open(output_filename, 'wb') as f:
                                     f.write(img_data)
                                 print(f"      ✅ Downloaded {mode} render: {output_filename}")
-                                return ImageGenResult(output_filename, "COMFYUI_PULID")
+                                return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
                     # Outputs exist but no images — task failed
                     print(f"      ⚠️ ComfyUI task completed but no images in output")
                     break
@@ -445,13 +523,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             time.sleep(2)
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
+        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
+        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
 
 def _parse_structured_prompt(prompt: str) -> dict:

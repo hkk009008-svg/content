@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 _VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0
 _VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset hourly
 
+# GEMINI_OMNI gets its OWN cooldown pair — do NOT reuse Veo's. Gemini Developer
+# API Tier-1 bills a rolling $10/10min spend window (not Veo's hourly-reset
+# assumption); at ~$0.90/8s-clip, ~11 calls exhaust the window. Reusing Veo's
+# 1800s TTL would over-block 3x once the window actually clears.
+_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL: float = 0.0
+_GEMINI_OMNI_QUOTA_TTL_S: int = 600  # 10 min — Gemini Developer API Tier-1 rolling spend window
+
 # Providers that can produce 9:16 portrait video (aspect-aware via Phase-3 T3-T6, or
 # keyframe-driven). Portrait projects filter the cascade to this set. EXCLUDED:
 # LTX (native-only/pod-gated, not aspect-wired), FAL_SVD (not aspect-wired).
@@ -64,6 +71,13 @@ def _veo_quota_blocked() -> bool:
     to restart the server to retry once Google's quota window rolls over.
     """
     return _VEO_QUOTA_EXHAUSTED_UNTIL > time.time()
+
+
+def _gemini_omni_quota_blocked() -> bool:
+    """True if a recent GEMINI_OMNI budget_exceeded/429 means we should still
+    cascade past it. Auto-expires after _GEMINI_OMNI_QUOTA_TTL_S seconds (see
+    the module-level comment on that constant for why it's separate from Veo's)."""
+    return _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL > time.time()
 
 try:
     from runwayml import RunwayML, TaskFailedError
@@ -1055,7 +1069,75 @@ def generate_ai_video(
                 )
             logger.warning("FAL_KEY missing for Seedance — cascading", extra={"engine": "SEEDANCE"})
             return try_next_api()
-    
+
+    elif target_api.upper() == "GEMINI_OMNI":
+        # Native Gemini Omni Flash (Preview) — Google-first primary (WS2).
+        # Gemini Developer API only (no Vertex surface for this model today).
+        global _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL
+        if _gemini_omni_quota_blocked():
+            remaining = int(_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL - time.time())
+            logger.warning(
+                "GEMINI_OMNI quota cooldown active — cascading",
+                extra={"engine": "GEMINI_OMNI", "cooldown_remaining_s": remaining},
+            )
+            return try_next_api()
+
+        try:
+            from gemini_omni_native import GeminiOmniAPI
+            omni = GeminiOmniAPI()
+            # Duration/resolution/audio are prompt-inferred on this API (no
+            # structured kwargs) — encode the same audio intent VEO_NATIVE
+            # computes structurally (landscape ambient / wide-non-overlay
+            # ambient / native dialogue voice) directly into the prompt text.
+            _wants_audio = (
+                shot_type == "landscape"
+                or (shot_type == "wide" and not (has_dialogue and not dialogue_native_audio))
+                or dialogue_native_audio
+            )
+            _audio_intent = (
+                "AUDIO: Generate natural synced audio — ambient environment sound and "
+                "dialogue voice as appropriate to the scene."
+                if _wants_audio else
+                "AUDIO: Silent — no generated audio track; audio is added separately downstream."
+            )
+            result = omni.generate_video(
+                image_path=image_path,
+                prompt=(
+                    f"MOTION: Smooth cinematic {camera_motion}, natural acceleration. "
+                    f"PRESERVE: Maintain exact character appearance from reference images. "
+                    f"PHYSICS: Natural body weight and momentum, cloth physics, realistic shadows. "
+                    f"TEMPORAL: Consistent luminance, stable color temperature, no flickering. "
+                    f"QUALITY: Photorealistic cinematic footage, consistent volumetric lighting. "
+                    f"{_audio_intent}"
+                ),
+                output_path=output_mp4,
+                reference_images=multi_angle_refs,
+                aspect_ratio=fal_aspect_ratio(_aspect),
+            )
+            if result:
+                # Native branch wrote output_mp4 directly (billed) — note it
+                # before the aspect backstop so a reject still records spend.
+                _note_billed_attempt(target_api.upper())
+                if not _accept_or_reject(output_mp4, _aspect):
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
+                    return try_next_api()
+                _record_video_cascade(target_api.upper())
+                return result
+            return try_next_api()
+        except Exception as e:
+            error_str = str(e).lower()
+            if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "budget_exceeded" in error_str:
+                _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL = time.time() + _GEMINI_OMNI_QUOTA_TTL_S
+                logger.warning(
+                    "GEMINI_OMNI quota exhausted — blocking GEMINI_OMNI",
+                    extra={"engine": "GEMINI_OMNI", "block_duration_s": _GEMINI_OMNI_QUOTA_TTL_S},
+                )
+            logger.warning("Gemini Omni error", extra={"engine": "GEMINI_OMNI", "error": str(e)})
+            return try_next_api()
+
     else:
         # Fallback if UNKNOWN target API is given
         return try_next_api()

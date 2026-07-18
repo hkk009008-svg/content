@@ -337,8 +337,8 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     """
     from cinema.shots.strategy import (
         IdentityStrategy, CharIdentitySpec,
-        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, MAX_TIER_MULTI_LORA,
-        NO_IDENTITY_ASSET,
+        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
+        GEMINI_MULTIREF_PRIMARY_ONLY, GEMINI_MULTIREF_MULTI_CHAR,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
@@ -360,54 +360,68 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             unconditioned_chars=list(in_frame),
         )
 
+    # WS3: identity_backend='gemini_multiref' is now the DEFAULT — Nano
+    # Banana is the image PRIMARY for all projects (user-confirmed: "Nano
+    # Banana as image PRIMARY, pod demoted to first fallback"), consistent
+    # with the PRIORITY-0 gate default in phase_c_assembly.py's
+    # generate_ai_broll. It routes the primary through Nano Banana's
+    # multi-reference binding (identity from reference images, not a PuLID
+    # graph) — tag the spec's fidelity accordingly so downstream
+    # validation/telemetry can distinguish it from the production
+    # 'reference' (PuLID) mechanism. A project sets identity_backend='pod'
+    # to opt OUT and keep the production PuLID behavior byte-for-byte.
+    # `or "gemini_multiref"` (not a bare `.get(k, default)`) matches this
+    # function's existing None-safety idiom (see char_lora_path just above)
+    # so a key present-but-None/empty-string also falls to the new default,
+    # not silently to pod.
+    is_gemini_multiref = (settings.get("identity_backend") or "gemini_multiref") == "gemini_multiref"
+    primary_fidelity = "gemini_multiref" if is_gemini_multiref else "reference"
+
     conditioned = [CharIdentitySpec(
         char_id=primary_char_id, reference=primary_ref,
         identity_anchor=cc.get("identity_anchor", ""),
         multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
-        fidelity="pulid" if quality_tier == "max" else "reference",
+        # WS1: the max tier is retired — every shot conditions the primary via
+        # the production PuLID graph (ApplyPulidFlux) and is tagged "reference"
+        # — UNLESS the WS3 gemini_multiref backend is selected (see above).
+        fidelity=primary_fidelity,
     )]
     conditioned_ids = {primary_char_id}
 
-    if quality_tier == "max":
-        # P1-1 slice 2 (§3b + §3c-A): same registered-ref gate + 2-cap as the
-        # Kontext arm; per-secondary LoRA assets looked up exactly like the
-        # primary's (settings dicts keyed by char_id). A LoRA-less secondary
-        # still rides as fidelity="reference" — the ReActor rescue swaps its
-        # face from the canonical even without a LoRA.
-        for entry in secondary[:2]:
-            sec_id = entry["char_id"]
-            sec_lora = char_lora_paths.get(sec_id) or None
-            conditioned.append(CharIdentitySpec(
-                char_id=sec_id, reference=entry["reference"],
-                identity_anchor=entry.get("identity_anchor", ""),
-                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity="lora" if sec_lora else "reference",
-                lora_path=sec_lora,
-                lora_strength=(settings.get("char_lora_strengths", {}) or {}).get(sec_id),
-                # `or None` matches the primary's coercion (:298) — a ""
-                # trigger must not diverge between primary and secondary.
-                # (Strength stays bare .get(): 0.0 is a real value, cf. the
-                # is-not-None gate at web_server.py:781.)
-                trigger=char_lora_triggers.get(sec_id) or None,
-            ))
-            conditioned_ids.add(sec_id)
-        tag = MAX_TIER_MULTI_LORA if len(conditioned) > 1 else MAX_TIER_PRIMARY_ONLY
-    elif secondary:
-        # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
-        for entry in secondary[:2]:
+    # WS1: single identity-derivation path for every tier — the max-tier
+    # per-secondary LoRA fork (fidelity="lora" + MAX_TIER_* tags) was retired
+    # with quality_max.py. WS3 grafts a gemini_multiref branch onto this clean
+    # single-branch shape (plan Rule #13 note) — NOT the deferred, separate
+    # FLUX.2 A/B track.
+    if secondary:
+        if is_gemini_multiref:
+            # Nano Banana budgets REFERENCE IMAGES, not characters — cap the
+            # combined primary+secondary character count against the shared
+            # GEMINI_MULTIREF_MAX_REFS ceiling (1 slot already spent on the
+            # primary) instead of the Kontext-tier flat 2-secondary cap, which
+            # doesn't apply to this mechanism.
+            from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
+            secondary_cap = max(0, GEMINI_MULTIREF_MAX_REFS - 1)
+        else:
+            # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
+            secondary_cap = 2
+        for entry in secondary[:secondary_cap]:
             conditioned.append(CharIdentitySpec(
                 char_id=entry["char_id"], reference=entry["reference"],
                 identity_anchor=entry.get("identity_anchor", ""),
                 # V-5: without this, the Task-7 allocator's
                 # entry.get("multi_angle_refs") is ALWAYS empty via this path
-                # and secondaries can never fill their 2 slots.
+                # and secondaries can never fill their slots.
                 multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity="reference",
+                fidelity=primary_fidelity,
             ))
             conditioned_ids.add(entry["char_id"])
-        tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
+        if is_gemini_multiref:
+            tag = GEMINI_MULTIREF_MULTI_CHAR if len(conditioned) > 1 else GEMINI_MULTIREF_PRIMARY_ONLY
+        else:
+            tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
     else:
-        tag = PRIMARY_ONLY
+        tag = GEMINI_MULTIREF_PRIMARY_ONLY if is_gemini_multiref else PRIMARY_ONLY
 
     return IdentityStrategy(
         mechanism_tag=tag,
@@ -775,9 +789,13 @@ class ShotController:
             _image_api_hint = None
 
         # Build a lightweight PipelineContext so max-tier UI knobs
-        # (MaxTierComfyControls + halt overrides) flow through to
-        # generate_ai_broll_max.  settings is a plain dict; wrapping it in
-        # PipelineContext lets get_project_setting() read it correctly.
+        # (MaxTierComfyControls + halt overrides) could flow through to a
+        # max-tier dispatch — WS1 already retired that dispatch from
+        # phase_c_assembly.generate_ai_broll (independent of Task 4, which
+        # additionally deleted quality_max.py, the dispatch's only
+        # implementation) — so ctx is currently unconsumed on this path.
+        # settings is a plain dict; wrapping it in PipelineContext lets
+        # get_project_setting() read it correctly if a consumer returns.
         ctx = PipelineContext(global_settings=settings)
 
         result = generate_ai_broll(
@@ -813,6 +831,11 @@ class ShotController:
             # This records EMISSION, not server honoring; S1 + per-char
             # validation cover the latter.
             actual = "FLUX_KONTEXT_MULTI_CHAR"
+        elif actual == "GEMINI_IMAGE" and strategy.secondary_specs:
+            # WS3 analog of the FLUX_KONTEXT derivation above: a successful
+            # Nano Banana call also looks identical for multi-char vs
+            # primary-only at the api_name level.
+            actual = "GEMINI_IMAGE_MULTI_CHAR"
         take["metadata"]["mechanism_actually_used"] = actual
 
         identity_score = 0.0
@@ -840,7 +863,12 @@ class ShotController:
             # operator-facing review can read failure cause and a suggested
             # PuLID weight delta from the take metadata.
             char_diag = id_result.character_results.get(primary_char_id)
-            if char_diag and not id_result.passed:
+            # A PuLID-weight suggestion is meaningless for a Nano-Banana take —
+            # there is no PuLID node in that generation path to adjust.
+            # result.api_name is the RAW backend name from ImageGenResult
+            # ("GEMINI_IMAGE"); the "_MULTI_CHAR" suffix only ever appears on
+            # the derived `actual` local above, never on result.api_name itself.
+            if char_diag and not id_result.passed and result.api_name not in ("GEMINI_IMAGE",):
                 take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
                 take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
                 # T6: deterministic remediation advisory (pure; advisory-only).
@@ -904,9 +932,10 @@ class ShotController:
         # Record image generation cost under the backend that ACTUALLY ran.
         # generate_ai_broll threads the real provenance back via
         # ImageGenResult.api_name (COMFYUI_PULID on the pod; FLUX_KONTEXT /
-        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; QUALITY_MAX for
-        # the max tier) rather than a quality_tier-based guess — so cost_log can
-        # tell a pod generation from a FAL fallback (both used to log 'fal').
+        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; the max tier's
+        # QUALITY_MAX was retired WS1 Task 4) rather than a quality_tier-based
+        # guess — so cost_log can tell a pod generation from a FAL fallback
+        # (both used to log 'fal').
         # result is a truthy ImageGenResult here (the `if not result` guard above
         # already returned on failure).
         _image_api = result.api_name
@@ -925,6 +954,37 @@ class ShotController:
                 exc_info=True,
                 extra={"shot_id": shot_id},
             )
+
+        # Billed-but-REJECTED image engines (WS3: Gemini/Nano Banana can BILL
+        # a real frame that then fails identity and falls through to the
+        # pod/FAL cascade above) bill the invoice but never become the
+        # winner — record them too, mirroring _record_billed_rejects on the
+        # video side (money-gate finding 2026-07-11, image-side close-out).
+        # result.billed_rejects only ever contains engines OTHER than the
+        # eventual winner by construction (a rejected engine's own success
+        # return happens before it can be appended — see phase_c_assembly's
+        # _with_rejects), but the _image_api guard is kept anyway to mirror
+        # _record_billed_rejects's own defensive winner-subtraction.
+        for _rejected_engine in result.billed_rejects:
+            if _rejected_engine == _image_api:
+                continue
+            try:
+                self.cost_tracker.record_api_call(
+                    _rejected_engine,
+                    operation="image_generation_rejected",
+                    shot_id=shot_id,
+                    video_id=video_id,
+                )
+                logger.info(
+                    "billed-but-rejected image attempt recorded",
+                    extra={"shot_id": shot_id, "engine": _rejected_engine},
+                )
+            except Exception:
+                logger.warning(
+                    "billed-reject image cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "engine": _rejected_engine},
+                )
 
         self.progress(
             "KEYFRAME_READY",
@@ -1045,7 +1105,7 @@ class ShotController:
             from cost_tracker import API_COST_USD
             from performance.driving_video import estimate_driving_face_cost
 
-            driving_cost = estimate_driving_face_cost("hedra", duration_s)
+            driving_cost = estimate_driving_face_cost("sadtalker", duration_s)
             estimated_cost = API_COST_USD.get(engine.upper(), 0.0) + driving_cost
             would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
             if would_exceed_budget:
@@ -1121,7 +1181,7 @@ class ShotController:
                 ),
                 "audio_path": audio_path,
                 "duration_s": duration_s,
-                "driving_provider": driving_provider,  # "hedra" | "sadtalker" | "cache" | None
+                "driving_provider": driving_provider,  # "sadtalker" | "cache" | None
             },
         )
         perf_path = self._take_output_path(shot_id, take["id"], ".mp4")
@@ -1976,7 +2036,7 @@ class ShotController:
         #
         # NOTE: generate_lip_sync_video's "mode" param is "auto"/"overlay"/"generation",
         # NOT an engine name.  The optimizer cache carries suggested_lipsync (e.g.
-        # HEDRA_C3) as an engine-level hint, but there is no engine-selection knob on
+        # SYNC_SO_V3) as an engine-level hint, but there is no engine-selection knob on
         # generate_lip_sync_video — the engine cascade inside lipsync_overlay/generation
         # handles selection internally.  We pass mode="auto" (same as the manual
         # lip_sync correction action) and let the cascade choose.

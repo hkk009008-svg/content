@@ -37,3 +37,17 @@ def test_default_aspect_is_widescreen():
     # No aspect_ratio key → default 16:9 → widescreen.
     p = _prompt(None)
     assert "16:9 widescreen" in p
+
+
+def test_hedra_c3_purged_from_catalog():
+    # WS4 Task 4: the LLM-routing catalog still listed HEDRA_C3 as status:"live"
+    # and ranked it first for lipsync, even though Tasks 1-3 removed the Hedra
+    # engine entirely. Repoint policy: default lipsync = SYNC_SO_V3 (sync-3,
+    # overlay/dialogue primary) / OMNIHUMAN_V1_5 (talking-head-generation primary).
+    import domain.scene_decomposer as sd, domain.language_defaults as ld
+    assert "HEDRA_C3" not in sd.API_REGISTRY
+    assert all("HEDRA_C3" not in v for v in sd.PURPOSE_API_RANKING.values())
+    for cfg in ld.PIPELINE_LANGUAGE_DEFAULTS.values():
+        assert "HEDRA_C3" not in cfg.get("lipsync_engine_priority", [])
+    assert sd.PURPOSE_API_RANKING["dialogue_close_up"][0] == "SYNC_SO_V3"
+    assert sd.PURPOSE_API_RANKING["talking_head_full"][0] == "OMNIHUMAN_V1_5"

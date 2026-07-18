@@ -2,15 +2,14 @@
 Cinema Production Tool — Workflow Selector (Lightweight ComfyGPT)
 Automatically classifies shots by type and selects optimal workflow parameters.
 
-Two quality tiers:
-  - "production" (default): pre-tuned params for base pulid.json (5 templates)
-  - "max":                  full maxed stack for pulid_max.json (N=8 best-of,
-                            4-layer identity, 4-channel Union CN, Redux,
-                            multi-pass refinement, SUPIR upscale)
+Single quality tier: "production" — pre-tuned params for base pulid.json
+(5 templates). The former "max" tier (pulid_max.json: N=8 best-of, 4-layer
+identity, 4-channel Union CN, Redux, multi-pass refinement, SUPIR upscale)
+was retired WS1 Task 2 (MAX_QUALITY_TEMPLATES/get_max_quality_params) and
+WS1 Task 4 (the quality_max.py driver + pulid_max.json graph themselves).
 
 Shot types: portrait, medium, wide, action, landscape
-Each type optimizes: PuLID weight, guidance, steps, denoise — and at max tier
-also: SLG/FreeU scales, CN channel strengths, DetailDaemon, halt rules.
+Each type optimizes: PuLID weight, guidance, steps, denoise.
 """
 
 import math
@@ -32,12 +31,14 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.35,  # Subtle spatial lock from previous shot
         "ip_adapter_weight": 0.25, # Minimal style transfer — face is priority
         "denoise_default": 0.25,   # Lower denoise = tighter temporal consistency in img2img
-        # KLING_3_0 = fal Kling v3 Pro, the best-ranked Kling (#11 AA i2v arena,
-        # 2026-07-11) with `elements` identity binding. KLING_NATIVE stays first
-        # fallback: it is the legacy kling-v1-6 route (proven identity path;
-        # native kling-v3 bump deferred — v3 param compat unverifiable offline).
-        "target_api": "KLING_3_0",
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"],
+        # GEMINI_OMNI = Gemini Omni Flash (Preview), Google-first primary since
+        # WS2 (Gemini Omni Flash is arena #1). KLING_3_0 = fal Kling v3 Pro
+        # (#11 AA i2v arena, 2026-07-11) with `elements` identity binding stays
+        # first fallback; KLING_NATIVE is the legacy kling-v1-6 route (proven
+        # identity path; native kling-v3 bump deferred — v3 param compat
+        # unverifiable offline).
+        "target_api": "GEMINI_OMNI",
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"],
         "description": "Close-up portrait — max face fidelity, 25 steps, DPM++ 2M + PAG",
     },
     "medium": {
@@ -52,10 +53,11 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.40,  # Moderate spatial lock
         "ip_adapter_weight": 0.30, # Balanced style transfer
         "denoise_default": 0.35,
-        # fal Kling v3 Pro (elements identity); native v1.6 first fallback —
-        # see the portrait entry for the full rationale.
-        "target_api": "KLING_3_0",
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
+        # GEMINI_OMNI Google-first primary (WS2); fal Kling v3 Pro (elements
+        # identity) first fallback, native v1.6 second — see the portrait
+        # entry for the full rationale.
+        "target_api": "GEMINI_OMNI",
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "Medium shot — balanced face + scene, 20 steps, DPM++ 2M + PAG",
     },
     "wide": {
@@ -70,8 +72,10 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.50,  # Strongest spatial lock — wide shots drift most
         "ip_adapter_weight": 0.35, # Higher style transfer — lock environment atmosphere
         "denoise_default": 0.45,
-        "target_api": "LTX",            # 4K, 3D camera, depth-aware, cheapest
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"],
+        # GEMINI_OMNI Google-first primary (WS2); old target_api LTX demoted
+        # into 2nd fallback slot; old VEO_NATIVE fallback deduped (now the head).
+        "target_api": "GEMINI_OMNI",
+        "video_fallbacks": ["VEO_NATIVE", "LTX", "KLING_3_0", "RUNWAY_GEN4"],
         "description": "Wide establishing shot — environment-first, 20 steps, DPM++ 2M + PAG",
     },
     "action": {
@@ -86,14 +90,13 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.30,  # Light spatial guidance — allow motion freedom
         "ip_adapter_weight": 0.25, # Light style transfer — don't constrain action
         "denoise_default": 0.40,
-        # SEEDANCE primary since the Sora sunset (OpenAI retires Sora 2 +
-        # the Videos API on 2026-09-24): #1 on the AA i2v arena (2026-07),
-        # and its multi-reference input (up to 9 images) binds
-        # multi-character action shots — the old SEEDANCE-last niche.
-        "target_api": "SEEDANCE",
-        # SORA_NATIVE stays first fallback (best motion physics) until the
-        # shutdown date; after it, the call errors fast and cascades on.
-        "video_fallbacks": ["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
+        # GEMINI_OMNI Google-first primary (WS2). SEEDANCE (#1 AA i2v arena,
+        # 2026-07; multi-reference up to 9 images binds multi-character action)
+        # demoted into 2nd fallback slot. SORA_NATIVE stays third fallback
+        # (best motion physics) until the shutdown date; after it, the call
+        # errors fast and cascades on.
+        "target_api": "GEMINI_OMNI",
+        "video_fallbacks": ["VEO_NATIVE", "SEEDANCE", "SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
     },
     "landscape": {
@@ -108,14 +111,18 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.55,  # Strong spatial lock for architecture/layout
         "ip_adapter_weight": 0.40, # Max style transfer — lock atmosphere and color grade
         "denoise_default": 0.55,
-        "target_api": "LTX",            # 4K, no face needed, cheapest, best environments
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0"],
+        # GEMINI_OMNI Google-first primary (WS2); old target_api LTX demoted;
+        # old VEO_NATIVE fallback deduped (now the head).
+        "target_api": "GEMINI_OMNI",
+        "video_fallbacks": ["VEO_NATIVE", "LTX", "KLING_3_0"],
         "description": "Pure landscape — no PuLID, 25 steps, max detail + PAG",
     },
     # NOTE: "dialogue" is not a ComfyUI image-gen template — dialogue shots use
     # portrait/medium templates for image generation, then the pipeline routes
     # to a video API with native lipsync.
-    # The video generation cascade for dialogue: VEO_NATIVE → Kling Lip Sync → Omnihuman.
+    # The video generation cascade for dialogue: GEMINI_OMNI → VEO_NATIVE →
+    # Kling Lip Sync → Omnihuman (data-driven via PURPOSE_API_RANKING /
+    # _resolve_dialogue_routing, domain/scene_decomposer.py).
     # Assembly uses HARD CUTS only — no AI-generated transition clips.
 }
 
@@ -142,263 +149,6 @@ SHOT_TYPE_KEYWORDS = {
         "cowboy shot", "two-shot",
     ],
 }
-
-
-# =============================================================================
-# MAX-QUALITY TIER — for pulid_max.json (full maxed stack)
-# =============================================================================
-# Per-shot-type tuning for the max graph. Every shot type gets the SAME
-# generation budget (N=8) but the halt threshold and the conditioning mix
-# vary. Values here are deliberately bolder than the production tier — this
-# is the "ignore cost, max quality" path.
-MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
-    "portrait": {
-        "candidate_count": 8,
-        "candidate_batch": 4,
-        "halt_threshold_composite": 0.92,
-        "halt_threshold_arc": 0.85,
-        "halt_min_n": 4,
-        "halt_rule": "conjunctive",   # face-dominant: arc threshold is a REAL halt gate (2026-06-11 disposition — was fallback composite_only, leaving halt_threshold_arc dead)
-        "regenerate_floor_arc": 0.82,
-        "pulid_weight": 0.85,
-        "pulid_start_at": 0.0,
-        "pulid_end_at": 0.90,
-        "lora_strength_model": 1.0,
-        "lora_strength_clip": 1.0,
-        "guidance": 3.5,
-        "ays_steps": 28,
-        "sampler": "dpmpp_3m_sde_gpu",
-        "scheduler_ays": True,
-        "pag_scale": 3.0,
-        "slg_scale": 2.5,
-        "slg_double_layers": "7,8,9",
-        "slg_single_layers": "10,11",
-        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
-        "detail_daemon_amount": 0.5,
-        "diffdiff_enabled": True,
-        "cn_depth_strength": 0.40,
-        "cn_canny_strength": 0.15,
-        "cn_pose_strength": 0.35,
-        "cn_tile_strength": 0.25,
-        "redux_strength": "high",
-        "redux_end_at": 0.50,
-        "latent_blend_ratio": 0.15,
-        "hires_fix_enabled": True,
-        "hires_fix_scale": 1.5,
-        "hires_fix_denoise": 0.40,
-        "hires_fix_steps": 18,
-        "face_detailer_enabled": True,
-        "face_detailer_guide_size": 1024,
-        "face_detailer_denoise": 0.35,
-        "supir_enabled": True,
-        "supir_steps": 40,
-        "supir_cfg_scale": 2.8,
-        "final_resolution": (3840, 2160),
-        # fal Kling v3 Pro primary; native v1.6 first fallback (see the
-        # production portrait entry for the rationale).
-        "target_api": "KLING_3_0",
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "VEO_NATIVE"],
-        "description": "MAX portrait — 4-layer identity, full CN+Redux, N=8 halt@0.92, all post-passes",
-    },
-    "medium": {
-        "candidate_count": 8,
-        "candidate_batch": 4,
-        "halt_threshold_composite": 0.90,
-        "halt_threshold_arc": 0.83,
-        "halt_min_n": 4,
-        "halt_rule": "conjunctive",   # face-dominant: arc threshold is a REAL halt gate (2026-06-11 disposition)
-        "regenerate_floor_arc": 0.80,
-        "pulid_weight": 0.80,
-        "pulid_start_at": 0.0,
-        "pulid_end_at": 0.90,
-        "lora_strength_model": 1.0,
-        "lora_strength_clip": 1.0,
-        "guidance": 3.5,
-        "ays_steps": 28,
-        "sampler": "dpmpp_3m_sde_gpu",
-        "scheduler_ays": True,
-        "pag_scale": 3.0,
-        "slg_scale": 2.5,
-        "slg_double_layers": "7,8,9",
-        "slg_single_layers": "10,11",
-        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
-        "detail_daemon_amount": 0.45,
-        "diffdiff_enabled": True,
-        "cn_depth_strength": 0.42,
-        "cn_canny_strength": 0.15,
-        "cn_pose_strength": 0.32,
-        "cn_tile_strength": 0.25,
-        "redux_strength": "high",
-        "redux_end_at": 0.50,
-        "latent_blend_ratio": 0.15,
-        "hires_fix_enabled": True,
-        "hires_fix_scale": 1.5,
-        "hires_fix_denoise": 0.40,
-        "hires_fix_steps": 18,
-        "face_detailer_enabled": True,
-        "face_detailer_guide_size": 1024,
-        "face_detailer_denoise": 0.35,
-        "supir_enabled": True,
-        "supir_steps": 40,
-        "supir_cfg_scale": 2.8,
-        "final_resolution": (3840, 2160),
-        # fal Kling v3 Pro primary; native v1.6 first fallback.
-        "target_api": "KLING_3_0",
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
-        "description": "MAX medium — same identity stack, slightly relaxed thresholds",
-    },
-    "wide": {
-        "candidate_count": 8,
-        "candidate_batch": 4,
-        "halt_threshold_composite": 0.88,
-        "halt_threshold_arc": 0.78,
-        "halt_min_n": 4,
-        "halt_rule": "composite_only",  # distant faces: arc unreliable as a halt gate; regen floor still backstops identity
-        "regenerate_floor_arc": 0.72,
-        "pulid_weight": 0.65,
-        "pulid_start_at": 0.20,
-        "pulid_end_at": 0.85,
-        "lora_strength_model": 0.9,
-        "lora_strength_clip": 0.9,
-        "guidance": 3.5,
-        "ays_steps": 28,
-        "sampler": "dpmpp_3m_sde_gpu",
-        "scheduler_ays": True,
-        "pag_scale": 2.8,
-        "slg_scale": 2.5,
-        "slg_double_layers": "7,8,9",
-        "slg_single_layers": "10,11",
-        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
-        "detail_daemon_amount": 0.5,
-        "diffdiff_enabled": True,
-        "cn_depth_strength": 0.50,
-        "cn_canny_strength": 0.18,
-        "cn_pose_strength": 0.25,
-        "cn_tile_strength": 0.30,
-        "redux_strength": "high",
-        "redux_end_at": 0.50,
-        "latent_blend_ratio": 0.18,
-        "hires_fix_enabled": True,
-        "hires_fix_scale": 1.5,
-        "hires_fix_denoise": 0.42,
-        "hires_fix_steps": 18,
-        "face_detailer_enabled": False,
-        "face_detailer_guide_size": 1024,
-        "face_detailer_denoise": 0.35,
-        "supir_enabled": True,
-        "supir_steps": 40,
-        "supir_cfg_scale": 2.8,
-        "final_resolution": (3840, 2160),
-        "target_api": "LTX",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"],
-        "description": "MAX wide — face too small for FaceDetailer; CN spatial dominant",
-    },
-    "action": {
-        "candidate_count": 8,
-        "candidate_batch": 4,
-        "halt_threshold_composite": 0.88,
-        "halt_threshold_arc": 0.80,
-        "halt_min_n": 4,
-        "halt_rule": "composite_only",  # motion blur: arc unreliable as a halt gate; regen floor still backstops identity
-        "regenerate_floor_arc": 0.75,
-        "pulid_weight": 0.75,
-        "pulid_start_at": 0.0,
-        "pulid_end_at": 0.90,
-        "lora_strength_model": 1.0,
-        "lora_strength_clip": 1.0,
-        "guidance": 3.5,
-        "ays_steps": 28,
-        "sampler": "dpmpp_3m_sde_gpu",
-        "scheduler_ays": True,
-        "pag_scale": 2.5,
-        "slg_scale": 2.0,
-        "slg_double_layers": "7,8,9",
-        "slg_single_layers": "10,11",
-        "freeu_b1": 1.2, "freeu_b2": 1.3, "freeu_s1": 0.9, "freeu_s2": 0.2,
-        "detail_daemon_amount": 0.4,
-        "diffdiff_enabled": True,
-        "cn_depth_strength": 0.32,
-        "cn_canny_strength": 0.12,
-        "cn_pose_strength": 0.28,
-        "cn_tile_strength": 0.20,
-        "redux_strength": "medium",
-        "redux_end_at": 0.45,
-        "latent_blend_ratio": 0.12,
-        "hires_fix_enabled": True,
-        "hires_fix_scale": 1.5,
-        "hires_fix_denoise": 0.45,
-        "hires_fix_steps": 18,
-        "face_detailer_enabled": True,
-        "face_detailer_guide_size": 1024,
-        "face_detailer_denoise": 0.35,
-        "supir_enabled": True,
-        "supir_steps": 40,
-        "supir_cfg_scale": 2.8,
-        "final_resolution": (3840, 2160),
-        # SEEDANCE primary since the Sora sunset (2026-09-24) — see the
-        # production-template action entry for the full rationale.
-        "target_api": "SEEDANCE",
-        "video_fallbacks": ["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
-        "description": "MAX action — softer guidance for motion, lower CN strength to allow movement",
-    },
-    "landscape": {
-        "candidate_count": 8,
-        "candidate_batch": 4,
-        "halt_threshold_composite": 0.90,
-        "halt_threshold_arc": 0.0,
-        "halt_min_n": 4,
-        "halt_rule": "composite_only",  # no identity stack at all
-        "regenerate_floor_arc": 0.0,
-        "pulid_weight": 0.0,
-        "pulid_start_at": 0.0,
-        "pulid_end_at": 0.0,
-        "lora_strength_model": 0.0,
-        "lora_strength_clip": 0.0,
-        "guidance": 4.0,
-        "ays_steps": 30,
-        "sampler": "dpmpp_3m_sde_gpu",
-        "scheduler_ays": True,
-        "pag_scale": 3.5,
-        "slg_scale": 2.8,
-        "slg_double_layers": "7,8,9",
-        "slg_single_layers": "10,11",
-        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
-        "detail_daemon_amount": 0.6,
-        "diffdiff_enabled": True,
-        "cn_depth_strength": 0.55,
-        "cn_canny_strength": 0.20,
-        "cn_pose_strength": 0.0,
-        "cn_tile_strength": 0.35,
-        "redux_strength": "high",
-        "redux_end_at": 0.55,
-        "latent_blend_ratio": 0.20,
-        "hires_fix_enabled": True,
-        "hires_fix_scale": 1.5,
-        "hires_fix_denoise": 0.45,
-        "hires_fix_steps": 20,
-        "face_detailer_enabled": False,
-        "face_detailer_guide_size": 1024,
-        "face_detailer_denoise": 0.35,
-        "supir_enabled": True,
-        "supir_steps": 40,
-        "supir_cfg_scale": 2.8,
-        "final_resolution": (3840, 2160),
-        "target_api": "LTX",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0"],
-        "description": "MAX landscape — no identity stack, max CN + PAG + SLG for architecture/atmosphere",
-    },
-}
-
-
-def get_max_quality_params(shot_type: str) -> Dict:
-    """Return the maxed parameter template for a shot type.
-
-    Keys cover: candidate budget (N), halt thresholds, identity stack weights,
-    ControlNet channel strengths, guidance enhancers, post-pass toggles.
-    Consumed by quality_max.generate_ai_broll_max — not used in the production
-    tier path.
-    """
-    return MAX_QUALITY_TEMPLATES.get(shot_type, MAX_QUALITY_TEMPLATES["medium"]).copy()
 
 
 # =============================================================================
@@ -480,12 +230,13 @@ def get_workflow_params(
     quality_tier: str = "production",
     settings: Optional[dict] = None,
 ) -> Dict:
-    """Get the optimized workflow parameters for a shot type and quality tier.
+    """Get the optimized workflow parameters for a shot type.
 
     Args:
         shot_type: "portrait" | "medium" | "wide" | "action" | "landscape"
-        quality_tier: "production" (default, pulid.json) or "max" (pulid_max.json).
-            Existing callers pass shot_type only and get production behavior unchanged.
+        quality_tier: retained for signature compat only — production (pulid.json)
+            is the sole tier now that MAX_QUALITY_TEMPLATES/get_max_quality_params
+            have been retired (WS1 Task 2). No longer branches on this value.
         settings: Optional project settings dict (ctx.global_settings or equivalent).
             When provided, overlays the 4 per-project UI knobs onto the returned params:
               flux_guidance    → guidance   (float)
@@ -495,8 +246,6 @@ def get_workflow_params(
 
     Returns: copy of the matching template dict (callers may mutate freely).
     """
-    if quality_tier == "max":
-        return get_max_quality_params(shot_type)
     params = WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"]).copy()
 
     if settings:
@@ -528,16 +277,18 @@ def get_workflow_params(
         # in web_server.py:331 before writing — the JSON API can send any float.
         # isinstance(_co, dict): a present-but-null continuity_options (JSON null)
         # makes settings.get(..., {}) return None (the {} default applies only to a
-        # MISSING key), so None.get('img2img_denoise') raises AttributeError. Mirror
-        # the dict-guard the sibling site quality_max.py:1044 already has. (bf1034a
-        # closed the main non-finite issue but its audit boundary missed this sibling.)
+        # MISSING key), so None.get('img2img_denoise') raises AttributeError. (bf1034a
+        # closed the main non-finite issue but its audit boundary missed this sibling;
+        # the quality_max.py sibling site that used to mirror this guard was retired
+        # WS1 Task 4.)
         _co = settings.get("continuity_options", {})
         img2img_denoise = _co.get("img2img_denoise") if isinstance(_co, dict) else None
         if (img2img_denoise is not None and isinstance(img2img_denoise, (int, float))
                 and math.isfinite(img2img_denoise)):
             # math.isfinite: the [0.2,0.6] clamp neutralises non-finite by luck
-            # (nan->0.6), silently overwriting the template default. Skip instead,
-            # matching quality_max._clamp_img2img_denoise's reject-non-finite policy.
+            # (nan->0.6), silently overwriting the template default. Skip instead
+            # (formerly matched quality_max._clamp_img2img_denoise's reject-non-finite
+            # policy; that module was retired WS1 Task 4).
             clamped = max(0.2, min(0.6, float(img2img_denoise)))
             params["denoise_default"] = clamped
 

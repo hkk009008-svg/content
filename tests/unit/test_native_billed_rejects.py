@@ -70,6 +70,12 @@ def _run_native(target_api: str, module_name: str, class_attr: str, aspect: str 
     ("SORA_NATIVE", "sora_native", "SoraNativeAPI"),
     ("VEO_NATIVE", "veo_native", "VeoNativeAPI"),
     ("LTX", "ltx_native", "LTXVideoAPI"),
+    # GEMINI_OMNI (WS2, 2026-07-18): writes via output_path= like the other
+    # native branches (never touches _download_video_or_cascade) and calls
+    # _note_billed_attempt before the aspect backstop (phase_c_ffmpeg.py's
+    # GEMINI_OMNI branch mirrors VEO_NATIVE's shape exactly here) — same
+    # billed-but-rejected leak this file exists to pin.
+    ("GEMINI_OMNI", "gemini_omni_native", "GeminiOmniAPI"),
 ])
 def test_native_branch_notes_billed_attempt_on_aspect_reject(target_api, module_name, class_attr):
     cascade = _run_native(target_api, module_name, class_attr)

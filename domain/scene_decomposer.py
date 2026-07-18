@@ -41,6 +41,7 @@ API_REGISTRY = {
     "KLING_NATIVE":  {"label": "Kling Native (legacy v1.6)", "category": "native", "description": "Legacy kling-v1-6 JWT route — fallback-only since 2026-07-11; kept as the proven pre-v3 identity path", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "style_locked_sequence"], "per_shot_cost": 0.50, "quality_score": 0.80, "latency_s": 90, "status": "live"},
     "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Best motion physics — body momentum, cloth sim (OpenAI retires Sora 2 + Videos API 2026-09-24)", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
     "VEO_NATIVE":    {"label": "Veo 3.1 Native",       "category": "native",    "description": "Native audio + reference images, 1080p", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "establishing_shot"], "per_shot_cost": 0.40, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
+    "GEMINI_OMNI":   {"label": "Gemini Omni Flash (Preview)", "category": "native", "description": "Google Gemini Developer API native video — Google-first primary per WS2; PREVIEW-tier (no SLA per Google Cloud's standing launch-stage policy), Gemini-API billing only (not on Vertex yet)", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "static_portrait", "action_motion", "establishing_shot"], "per_shot_cost": 0.56, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
     "RUNWAY_GEN4":   {"label": "Runway Gen-4",         "category": "native",    "description": "Style lock with 3 references, turbo preview", "modality": "video", "best_for": ["style_locked_sequence", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.82, "latency_s": 75, "status": "live"},
     "LTX":           {"label": "LTX Video 2.3",        "category": "native",    "description": "4K, keyframe interpolation, cheapest per second (~$0.06/s @1080p; 6s minimum on fal 2.3)", "modality": "video", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.36, "quality_score": 0.74, "latency_s": 60, "status": "live"},
 
@@ -57,7 +58,6 @@ API_REGISTRY = {
     "LATENTSYNC":    {"label": "LatentSync v1.6",      "category": "lipsync",   "description": "ByteDance — diffusion-based lipsync, sharper mouth than MuseTalk", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.03, "quality_score": 0.83, "latency_s": 45, "status": "live"},
     "SYNC_V2":       {"label": "Sync lipsync-2 (legacy)", "category": "lipsync", "description": "Sync Labs LEGACY — 512x512 face region, needs natural speaking motion in the input; last-resort fallback", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.23, "quality_score": 0.79, "latency_s": 40, "status": "live"},
     "SYNC_SO_V3":    {"label": "sync-3 (Sync Labs)",    "category": "lipsync", "description": "Sync Labs flagship (2026-04) — best generalist lipsync; the ONLY sync.so model that opens still/silent lips (fits the still-derived talking-head path); removes the 512x512 face cap, 4K-capable", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.67, "quality_score": 0.90, "latency_s": 50, "status": "live"},
-    "HEDRA_C3":      {"label": "Hedra Character-3",    "category": "lipsync",   "description": "SOTA portrait talking head — best emotional micro-expressions, full body", "modality": "lipsync", "best_for": ["talking_head_full", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.93, "latency_s": 90, "status": "live"},
     "KLING_LIPSYNC_2":{"label": "Kling Lip Sync 2",    "category": "lipsync",   "description": "Kuaishou's Kling-integrated lipsync — pairs natively with Kling video", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.05, "quality_score": 0.82, "latency_s": 55, "status": "planned"},
     "PIXVERSE_LS2":  {"label": "PixVerse Lip Sync v2", "category": "lipsync",   "description": "PixVerse — quick fallback, average quality", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.07, "quality_score": 0.75, "latency_s": 35, "status": "planned"},
     "REACT_1":       {"label": "sync.so react-1",       "category": "lipsync",   "description": "Full-face performance re-direction from audio — emotion-promptable (angry/sad/happy...), not just mouth; fal-ai/sync-lipsync/react-1, $0.133-0.167/s, 15s input cap (verified 2026-07-11). NOT YET WIRED.", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.84, "quality_score": 0.90, "latency_s": 60, "status": "planned"},
@@ -74,7 +74,7 @@ API_REGISTRY = {
 
     # --- IMAGE GEN ALTERNATIVES ---
     "FLUX_DEV":      {"label": "FLUX-Dev (current)",   "category": "image_gen", "description": "Production image gen on RunPod ComfyUI + PuLID", "modality": "image", "best_for": ["any"], "per_shot_cost": 0.03, "quality_score": 0.87, "latency_s": 30, "status": "live"},
-    "HIDREAM_I1":    {"label": "HiDream-I1-Full",      "category": "image_gen", "description": "17B params — beats FLUX on photorealism benchmarks. Dispatcher wired in quality_max.py; activates when HiDreamModelLoader detected on pod (requires HiDream ComfyUI node + 35GB model install).", "modality": "image", "best_for": ["static_portrait", "macro_detail", "product_hero"], "per_shot_cost": 0.08, "quality_score": 0.91, "latency_s": 55, "status": "live"},
+    "HIDREAM_I1":    {"label": "HiDream-I1-Full",      "category": "image_gen", "description": "17B params — beats FLUX on photorealism benchmarks. No production dispatcher currently wired (the only implementation, quality_max.py's _swap_to_hidream, was retired WS1 Task 4); would activate when HiDreamModelLoader is detected on pod (requires HiDream ComfyUI node + 35GB model install) if re-wired to a production path.", "modality": "image", "best_for": ["static_portrait", "macro_detail", "product_hero"], "per_shot_cost": 0.08, "quality_score": 0.91, "latency_s": 55, "status": "planned"},
     "SD3_5_LARGE":   {"label": "Stable Diffusion 3.5 Large", "category": "image_gen", "description": "8B params, strong prompt adherence, alternative refiner", "modality": "image", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.05, "quality_score": 0.84, "latency_s": 40, "status": "planned"},
 
     # --- MUSIC ---
@@ -121,11 +121,11 @@ PURPOSE_TAGS = [
 # are ordered fallbacks. The orchestrator uses these when target_api='AUTO' or
 # when a per-purpose route is explicitly requested. Edit here, not in code.
 PURPOSE_API_RANKING = {
-    "dialogue_close_up":    ["HEDRA_C3", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "SYNC_SO_V3", "LATENTSYNC", "MUSETALK"],
-    "talking_head_full":    ["HEDRA_C3", "RUNWAY_ACT_ONE", "OMNIHUMAN_V1_5", "VEO_NATIVE", "SYNC_SO_V3"],
-    "action_motion":        ["SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
-    "static_portrait":      ["KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
-    "establishing_shot":    ["LTX", "VEO_NATIVE"],
+    "dialogue_close_up":    ["SYNC_SO_V3", "GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"],
+    "talking_head_full":    ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "GEMINI_OMNI", "VEO_NATIVE", "SYNC_SO_V3"],
+    "action_motion":        ["GEMINI_OMNI", "SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
+    "static_portrait":      ["GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
+    "establishing_shot":    ["GEMINI_OMNI", "VEO_NATIVE", "LTX"],
     "macro_detail":         ["SORA_NATIVE", "SEEDANCE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
     "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE"],
     "narration":            ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO", "F5_TTS"],
@@ -155,12 +155,13 @@ BILLING_PROVIDERS = {
     "FAL_AI": [
         "KLING_3_0", "SORA_2", "VEO", "RUNWAY", "SEEDANCE",
         "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
-        "SYNC_SO_V3", "HEDRA_C3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
+        "SYNC_SO_V3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",
     ],
     "KLING_DIRECT":     ["KLING_NATIVE"],
     "OPENAI":           ["SORA_NATIVE", "OPENAI_AUDIO"],
     "GOOGLE_VERTEX":    ["VEO_NATIVE"],
+    "GOOGLE_GEMINI_API": ["GEMINI_OMNI"],
     "RUNWAY_DIRECT":    ["RUNWAY_GEN4"],
     "LTX_DIRECT":       ["LTX"],
     "ELEVENLABS":       ["ELEVENLABS_V3", "ELEVENLABS_DIALOGUE", "ELEVENLABS_MUSIC"],
@@ -179,7 +180,7 @@ def estimate_short_cost(
     has_dialogue: bool = True,
     dialogue_shot_ratio: float = 0.5,
     quality_tier: str = "production",
-    candidate_count: int = 1,   # >1 only for max tier
+    candidate_count: int = 1,   # kept for signature compat; no longer branches (max tier retired)
 ) -> dict:
     """Rough cost estimate for a 60-shot short. Returns per-category breakdown.
 
@@ -187,8 +188,10 @@ def estimate_short_cost(
         shot_count: Total shots in the short.
         has_dialogue: Whether any shots have spoken dialogue.
         dialogue_shot_ratio: Fraction of shots that are dialogue shots.
-        quality_tier: 'production' (single attempt) | 'max' (N candidates × all post-passes).
-        candidate_count: For max tier, N from best-of-N. Multiplies image gen cost.
+        quality_tier: retained for signature compat only — production is the sole
+            tier now (max tier retired, WS1 Task 2); no longer branches on this value.
+        candidate_count: retained for signature compat only; still multiplies image
+            gen cost if a caller passes >1, but nothing in the live pipeline does.
 
     Returns:
         {
@@ -202,12 +205,8 @@ def estimate_short_cost(
     dialogue_shots = int(shot_count * dialogue_shot_ratio) if has_dialogue else 0
     notes = []
 
-    is_max = quality_tier == "max"
-
     # ----- Image gen (always, one per shot, multiplied by candidate count for max) -----
     img_cost_per = API_REGISTRY["FLUX_DEV"]["per_shot_cost"]
-    if is_max:
-        img_cost_per += API_REGISTRY["SUPIR_V0Q"]["per_shot_cost"]  # SUPIR post-pass
     image_total = img_cost_per * shot_count * candidate_count
 
     # ----- Video gen (one per shot, no candidate multiplier — only one video per shot) -----
@@ -217,7 +216,7 @@ def estimate_short_cost(
 
     # ----- Lipsync (only dialogue shots) -----
     if dialogue_shots > 0:
-        lipsync_per = API_REGISTRY["HEDRA_C3"]["per_shot_cost"]  # default routed pick
+        lipsync_per = API_REGISTRY["SYNC_SO_V3"]["per_shot_cost"]  # default routed pick (sync-3, overlay primary)
     else:
         lipsync_per = 0.0
     lipsync_total = lipsync_per * dialogue_shots
@@ -234,7 +233,7 @@ def estimate_short_cost(
     foley_total = API_REGISTRY["STABLE_AUDIO_FOLEY"]["per_shot_cost"] * (shot_count // 3)
 
     # ----- Video upscale (final master pass) -----
-    upscale_total = API_REGISTRY["SEEDVR2"]["per_shot_cost"] if is_max else 0.0
+    upscale_total = 0.0  # video upscale not counted in the production estimate
 
     # ----- LLM (script + decompose + per-shot prompt optimizer) -----
     # Claude/GPT-4o pricing is per token. Rough estimate: ~$0.50 per short for
@@ -268,8 +267,6 @@ def estimate_short_cost(
         "with_dialogue": round(img_cost_per * candidate_count + lipsync_per + tts_per_line * 4, 3),
     }
 
-    if is_max and candidate_count > 1:
-        notes.append(f"Max tier with N={candidate_count} multiplies image gen cost {candidate_count}x")
     if not has_dialogue:
         notes.append("Dialogue costs excluded (no dialogue in this short)")
 

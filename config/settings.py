@@ -73,7 +73,6 @@ class Settings:
 
     # Performance capture (new phase — face/body retargeting for cinema dialogue)
     viggle_api_key: str         # Viggle — full-body motion retargeting from operator-shot phone reference
-    hedra_api_key: str          # Hedra — audio-driven driving-face synth (Mode B autopilot)
 
     # Google Cloud (Veo, Vertex)
     google_cloud_project: str
@@ -120,7 +119,6 @@ class Settings:
             suno_api_key=_env("SUNO_API_KEY") or _env("SUNO_TOKEN"),
             suno_api_base=_env("SUNO_API_BASE", "https://api.sunoapi.org"),
             viggle_api_key=_env("VIGGLE_API_KEY"),
-            hedra_api_key=_env("HEDRA_API_KEY"),
             google_cloud_project=_env("GOOGLE_CLOUD_PROJECT"),
             google_cloud_location=_env("GOOGLE_CLOUD_LOCATION", "us-central1"),
             firecrawl_api_key=_env("FIRECRAWL_API_KEY"),

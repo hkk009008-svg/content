@@ -2,18 +2,23 @@
 
 The router (cinema/shots/controller.py::_resolve_identity_strategy) emits one
 IdentityStrategy per keyframe take BEFORE generation; the validator and the
-capability scorecard hold generation accountable to it. Only tags whose
-mechanism is implemented are ever emitted (slice 1: the four below; slice 2
-adds MAX_TIER_MULTI_LORA; MAX_TIER_DUAL_PULID remains reserved for Pass B/S2).
+capability scorecard hold generation accountable to it. Tags whose mechanism
+is implemented: PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET (single
+production tier, WS1), and GEMINI_MULTIREF_PRIMARY_ONLY /
+GEMINI_MULTIREF_MULTI_CHAR (Nano Banana multi-reference identity, WS3). The
+MAX_TIER_* tags were retired with the max image-gen tier (WS1); the
+per-character LoRA fields below are kept dormant for a possible future
+FLUX.2 A/B — a separate, deferred track, NOT this WS3 (which binds identity
+via Gemini reference images, not LoRA).
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 PRIMARY_ONLY = "PRIMARY_ONLY"
 KONTEXT_MULTI_CHAR = "KONTEXT_MULTI_CHAR"
-MAX_TIER_PRIMARY_ONLY = "MAX_TIER_PRIMARY_ONLY"
 NO_IDENTITY_ASSET = "NO_IDENTITY_ASSET"
-MAX_TIER_MULTI_LORA = "MAX_TIER_MULTI_LORA"
+GEMINI_MULTIREF_PRIMARY_ONLY = "GEMINI_MULTIREF_PRIMARY_ONLY"
+GEMINI_MULTIREF_MULTI_CHAR = "GEMINI_MULTIREF_MULTI_CHAR"
 
 
 @dataclass(frozen=True)
@@ -21,13 +26,15 @@ class CharIdentitySpec:
     char_id: str
     reference: str
     identity_anchor: str = ""
-    fidelity: str = "reference"  # slice 1: reference | pulid; lora is now live
+    fidelity: str = "reference"  # router emits "reference" only (max tier retired, WS1)
     # V-5: angle refs ride the spec through to_dict() -> generate_ai_broll ->
     # the slot allocator; a tuple (not list) keeps the frozen dataclass hashable.
     multi_angle_refs: tuple = ()
-    # P1-1 slice 2 (§3b): per-char LoRA assets — populated only on the max
-    # tier for registered-LoRA secondaries; None elsewhere (Kontext specs
-    # carry them as None and the Kontext branch ignores them).
+    # P1-1 slice 2 (§3b): per-char LoRA assets — formerly populated on the max
+    # tier for registered-LoRA secondaries (retired WS1). The router now leaves
+    # them None on every spec (including the WS3 gemini_multiref branch, which
+    # binds identity via reference images, not LoRA); kept dormant for a
+    # possible future FLUX.2 A/B — deferred, tracked separately from WS3.
     lora_path: Optional[str] = None
     lora_strength: Optional[float] = None
     # The PRIMARY's trigger rides IdentityStrategy.char_lora_trigger (the

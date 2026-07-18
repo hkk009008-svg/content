@@ -24,6 +24,8 @@ from identity.types import FailureReason
 
 # Valid target_api / video_fallback values accepted by the cinema pipeline.
 # Sourced from WORKFLOW_TEMPLATES + handoff §3.3 valid-api list.
+# GEMINI_OMNI added WS2 (google-first-overhaul): Google-first primary
+# (Gemini Omni Flash) is now target_api for every shot type.
 _VALID_APIS = {
     "KLING_NATIVE",
     "LTX",
@@ -32,6 +34,7 @@ _VALID_APIS = {
     "VEO_NATIVE",
     "KLING_3_0",
     "SEEDANCE",
+    "GEMINI_OMNI",
 }
 
 
@@ -248,19 +251,6 @@ class TestCharLandscapeRouting:
         }
         weight = WORKFLOW_TEMPLATES[classify_shot_type(shot)]["pulid_weight"]
         assert weight == 0.65, f"identity not recovered: pulid_weight={weight}"
-
-    def test_char_landscape_recovers_max_tier_identity_weight(self):
-        """Same recovery in the max tier: the routed shot pulls wide's 0.65 /
-        lora 0.9 instead of the landscape template's zeros."""
-        from workflow_selector import get_max_quality_params
-
-        shot = {
-            "prompt": "an aerial vista of the valley",
-            "camera": "",
-            "characters_in_frame": ["hero"],
-        }
-        params = get_max_quality_params(classify_shot_type(shot))
-        assert params["pulid_weight"] == 0.65, f"max identity not recovered: {params['pulid_weight']}"
 
 
 # --- Shot-section priority over full prompt -------------------------------

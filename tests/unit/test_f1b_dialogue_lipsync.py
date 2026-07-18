@@ -914,7 +914,13 @@ class TestGenerateMotionTakeOverlayWiring:
         tracker.spent_usd = 0.26
         tracker.budget_usd = 0.60
         assert tracker.spent_usd + API_COST_USD["VEO_NATIVE"] <= tracker.budget_usd
-        expected_envelope = API_COST_USD["VEO_NATIVE"] + API_COST_USD["LIPSYNC_DEFAULT"]
+        # WS2: GEMINI_OMNI (native audio) now outranks VEO_NATIVE in dialogue
+        # routing (domain/scene_decomposer.py PURPOSE_API_RANKING), so the
+        # dialogue video generate_motion_take actually dispatches is
+        # GEMINI_OMNI, not VEO_NATIVE — the envelope the budget gate checks
+        # follows the real routing change (this is an expected-value update,
+        # not a masking one: the routing change IS intended).
+        expected_envelope = API_COST_USD["GEMINI_OMNI"] + API_COST_USD["LIPSYNC_DEFAULT"]
         assert tracker.spent_usd + expected_envelope > tracker.budget_usd
         tracker.would_exceed.return_value = False
         tracker.would_exceed_cost.side_effect = (
@@ -1336,15 +1342,12 @@ class TestLipsyncOrientationBackstop:
         fake_fal.subscribe.return_value = {"video": {"url": "http://fake/vid"}}
 
         prereq = types.SimpleNamespace(passed=True, warnings=[], blockers=[])
-        hedra = MagicMock()
-        hedra.return_value.generate_talking_head.return_value = None  # Hedra no output → reach the FAL engines
 
         with patch("lip_sync.FAL_AVAILABLE", True), \
              patch("lip_sync.ENV_SETTINGS", types.SimpleNamespace(fal_key="k")), \
              patch("lip_sync.check_generation_prerequisites", return_value=prereq), \
              patch("lip_sync.fal_client", fake_fal), \
              patch("lip_sync.safe_download", side_effect=_fake_download), \
-             patch("lip_sync._HedraAPI", hedra), \
              patch("lip_sync.validate_lipsync_quality", return_value=0.91), \
              patch("phase_c_ffmpeg.probe_final_media",
                    return_value={"format": {"width": probe_dims[0], "height": probe_dims[1]}}):
@@ -1372,3 +1375,15 @@ class TestLipsyncOrientationBackstop:
         of dims (byte-identical to pre-fix behavior)."""
         result, out = self._run(tmp_path, None, probe_dims=(1920, 1080))
         assert result == out
+
+
+class TestHedraRemovedFromGenerationCascade:
+    """WS4 — Hedra Character-3 (lapsed subscription) must be fully gone from the
+    lipsync generation cascade. Kling/Omnihuman/Aurora already exist below it
+    and become the new front of the cascade."""
+
+    def test_generation_cascade_has_no_hedra_attempt(self):
+        import lip_sync
+        src = __import__("inspect").getsource(lip_sync)
+        assert "hedra" not in src.lower(), "Hedra must be fully removed from lip_sync.py"
+        assert "_HedraAPI" not in src

@@ -1,10 +1,12 @@
 """TDD tests for Task 7: thread per-character char_lora_strength to ComfyUI injection.
 
-Four hops verified:
+Three hops verified (of the original four — Hop 4, quality_max._inject_identity,
+retired WS1 Task 4 with no production replacement; char_lora_strength is
+registered in char_lora_strengths for a future consumer, currently dormant):
   1. cinema/context.py        -- char_lora_strengths field declared
   2. cinema/shots/controller  -- reads strength from settings, forwards at call site
-  3. phase_c_assembly         -- char_lora_strength param forwarded to generate_ai_broll_max
-  4. quality_max              -- _inject_identity uses char_lora_strength over tier default
+  3. phase_c_assembly         -- char_lora_strength param accepted (forwarding
+                                  target retired; param is dormant-preserved)
 
 Backward-compat invariant: absent/None strength → tier default (params["lora_strength_model"]).
 """
@@ -13,81 +15,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-# ---------------------------------------------------------------------------
-# Hop 4: _inject_identity honors char_lora_strength
-# ---------------------------------------------------------------------------
-
-def test_inject_identity_honors_char_lora_strength():
-    """When char_lora_strength=0.55, node-700 strength_model/strength_clip must be 0.55."""
-    import quality_max
-    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
-    params = {"lora_strength_model": 1.0, "lora_strength_clip": 1.0}
-    quality_max._inject_identity(
-        wf, "mara.safetensors", None, params, True, char_lora_strength=0.55
-    )
-    assert wf["700"]["inputs"]["strength_model"] == 0.55, (
-        f"expected strength_model=0.55, got {wf['700']['inputs']['strength_model']!r}"
-    )
-    assert wf["700"]["inputs"]["strength_clip"] == 0.55, (
-        f"expected strength_clip=0.55, got {wf['700']['inputs']['strength_clip']!r}"
-    )
-
-
-def test_inject_identity_uses_tier_default_when_strength_none():
-    """When char_lora_strength=None, node-700 must use params['lora_strength_model'] (tier default)."""
-    import quality_max
-    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
-    params = {"lora_strength_model": 1.0, "lora_strength_clip": 1.0}
-    quality_max._inject_identity(
-        wf, "mara.safetensors", None, params, True, char_lora_strength=None
-    )
-    assert wf["700"]["inputs"]["strength_model"] == 1.0, (
-        f"expected strength_model=1.0 (tier default), got {wf['700']['inputs']['strength_model']!r}"
-    )
-    assert wf["700"]["inputs"]["strength_clip"] == 1.0
-
-
-def test_inject_identity_uses_tier_default_when_strength_absent():
-    """When char_lora_strength is not passed at all (old callers), tier default must apply."""
-    import quality_max
-    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
-    params = {"lora_strength_model": 0.9, "lora_strength_clip": 0.9}
-    # Don't pass char_lora_strength at all — backward compat
-    quality_max._inject_identity(
-        wf, "mara.safetensors", None, params, True
-    )
-    assert wf["700"]["inputs"]["strength_model"] == 0.9
-    assert wf["700"]["inputs"]["strength_clip"] == 0.9
-
-
-def test_inject_identity_strength_zero_is_honored():
-    """Strength=0.0 is a valid override (not falsy-treated as None)."""
-    import quality_max
-    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
-    params = {"lora_strength_model": 1.0, "lora_strength_clip": 1.0}
-    quality_max._inject_identity(
-        wf, "mara.safetensors", None, params, True, char_lora_strength=0.0
-    )
-    assert wf["700"]["inputs"]["strength_model"] == 0.0
-
-
-def test_inject_identity_preserves_independent_model_clip_when_none():
-    """Backward-compat: when char_lora_strength is None and the tier params carry
-    DIFFERENT model/clip values, each is honored SEPARATELY (clip must NOT collapse
-    to the model value)."""
-    import quality_max
-    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
-    params = {"lora_strength_model": 0.8, "lora_strength_clip": 0.6}
-    quality_max._inject_identity(
-        wf, "mara.safetensors", None, params, True, char_lora_strength=None
-    )
-    assert wf["700"]["inputs"]["strength_model"] == 0.8
-    assert wf["700"]["inputs"]["strength_clip"] == 0.6, (
-        f"strength_clip must use lora_strength_clip (0.6), not collapse to the model "
-        f"value; got {wf['700']['inputs']['strength_clip']!r}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -213,47 +140,3 @@ def test_phase_c_assembly_accepts_char_lora_strength_param():
         f"current params: {list(sig.parameters.keys())}"
     )
 
-
-def test_phase_c_assembly_forwards_char_lora_strength_to_max():
-    """In max-tier dispatch, char_lora_strength must be forwarded to generate_ai_broll_max.
-
-    The import of quality_max is inside the function body (lazy), so we patch it
-    via sys.modules before the call to intercept the internal call.
-    """
-    import sys
-    import importlib
-
-    fake_result = MagicMock()
-    fake_result.__bool__ = lambda self: True
-
-    mock_max = MagicMock(return_value=fake_result)
-    fake_qm = MagicMock()
-    fake_qm.generate_ai_broll_max = mock_max
-
-    import phase_c_assembly
-
-    old_qm = sys.modules.get("quality_max")
-    sys.modules["quality_max"] = fake_qm
-    try:
-        phase_c_assembly.generate_ai_broll(
-            "test prompt",
-            "/tmp/out.jpg",
-            quality_tier="max",
-            char_lora_path="/fake/mara.safetensors",
-            char_lora_strength=0.55,
-        )
-    finally:
-        if old_qm is None:
-            sys.modules.pop("quality_max", None)
-        else:
-            sys.modules["quality_max"] = old_qm
-
-    mock_max.assert_called_once()
-    call_kwargs = mock_max.call_args.kwargs
-    assert "char_lora_strength" in call_kwargs, (
-        f"generate_ai_broll_max must be called with char_lora_strength; "
-        f"got kwargs: {list(call_kwargs.keys())}"
-    )
-    assert call_kwargs["char_lora_strength"] == 0.55, (
-        f"expected char_lora_strength=0.55, got {call_kwargs['char_lora_strength']!r}"
-    )

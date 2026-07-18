@@ -54,6 +54,7 @@ API_COST_USD: dict[str, float] = {
     "SORA_NATIVE":   0.80,
     "SORA_2":        0.60,
     "VEO_NATIVE":    0.30,
+    "GEMINI_OMNI":   0.56,   # $0.112/s x ~5s estimate (Gemini Developer API preview pricing — WEB-VERIFIED NOT REPO-MEASURED, confirm against a live billed call per R-MEASURE). Duration is prompt-inferred/variable on this API (no structured duration kwarg), so this flat per-clip estimate risks the exact under-billing pattern SEEDANCE needed fixing for on 2026-07-11 (see SEEDANCE_DURATIONS, phase_c_ffmpeg.py:38) — a duration-probe (ffprobe on the downloaded mp4) fix is recommended before this is load-bearing at scale, not shipped in this first pass.
     "VEO":           0.25,
     "LTX":           0.36,   # per clip: fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified
     "RUNWAY_GEN4":   0.50,
@@ -64,7 +65,6 @@ API_COST_USD: dict[str, float] = {
     "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
-    "PERFORMANCE_DRIVING_HEDRA":      0.30,   # Mode-B Hedra driving face, 5s: Character-3 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11), upper bound.
     "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
@@ -76,8 +76,8 @@ API_COST_USD: dict[str, float] = {
     "FLUX_PRO":      0.05,
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
-    "QUALITY_MAX":   0.40,   # N=8 best-of on the pod, ~8x base cost
     "HIDREAM_I1":    0.06,
+    "GEMINI_IMAGE":  0.03,   # gemini-2.5-flash-image (Nano Banana); Google model-card math ($30/1M output tok x ~1290 tok/img) computes ~$0.039/img — using 0.03 per brief, recalibrate against invoice
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
     "CARTESIA_SONIC_2":  0.008,   # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
@@ -95,7 +95,6 @@ API_COST_USD: dict[str, float] = {
     "LIPSYNC_MUSETALK":    0.02,   # MuseTalk mouth-only overlay via FAL
     "LIPSYNC_LATENTSYNC":  0.03,   # LatentSync overlay fallback via FAL
     "LIPSYNC_SYNCV2":      0.23,   # Sync lipsync-2 (LEGACY tier: 512x512 face region) via FAL: $0.04-0.05/s (sync.so docs 2026-07-11) -> ~5s clip
-    "LIPSYNC_HEDRA":       0.30,   # Hedra Character-3 (native API): 6 credits/s = $0.031-0.060/s by tier (hedra.com/pricing 2026-07-11) -> ~5s, upper bound
     "LIPSYNC_KLING":       0.05,   # Kling lipsync generation via FAL
     "LIPSYNC_OMNIHUMAN":   0.80,   # OmniHuman v1.5 via FAL: $0.16/s (fal model page 2026-07-11) -> 5s clip
     "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL
@@ -188,8 +187,9 @@ def _finite_budget_or_block(value) -> float:
     ``cinema.context._finite_or``: that import is circular-safe (verified) but
     inverts the layering — ``cost_tracker`` is a low-level root util — and would
     drag the ``cinema.context`` dependency tree into a foundational module;
-    consolidation is deferred to the dedicated import-swap pass. Mirrors the
-    ``quality_max:191`` documented-temporary local-copy precedent.
+    consolidation is deferred to the dedicated import-swap pass. (Formerly
+    mirrored the ``quality_max:191`` documented-temporary local-copy precedent;
+    that module was retired WS1 Task 4.)
     """
     try:
         v = float(value)
@@ -418,8 +418,7 @@ class CostTracker:
         # Derive a human-readable provider name from the API key.
         # Prefix match in insertion order; first hit wins. Pod (ComfyUI/PuLID)
         # image backends map to a provider DISTINCT from "fal" so cost_log can
-        # tell "ran on the pod" from "fell back to FAL". QUALITY_MAX is the N=8
-        # best-of, which also runs on the pod.
+        # tell "ran on the pod" from "fell back to FAL".
         _provider_map = {
             # Fal-proxy engines that share a prefix with a native provider must
             # sit BEFORE that prefix (first-prefix-wins) or the fal invoice
@@ -430,10 +429,12 @@ class CostTracker:
             "KLING_3_0": "fal",
             "SORA_2": "fal",        # fal-ai/sora-2 — before "SORA"→openai
             "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
+            "GEMINI_OMNI": "google",  # Gemini Developer API only (not on Vertex yet) — shares the "google" cost-log bucket with VEO_NATIVE
+            "GEMINI_IMAGE": "google",  # gemini-2.5-flash-image (Nano Banana) — Gemini Developer API only, same "google" bucket
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",
-            "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
+            "COMFYUI": "comfyui",
             "POLLINATIONS": "pollinations",
             "FLUX": "fal", "HIDREAM": "fal", "SEEDANCE": "fal",
         }

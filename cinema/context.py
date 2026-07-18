@@ -94,21 +94,25 @@ class PipelineContext:
     # --- workspace ---
     downloaded_vids: list = field(default_factory=list)
 
-    # --- max-quality tier state ---
+    # --- max-quality tier state (reserved) ---
+    # Dormant until a possible future FLUX.2 A/B revives a max-quality path
+    # (a separate, deferred track — NOT WS3, which shipped Nano Banana /
+    # gemini_multiref instead and binds identity via reference images, not a
+    # max-tier LatentBlend graph); the workflow_selector.MAX_QUALITY_TEMPLATES /
+    # get_max_quality_params consumer was removed in WS1 Task 2. Fields kept
+    # (not deleted) so a future consumer doesn't need to re-thread PipelineContext.
     # Pre-VAE-decode latent of the previous shot, cached for LatentBlend in the
-    # max tier. Bytes (serialized torch tensor) or None. Only populated when
-    # generate_ai_broll(..., quality_tier="max") runs and the pod returns the
-    # latent. Production tier ignores this field.
+    # (currently absent) max tier. Bytes (serialized torch tensor) or None.
     prev_shot_latent: Optional[bytes] = None
     # Per-character LoRA registry: character_id -> local path to .safetensors.
-    # Consumed by quality_max via the char_lora_path kwarg.
+    # Was consumed by quality_max via the char_lora_path kwarg.
     char_lora_paths: dict = field(default_factory=dict)
     # Per-character LoRA validated strength: character_id -> float (0.0–1.0).
     # Written by web_server /train-lora when a LoRA passes identity gating.
-    # Consumed by quality_max._inject_identity via char_lora_strength kwarg.
+    # Was consumed by quality_max._inject_identity via char_lora_strength kwarg.
     # Absent key (or None) → tier default (e.g. 1.0 from params).
     char_lora_strengths: dict = field(default_factory=dict)
-    # Style reference board for FLUX Redux (max tier). List of local paths.
+    # Style reference board for FLUX Redux (reserved: dormant max-tier field).
     style_reference_paths: list = field(default_factory=list)
 
     # -----------------------------------------------------------------
@@ -195,8 +199,7 @@ def _finite_or(value, default):
 
     Placed beside ``get_project_setting`` as its read-side companion: callers
     read a knob via ``get_project_setting`` (or a settings ``.get``) then
-    finite-guard it via ``_finite_or``. (quality_max keeps a documented-temporary
-    local copy at ``quality_max:191`` pending a trivial import-swap to this one.)
+    finite-guard it via ``_finite_or``.
     """
     try:
         v = float(value)
