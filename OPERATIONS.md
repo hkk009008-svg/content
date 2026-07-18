@@ -198,14 +198,20 @@ curl -X POST http://localhost:8080/api/projects/<pid>/cancel
 
 ## 5. Pod setup — RunPod / Railway ComfyUI
 
-The pipeline needs a ComfyUI pod for image generation (production + max
-tier) and certain performance capture paths (LivePortrait, SadTalker).
+The pipeline needs a ComfyUI pod for image generation (production tier,
+`pulid.json`) and certain performance capture paths (LivePortrait, SadTalker).
 
 ### Recommended pod spec
 
-- **GPU:** A40 / A100 / RTX 6000 Ada (≥24GB VRAM) — required for FLUX +
-  PuLID + SUPIR. Max tier uses heavy stacks.
-- **Disk:** ≥50GB (models + temp output)
+- **GPU:** RTX 4090 (24GB) recommended. The production `pulid.json` graph is
+  all-fp8 (FLUX-dev-fp8 ~12GB + t5xxl-fp8 ~5GB + PuLID) and fits comfortably
+  in 24GB. The max tier (SUPIR/48GB+) that used to justify a bigger card
+  (A40/A100/RTX 6000 Ada) was retired in WS1, so a big card is no longer needed.
+- **Disk:** models ~21GB + Python env (torch/CUDA/insightface) ~10-12GB +
+  ComfyUI+nodes ~1GB + working/output ~5-10GB. Use an **80GB network volume
+  mounted at `/workspace`** for full-setup persistence (ComfyUI + nodes +
+  models all survive a pod restart, no re-download) — or 40GB if you only
+  want to persist the models and reinstall the rest per-pod.
 - **Network:** ComfyUI listens on `:8188` by default. Expose this port.
 
 ### Bootstrap script
@@ -214,14 +220,15 @@ tier) and certain performance capture paths (LivePortrait, SadTalker).
 workflows depend on (incl. `ComfyUI-PuLID-Flux`), the InsightFace runtime
 stack + `antelopev2` model that `PulidInsightFaceLoader` needs to register,
 and runs a post-start `/object_info` check that the PuLID nodes are
-available (C-D4 guard). Run it on the pod after first boot.
+available (C-D4 guard). Run it on the pod after first boot; it targets
+`$WORKSPACE` (default `/workspace`, RunPod's persistent network volume) so
+a restarted pod doesn't re-download anything already there.
 
-For **max tier**, pass `--max` (or `--max-fp16` for true fp16 base models;
-needs `HF_TOKEN` for the gated FLUX weights) to also install the max-tier
-custom nodes (SUPIR, Impact-Pack + Subpack, Detail-Daemon) and model weights.
-The flag is additive — no flag = production-only. See
-[docs/RUNBOOK-max-tier-test.md](docs/RUNBOOK-max-tier-test.md) for the
-end-to-end provisioning + run + verify steps.
+The script is production-only — the max tier (`--max`/`--max-fp16`: SUPIR,
+Impact-Pack + Subpack, Detail-Daemon, fp16/Redux gated downloads, ReActor)
+was retired in WS1 and those flags no longer exist.
+[docs/RUNBOOK-max-tier-test.md](docs/RUNBOOK-max-tier-test.md) documents that
+retired tier's provisioning steps; treat it as historical.
 
 ### torch / CUDA build (driver-dependent)
 
@@ -285,26 +292,30 @@ ComfyUI workflow JSONs live at the **repo root**, not under `workflows/`:
 
 | File | Used by |
 |---|---|
-| `pulid.json` | Production-tier keyframe gen — `phase_c_assembly.generate_ai_broll` |
-| `pulid_max.json` | Max-tier — `quality_max.generate_ai_broll_max` |
+| `pulid.json` | Production keyframe gen — `phase_c_assembly.generate_ai_broll` |
 
-Both are loaded once per process (module-level cache, lock-guarded) and
-deep-copied per shot. Operator-side edits to the workflow JSONs take
+**Retired (WS1 Task 4):** `pulid_max.json` and its driver
+(`quality_max.generate_ai_broll_max`) were deleted along with the max tier;
+`pulid.json` is the sole ComfyUI/pod image graph now.
+
+`pulid.json` is loaded once per process (module-level cache, lock-guarded)
+and deep-copied per shot. Operator-side edits to the workflow JSON take
 effect on next process restart.
 
 ### Model files required on the pod
 
-For production (`pulid.json`):
-- FLUX.1-dev base
-- PuLID-FLUX face encoder weights
-- ArcFace / InsightFace landmark model
+For production (`pulid.json`), installed by `scripts/setup_runpod.sh`:
+- FLUX.1-dev fp8 checkpoint (`flux1-dev-fp8.safetensors`, ~12GB)
+- T5-XXL fp8 + CLIP-L text encoders (`t5xxl_fp8_e4m3fn.safetensors`, `clip_l.safetensors`)
+- FLUX VAE (`ae.safetensors`)
+- PuLID-FLUX face encoder weights (`pulid_flux_v0.9.1.safetensors`)
+- antelopev2 InsightFace landmark model
+- Real-ESRGAN 4x upscaler (`RealESRGAN_x4plus.pth`)
 
-For max (`pulid_max.json`) — adds:
-- AlignYourSteps scheduler weights
-- LAION Aesthetic Predictor v2 (`shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE`)
-- CLIP ViT-L/14 (`openai/clip-vit-large-patch14`)
-- SUPIR V2 (~35GB)
-- Optional: HiDream-I1-Full (only loaded if operator selects HIDREAM_I1 image API)
+**Retired (WS1):** the max tier's SUPIR V2 (~35GB), AlignYourSteps scheduler
+weights, LAION Aesthetic Predictor v2, CLIP ViT-L/14, FLUX Redux, the gated
+fp16 FLUX/T5 base weights, and ReActor's `inswapper_128.onnx` are no longer
+downloaded or needed.
 
 ---
 
