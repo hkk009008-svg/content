@@ -73,7 +73,7 @@ API_REGISTRY = {
 
     # --- IMAGE GEN ALTERNATIVES ---
     "FLUX_DEV":      {"label": "FLUX-Dev (current)",   "category": "image_gen", "description": "Production image gen on RunPod ComfyUI + PuLID", "modality": "image", "best_for": ["any"], "per_shot_cost": 0.03, "quality_score": 0.87, "latency_s": 30, "status": "live"},
-    "HIDREAM_I1":    {"label": "HiDream-I1-Full",      "category": "image_gen", "description": "17B params — beats FLUX on photorealism benchmarks. Dispatcher wired in quality_max.py; activates when HiDreamModelLoader detected on pod (requires HiDream ComfyUI node + 35GB model install).", "modality": "image", "best_for": ["static_portrait", "macro_detail", "product_hero"], "per_shot_cost": 0.08, "quality_score": 0.91, "latency_s": 55, "status": "live"},
+    "HIDREAM_I1":    {"label": "HiDream-I1-Full",      "category": "image_gen", "description": "17B params — beats FLUX on photorealism benchmarks. No production dispatcher currently wired (the only implementation, quality_max.py's _swap_to_hidream, was retired WS1 Task 4); would activate when HiDreamModelLoader is detected on pod (requires HiDream ComfyUI node + 35GB model install) if re-wired to a production path.", "modality": "image", "best_for": ["static_portrait", "macro_detail", "product_hero"], "per_shot_cost": 0.08, "quality_score": 0.91, "latency_s": 55, "status": "planned"},
     "SD3_5_LARGE":   {"label": "Stable Diffusion 3.5 Large", "category": "image_gen", "description": "8B params, strong prompt adherence, alternative refiner", "modality": "image", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.05, "quality_score": 0.84, "latency_s": 40, "status": "planned"},
 
     # --- MUSIC ---

@@ -1,7 +1,10 @@
 """
 Face Validator Gate — scores generated candidates and decides early-halt.
 
-Used by quality_max.generate_ai_broll_max for the N=8 adaptive halt strategy:
+Formerly used by quality_max.generate_ai_broll_max (retired WS1 Task 4) for
+the N=8 adaptive halt strategy described below; should_halt/score_candidate/
+needs_regenerate have other callers today (e.g. prep/lora_quality.py's
+_score_candidate), so this module is not orphaned:
 
   1. Generate a batch of candidates with different seeds.
   2. Score each: composite = w_arc * ArcFace_sim + w_aes * AestheticV2.

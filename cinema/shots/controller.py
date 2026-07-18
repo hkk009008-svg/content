@@ -775,9 +775,13 @@ class ShotController:
             _image_api_hint = None
 
         # Build a lightweight PipelineContext so max-tier UI knobs
-        # (MaxTierComfyControls + halt overrides) flow through to
-        # generate_ai_broll_max.  settings is a plain dict; wrapping it in
-        # PipelineContext lets get_project_setting() read it correctly.
+        # (MaxTierComfyControls + halt overrides) could flow through to a
+        # max-tier dispatch — WS1 already retired that dispatch from
+        # phase_c_assembly.generate_ai_broll (independent of Task 4, which
+        # additionally deleted quality_max.py, the dispatch's only
+        # implementation) — so ctx is currently unconsumed on this path.
+        # settings is a plain dict; wrapping it in PipelineContext lets
+        # get_project_setting() read it correctly if a consumer returns.
         ctx = PipelineContext(global_settings=settings)
 
         result = generate_ai_broll(
@@ -904,9 +908,10 @@ class ShotController:
         # Record image generation cost under the backend that ACTUALLY ran.
         # generate_ai_broll threads the real provenance back via
         # ImageGenResult.api_name (COMFYUI_PULID on the pod; FLUX_KONTEXT /
-        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; QUALITY_MAX for
-        # the max tier) rather than a quality_tier-based guess — so cost_log can
-        # tell a pod generation from a FAL fallback (both used to log 'fal').
+        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; the max tier's
+        # QUALITY_MAX was retired WS1 Task 4) rather than a quality_tier-based
+        # guess — so cost_log can tell a pod generation from a FAL fallback
+        # (both used to log 'fal').
         # result is a truthy ImageGenResult here (the `if not result` guard above
         # already returned on failure).
         _image_api = result.api_name

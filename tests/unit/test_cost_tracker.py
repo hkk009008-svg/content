@@ -556,9 +556,10 @@ class TestRecordAPICall:
     # indistinguishable from a FAL fallback in cost_log (both provider='fal').
     # The backend that actually ran is now threaded out of generate_ai_broll
     # and recorded here; pod backends must log a provider distinct from 'fal'.
+    # QUALITY_MAX (the N=8 best-of pod row) was retired WS1 Task 4 along with
+    # quality_max.py — its cost-table entry and provider-map row are gone too.
     @pytest.mark.parametrize("api_name,expected_provider", [
         ("COMFYUI_PULID", "comfyui"),       # production pod PuLID
-        ("QUALITY_MAX",   "comfyui"),       # N=8 best-of — also the pod
         ("FLUX_KONTEXT",  "fal"),           # FAL identity-preserving fallback
         ("FLUX_PRO",      "fal"),           # FAL last-resort
         ("FLUX_SCHNELL",  "fal"),           # FAL fast fallback

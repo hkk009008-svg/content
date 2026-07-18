@@ -8,9 +8,6 @@ should_halt() gains a halt_rule param:
     never-halt policy; just deferred per user decision).
 
 Budget halt (n >= halt_max_n) is UNCHANGED for ALL modes.
-
-quality_max.generate_ai_broll_max must extract halt_rule from params and pass
-it to should_halt.
 """
 from __future__ import annotations
 
@@ -314,30 +311,3 @@ class TestBudgetExhaustedAllModes:
             halt_rule=halt_rule,
         )
         assert decision.best is not None
-
-
-# ---------------------------------------------------------------------------
-# 5. quality_max extracts halt_rule from params and passes it to should_halt
-# ---------------------------------------------------------------------------
-
-class TestQualityMaxExtractsHaltRule:
-    def test_halt_rule_extracted_from_params(self):
-        """quality_max.generate_ai_broll_max passes halt_rule from params to should_halt.
-
-        We verify this by inspecting the source of the function — it must
-        contain:
-          - extraction of halt_rule from params (params.get("halt_rule", ...))
-          - passing halt_rule= to should_halt(...)
-        This is a structural test that catches the 'written-never-read' dead
-        code path without requiring a full GPU pipeline run.
-        """
-        import inspect
-        import quality_max
-
-        src = inspect.getsource(quality_max.generate_ai_broll_max)
-        assert 'params.get("halt_rule"' in src, (
-            "generate_ai_broll_max must extract halt_rule from params via params.get()"
-        )
-        assert "halt_rule=halt_rule" in src, (
-            "generate_ai_broll_max must pass halt_rule=halt_rule to should_halt()"
-        )

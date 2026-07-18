@@ -102,7 +102,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Story prep | [domain/](domain/) — `scene_decomposer.py`, `dialogue_writer.py`, `continuity_engine.py`, `character_manager.py`, `location_manager.py`, `project_manager.py`, `language_defaults.py`, `shot_types.py`, `performance.py` | Filelock-guarded JSON CRUD (10s). LLM persona "CineDecompose v1.0" with 5 HardConstraints + 4 Tripwires. |
 | LLM | [llm/](llm/) — `ensemble.py`, `chief_director.py`, `style_director.py`, `prompt_optimizer.py`, `negative_prompts.py` | Parallel quorum (not fallback), then a judge picks. Anthropic + OpenAI + **Gemini opt-in**. |
 | Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
-| Image gen | [phase_c_assembly.py](phase_c_assembly.py), [quality_max.py](quality_max.py), [pulid.json](pulid.json), [pulid_max.json](pulid_max.json) | Production = RunPodComfyUI + PuLID. Max = N=8 adaptive best-of + SUPIR + 4K downsample. |
+| Image gen | [phase_c_assembly.py](phase_c_assembly.py), [pulid.json](pulid.json) | Production = RunPodComfyUI + PuLID, single tier. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
 | Video gen | [workflow_selector.py](workflow_selector.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 shot-type templates × 11-engine dispatch. Runway + Seedance dispatched inline (no adapter file). |
 | Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
 | Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (4 cloud engines). SyncNet quality gate. |
@@ -815,21 +815,23 @@ end-to-end. Resolve alongside Part 2 / the api-engine toggle wiring.
 
 ---
 
-## 8. Image generation — production + max-tier N=8
+## 8. Image generation — production tier (max-tier retired)
 
 ### 8.1 Branching
 
-[phase_c_assembly.py:151](phase_c_assembly.py:151):
-```python
-if quality_tier == "max":
-    try: return generate_ai_broll_max(...)  # quality_max.py
-    except: pass  # fall through
-# production path
-```
-
-`quality_tier` is sourced from `settings.get("quality_tier", "production")`
-at [cinema/shots/controller.py:683](cinema/shots/controller.py:683). Operator
-picks via UI Advanced Settings; no per-shot heuristic.
+`generate_ai_broll` ([phase_c_assembly.py](phase_c_assembly.py)) has a single
+tier — production (`pulid.json`/ComfyUI + FAL fallback chain, §8.2). The
+former `quality_tier == "max"` fork (`try: return generate_ai_broll_max(...)`)
+was retired across three WS1 steps: Task 1 removed the dispatch branch itself
+from `generate_ai_broll`; Task 2 removed its config
+(`MAX_QUALITY_TEMPLATES`/`get_max_quality_params` from `workflow_selector.py`);
+Task 4 (TEARDOWN) deleted the driver + graph + tests
+(`quality_max.py`, `pulid_max.json`). `quality_tier` is still accepted as a
+parameter (informational only — `generate_ai_broll`'s docstring notes
+production is "the only tier since WS1's max-tier retirement") sourced from
+`settings.get("quality_tier", "production")` at
+[cinema/shots/controller.py:683](cinema/shots/controller.py:683); no per-shot
+heuristic. §8.3 (below) covers what the max tier did, for archaeology.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
 
@@ -867,8 +869,9 @@ mislabeling every pod generation as `fal` (e.g. cycle-17 cost_log row 1065).
 | `get_image(filename, ...)` | `GET {server}/view?...` | Raw bytes |
 | `get_history(prompt_id)` | `GET {server}/history/{id}` | For polling |
 
-Polling: 2s × up to 300 iterations (~10 min) in production, 900s default in
-quality_max.
+Polling: 2s × up to 300 iterations (~10 min) in production (the max tier's
+900s default polling window was retired alongside `quality_max.py`, WS1
+Task 4).
 
 **Multi-char keyframe flow (P1-1 slice 1).** `_resolve_identity_strategy`
 ([cinema/shots/controller.py:317](cinema/shots/controller.py:317)) inspects registered characters and writes
@@ -877,8 +880,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:502](phase_c_assembly.py:502)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:437](phase_c_assembly.py:437)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:504](phase_c_assembly.py:504)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:439](phase_c_assembly.py:439)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:460](phase_c_assembly.py:460)) emits per-character `@ImageN PRESERVE` blocks with a
@@ -889,108 +892,43 @@ ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 ([cinema/shots/controller.py:859](cinema/shots/controller.py:859)) and are surfaced as `identity_multi`
 in the capability scorecard ([cinema/capability_scorecard.py:166](cinema/capability_scorecard.py:166)).
 
-### 8.3 Max tier — `quality_max.py` (N=8 adaptive best-of)
+### 8.3 Max tier (RETIRED WS1 Task 4) — history, for archaeology
 
-Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
-`_WORKFLOW_LOCK`).
+`quality_max.py` (driver) and `pulid_max.json` (ComfyUI graph) were **deleted**
+in WS1 Task 4 (TEARDOWN), with no production replacement — production
+(§8.2) is the only image-generation tier now. What the max tier did, briefly,
+for anyone reading old commits/handoffs/scorecards that reference it: an N=8
+best-of loop (adaptive halt on a composite ArcFace+aesthetic score, configurable
+`composite_only`/`conjunctive`/`budget_only` halt rules) driving a 4-layer
+identity stack (PuLID + up to 2 secondary-character LoRAs + ReActor faceswap)
+through a heavier ComfyUI graph (4-channel Union ControlNet, FLUX Redux,
+FreeU V2, SLG, DetailDaemon, a `hires_fix` Pass-2, SUPIR V2 upscale to 4K).
+ADR-024/025 (see DECISIONS.md) record why it was never promoted to the
+default: the max graph over-cooks structurally (hires-fix + 28-step sampler),
+and single-tier production + a grafted FLUX identity stack proved to be the
+validated realism path instead. Full mechanism detail (halt-loop code, per-node
+injection passes, the technique-parameter table) is not reproduced here — it
+described a file that no longer exists; consult git history at or before the
+WS1 Task 4 commit if it's ever needed.
 
-**Portrait (Phase 2).** `_inject_aspect(workflow, aspect_ratio)` transposes node
-102 (EmptyLatentImage 1024×576 → 576×1024) and node 950 (final ImageScale
-3840×2160 → 2160×3840) via `cinema/aspect.py::portrait_swap`, called once after
-`_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
-dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
-
-**Adaptive halt loop** ([quality_max.py:1208-1246](quality_max.py:1208)):
-```
-while len(scores) < n_max:
-    starting_index = len(scores)
-    tasks = [...]  # pre-compute seeds + paths so workers don't race on len(scores)
-    with ThreadPoolExecutor(max_workers=parallel_workers) as pool:
-        for result in pool.map(_run_candidate, tasks):
-            scores.append(result.cs)
-    if should_halt(scores).halt: break
-```
-
-`parallel_workers` is the project setting `max_quality_parallel_workers`
-(default 1, clamp [1, 4]). Default-1 preserves the historical sequential
-behavior byte-for-byte. With workers > 1, the ComfyUI submit + poll +
-download + score cycles overlap on the same pod; the GPU still serializes
-model execution but the I/O + scoring phases run concurrent. Measured
-speedup at workers=4 on a 4-candidate batch: ~3.9× wall-clock. `pool.map`
-yields in submission order so log + scores ordering is stable regardless
-of workers count.
-
-**Halt rule** ([face_validator_gate.py:228-315](face_validator_gate.py:228)) — mode
-selected by the `max_halt_rule` config enum, passed as `should_halt(halt_rule=...)`:
-- `n >= halt_min_n (default 4) AND best.composite >= halt_threshold_composite (default 0.92)`
-- OR `n >= halt_max_n (default 8)` (budget halt — **unconditional for all modes**)
-- **`composite_only` (default):** `halt_threshold_arc=0.85` is **informational only** — not gated.
-- **`conjunctive`:** also requires `best.arc >= halt_threshold_arc` (the identity floor),
-  auto-satisfied for no-character / no-arc shots (`not has_character or not has_arc`) so
-  landscape shots still early-halt instead of burning the full budget (T4 + Lane-V guard `bf86262`).
-- **`budget_only`:** deferred — falls back to `composite_only` behavior.
-
-**Composite score:** `0.6 * arc + 0.4 * aesthetic`. Missing scores neutral-fall to 0.5.
-
-**Aesthetic scorer:** LAION
-`shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE` + CLIP ViT-L/14.
-
-**Workflow injection passes:**
-- `_inject_identity` — LoRA, face_anchor, PuLID weight; honors a per-character
-  `char_lora_strength` override on node-700 (`0.0` honored; independent
-  `strength_model`/`strength_clip` fallbacks preserved when unset), threaded from
-  the validated LoRA-gate sweep (see "LoRA quality gate" below)
-- `_inject_conditioning` — prompt, CN strengths, Redux refs
-- `_inject_sampling` — AYS steps, sampler, PAG, **SLG**, **FreeU**, **DetailDaemon**
-- `_inject_latent_source` — EmptyLatent | VAEEncode | LatentBlend
-- `_inject_post_passes` — FaceDetailer, **SUPIR**, **hires_fix Pass-2** (when
-  `hires_fix_enabled`: node 18 = deepcopy of the node-17 scheduler at gentler
-  denoise [default 0.40] + fewer steps [`hires_fix_steps`, default 18, range 5–40],
-  re-pointing the node-901 refine-pass sigmas — a photorealism lever vs. the old
-  full-denoise=1.0 painterly refine; **pod-unvalidated hypothesis**), final 4K
-  resolution (default 3840×2160)
-
-| Technique | What it does | Default params |
-|---|---|---|
-| **FreeU V2** | Training-free U-Net skip/backbone feature rescaling | `b1=1.3, b2=1.4, s1=0.9, s2=0.2` |
-| **SLG** | Skip-Layer Guidance for Diffusion Transformers | `scale=2.5, double_layers="7,8,9", single_layers="10,11"` |
-| **DetailDaemon** | Sampler wrapper injecting noise to surface micro-detail | `detail_amount=0.5` |
-| **SUPIR V2** | Scaling Up Image Restoration as final post-pass | `steps=40, cfg_scale_start/end=2.8` |
-| **Final downsample** | Latent upscale + downsample to target | `(3840, 2160)` |
-
-**No Topaz in the live path.** Operator-side Topaz prep lives in
-`prep/topaz_upscale.py`.
-
-**LoRA quality gate** ([prep/lora_quality.py](prep/lora_quality.py)) — before render,
-`train_character_lora_gated` runs a bounded train→validate→retrain loop (≤3 trains,
-keep-best, reject-if-net-negative). `validate_lora_quality` is the ArcFace oracle: it
-sweeps strength × prompts against the reference and picks the best per-character
-strength, persisted as `char_lora_strengths` (web `api_train_lora` → status
-`record_lora_verdict`; `get_lora_status` surfaces `rejected`/`quality_warning`). The
-render path's `_inject_identity` (above) then bakes each LoRA at its **validated**
-strength instead of the tier default `1.0` — closing the 1.0-over-bake realism gap
-(0.55 beats 1.0; 2026-06-02 char-LoRA finding). Gracefully skips (registers
-unvalidated) when ComfyUI/GPU is unreachable; live threshold/baseline/sweep
-calibration is GPU-pod (Phase-B) work. Status: `pipeline_status.toml::lora_validation
-= wired` (T1, `9f2ace6..6f7df8d`). The old `-1.0` stub in `prep/lora_training.py` is
-gone; `prep/lora_training.py::train_character_lora` is now a pure single-train the gate
-orchestrates.
-
-**Multi-char keyframe flow (P1-1 slice 2).** When `_resolve_identity_strategy`
-([cinema/shots/controller.py:317](cinema/shots/controller.py:317)) assigns `MAX_TIER_MULTI_LORA`
-([cinema/shots/controller.py:381](cinema/shots/controller.py:381)), the dispatcher passes `secondary_char_refs`
-([cinema/shots/controller.py:785](cinema/shots/controller.py:785)) through `generate_ai_broll` →
-`generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
-`_inject_secondary_loras` ([quality_max.py:607](quality_max.py:607)) chains up to two extra LoraLoader nodes
-(701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
-([quality_max.py:576](quality_max.py:576)), with each `lora_name` set to the artifact's basename for
-pod-side placement; `_assemble_max_prompt` ([quality_max.py:517](quality_max.py:517)) prepends LoRA trigger
-tokens (primary first, then each secondary's) before conditioning; and
-`_inject_secondary_faceswap` ([quality_max.py:674](quality_max.py:674)) splices a LoadImage(94) +
-ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
-secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
-950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);
-per-char validation and the capability scorecard are unchanged from slice 1.
+**LoRA quality gate** ([prep/lora_quality.py](prep/lora_quality.py)) — the
+train→validate→retrain orchestration (`train_character_lora_gated`,
+`validate_lora_quality`) still exists and is still called from
+`web_server.py`'s train-lora endpoint, but its ComfyUI generation step
+(`_generate_with_lora`) was a thin wrapper over `quality_max.py`'s
+injection functions and now raises `ModuleNotFoundError` on every call —
+caught by a broad `except Exception`, so the endpoint silently returns
+`skipped=True` / `skip_reason="generation_or_scoring_unavailable"` for every
+request (this predates Task 4: `get_max_quality_params` was already gone
+from `workflow_selector.py` since WS1 Task 2, so the path was already
+failing, just via a different exception). Whether to repoint these wrappers
+at the production `pulid.json`/ComfyUI path or explicitly retire
+`validate_lora_quality`/`train_character_lora_gated` is an open product
+decision, not yet made. `prep/lora_training.py::train_character_lora` (the
+actual training subprocess wrapper) is unaffected and still functions; the
+LoRA it produces registers into `char_lora_paths`/`char_lora_strengths` for a
+future consumer that doesn't exist yet (`phase_c_assembly.py`'s
+`char_lora_path`/`char_lora_strength` kwargs are reserved but dormant).
 
 ### 8.4 Identity-validator integration
 
@@ -1019,22 +957,22 @@ effect (zero face-lock), mutually exclusive by tier**:
   never runs and the **reference is dropped entirely** (strictly worse than the
   `pulid_weight=0.0` its own `landscape` template would set at
   [workflow_selector.py:89](workflow_selector.py:89)).
-- **Max tier (§8.3):** no early-return, but `MAX_QUALITY_TEMPLATES['landscape']`
-  ([workflow_selector.py:330-375](workflow_selector.py:330), via
-  `get_max_quality_params`) writes `pulid_weight=0.0`,
+- **Max tier (§8.3, HISTORICAL — the whole tier is now retired):** no
+  early-return, but `MAX_QUALITY_TEMPLATES['landscape']` (via
+  `get_max_quality_params`, both retired WS1 Task 2) wrote `pulid_weight=0.0`,
   `lora_strength_model/clip=0.0`, `halt_threshold_arc=0.0`,
-  `regenerate_floor_arc=0.0`. `_inject_identity` still runs (identity gating keys
-  on `has_character`/file-presence at [quality_max.py:1060](quality_max.py:1060),
-  not `shot_type`), so the PuLID node + uploaded reference are physically present
-  but **inert**, and the best-of-N identity rescue is dead — the +0.15 PuLID-boost
-  retry at [quality_max.py:1253](quality_max.py:1253) gates on
+  `regenerate_floor_arc=0.0`. `_inject_identity` still ran (identity gating
+  keyed on `has_character`/file-presence, not `shot_type`), so the PuLID node
+  + uploaded reference were physically present but **inert**, and the
+  best-of-N identity rescue was dead — the +0.15 PuLID-boost retry gated on
   [`needs_regenerate`](face_validator_gate.py:327), whose `arc_score <
-  regenerate_floor_arc` test never holds at `regenerate_floor_arc=0.0` (and its
-  `has_character` guard passes for a char-bearing shot, so the `0.0` floor — not
-  the guard — is the operative kill). The char LoRA fires only if the project explicitly
-  sets a non-zero per-character `char_lora_strengths`
-  ([cinema/shots/controller.py:334](cinema/shots/controller.py:334), applied at
-  [quality_max.py:538](quality_max.py:538)).
+  regenerate_floor_arc` test never held at `regenerate_floor_arc=0.0` (and its
+  `has_character` guard passed for a char-bearing shot, so the `0.0` floor —
+  not the guard — was the operative kill). The char LoRA fired only if the
+  project explicitly set a non-zero per-character `char_lora_strengths`
+  ([cinema/shots/controller.py:334](cinema/shots/controller.py:334)).
+  (All of `quality_max.py`'s injection functions cited above no longer exist —
+  deleted WS1 Task 4.)
 
 **Root cause is the single shared seam.** Routing a landscape-keyword shot *with
 non-empty `characters_in_frame`* to `wide` (`pulid_weight=0.65` both tiers —
@@ -1107,7 +1045,7 @@ check, see kling_native.py's module docstring). Two-character dialogue shots
 classify as `medium` and route Kling v3 Pro → Kling Native → Runway →
 Seedance → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:174-219](workflow_selector.py:174))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:173-218](workflow_selector.py:173))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1390,11 +1328,13 @@ a pure function of the (stable) detection set.
 the guard sets 1, then falls back to 0 if 1 didn't take. The deterministic value
 is OpenCV-build-specific, so the macOS pinned value (man 0.870) **must be
 re-confirmed on the Linux pod before it is trusted as the production baseline**
-(pre-burn gate). The guard is process-global; `quality_max.py` scores in a
-ThreadPoolExecutor (`max_quality_parallel_workers`, default 1) — each call still
-runs single-threaded (per-call determinism holds), but a concurrent overlap
-leaves OpenCV at 1 thread (benign); gate with a `threading.Lock` if
-`parallel_workers > 1` becomes the default. ROUTED (commit `970015b`): the
+(pre-burn gate). The guard is process-global; `quality_max.py` used to score
+in a ThreadPoolExecutor (`max_quality_parallel_workers`, up to 4 workers)
+before that module was retired WS1 Task 4 — the underlying property holds for
+any future concurrent caller: each call still runs single-threaded (per-call
+determinism holds), but a concurrent overlap leaves OpenCV at 1 thread
+(benign); gate with a `threading.Lock` if a parallel caller with >1 workers
+returns. ROUTED (commit `970015b`): the
 domain-layer sibling sites `domain/continuity_engine.py:165,183` and
 `domain/character_manager.py:371,389,402` (the last persists `embedding.npy`)
 wrap their `DeepFace` calls in `cv2_single_thread` (imported from

@@ -437,10 +437,12 @@ def _best_take_composite(takes: list[dict]) -> float:
 
     Prefers ``metadata["composite"]`` but FALLS BACK to ``metadata["identity_score"]``
     when composite is absent. Production-tier keyframe takes only ever write
-    ``identity_score`` (``composite`` is computed solely in max-tier, see
-    ``quality_max.py``); without this fallback the function returned 0.0 for every
-    production take, so any ``image_min_composite > 0`` (default 0.97) vetoed EVERY
-    keyframe → headless ``GateNotSatisfiedError`` regardless of actual quality.
+    ``identity_score`` (``composite`` was computed solely in the now-retired
+    max-tier ``quality_max.py``, deleted WS1 Task 4 with no production
+    replacement — so no live path writes ``composite`` today); without this
+    fallback the function returned 0.0 for every production take, so any
+    ``image_min_composite > 0`` (default 0.97) vetoed EVERY keyframe → headless
+    ``GateNotSatisfiedError`` regardless of actual quality.
     """
     best = 0.0
     for take in takes:

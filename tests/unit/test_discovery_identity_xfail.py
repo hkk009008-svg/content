@@ -3,12 +3,14 @@ discovery bug-hunt (discovery-wf_13f9d2f6-f93.json).
 
 Confirmed indices and prefixes:
   confirmed[3]  W2:MEDIUM:identity-nan-arc-bypass
-  confirmed[28] W2:MEDIUM:secondary-lora-hole
+  confirmed[28] W2:MEDIUM:secondary-lora-hole (RETIRED WS1 Task 4 — its only
+                implementation lived in quality_max.py, now deleted with no
+                production replacement; regression tests retired alongside it)
   confirmed[29] Wdefer:MINOR:identity-arcface-embselect
 
 All three were confirmed by refute-first verifiers in the discovery workflow (two
 independent passes each, finalVerdict=CONFIRMED, production-reachable). The
-rows are now live regressions after their fixes.
+remaining two rows are live regressions after their fixes.
 
 When a remaining strict pin is fixed, XPASS is the signal to revise or delete it.
 Mirror style: tests/unit/test_has_character_lora_only_hole.py,
@@ -64,108 +66,13 @@ def test_needs_regenerate_returns_true_for_nan_arc_score():
 
 
 # ---------------------------------------------------------------------------
-# confirmed[28]: W2:MEDIUM:secondary-lora-hole
-# quality_max.py:1114 and quality_max.py:624-629
+# confirmed[28]: W2:MEDIUM:secondary-lora-hole — RETIRED WS1 Task 4.
+# Its only implementation (_inject_secondary_loras / _prune_unavailable /
+# _inject_identity in quality_max.py) was deleted with no production
+# replacement; the pinning tests were removed alongside it. See
+# tests/unit/test_has_character_lora_only_hole.py for the still-open sibling
+# design question (surfaced separately for explicit disposition).
 # ---------------------------------------------------------------------------
-# `_inject_secondary_loras` is gated on `has_character` (quality_max.py:1114),
-# which is derived from the PRIMARY character's face-reference file only
-# (quality_max.py:1055: `bool(character_image and os.path.exists(character_image))`).
-# A shot where the primary has NO face reference (LoRA-only primary, or face file
-# deleted post-training) gets has_character=False, so `_inject_secondary_loras` is
-# never called -> the secondary character's LoRA is silently dropped.
-#
-# This is the secondary-character sibling of the already-pinned has_character
-# LoRA-only hole (tests/unit/test_has_character_lora_only_hole.py). It is exposed
-# by the same root cause (has_character keyed off face-ref only) but manifests on a
-# SECONDARY character's LoRA, not the primary's. Mirror that pin's structure.
-#
-# The injection gate was fixed by decoupling has_face_ref / has_char_lora.
-# A residual reachability regression below pins the MODEL output: a secondary
-# LoraLoader must reach BasicGuider(22), not only CLIPTextEncode(122).
-def test_secondary_lora_injected_when_primary_has_no_face_ref():
-    """When primary has no face reference but a secondary character has a lora_path,
-    _inject_secondary_loras should still inject the secondary LoRA.
-
-    Fixed by decoupling has_face_ref from has_char_lora/has_secondary_lora in the
-    gate at quality_max.py generate_ai_broll_max: the gate now fires when
-    has_char_lora OR has_secondary_lora is True, independent of has_face_ref.
-    This was previously an xfail pin tracking the W2:MEDIUM:secondary-lora-hole defect.
-    Surfaced: discovery-wf_13f9d2f6-f93.json confirmed[28].
-    """
-    import quality_max as qm
-
-    # Load the max workflow with full node availability (same helper as the mirror test)
-    wf = qm._load_max_workflow()
-    wf.pop("_metadata", None)
-    available = {n["class_type"] for n in wf.values()
-                 if isinstance(n, dict) and "class_type" in n}
-
-    # Simulate: primary has NO face reference on disk AND no primary LoRA
-    # Secondary character has a LoRA.
-    has_face_ref = False
-    has_char_lora = False  # primary has no LoRA either
-    secondary_chars = [{"lora_path": "secondary_char_v1.safetensors", "lora_strength": 0.45}]
-    has_secondary_lora = any(e.get("lora_path") for e in secondary_chars)
-
-    # Prune as generate_ai_broll_max would with decoupled flags
-    qm._prune_unavailable(wf, available, has_face_ref=has_face_ref,
-                          has_char_lora=has_char_lora, has_init=False)
-
-    # The fixed gate: fires when has_char_lora OR has_secondary_lora is True
-    if has_char_lora or has_secondary_lora:
-        qm._inject_secondary_loras(wf, secondary_chars)
-
-    # Secondary LoRA node (701) must now be injected
-    assert "701" in wf, (
-        "secondary LoRA node 701 was not injected even though secondary_chars has a lora_path"
-    )
-    assert wf["701"]["inputs"].get("lora_name") == "secondary_char_v1.safetensors", (
-        "secondary LoRA name not wired into node 701"
-    )
-
-
-def test_secondary_lora_model_output_reaches_guider_when_primary_has_no_face_ref():
-    """A secondary LoRA must affect the executing model chain, not only CLIP.
-
-    This covers the no-primary-face-ref stack where PuLID(100) has already been
-    pruned. In that topology, _inject_secondary_loras cannot rely on rewiring
-    100.model; it must ensure the last secondary LoRA reaches BasicGuider(22).
-    """
-    import quality_max as qm
-
-    wf = qm._load_max_workflow()
-    wf.pop("_metadata", None)
-    available = {n["class_type"] for n in wf.values()
-                 if isinstance(n, dict) and "class_type" in n}
-
-    qm._prune_unavailable(wf, available, has_face_ref=False,
-                          has_char_lora=True, has_init=False)
-    qm._inject_identity(wf, "primary_char_v1.safetensors", None, {}, has_face_ref=False)
-    qm._inject_secondary_loras(
-        wf,
-        [{"lora_path": "secondary_char_v1.safetensors", "lora_strength": 0.45}],
-    )
-
-    visited = set()
-    stack = ["22"]
-    while stack:
-        cur = stack.pop()
-        if cur in visited:
-            continue
-        visited.add(cur)
-        node = wf.get(cur)
-        if not isinstance(node, dict):
-            continue
-        model_ref = node.get("inputs", {}).get("model")
-        if isinstance(model_ref, list) and len(model_ref) == 2:
-            src = str(model_ref[0])
-            if src in wf:
-                stack.append(src)
-
-    assert "701" in visited, (
-        "secondary LoraLoader(701) is not reachable from BasicGuider(22) via "
-        f"model edges; reachable model-chain nodes: {visited}"
-    )
 
 
 # ---------------------------------------------------------------------------

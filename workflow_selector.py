@@ -2,15 +2,14 @@
 Cinema Production Tool — Workflow Selector (Lightweight ComfyGPT)
 Automatically classifies shots by type and selects optimal workflow parameters.
 
-Two quality tiers:
-  - "production" (default): pre-tuned params for base pulid.json (5 templates)
-  - "max":                  full maxed stack for pulid_max.json (N=8 best-of,
-                            4-layer identity, 4-channel Union CN, Redux,
-                            multi-pass refinement, SUPIR upscale)
+Single quality tier: "production" — pre-tuned params for base pulid.json
+(5 templates). The former "max" tier (pulid_max.json: N=8 best-of, 4-layer
+identity, 4-channel Union CN, Redux, multi-pass refinement, SUPIR upscale)
+was retired WS1 Task 2 (MAX_QUALITY_TEMPLATES/get_max_quality_params) and
+WS1 Task 4 (the quality_max.py driver + pulid_max.json graph themselves).
 
 Shot types: portrait, medium, wide, action, landscape
-Each type optimizes: PuLID weight, guidance, steps, denoise — and at max tier
-also: SLG/FreeU scales, CN channel strengths, DetailDaemon, halt rules.
+Each type optimizes: PuLID weight, guidance, steps, denoise.
 """
 
 import math
@@ -270,16 +269,18 @@ def get_workflow_params(
         # in web_server.py:331 before writing — the JSON API can send any float.
         # isinstance(_co, dict): a present-but-null continuity_options (JSON null)
         # makes settings.get(..., {}) return None (the {} default applies only to a
-        # MISSING key), so None.get('img2img_denoise') raises AttributeError. Mirror
-        # the dict-guard the sibling site quality_max.py:1044 already has. (bf1034a
-        # closed the main non-finite issue but its audit boundary missed this sibling.)
+        # MISSING key), so None.get('img2img_denoise') raises AttributeError. (bf1034a
+        # closed the main non-finite issue but its audit boundary missed this sibling;
+        # the quality_max.py sibling site that used to mirror this guard was retired
+        # WS1 Task 4.)
         _co = settings.get("continuity_options", {})
         img2img_denoise = _co.get("img2img_denoise") if isinstance(_co, dict) else None
         if (img2img_denoise is not None and isinstance(img2img_denoise, (int, float))
                 and math.isfinite(img2img_denoise)):
             # math.isfinite: the [0.2,0.6] clamp neutralises non-finite by luck
-            # (nan->0.6), silently overwriting the template default. Skip instead,
-            # matching quality_max._clamp_img2img_denoise's reject-non-finite policy.
+            # (nan->0.6), silently overwriting the template default. Skip instead
+            # (formerly matched quality_max._clamp_img2img_denoise's reject-non-finite
+            # policy; that module was retired WS1 Task 4).
             clamped = max(0.2, min(0.6, float(img2img_denoise)))
             params["denoise_default"] = clamped
 

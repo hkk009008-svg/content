@@ -75,7 +75,6 @@ API_COST_USD: dict[str, float] = {
     "FLUX_PRO":      0.05,
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
-    "QUALITY_MAX":   0.40,   # N=8 best-of on the pod, ~8x base cost
     "HIDREAM_I1":    0.06,
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
@@ -186,8 +185,9 @@ def _finite_budget_or_block(value) -> float:
     ``cinema.context._finite_or``: that import is circular-safe (verified) but
     inverts the layering — ``cost_tracker`` is a low-level root util — and would
     drag the ``cinema.context`` dependency tree into a foundational module;
-    consolidation is deferred to the dedicated import-swap pass. Mirrors the
-    ``quality_max:191`` documented-temporary local-copy precedent.
+    consolidation is deferred to the dedicated import-swap pass. (Formerly
+    mirrored the ``quality_max:191`` documented-temporary local-copy precedent;
+    that module was retired WS1 Task 4.)
     """
     try:
         v = float(value)
@@ -416,8 +416,7 @@ class CostTracker:
         # Derive a human-readable provider name from the API key.
         # Prefix match in insertion order; first hit wins. Pod (ComfyUI/PuLID)
         # image backends map to a provider DISTINCT from "fal" so cost_log can
-        # tell "ran on the pod" from "fell back to FAL". QUALITY_MAX is the N=8
-        # best-of, which also runs on the pod.
+        # tell "ran on the pod" from "fell back to FAL".
         _provider_map = {
             # Fal-proxy engines that share a prefix with a native provider must
             # sit BEFORE that prefix (first-prefix-wins) or the fal invoice
@@ -431,7 +430,7 @@ class CostTracker:
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",
-            "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
+            "COMFYUI": "comfyui",
             "POLLINATIONS": "pollinations",
             "FLUX": "fal", "HIDREAM": "fal", "SEEDANCE": "fal",
         }

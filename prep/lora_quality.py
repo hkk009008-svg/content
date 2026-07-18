@@ -60,9 +60,17 @@ def _next_lora_action(attempt: int, best_score: Optional[float], *,
 # ---------------------------------------------------------------------------
 # Task 2 — lazy wrappers + _generate_with_lora
 # ---------------------------------------------------------------------------
-# All quality_max / phase_c_assembly / workflow_selector imports are inside
-# the _qm_* wrappers so that `import prep.lora_quality` stays light and the
-# pure-fn tests never pull the heavy ComfyUI stack.
+# quality_max.py was deleted (WS1 Task 4, TEARDOWN); its generate_ai_broll_max
+# dispatch has no production replacement. The _qm_* wrappers below are now a
+# DORMANT/BROKEN call path: each raises ModuleNotFoundError when invoked,
+# which _generate_with_lora's broad `except Exception` catches and treats as
+# a skip (same silent-skip behavior as before Task 4 — get_max_quality_params
+# was already gone from workflow_selector, so this path was already failing).
+# Kept lazy (not deleted outright) so `import prep.lora_quality` stays light
+# and the pure-fn tests never pull the heavy ComfyUI stack; whether to repoint
+# these at the production pulid.json/ComfyUI path or explicitly retire
+# validate_lora_quality/train_character_lora_gated is an open product
+# decision (surfaced, not silently made — see WS1 Task 4 handoff).
 
 def _qm_load_max_workflow():
     from quality_max import _load_max_workflow
@@ -90,20 +98,21 @@ def _qm_run_one_candidate(*a, **k):
 
 
 def _make_comfy(url: str):
-    # NOTE: RunPodComfyUI lives in phase_c_assembly (imported into quality_max
-    # at line 60 as `from phase_c_assembly import RunPodComfyUI`); we import
-    # from the canonical source directly.
+    # NOTE: RunPodComfyUI lives in phase_c_assembly; we import from the
+    # canonical source directly (formerly also re-imported into the now-
+    # deleted quality_max.py).
     from phase_c_assembly import RunPodComfyUI
     return RunPodComfyUI(url)
 
 
 def _default_max_params(shot_type: str = "portrait") -> dict:
-    """Tier params baseline — the SAME source generate_ai_broll_max uses
-    (`params = get_max_quality_params(shot_type)`).
+    """Tier params baseline — formerly the SAME source generate_ai_broll_max
+    used, back when that function (quality_max.py) existed.
 
-    NOTE: get_max_quality_params is in workflow_selector (imported into
-    quality_max at line 57 as `from workflow_selector import ..., get_max_quality_params`);
-    we import from the canonical source directly.
+    NOTE: get_max_quality_params was retired from workflow_selector before
+    quality_max.py itself was deleted (WS1 Task 2), so this call already
+    raises ImportError; it is caught by _generate_with_lora's broad
+    `except Exception` and treated as a skip, same as the wrappers above.
     """
     from workflow_selector import get_max_quality_params
     return dict(get_max_quality_params(shot_type))
@@ -115,8 +124,11 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
     no ArcFace gating.  Returns image path or None on any infra failure (never
     raises).
 
-    Assembly order mirrors generate_ai_broll_max:
+    Assembly order formerly mirrored generate_ai_broll_max (quality_max.py,
+    deleted WS1 Task 4):
       load -> inject_identity -> inject_conditioning -> inject_sampling -> run_one
+    Every step below raises ModuleNotFoundError now that quality_max.py is
+    gone; the surrounding try/except treats that as an infra-failure skip.
     """
     try:
         wf = _qm_load_max_workflow()
@@ -129,10 +141,11 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
         # _inject_conditioning(workflow, prompt, prev_shot_remote, style_remote, params, has_character)
         _qm_inject_conditioning(wf, prompt, None, None, params, True)
         _qm_inject_sampling(wf, params)
-        # _inject_sampling does NOT touch the seed; generate_ai_broll_max sets it
-        # directly on node 25 (quality_max.py:884 `wf["25"]["inputs"]["noise_seed"]`).
-        # Mirror that so per-prompt seeds actually vary the output and the validation
-        # score is reproducible — otherwise every gen reuses the template's baked seed.
+        # _inject_sampling does NOT touch the seed; generate_ai_broll_max used to set
+        # it directly on node 25 (formerly quality_max.py:884
+        # `wf["25"]["inputs"]["noise_seed"]`, now deleted). Mirror that so per-prompt
+        # seeds actually vary the output and the validation score is reproducible —
+        # otherwise every gen reuses the template's baked seed.
         if "25" in wf:
             wf["25"]["inputs"]["noise_seed"] = seed
         comfy = _make_comfy(comfyui_url)  # RunPodComfyUI is stateless (request-per-call) — no close() needed
@@ -165,7 +178,7 @@ def _score_candidate(image_path: str, anchor: str):
 def _resolve_comfyui_url(comfyui_url: Optional[str]) -> str:
     if comfyui_url:
         return comfyui_url
-    from config.settings import get_settings  # cached singleton; same object quality_max uses
+    from config.settings import get_settings  # cached singleton
     return get_settings().comfyui_server_url
 
 

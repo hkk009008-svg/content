@@ -33,10 +33,27 @@ makes CI carry the defect (not the next session's agents). When director-1 lands
 XPASS (or signature TypeError) under strict=True is the signal to revise/delete this file.
 
 See memory: project_secondary_char_needs_lora; realism_production_plus_char_lora (ADR-024/025).
+
+WS1 Task 4 (TEARDOWN) update: quality_max.py was deleted (no production
+replacement). This file is intentionally NOT deleted alongside it — the design
+backlog item above is still OPEN (director-1 PM7 handoff Carry#2, "defer to a
+focused TDD session") and has no known equivalent in the post-WS1 pulid.json
+production pipeline (phase_c_assembly.py's char_lora_path/char_lora_strength
+kwargs are "reserved -- dormant" there). The module is skipped (not errored,
+not deleted) pending an explicit director disposition: confirm this backlog
+item retires with max-tier, or port it to wherever LoRA-only identity
+conditioning should live next.
 """
 import pytest
 
-import quality_max as qm
+qm = pytest.importorskip(
+    "quality_max",
+    reason=(
+        "quality_max.py deleted WS1 Task 4 (TEARDOWN); this file pins an OPEN "
+        "design backlog item (has_character LoRA-only prune hole) pending "
+        "explicit director disposition -- see module docstring."
+    ),
+)
 
 
 def _max_workflow_with_full_availability():

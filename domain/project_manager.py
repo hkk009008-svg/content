@@ -336,11 +336,6 @@ def make_project(name: str) -> dict:
             # Caches optimizer output on the shot (.optimizer_cache) so
             # regen doesn't repeat the LLM call.
             "prompt_optimizer_enabled": True,
-            # Step-3 (2026-05-24): N=8 best-of per-batch parallelism. 1 = sequential
-            # (historic behavior); up to 4 = concurrent workers on the same RunPod
-            # pod, overlapping submit/poll/download cycles. ComfyUI still serializes
-            # GPU work per pod.
-            "max_quality_parallel_workers": 1,
             # P4-3 (Session 11): auto-approve veto rules config. Conservative-on
             # defaults; operator tunes via project settings. Typed schema is
             # Session 10 (P1-3 part 2) work — rides through extra="allow" for now.

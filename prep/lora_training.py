@@ -4,8 +4,11 @@ WHAT THIS DOES
 --------------
 Wraps ai-toolkit (preferred) or kohya-ss as a subprocess to train a per-character
 LoRA on the project's reference images. The trained LoRA gets registered in
-project.global_settings.char_lora_paths and is picked up by the maxed-quality
-pipeline automatically (see workflow_selector + quality_max).
+project.global_settings.char_lora_paths for a future consumer — currently
+dormant (the max-tier pipeline that used to pick it up automatically via
+workflow_selector + quality_max was retired WS1 Task 4; phase_c_assembly.py's
+char_lora_path/char_lora_strength kwargs are reserved but not yet wired to a
+production generation path).
 
 WHY IT MATTERS
 --------------

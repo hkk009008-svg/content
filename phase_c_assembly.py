@@ -22,10 +22,11 @@ class ImageGenResult(NamedTuple):
     ``path`` is the saved image (equals ``output_filename`` on success);
     ``api_name`` is the cost_tracker API key for the backend that ACTUALLY ran
     (``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` | ``FLUX_SCHNELL`` |
-    ``POLLINATIONS`` | ``QUALITY_MAX``). Callers record ``api_name`` so cost_log
-    reflects where the image was really generated (pod vs FAL), not a tier-based
-    guess. Backends return ``None`` (not this type) on failure, so the caller's
-    ``if not result`` success guard is preserved (a 2-field NamedTuple is always
+    ``POLLINATIONS``; ``QUALITY_MAX`` was retired WS1 Task 4 along with
+    quality_max.py). Callers record ``api_name`` so cost_log reflects where the
+    image was really generated (pod vs FAL), not a tier-based guess. Backends
+    return ``None`` (not this type) on failure, so the caller's ``if not
+    result`` success guard is preserved (a 2-field NamedTuple is always
     truthy).
     """
 
@@ -82,8 +83,9 @@ def _resolve_ui_denoise(ctx):
     A bare NaN survives project.json (json.load allow_nan=True); a raw
     max(0.2, min(0.6, nan)) clamp-lucks to 0.6, silently overriding the caller. The
     math.isfinite guard skips it instead. Mirrors bf1034a's same-knob guard in
-    workflow_selector and quality_max._clamp_img2img_denoise's reject-non-finite
-    policy + its isinstance(continuity_options, dict) check. Extracted (vs inline)
+    workflow_selector (formerly also quality_max._clamp_img2img_denoise's
+    reject-non-finite policy + its isinstance(continuity_options, dict) check,
+    before that module was retired WS1 Task 4). Extracted (vs inline)
     so the gate is unit-testable — drop math.isfinite and the nan test goes red."""
     if ctx is None:
         return None
