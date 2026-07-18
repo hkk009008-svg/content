@@ -26,12 +26,23 @@ class ImageGenResult(NamedTuple):
     along with quality_max.py). Callers record ``api_name`` so cost_log reflects where the
     image was really generated (pod vs FAL), not a tier-based guess. Backends
     return ``None`` (not this type) on failure, so the caller's ``if not
-    result`` success guard is preserved (a 2-field NamedTuple is always
-    truthy).
+    result`` success guard is preserved (a populated NamedTuple is always
+    truthy regardless of field count).
+
+    ``billed_rejects`` (WS3 money-loss close-out, mirrors
+    ``cinema/shots/controller.py::_record_billed_rejects`` on the video side):
+    engines that BILLED for a real generation this call incurred but did NOT
+    win (currently only ``"GEMINI_IMAGE"`` — Nano Banana bills on generation,
+    independent of the later identity check). Defaults to ``()`` so existing
+    2-positional-arg construction (``ImageGenResult(path, api_name)``) stays
+    valid. The caller (``cinema/shots/controller.py``) records each entry
+    against cost_tracker with ``operation="image_generation_rejected"`` next
+    to the winner-keyed ``keyframe_generation`` record.
     """
 
     path: str
     api_name: str
+    billed_rejects: tuple = ()
 
 
 class RunPodComfyUI:
@@ -153,12 +164,16 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             (separate, deferred track — not WS3).
 
     Returns:
-        ImageGenResult(path, api_name) naming the backend that actually ran
-        (GEMINI_IMAGE | COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL
-        | POLLINATIONS), or None if every backend failed. Callers record
-        ``api_name`` for cost attribution so a pod generation is
-        distinguishable from a FAL fallback (and both from a Gemini-native
-        generation) in cost_log.
+        ImageGenResult(path, api_name, billed_rejects) naming the backend
+        that actually ran (GEMINI_IMAGE | COMFYUI_PULID | FLUX_KONTEXT |
+        FLUX_PRO | FLUX_SCHNELL | POLLINATIONS), or None if every backend
+        failed. Callers record ``api_name`` for cost attribution so a pod
+        generation is distinguishable from a FAL fallback (and both from a
+        Gemini-native generation) in cost_log. ``billed_rejects`` names any
+        engine that billed for a generation this call incurred but did NOT
+        win (WS3: a Gemini bill-but-identity-reject before falling through) —
+        callers must record these too or the spend is invisible to the
+        budget gate.
     """
 
     mode = "img2img" if init_image else "txt2img"
@@ -169,6 +184,25 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # get_project_setting is a safe dict lookup with a default (never raises,
     # handles ctx=None), so it is safe to call here outside the try block.
     aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
+    # WS3 money-loss close-out (mirrors cinema/shots/controller.py's
+    # _record_billed_rejects on the video side): Gemini can BILL a real
+    # image (Nano Banana, $0.03) that then fails identity and falls through
+    # to the pod/FAL cascade below — a billed engine that never becomes the
+    # winner. Track it here and thread it onto whichever ImageGenResult this
+    # call finally returns, so the caller's cost_tracker sees the spend even
+    # though Gemini didn't win. Only the PRIORITY-0 block below appends to
+    # this list; the Gemini SUCCESS return just below keeps it empty (there
+    # is nothing to fall through from).
+    billed_rejects = []
+
+    def _with_rejects(result):
+        """Attach any accumulated billed_rejects to a winning ImageGenResult.
+        Passes None through unchanged so the caller's `if not result`
+        failure guard is preserved."""
+        if result is not None and billed_rejects:
+            return result._replace(billed_rejects=tuple(billed_rejects))
+        return result
 
     # ----- PRIORITY 0: Gemini 2.5 Flash Image (Nano Banana, WS3) -----
     # Google-first overhaul: only engages when a project explicitly opts into
@@ -213,6 +247,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                     return ImageGenResult(output_filename, "GEMINI_IMAGE")
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
                       f"falling back to the pod/FAL cascade")
+                # Google already billed this frame ($0.03) even though it
+                # lost the identity check — record it so the eventual
+                # winner's cost record doesn't make it invisible spend.
+                billed_rejects.append("GEMINI_IMAGE")
                 try:
                     os.makedirs("logs", exist_ok=True)
                     with open("logs/gemini_image_arc_comparison.jsonl", "a", encoding="utf-8") as f:
@@ -244,20 +282,20 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # (Same args as the old elif/else, consolidated.)
     if not (server_url and os.path.exists("pulid.json")):
         if character_image and os.path.exists(character_image) and settings.fal_key:
-            return _fal_flux_fallback(
+            return _with_rejects(_fal_flux_fallback(
                 prompt, output_filename, seed,
                 character_image=character_image,
                 multi_angle_refs=multi_angle_refs,
                 identity_anchor=identity_anchor,
                 aspect_ratio=aspect_ratio,
                 secondary_char_refs=secondary_char_refs,
-            )
-        return _fal_flux_fallback(
+            ))
+        return _with_rejects(_fal_flux_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
             aspect_ratio=aspect_ratio,
             secondary_char_refs=None,
-        )
+        ))
 
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
     print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
@@ -265,8 +303,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     try:
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
-            return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                      aspect_ratio=aspect_ratio, secondary_char_refs=None)
+            return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                      aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
         with open("pulid.json", "r") as f:
             workflow = json.load(f)
@@ -290,8 +328,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Skip ComfyUI entirely for landscape shots (no face-lock needed)
             if shot_type == "landscape" and character_image:
                 print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
-                return _fal_flux_fallback(prompt, output_filename, seed, character_image=None,
-                                          aspect_ratio=aspect_ratio, secondary_char_refs=None)
+                return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=None,
+                                          aspect_ratio=aspect_ratio, secondary_char_refs=None))
         except ImportError:
             pass  # workflow_selector not available — use defaults
 
@@ -472,7 +510,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                                 with open(output_filename, 'wb') as f:
                                     f.write(img_data)
                                 print(f"      ✅ Downloaded {mode} render: {output_filename}")
-                                return ImageGenResult(output_filename, "COMFYUI_PULID")
+                                return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
                     # Outputs exist but no images — task failed
                     print(f"      ⚠️ ComfyUI task completed but no images in output")
                     break
@@ -482,13 +520,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             time.sleep(2)
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
+        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
+        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
 
 def _parse_structured_prompt(prompt: str) -> dict:

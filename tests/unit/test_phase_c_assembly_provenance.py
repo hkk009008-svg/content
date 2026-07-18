@@ -433,3 +433,159 @@ class TestGeminiImagePriorityZero:
 
         assert isinstance(res, pca.ImageGenResult)
         assert res.api_name == "FLUX_KONTEXT"
+
+    # -----------------------------------------------------------------
+    # WS3 money-loss close-out: Gemini bills ($0.03) on generation,
+    # independent of whether the identity check later rejects it. A
+    # bill-but-reject must not vanish when the pod/FAL cascade wins —
+    # mirror of cinema/shots/controller.py::_record_billed_rejects on the
+    # video side (money-gate finding 2026-07-11: offline-probe proven,
+    # invisible to would_exceed/is_over_budget before this fix).
+    # -----------------------------------------------------------------
+
+    def test_gemini_billed_reject_threads_onto_fallback_winner(
+        self, gemini_enabled_settings, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch
+    ):
+        """A Gemini bill-but-identity-reject must be threaded onto whichever
+        backend the pod/FAL cascade ultimately returns as `billed_rejects`,
+        so the caller can record the $0.03 Google already billed even
+        though Gemini lost the identity check."""
+        stub_validator["passed"] = False
+        stub_validator["score"] = 0.31
+
+        # COST CONTROL: this repo has a real pod URL in .env — force the
+        # ComfyUI branch off (mirrors test_identity_backend_pod_skips_gemini_
+        # entirely / test_no_ctx_skips_gemini_entirely above) so the call
+        # deterministically lands in the already-stubbed FAL path instead of
+        # risking a real pod HTTP call.
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url=""),
+        )
+        monkeypatch.chdir(tmp_path)  # gemini_image_arc_comparison.jsonl is CWD-relative
+
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+
+        res = pca.generate_ai_broll(
+            "a prompt", out, character_image=str(char),
+            ctx=gemini_enabled_settings,
+        )
+
+        assert isinstance(res, pca.ImageGenResult)
+        assert res.api_name == "FLUX_KONTEXT", (
+            f"expected the FAL Kontext fallback to win; got {res.api_name!r}"
+        )
+        assert res.billed_rejects == ("GEMINI_IMAGE",), (
+            f"Gemini billed a frame that then lost identity — it must "
+            f"survive as billed_rejects on the winning result; got "
+            f"{res.billed_rejects!r}"
+        )
+
+    def test_gemini_success_never_populates_billed_rejects(
+        self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch
+    ):
+        """A passing Gemini identity check IS the winner, not a reject —
+        billed_rejects must stay empty on the success return path (L213
+        returns immediately, before the reject-tracking append)."""
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url="http://pod-should-not-be-called:8188"),
+        )
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+
+        res = pca.generate_ai_broll(
+            "a prompt", out, character_image=str(char),
+            ctx=gemini_enabled_settings,
+        )
+
+        assert res.api_name == "GEMINI_IMAGE"
+        assert res.billed_rejects == ()
+
+    def test_billed_reject_recorded_alongside_winner_via_keyframe_take(
+        self, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch
+    ):
+        """End-to-end regression driven through the REAL controller seam
+        (cinema/shots/controller.py::generate_keyframe_take), not just
+        generate_ai_broll directly. Gemini bills a real image ($0.03) that
+        then FAILS identity, falls through to the FAL Kontext fallback which
+        wins. cost_tracker must record BOTH the FAL winner
+        (operation="keyframe_generation") AND the Gemini bill-but-reject
+        (operation="image_generation_rejected") — before this fix the
+        Gemini spend was invisible to would_exceed/is_over_budget."""
+        from cinema.shots.controller import ShotController
+
+        stub_validator["passed"] = False
+        stub_validator["score"] = 0.31
+
+        # COST CONTROL: force the ComfyUI branch off (real pod URL in .env)
+        # so the call deterministically lands in the already-stubbed FAL
+        # path, same rationale as the generate_ai_broll-level tests above.
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url=""),
+        )
+        monkeypatch.chdir(tmp_path)  # gemini_image_arc_comparison.jsonl is CWD-relative
+
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        img_path = str(tmp_path / "keyframe.jpg")
+
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": [],
+            "camera": "medium_shot",
+            "target_api": "AUTO",
+        }
+        scene = {"id": "scene_1", "title": "T", "action": "A", "location_id": None, "shots": [shot]}
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [],
+            "objects": [],
+            "locations": [],
+            "global_settings": {"identity_backend": "gemini_multiref"},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        core = MagicMock()
+        core.project = project
+        core.project_dir = str(tmp_path)
+        core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": {"primary_reference": str(char)},
+        }
+        core.cost_tracker = MagicMock()
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        ctrl._take_output_path = MagicMock(return_value=img_path)
+        ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
+        ctrl._mutate_shot = MagicMock()
+
+        result = ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        assert result.get("success") is True, f"expected success, got {result}"
+
+        calls = ctrl.cost_tracker.record_api_call.call_args_list
+        by_op = {c.kwargs.get("operation"): c for c in calls}
+        assert "keyframe_generation" in by_op and "image_generation_rejected" in by_op, (
+            f"expected winner + Gemini-reject records; got {calls}"
+        )
+        assert by_op["keyframe_generation"].args[0] == "FLUX_KONTEXT", (
+            f"expected the FAL Kontext fallback to win; got "
+            f"{by_op['keyframe_generation'].args[0]!r}"
+        )
+        assert by_op["image_generation_rejected"].args[0] == "GEMINI_IMAGE", (
+            f"expected the billed-but-rejected Gemini call recorded; got {calls}"
+        )

@@ -947,6 +947,37 @@ class ShotController:
                 extra={"shot_id": shot_id},
             )
 
+        # Billed-but-REJECTED image engines (WS3: Gemini/Nano Banana can BILL
+        # a real frame that then fails identity and falls through to the
+        # pod/FAL cascade above) bill the invoice but never become the
+        # winner — record them too, mirroring _record_billed_rejects on the
+        # video side (money-gate finding 2026-07-11, image-side close-out).
+        # result.billed_rejects only ever contains engines OTHER than the
+        # eventual winner by construction (a rejected engine's own success
+        # return happens before it can be appended — see phase_c_assembly's
+        # _with_rejects), but the _image_api guard is kept anyway to mirror
+        # _record_billed_rejects's own defensive winner-subtraction.
+        for _rejected_engine in result.billed_rejects:
+            if _rejected_engine == _image_api:
+                continue
+            try:
+                self.cost_tracker.record_api_call(
+                    _rejected_engine,
+                    operation="image_generation_rejected",
+                    shot_id=shot_id,
+                    video_id=video_id,
+                )
+                logger.info(
+                    "billed-but-rejected image attempt recorded",
+                    extra={"shot_id": shot_id, "engine": _rejected_engine},
+                )
+            except Exception:
+                logger.warning(
+                    "billed-reject image cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "engine": _rejected_engine},
+                )
+
         self.progress(
             "KEYFRAME_READY",
             f"Keyframe ready for {shot_id}",

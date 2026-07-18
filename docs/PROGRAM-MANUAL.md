@@ -226,7 +226,7 @@ flowchart TD
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
 | 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1064` |
 | 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:431`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
-| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. (The former N=8 **max tier** was retired in WS1 Task 4 — production is the sole image tier.) | `phase_c_assembly.py:100`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
+| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. (The former N=8 **max tier** was retired in WS1 Task 4 — production is the sole image tier.) | `phase_c_assembly.py:111`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
 | 4 | **PERFORMANCE_CAPTURE** | Per shot with an approved keyframe, retargets a performance onto the still: ACT_ONE / LIVE_PORTRAIT / VIGGLE, or SKIP (the domain router decides via `route_performance_engine`). Shots routed to SKIP are passed over with no generation. | `cinema/phases/performance.py:35`, `domain/performance.py:103`; called `cinema_pipeline.py:1119` |
 | 5 | **MOTION_RENDER** | Per shot, `generate_motion_take` turns the keyframe into a clip via the **video cascade** (`generate_ai_video`): Kling→Sora→Runway→LTX→Veo→Kling-3.0→…, filtering disabled engines and retrying on total exhaustion. Dialogue shots route first to **Veo native audio** (the only `native_audio=True` engine); non-embedded dialogue clips get a mandatory lip-sync pass. A storyboard batch path (Kling Native) handles 2–6-shot scenes in one call when all keyframes exist and the aspect is non-portrait (M-1 guard — portrait always takes the per-shot path). | `phase_c_ffmpeg.py:54`, `cinema/phases/motion_render.py:342`; called `cinema_pipeline.py:1166` |
 | 5a | **Post-processing** | Identity/continuity correction and finish passes happen at take-generation and operator-correction time: face-swap (PixVerse→FaceFusion), lip-sync overlay/generation cascades with a SyncNet gate, RIFE interpolation, SeedVR2/Topaz upscale. Stored as additive `postprocess_variants`. | `phase_c_vision.py:54`, `lip_sync.py:178`/`:475`/`:705`/`:815` |
@@ -547,9 +547,9 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:100` | Priority chain: ComfyUI PuLID (`pulid.json`) → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). `quality_tier` is still accepted but informational — the `=="max"` fork was retired in WS1 Task 4. |
-| `RunPodComfyUI` | `phase_c_assembly.py:37` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
-| `_fal_flux_fallback` | `phase_c_assembly.py:577` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
+| `generate_ai_broll` | `phase_c_assembly.py:111` | Priority chain: ComfyUI PuLID (`pulid.json`) → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). `quality_tier` is still accepted but informational — the `=="max"` fork was retired in WS1 Task 4. |
+| `RunPodComfyUI` | `phase_c_assembly.py:48` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
+| `_fal_flux_fallback` | `phase_c_assembly.py:615` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:19` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
 | `score_candidate` | `face_validator_gate.py:174` | Composite = `0.6·arc + 0.4·aesthetic`. |
 | `should_halt` | `face_validator_gate.py:231` | Halt on budget or composite ≥ threshold. |
@@ -651,7 +651,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `CostTracker` | `cost_tracker.py:201` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator initialized at construction and rehydrated from durable project rows on checkpoint resume. |
 | `record_api_call` | `cost_tracker.py:388` | Primary API logging path. |
 | `log_llm` | `cost_tracker.py:326` | LLM logging path; auto-detects provider from `PRICING` (`:109`) and silently records `$0.00` for unknown models. |
-| `would_exceed` | `cost_tracker.py:464` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1698`) since 2026-06-10 (P0-2). |
+| `would_exceed` | `cost_tracker.py:464` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1729`) since 2026-06-10 (P0-2). |
 | `is_over_budget` | `cost_tracker.py:501` | Post-call budget gate, consulted in `cinema/shots/controller.py:1567`. |
 | `API_COST_USD` | `cost_tracker.py:50` | ±30% per-call USD estimates — operators must calibrate against invoices. |
 | `cleanup_project` | `cleanup.py:56` | Deletes intermediate `temp/` artifacts post-assembly (called at `cinema_pipeline.py:907`, non-fatal); `aggressive=True` also removes generated media. |
@@ -672,7 +672,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1064`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2387` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2418` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:376` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
@@ -805,20 +805,20 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 2. Require `shot["plan_status"] == "approved"`.
 3. `ContinuityEngine.enhance_shot_prompt` (`domain/continuity_engine.py:446`) builds the augmented prompt + a `continuity_config` dict (img2img flag, `init_image`, `denoise_strength`, scene/location seed, `pulid_weight_override`, identity anchor, threshold).
 4. Optional `optimize_shot_prompt` (`llm/prompt_optimizer.py:355`) when `prompt_optimizer_enabled=True`, cached on `shot["optimizer_cache"]`.
-5. `generate_ai_broll(...)` (`phase_c_assembly.py:100`) produces the image.
+5. `generate_ai_broll(...)` (`phase_c_assembly.py:111`) produces the image.
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:100`); `enhance_shot_prompt` (`domain/continuity_engine.py:449`); `classify_shot_type` (`workflow_selector.py:181`); `get_workflow_params` (`workflow_selector.py:228`) / `apply_workflow_params` (`workflow_selector.py:298`); `get_adaptive_pulid_weight` (`workflow_selector.py:337`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:111`); `enhance_shot_prompt` (`domain/continuity_engine.py:449`); `classify_shot_type` (`workflow_selector.py:181`); `get_workflow_params` (`workflow_selector.py:228`) / `apply_workflow_params` (`workflow_selector.py:298`); `get_adaptive_pulid_weight` (`workflow_selector.py:337`).
 
 **DECISION POINTS:**
 
-*Image path* — `generate_ai_broll` (`phase_c_assembly.py:100`) runs one tier (the `quality_tier == "max"` fork was retired in WS1 Task 4; `quality_tier` is now accepted but informational):
+*Image path* — `generate_ai_broll` (`phase_c_assembly.py:111`) runs one tier (the `quality_tier == "max"` fork was retired in WS1 Task 4; `quality_tier` is now accepted but informational):
 
 | Path | Behavior |
 |---|---|
 | ComfyUI + PuLID via `RunPodComfyUI` (primary) | Used when `COMFYUI_SERVER_URL` set AND `pulid.json` exists. |
-| `_fal_flux_fallback` (fallback) | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:577`). |
+| `_fal_flux_fallback` (fallback) | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:615`). |
 
 *Shot-type → PuLID weight* (production `WORKFLOW_TEMPLATES`, `workflow_selector.py:22`, **verified**):
 
@@ -893,7 +893,7 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 *Per-shot path* — `generate_ai_video` (`phase_c_ffmpeg.py:95`) classifies the shot, resolves the engine, and runs a fault-tolerant cascade.
 
-**KEY FUNCTIONS:** `generate_ai_video` (`phase_c_ffmpeg.py:95`); inner `try_next_api` (`phase_c_ffmpeg.py:216`) and `_record_video_cascade` (`phase_c_ffmpeg.py:156`); the dialogue override + `audio_embedded` tagging + mandatory lipsync at `cinema/shots/controller.py:134` (routing helper), `:184` (tagging), and `:1880` (F1b lipsync), all driven from `generate_motion_take` (`:1698`).
+**KEY FUNCTIONS:** `generate_ai_video` (`phase_c_ffmpeg.py:95`); inner `try_next_api` (`phase_c_ffmpeg.py:216`) and `_record_video_cascade` (`phase_c_ffmpeg.py:156`); the dialogue override + `audio_embedded` tagging + mandatory lipsync at `cinema/shots/controller.py:134` (routing helper), `:184` (tagging), and `:1880` (F1b lipsync), all driven from `generate_motion_take` (`:1729`).
 
 **DECISION POINTS:**
 
@@ -1073,7 +1073,7 @@ flowchart TD
 
 ### 5.2 The Production Image Tier (the "max" tier was retired)
 
-The image pipeline has a single tier since WS1 Task 4. `quality_tier` in `global_settings` is still read at the top of `generate_ai_broll` (`phase_c_assembly.py:100`) but is now **informational** — the `"max"` branch it used to select was deleted, so any value renders on the production tier.
+The image pipeline has a single tier since WS1 Task 4. `quality_tier` in `global_settings` is still read at the top of `generate_ai_broll` (`phase_c_assembly.py:111`) but is now **informational** — the `"max"` branch it used to select was deleted, so any value renders on the production tier.
 
 | Production image tier (the only tier) | |
 |---|---|
@@ -1731,7 +1731,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 
 | Function | Location | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:100` | Image-gen dispatch: ComfyUI+PuLID (`pulid.json`) → FAL fallback (single tier since WS1 Task 4) |
+| `generate_ai_broll` | `phase_c_assembly.py:111` | Image-gen dispatch: ComfyUI+PuLID (`pulid.json`) → FAL fallback (single tier since WS1 Task 4) |
 | `generate_ai_video` | `phase_c_ffmpeg.py:95` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:181` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
 | `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:228 / 298` | Per-shot-type template + ComfyUI node injection |
