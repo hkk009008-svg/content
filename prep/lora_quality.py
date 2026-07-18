@@ -62,39 +62,51 @@ def _next_lora_action(attempt: int, best_score: Optional[float], *,
 # ---------------------------------------------------------------------------
 # quality_max.py was deleted (WS1 Task 4, TEARDOWN); its generate_ai_broll_max
 # dispatch has no production replacement. The _qm_* wrappers below are now a
-# DORMANT/BROKEN call path: each raises ModuleNotFoundError when invoked,
-# which _generate_with_lora's broad `except Exception` catches and treats as
-# a skip (same silent-skip behavior as before Task 4 — get_max_quality_params
-# was already gone from workflow_selector, so this path was already failing).
-# Kept lazy (not deleted outright) so `import prep.lora_quality` stays light
-# and the pure-fn tests never pull the heavy ComfyUI stack; whether to repoint
-# these at the production pulid.json/ComfyUI path or explicitly retire
-# validate_lora_quality/train_character_lora_gated is an open product
-# decision (surfaced, not silently made — see WS1 Task 4 handoff).
+# DORMANT/BROKEN call path, kept (not deleted outright) so `import
+# prep.lora_quality` stays light and the pure-fn tests never pull the heavy
+# ComfyUI stack; whether to repoint these at the production pulid.json/
+# ComfyUI path or explicitly retire validate_lora_quality/
+# train_character_lora_gated is an open product decision (surfaced, not
+# silently made — see WS1 Task 4 handoff).
+#
+# WS1 Task 4 VERIFY fast-follow: each wrapper used to lazily
+# `from quality_max import ...`, i.e. a live import of a module that no
+# longer exists on disk — a genuine dangling reference (ModuleNotFoundError
+# at call time), not just a stale comment. Replaced with an explicit,
+# named `_QualityMaxRemoved` raise so (a) no import statement in this file
+# still names a deleted module/symbol, and (b) `_generate_with_lora`'s
+# broad `except Exception` skip guard (below) can tell "backend
+# structurally removed" apart from a genuine transient ComfyUI/infra
+# failure in its log line — same silent_gate_degradation_bug_class this
+# repo already tracks (a permanently no-op gate must announce itself, not
+# just swallow-and-skip indistinguishably from an occasional outage).
+
+
+class _QualityMaxRemoved(RuntimeError):
+    """Raised by the _qm_* wrappers / _default_max_params: quality_max.py
+    (and its workflow_selector.get_max_quality_params dependency) were
+    deleted in WS1 Task 4 with no production replacement wired up yet.
+    Caught by _generate_with_lora's broad except -> treated as a skip."""
+
 
 def _qm_load_max_workflow():
-    from quality_max import _load_max_workflow
-    return _load_max_workflow()
+    raise _QualityMaxRemoved("quality_max._load_max_workflow: quality_max.py deleted WS1 Task 4, no production replacement")
 
 
 def _qm_inject_identity(*a, **k):
-    from quality_max import _inject_identity
-    return _inject_identity(*a, **k)
+    raise _QualityMaxRemoved("quality_max._inject_identity: quality_max.py deleted WS1 Task 4, no production replacement")
 
 
 def _qm_inject_conditioning(*a, **k):
-    from quality_max import _inject_conditioning
-    return _inject_conditioning(*a, **k)
+    raise _QualityMaxRemoved("quality_max._inject_conditioning: quality_max.py deleted WS1 Task 4, no production replacement")
 
 
 def _qm_inject_sampling(*a, **k):
-    from quality_max import _inject_sampling
-    return _inject_sampling(*a, **k)
+    raise _QualityMaxRemoved("quality_max._inject_sampling: quality_max.py deleted WS1 Task 4, no production replacement")
 
 
 def _qm_run_one_candidate(*a, **k):
-    from quality_max import _run_one_candidate
-    return _run_one_candidate(*a, **k)
+    raise _QualityMaxRemoved("quality_max._run_one_candidate: quality_max.py deleted WS1 Task 4, no production replacement")
 
 
 def _make_comfy(url: str):
@@ -109,13 +121,14 @@ def _default_max_params(shot_type: str = "portrait") -> dict:
     """Tier params baseline — formerly the SAME source generate_ai_broll_max
     used, back when that function (quality_max.py) existed.
 
-    NOTE: get_max_quality_params was retired from workflow_selector before
-    quality_max.py itself was deleted (WS1 Task 2), so this call already
-    raises ImportError; it is caught by _generate_with_lora's broad
-    `except Exception` and treated as a skip, same as the wrappers above.
+    NOTE: get_max_quality_params was retired from workflow_selector (WS1
+    Task 2) before quality_max.py itself was deleted (WS1 Task 4); this call
+    site is unreachable in practice today because `_qm_load_max_workflow()`
+    already raises `_QualityMaxRemoved` first in `_generate_with_lora`'s try
+    block. Raises the same typed exception (not a dangling import) so a
+    direct/future call site fails the same explicit way.
     """
-    from workflow_selector import get_max_quality_params
-    return dict(get_max_quality_params(shot_type))
+    raise _QualityMaxRemoved("workflow_selector.get_max_quality_params: retired WS1 Task 2, no production replacement")
 
 
 def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: int,
@@ -127,8 +140,11 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
     Assembly order formerly mirrored generate_ai_broll_max (quality_max.py,
     deleted WS1 Task 4):
       load -> inject_identity -> inject_conditioning -> inject_sampling -> run_one
-    Every step below raises ModuleNotFoundError now that quality_max.py is
-    gone; the surrounding try/except treats that as an infra-failure skip.
+    Every step below raises `_QualityMaxRemoved` (a typed, explicit exception —
+    see the Task 2 wrappers above) now that quality_max.py is gone; the
+    surrounding try/except treats that the same as any other infra-failure
+    skip, but logs it distinctly (WARNING, structural) so it isn't mistaken
+    for a transient per-call ComfyUI outage (ERROR, with traceback).
     """
     try:
         wf = _qm_load_max_workflow()
@@ -150,6 +166,18 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
             wf["25"]["inputs"]["noise_seed"] = seed
         comfy = _make_comfy(comfyui_url)  # RunPodComfyUI is stateless (request-per-call) — no close() needed
         return _qm_run_one_candidate(comfy, wf, out_path)
+    except _QualityMaxRemoved as e:
+        # Structural, not transient: this will fail on EVERY call until the
+        # repoint-vs-retire decision (module docstring) is made. WARNING, not
+        # ERROR/exc_info — the silent_gate_degradation_bug_class doctrine
+        # (CLAUDE.md) reserves WARNING for a structural condition vs. INFO/
+        # per-clip; logging this as a fresh per-call traceback would bury the
+        # one fact that matters (the LoRA quality gate is a permanent no-op)
+        # under repeated identical noise.
+        logger.warning("[lora_quality] quality-gate generation backend unavailable (%s); "
+                       "validate_lora_quality will report skipped=True for every call "
+                       "until this is repointed or retired", e)
+        return None
     except Exception as e:
         # Swallow-and-skip is required (never crash training), but keep the traceback
         # for diagnosis (Lane V #13 M-3 pattern) instead of a bare print.

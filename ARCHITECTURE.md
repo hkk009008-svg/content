@@ -916,15 +916,21 @@ train→validate→retrain orchestration (`train_character_lora_gated`,
 `validate_lora_quality`) still exists and is still called from
 `web_server.py`'s train-lora endpoint, but its ComfyUI generation step
 (`_generate_with_lora`) was a thin wrapper over `quality_max.py`'s
-injection functions and now raises `ModuleNotFoundError` on every call —
-caught by a broad `except Exception`, so the endpoint silently returns
-`skipped=True` / `skip_reason="generation_or_scoring_unavailable"` for every
-request (this predates Task 4: `get_max_quality_params` was already gone
+injection functions; those wrappers now raise a typed `_QualityMaxRemoved`
+exception on every call (WS1 Task 4 VERIFY fast-follow: previously a live
+`from quality_max import ...` dangling reference raising bare
+`ModuleNotFoundError`) — caught by a broad `except Exception`, so the
+endpoint still returns `skipped=True` /
+`skip_reason="generation_or_scoring_unavailable"` for every request, now
+logged at WARNING (structural, once per call) rather than a per-call ERROR
+traceback (this predates Task 4: `get_max_quality_params` was already gone
 from `workflow_selector.py` since WS1 Task 2, so the path was already
 failing, just via a different exception). Whether to repoint these wrappers
 at the production `pulid.json`/ComfyUI path or explicitly retire
-`validate_lora_quality`/`train_character_lora_gated` is an open product
-decision, not yet made. `prep/lora_training.py::train_character_lora` (the
+`validate_lora_quality`/`train_character_lora_gated` is still an open
+product decision, not yet made — this fast-follow only removed the dangling
+import and made the permanent-skip condition legible; it did not restore
+the gate's real function. `prep/lora_training.py::train_character_lora` (the
 actual training subprocess wrapper) is unaffected and still functions; the
 LoRA it produces registers into `char_lora_paths`/`char_lora_strengths` for a
 future consumer that doesn't exist yet (`phase_c_assembly.py`'s
