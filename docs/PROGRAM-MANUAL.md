@@ -520,19 +520,19 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** turns a keyframe still into a video clip — classify shot, select an optimal video API (`GEMINI_OMNI` primary per WS2, `VEO_NATIVE` first fallback — see the headline capabilities in §1.4), run a fault-tolerant ordered fallback cascade across vendors, route dialogue through native-audio (Gemini Omni, then Veo — both carry `native_audio=True`) or a mandatory lipsync pass, and write cascade provenance to the take.
 
-**Canonical modules:** `phase_c_ffmpeg.py` (1714 LOC — central routing + all per-API handlers + ffmpeg utilities), `workflow_selector.py` (613 LOC), and the native clients `kling_native.py`, `veo_native.py`, `ltx_native.py`, `sora_native.py`. (`RUNWAY*` and `SEEDANCE` are inline in `phase_c_ffmpeg.py` — no wrapper class.)
+**Canonical modules:** `phase_c_ffmpeg.py` (1864 LOC — central routing + all per-API handlers + ffmpeg utilities), `workflow_selector.py` (377 LOC), and the native clients `kling_native.py`, `veo_native.py`, `ltx_native.py`, `sora_native.py`. (`RUNWAY*` and `SEEDANCE` are inline in `phase_c_ffmpeg.py` — no wrapper class.)
 
 | Name | file:line | What it does |
 |---|---|---|
-| `generate_ai_video` | `phase_c_ffmpeg.py:95` | Central dispatch + cascade. Per-engine branches (KLING_NATIVE `:291`, SORA_NATIVE `:330`, VEO_NATIVE `:376`, LTX `:415`, RUNWAY_GEN4 `:461`, SORA_2 `:522`, VEO/FAL `:579`, KLING_3_0 `:668`, FAL_SVD `:772`, RUNWAY `:851`, SEEDANCE `:893`). Returns path or `None`. |
-| `try_next_api` (inner) | `phase_c_ffmpeg.py:216` | Iterates fallbacks, filters attempted + `api_engines`-disabled; on exhaustion sleeps 30s and retries up to `MAX_CASCADE_RETRIES` (default 1, `cascade_retry_limit` override). |
-| `_record_video_cascade` (inner) | `phase_c_ffmpeg.py:156` | Writes `{engine, attempts}` into `_cascade_out` before each successful return (provenance for the take record). |
-| `_veo_quota_blocked` | `phase_c_ffmpeg.py:67` | Checks the 1800s TTL cooldown flag. |
+| `generate_ai_video` | `phase_c_ffmpeg.py:97` | Central dispatch + cascade. Per-engine branches (KLING_NATIVE `:343`, SORA_NATIVE `:387`, VEO_NATIVE `:436`, LTX `:478`, RUNWAY_GEN4 `:527`, SORA_2 `:588`, VEO/FAL `:645`, KLING_3_0 `:734`, FAL_SVD `:853`, RUNWAY `:932`, SEEDANCE `:974`, GEMINI_OMNI `:1075` — WS2 Google-first primary, §9.4). Returns path or `None`. |
+| `try_next_api` (inner) | `phase_c_ffmpeg.py:218` | Iterates fallbacks, filters attempted + `api_engines`-disabled; on exhaustion sleeps 30s and retries up to `MAX_CASCADE_RETRIES` (default 1, `cascade_retry_limit` override). |
+| `_record_video_cascade` (inner) | `phase_c_ffmpeg.py:158` | Writes `{engine, attempts}` into `_cascade_out` before each successful return (provenance for the take record). |
+| `_veo_quota_blocked` | `phase_c_ffmpeg.py:69` | Checks the 1800s TTL cooldown flag. |
 | `_VEO_QUOTA_EXHAUSTED_UNTIL` | `phase_c_ffmpeg.py:23` | Cooldown timestamp — only the **FAL-proxy VEO** branch sets/checks it; VEO_NATIVE has no quota guard (§3.13). |
-| `stitch_modules` | `phase_c_ffmpeg.py:1145` | Concat demuxer (`-c copy`). |
-| `split_video_into_segments` | `phase_c_ffmpeg.py:1179` | Storyboard splitter (last segment to EOF). |
-| `classify_shot_type` | `workflow_selector.py:181` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
-| `WORKFLOW_TEMPLATES` | `workflow_selector.py:22` | Per-shot-type primary API + fallback list + render params. All 5 shot types now primary `GEMINI_OMNI` (WS2), `VEO_NATIVE` first fallback; portrait/medium second-fallback to fal Kling v3 Pro (`KLING_3_0`), wide/landscape to `LTX`, action to `SEEDANCE` — full table `ARCHITECTURE.md` §9.1. |
+| `stitch_modules` | `phase_c_ffmpeg.py:1147` | Concat demuxer (`-c copy`). |
+| `split_video_into_segments` | `phase_c_ffmpeg.py:1181` | Storyboard splitter (last segment to EOF). |
+| `classify_shot_type` | `workflow_selector.py:180` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
+| `WORKFLOW_TEMPLATES` | `workflow_selector.py:21` | Per-shot-type primary API + fallback list + render params. All 5 shot types now primary `GEMINI_OMNI` (WS2), `VEO_NATIVE` first fallback; portrait/medium second-fallback to fal Kling v3 Pro (`KLING_3_0`), wide/landscape to `LTX`, action to `SEEDANCE` — full table `ARCHITECTURE.md` §9.1. |
 | `VeoNativeAPI.generate_video` | `veo_native.py:138` | Vertex-preferred / Gemini-fallback. **Bug #4:** `reference_images` accepted but dropped (Vertex exclusivity). `driving_video_path` accepted but unwired. Duration clamped to (4,6,8). |
 | `_extract_video_bytes` | `veo_native.py:85` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini). Cycle-17 native-audio fix path. |
 | `_clamp_image_to_video_duration` | `veo_native.py:38` | Duration clamp (5s→6). |
@@ -541,24 +541,25 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 ### 3.9 Image / keyframe generation (single production tier)
 
-**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). There is one image tier: FLUX-Dev on RunPod ComfyUI with PuLID face-lock (`pulid.json`), with a FAL fallback cascade. (A heavier **max** tier — N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, SUPIR 4K — was retired in WS1 Task 4; see the retirement note below.) Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
+**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). Post-WS3 the image **primary** is Gemini 2.5 Flash Image (Nano Banana) via `gemini_image_native.GeminiImageAPI` (PRIORITY-0 in `generate_ai_broll`); the FLUX-Dev-on-RunPod-ComfyUI tier with PuLID face-lock (`pulid.json`) + FAL fallback cascade is the demoted first fallback — reached when Nano Banana is keyless, errors, or fails the identity gate, or when `identity_backend='pod'`. (A heavier **max** tier — N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, SUPIR 4K — was retired in WS1 Task 4; see the retirement note below.) Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
 
-**Canonical modules:** `phase_c_assembly.py` (732 LOC, the image generator — despite the "assembly" name), `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py`, plus the `performance/` package and the production ComfyUI graph `pulid.json`. (The max-tier driver `quality_max.py` and its `pulid_max.json` graph were deleted in WS1 Task 4.)
+**Canonical modules:** `phase_c_assembly.py` (846 LOC, the image generator — despite the "assembly" name), the WS3 image primary `gemini_image_native.py`, `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py`, plus the `performance/` package and the production ComfyUI graph `pulid.json`. (The max-tier driver `quality_max.py` and its `pulid_max.json` graph were deleted in WS1 Task 4.)
 
 | Name | file:line | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:111` | Priority chain: ComfyUI PuLID (`pulid.json`) → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). `quality_tier` is still accepted but informational — the `=="max"` fork was retired in WS1 Task 4. |
+| `generate_ai_broll` | `phase_c_assembly.py:111` | Priority chain: **PRIORITY-0 Gemini 2.5 Flash Image (Nano Banana, WS3 — `:208`)** → ComfyUI PuLID (`pulid.json`) → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). `quality_tier` is still accepted but informational — the `=="max"` fork was retired in WS1 Task 4. |
+| `GeminiImageAPI.generate_image` | `gemini_image_native.py:53` | The PRIORITY-0 Nano Banana path (`generate_ai_broll:208`). Multi-ref identity (frontal `character_image` + `multi_angle_refs` + secondary-char refs). Identity pass → `ImageGenResult(_, "GEMINI_IMAGE")`; on fail/keyless/error it records a billed-reject and **falls through** to the pod/FAL cascade (never raises, never returns `None` — silent-gate-degradation discipline). Opt out via `identity_backend='pod'`. |
 | `RunPodComfyUI` | `phase_c_assembly.py:48` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
 | `_fal_flux_fallback` | `phase_c_assembly.py:618` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:19` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
 | `score_candidate` | `face_validator_gate.py:174` | Composite = `0.6·arc + 0.4·aesthetic`. |
 | `should_halt` | `face_validator_gate.py:231` | Halt on budget or composite ≥ threshold. |
 | `needs_regenerate` | `face_validator_gate.py:330` | Regenerate (one PuLID-boost retry) if `arc < floor`. |
-| `get_workflow_params` | `workflow_selector.py:228` | Per-type params + UI overlays. |
-| `apply_workflow_params` | `workflow_selector.py:298` | Write params into the `pulid.json` node map. |
-| `get_adaptive_pulid_weight` | `workflow_selector.py:337` | Rolling-stats adaptive PuLID weight. |
+| `get_workflow_params` | `workflow_selector.py:227` | Per-type params + UI overlays. |
+| `apply_workflow_params` | `workflow_selector.py:297` | Write params into the `pulid.json` node map. |
+| `get_adaptive_pulid_weight` | `workflow_selector.py:336` | Rolling-stats adaptive PuLID weight. |
 
-> **Max tier retired (WS1 Task 4, `267af0cd`).** The `generate_ai_broll_max` driver (`quality_max.py`) and its `pulid_max.json` graph — N=8 adaptive best-of, node probe/prune, the five `_inject_*` axes, and the ControlNet / Redux / FaceDetailer / SUPIR post-passes — were deleted; production (`pulid.json` + FAL) is the sole image tier. `ARCHITECTURE.md` §8.3 keeps the mechanism archaeology; ADR-024 records why (the max graph over-cooks structurally, so `production`/`pulid.json` is the validated survivor). Of the scoring primitives above, `score_candidate` survives as the LoRA-quality oracle (`prep/lora_quality.py:203`); `should_halt` / `needs_regenerate` are now dormant (no live caller).
+> **Max tier retired (WS1 Task 4, `267af0cd`).** The `generate_ai_broll_max` driver (`quality_max.py`) and its `pulid_max.json` graph — N=8 adaptive best-of, node probe/prune, the five `_inject_*` axes, and the ControlNet / Redux / FaceDetailer / SUPIR post-passes — were deleted; production (`pulid.json` + FAL) is the sole ComfyUI/pod image tier (WS3 later layered Nano Banana in front as the image **primary** — see the §3.9 role). `ARCHITECTURE.md` §8.3 keeps the mechanism archaeology; ADR-024 records why (the max graph over-cooks structurally, so `production`/`pulid.json` is the validated survivor). Of the scoring primitives above, `score_candidate` survives as the LoRA-quality oracle (`prep/lora_quality.py:203`); `should_halt` / `needs_regenerate` are now dormant (no live caller).
 | `generate_keyframe_take` | `cinema/shots/controller.py:636` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence

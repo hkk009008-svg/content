@@ -1125,22 +1125,22 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:81-1045](phase_c_ffmpeg.py:81))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:97-1146](phase_c_ffmpeg.py:97))
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :322 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :363 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
-| `VEO_NATIVE` | :409 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
-| `GEMINI_OMNI` | :1073 | `gemini_omni_native.GeminiOmniAPI` — WS2 Google-first `target_api` PRIMARY for all 5 `WORKFLOW_TEMPLATES` (§9.1); own quota-cooldown pair, separate from Veo's `_veo_quota_blocked` | GOOGLE_API_KEY or GEMINI_API_KEY |
-| `LTX` | :448 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :494 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :555 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
-| `VEO` | :612 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :701 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")` — portrait/medium PRIMARY since 2026-07-11; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
-| `FAL_SVD` | :820 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
-| `RUNWAY` | :899 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :941 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
+| `KLING_NATIVE` | :343 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :387 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
+| `VEO_NATIVE` | :436 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `GEMINI_OMNI` | :1075 | `gemini_omni_native.GeminiOmniAPI` — WS2 Google-first `target_api` PRIMARY for all 5 `WORKFLOW_TEMPLATES` (§9.1); own quota-cooldown pair, separate from Veo's `_veo_quota_blocked` | GOOGLE_API_KEY or GEMINI_API_KEY |
+| `LTX` | :478 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :527 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :588 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
+| `VEO` | :645 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :734 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")` — portrait/medium PRIMARY since 2026-07-11; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
+| `FAL_SVD` | :853 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
+| `RUNWAY` | :932 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :974 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default cascade (when `video_fallbacks=None`)
 
