@@ -9,7 +9,7 @@ import pytest
 
 from cinema.shots.strategy import (
     IdentityStrategy, CharIdentitySpec,
-    PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, NO_IDENTITY_ASSET,
+    PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
 )
 from cinema.shots.controller import _resolve_identity_strategy
 
@@ -54,12 +54,13 @@ def test_two_char_production_with_refs_is_kontext_multi():
     assert s.conditioned_chars[1].multi_angle_refs == ("/r/b1.jpg",)
 
 
-def test_two_char_max_tier_promises_multi_lora_with_secondary_conditioned():
-    # slice 2: registered-ref secondary is CONDITIONED on max (ReActor rescue
-    # at minimum; LoRA chain when one is registered for it).
+def test_max_input_falls_through_to_kontext_multi_char():
+    # WS1: the max tier is retired — quality_tier="max" no longer forks the
+    # router; a two-registered-char shot routes through the Kontext arm exactly
+    # like production, and the secondary is conditioned as fidelity="reference".
     s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "max",
                                    SETTINGS_NO_LORA, CC_TWO_REGISTERED)
-    assert s.mechanism_tag == "MAX_TIER_MULTI_LORA"
+    assert s.mechanism_tag == "KONTEXT_MULTI_CHAR"
     assert [c.char_id for c in s.conditioned_chars] == ["char_a", "char_b"]
     sec = s.conditioned_chars[1]
     assert sec.fidelity == "reference"     # no LoRA registered for char_b here
@@ -67,7 +68,10 @@ def test_two_char_max_tier_promises_multi_lora_with_secondary_conditioned():
     assert s.unconditioned_chars == []
 
 
-def test_max_tier_secondary_with_lora_gets_lora_fidelity_and_assets():
+def test_secondary_lora_wiring_retired_with_max_tier():
+    # WS1: the per-secondary LoRA spec-building lived only in the (deleted) max
+    # arm. Even with a registered secondary LoRA, the router now leaves the
+    # secondary at fidelity="reference" with the LoRA fields dormant (None).
     settings = {"quality_tier": "max",
                 "char_lora_paths": {"char_b": "/l/b.safetensors"},
                 "char_lora_strengths": {"char_b": 0.7},
@@ -75,18 +79,21 @@ def test_max_tier_secondary_with_lora_gets_lora_fidelity_and_assets():
     s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "max",
                                    settings, CC_TWO_REGISTERED)
     sec = s.conditioned_chars[1]
-    assert sec.fidelity == "lora"
-    assert sec.lora_path == "/l/b.safetensors"
-    assert sec.lora_strength == 0.7
-    assert sec.trigger == "TOKman"
+    assert sec.fidelity == "reference"
+    assert sec.lora_path is None
+    assert sec.lora_strength is None
+    assert sec.trigger is None
 
 
-def test_max_tier_single_char_stays_primary_only():
+def test_max_input_single_char_is_primary_only_reference():
+    # WS1 Task 3 acceptance (plan Step 1): the max fork is gone — a single-char
+    # "max" shot is PRIMARY_ONLY and the primary conditions as "reference"
+    # (never "pulid"). This is the failing-first pin for the tier collapse.
     s = _resolve_identity_strategy(_shot(["char_a"]), "max",
                                    SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
-    assert s.mechanism_tag == "MAX_TIER_PRIMARY_ONLY"
+    assert s.mechanism_tag == "PRIMARY_ONLY"
     assert s.unconditioned_chars == []
-    assert s.conditioned_chars[0].fidelity == "pulid"
+    assert s.conditioned_chars[0].fidelity == "reference"
 
 
 def test_max_tier_secondary_cap_two_overflow_unconditioned():
@@ -443,7 +450,7 @@ def test_single_char_identity_per_char_pins_scalar_convention(
 
 
 # ---------------------------------------------------------------------------
-# Task 1 (slice 2): CharIdentitySpec per-char LoRA fields + MAX_TIER_MULTI_LORA
+# Task 1 (slice 2): CharIdentitySpec per-char LoRA fields (dormant post-WS1)
 # ---------------------------------------------------------------------------
 
 def test_char_spec_lora_fields_default_none_and_serialize():
@@ -459,16 +466,18 @@ def test_char_spec_lora_fields_default_none_and_serialize():
     assert bare["lora_path"] is None and bare["trigger"] is None
 
 
-def test_strategy_carries_primary_trigger_and_multi_lora_tag_importable():
-    from cinema.shots.strategy import MAX_TIER_MULTI_LORA
-    s = IdentityStrategy(mechanism_tag=MAX_TIER_MULTI_LORA,
+def test_strategy_carries_primary_trigger_and_is_json_safe():
+    # The primary char_lora_trigger threads through IdentityStrategy even though
+    # its consumer is dormant post-WS1 (kept for the future FLUX.2 A/B). The tag
+    # value is incidental here — any live tag exercises the JSON-safety path.
+    s = IdentityStrategy(mechanism_tag=KONTEXT_MULTI_CHAR,
                          primary_char_id="char_a", char_lora_trigger="TOKwoman")
     assert s.char_lora_trigger == "TOKwoman"
     json.dumps(s.to_metadata_dict())  # stays JSON-safe
 
 
 # ---------------------------------------------------------------------------
-# Task 4 (slice 2): controller integration — max-tier kwarg forwarding
+# Task 4 (slice 2): controller integration — dormant LoRA kwarg forwarding
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -496,16 +505,18 @@ def controller_two_chars_max(monkeypatch, tmp_path, captured, _stub_validator):
     return host._shot_ctrl
 
 
-def test_two_char_max_tier_strategy_tag_and_kwargs(
+def test_two_char_max_input_threads_lora_kwargs_dormant(
         controller_two_chars_max, captured):
-    """MAX_TIER_MULTI_LORA is set; char_lora_trigger kwarg flows to generate_ai_broll;
-    identity_per_char covers both conditioned chars (slice-2 accountability pin)."""
+    """WS1: quality_tier="max" no longer forks the router → mechanism_tag is
+    KONTEXT_MULTI_CHAR. The char_lora_trigger kwarg still flows to
+    generate_ai_broll (dormant threading preserved) and identity_per_char
+    covers both conditioned chars (slice-2 accountability pin)."""
     controller_two_chars_max.generate_keyframe_take("scene_1", "shot_1")
     take = _latest_keyframe_take(controller_two_chars_max, "shot_1")
 
-    # Strategy promise
+    # Strategy promise — tier no longer forks; the Kontext reference arm runs
     md = take["metadata"]["identity_strategy"]
-    assert md["mechanism_tag"] == "MAX_TIER_MULTI_LORA"
+    assert md["mechanism_tag"] == "KONTEXT_MULTI_CHAR"
 
     # char_lora_trigger kwarg must be present in the captured call
     # (no trigger registered in fixture → value is None, but key must exist)

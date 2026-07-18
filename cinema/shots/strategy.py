@@ -3,17 +3,17 @@
 The router (cinema/shots/controller.py::_resolve_identity_strategy) emits one
 IdentityStrategy per keyframe take BEFORE generation; the validator and the
 capability scorecard hold generation accountable to it. Only tags whose
-mechanism is implemented are ever emitted (slice 1: the four below; slice 2
-adds MAX_TIER_MULTI_LORA; MAX_TIER_DUAL_PULID remains reserved for Pass B/S2).
+mechanism is implemented are ever emitted: PRIMARY_ONLY, KONTEXT_MULTI_CHAR,
+NO_IDENTITY_ASSET. The MAX_TIER_* tags were retired with the max image-gen
+tier (WS1); the per-character LoRA fields below are kept dormant for the
+future FLUX.2 A/B (WS3).
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 PRIMARY_ONLY = "PRIMARY_ONLY"
 KONTEXT_MULTI_CHAR = "KONTEXT_MULTI_CHAR"
-MAX_TIER_PRIMARY_ONLY = "MAX_TIER_PRIMARY_ONLY"
 NO_IDENTITY_ASSET = "NO_IDENTITY_ASSET"
-MAX_TIER_MULTI_LORA = "MAX_TIER_MULTI_LORA"
 
 
 @dataclass(frozen=True)
@@ -21,13 +21,13 @@ class CharIdentitySpec:
     char_id: str
     reference: str
     identity_anchor: str = ""
-    fidelity: str = "reference"  # slice 1: reference | pulid; lora is now live
+    fidelity: str = "reference"  # router emits "reference" only (max tier retired, WS1)
     # V-5: angle refs ride the spec through to_dict() -> generate_ai_broll ->
     # the slot allocator; a tuple (not list) keeps the frozen dataclass hashable.
     multi_angle_refs: tuple = ()
-    # P1-1 slice 2 (§3b): per-char LoRA assets — populated only on the max
-    # tier for registered-LoRA secondaries; None elsewhere (Kontext specs
-    # carry them as None and the Kontext branch ignores them).
+    # P1-1 slice 2 (§3b): per-char LoRA assets — formerly populated on the max
+    # tier for registered-LoRA secondaries (retired WS1). The router now leaves
+    # them None on every spec; kept dormant for the future FLUX.2 A/B (WS3).
     lora_path: Optional[str] = None
     lora_strength: Optional[float] = None
     # The PRIMARY's trigger rides IdentityStrategy.char_lora_trigger (the

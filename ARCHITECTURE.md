@@ -1629,7 +1629,7 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:622`; call at :854) and `diagnose_clip`
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:603`; call at :854) and `diagnose_clip`
   (`cinema/shots/controller.py:2325`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`

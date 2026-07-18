@@ -337,8 +337,7 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     """
     from cinema.shots.strategy import (
         IdentityStrategy, CharIdentitySpec,
-        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, MAX_TIER_MULTI_LORA,
-        NO_IDENTITY_ASSET,
+        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
@@ -364,35 +363,17 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
         char_id=primary_char_id, reference=primary_ref,
         identity_anchor=cc.get("identity_anchor", ""),
         multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
-        fidelity="pulid" if quality_tier == "max" else "reference",
+        # WS1: the max tier is retired — every shot conditions the primary via
+        # the production PuLID graph (ApplyPulidFlux) and is tagged "reference".
+        fidelity="reference",
     )]
     conditioned_ids = {primary_char_id}
 
-    if quality_tier == "max":
-        # P1-1 slice 2 (§3b + §3c-A): same registered-ref gate + 2-cap as the
-        # Kontext arm; per-secondary LoRA assets looked up exactly like the
-        # primary's (settings dicts keyed by char_id). A LoRA-less secondary
-        # still rides as fidelity="reference" — the ReActor rescue swaps its
-        # face from the canonical even without a LoRA.
-        for entry in secondary[:2]:
-            sec_id = entry["char_id"]
-            sec_lora = char_lora_paths.get(sec_id) or None
-            conditioned.append(CharIdentitySpec(
-                char_id=sec_id, reference=entry["reference"],
-                identity_anchor=entry.get("identity_anchor", ""),
-                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity="lora" if sec_lora else "reference",
-                lora_path=sec_lora,
-                lora_strength=(settings.get("char_lora_strengths", {}) or {}).get(sec_id),
-                # `or None` matches the primary's coercion (:298) — a ""
-                # trigger must not diverge between primary and secondary.
-                # (Strength stays bare .get(): 0.0 is a real value, cf. the
-                # is-not-None gate at web_server.py:781.)
-                trigger=char_lora_triggers.get(sec_id) or None,
-            ))
-            conditioned_ids.add(sec_id)
-        tag = MAX_TIER_MULTI_LORA if len(conditioned) > 1 else MAX_TIER_PRIMARY_ONLY
-    elif secondary:
+    # WS1: single identity-derivation path for every tier — the max-tier
+    # per-secondary LoRA fork (fidelity="lora" + MAX_TIER_* tags) was retired
+    # with quality_max.py. WS3 (FLUX.2 A/B) will add a gemini_multiref branch
+    # onto this clean single-branch shape (plan Rule #13 note).
+    if secondary:
         # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
         for entry in secondary[:2]:
             conditioned.append(CharIdentitySpec(
