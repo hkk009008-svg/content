@@ -124,7 +124,7 @@ One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`) 
 
 - **Native audio & dialogue.** `VEO_NATIVE` is the only video engine that generates voice *embedded in the clip* (`native_audio: True`, the sole such entry — `domain/scene_decomposer.py:43`); dialogue shots route to it when available. Every other engine produces silent video, so any non-embedded dialogue take gets a **mandatory lip-sync pass** (`cinema/shots/controller.py:1880`). Separately, a full audio stack generates TTS dialogue (ElevenLabs / Cartesia for Korean), BGM (Suno / FAL Stable Audio), and environmental foley (Stability AI), mixed into a 3-track final.
 
-- **Quality tiers.** A `"production"` tier (ComfyUI + PuLID, FLUX-Dev) and a `"max"` tier that runs **N=8 adaptive best-of** generation with ArcFace + aesthetic scoring, four-channel ControlNet, FLUX Redux style transfer, FaceDetailer, and SUPIR 4K upscale (`quality_max.py:966`).
+- **Single production image tier.** Keyframes render on FLUX-Dev via RunPod ComfyUI with PuLID face-lock (`pulid.json`) and a FAL fallback cascade — one validated tier, no operator tier-selection. (A heavier `"max"` tier — N=8 adaptive best-of with ArcFace/aesthetic scoring, ControlNet, FLUX Redux, FaceDetailer, and SUPIR 4K upscale — was **retired in WS1 Task 4**; `ARCHITECTURE.md` §8.3 keeps the archaeology and ADR-024 records why the max graph was dropped.)
 
 - **Metacognitive Chief-Director QA.** Before any pixels render, a `ChiefDirector` LLM (`llm/chief_director.py`) validates every shot prompt against eight hard constraints (identity firewall, schema/location/lighting locks, face-direction) and returns `APPROVED` / `MODIFIED` / `REJECTED` (`llm/chief_director.py:296`). Its verdict feeds the PLAN gate.
 
@@ -171,7 +171,7 @@ flowchart TD
 
     subgraph IMAGE["Keyframe generation — image tiers"]
         G1 --> KF["KEYFRAME_RENDER<br/>KeyframeRenderPhase.run (1089)"]
-        KF --> KFCASCADE["per shot: generate_keyframe_take<br/>FLUX+PuLID (ComfyUI) → FAL Kontext<br/>→ FLUX-Pro → Schnell → Pollinations<br/>[max tier: N=8 best-of, SUPIR 4K]"]
+        KF --> KFCASCADE["per shot: generate_keyframe_take<br/>FLUX+PuLID (ComfyUI) → FAL Kontext<br/>→ FLUX-Pro → Schnell → Pollinations"]
         KFCASCADE --> IDVAL1["Identity validate (ArcFace)<br/>IdentityValidator.validate_image"]
     end
 
@@ -226,7 +226,7 @@ flowchart TD
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
 | 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1064` |
 | 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:431`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
-| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. The optional **max tier** runs N=8 adaptive best-of with ArcFace+aesthetic scoring, ControlNet, Redux, FaceDetailer, ReActor, and SUPIR 4K upscale. | `phase_c_assembly.py:99`, `quality_max.py:966`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
+| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. (The former N=8 **max tier** was retired in WS1 Task 4 — production is the sole image tier.) | `phase_c_assembly.py:100`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
 | 4 | **PERFORMANCE_CAPTURE** | Per shot with an approved keyframe, retargets a performance onto the still: ACT_ONE / LIVE_PORTRAIT / VIGGLE, or SKIP (the domain router decides via `route_performance_engine`). Shots routed to SKIP are passed over with no generation. | `cinema/phases/performance.py:35`, `domain/performance.py:103`; called `cinema_pipeline.py:1119` |
 | 5 | **MOTION_RENDER** | Per shot, `generate_motion_take` turns the keyframe into a clip via the **video cascade** (`generate_ai_video`): Kling→Sora→Runway→LTX→Veo→Kling-3.0→…, filtering disabled engines and retrying on total exhaustion. Dialogue shots route first to **Veo native audio** (the only `native_audio=True` engine); non-embedded dialogue clips get a mandatory lip-sync pass. A storyboard batch path (Kling Native) handles 2–6-shot scenes in one call when all keyframes exist and the aspect is non-portrait (M-1 guard — portrait always takes the per-shot path). | `phase_c_ffmpeg.py:54`, `cinema/phases/motion_render.py:342`; called `cinema_pipeline.py:1166` |
 | 5a | **Post-processing** | Identity/continuity correction and finish passes happen at take-generation and operator-correction time: face-swap (PixVerse→FaceFusion), lip-sync overlay/generation cascades with a SyncNet gate, RIFE interpolation, SeedVR2/Topaz upscale. Stored as additive `postprocess_variants`. | `phase_c_vision.py:54`, `lip_sync.py:178`/`:475`/`:705`/`:815` |
@@ -330,7 +330,7 @@ After every scene-loop iteration and after each audio step, `CheckpointStore._sa
 
 ### 2.6 One run, narrated end to end
 
-Putting the pieces together, a single interactive run reads as: the operator creates and configures a project, adds characters (with reference images → multi-angle FLUX refs → ArcFace embeddings) and locations, writes scenes, and posts `…/generate`. The orchestrator generates style rules, pre-generates BGM, then per scene decomposes → has the ChiefDirector validate → writes `director_review` → generates dialogue audio, and parks at **PLAN_REVIEW**. After plan approval it renders keyframes (FLUX+PuLID, optionally N=8 max-tier) and parks at **KEYFRAME_REVIEW**; then performance capture and (unless all-SKIP) **PERFORMANCE_REVIEW**; then the motion cascade — Veo-native-audio-first for dialogue, lip-sync for the rest — and **REVIEW**. On final approval it assembles (normalize → stitch → grade → 3-track mix → R128 loudnorm) into `exports/final_cinema.mp4`, parks at **SCREENING** for a watch-and-iterate loop, and on approval cleans up, logs cost, and reports **COMPLETE**. The identical sequence runs unattended when `headless=True` and auto-approve thresholds are tuned to clear all five gates without a human.
+Putting the pieces together, a single interactive run reads as: the operator creates and configures a project, adds characters (with reference images → multi-angle FLUX refs → ArcFace embeddings) and locations, writes scenes, and posts `…/generate`. The orchestrator generates style rules, pre-generates BGM, then per scene decomposes → has the ChiefDirector validate → writes `director_review` → generates dialogue audio, and parks at **PLAN_REVIEW**. After plan approval it renders keyframes (FLUX+PuLID) and parks at **KEYFRAME_REVIEW**; then performance capture and (unless all-SKIP) **PERFORMANCE_REVIEW**; then the motion cascade — Veo-native-audio-first for dialogue, lip-sync for the rest — and **REVIEW**. On final approval it assembles (normalize → stitch → grade → 3-track mix → R128 loudnorm) into `exports/final_cinema.mp4`, parks at **SCREENING** for a watch-and-iterate loop, and on approval cleans up, logs cost, and reports **COMPLETE**. The identical sequence runs unattended when `headless=True` and auto-approve thresholds are tuned to clear all five gates without a human.
 
 ---
 
@@ -539,30 +539,26 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `KlingNativeAPI` | `kling_native.py:19` | JWT HS256 auth; `create_image_to_video` (`:86`), `poll_task` (`:170`), `generate_storyboard` (`:313`, ≤6 shots, `face_consistency`). |
 | `SoraNativeAPI.generate_video` / `LTXVideoAPI.generate_video` | `sora_native.py:56` / `ltx_native.py:68` | Sora: durations [4,8,12,16,20], driving-video as `input_reference` (only engine that fully wires it). LTX: native REST preferred, FAL fallback; `_*_transition` methods exist but are dead in the cascade. |
 
-### 3.9 Image / keyframe generation + quality tiers
+### 3.9 Image / keyframe generation (single production tier)
 
-**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). Production tier = FLUX-Dev on RunPod ComfyUI with PuLID face-lock (FAL fallbacks); optional **max** tier = N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, ReActor, SUPIR 4K. Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
+**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). There is one image tier: FLUX-Dev on RunPod ComfyUI with PuLID face-lock (`pulid.json`), with a FAL fallback cascade. (A heavier **max** tier — N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, SUPIR 4K — was retired in WS1 Task 4; see the retirement note below.) Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
 
-**Canonical modules:** `phase_c_assembly.py` (768 LOC, the image generator — despite the "assembly" name), `quality_max.py` (1297 LOC), `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py` (2671 LOC), plus the `performance/` package and ComfyUI graphs `pulid.json` / `pulid_max.json`.
+**Canonical modules:** `phase_c_assembly.py` (732 LOC, the image generator — despite the "assembly" name), `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py`, plus the `performance/` package and the production ComfyUI graph `pulid.json`. (The max-tier driver `quality_max.py` and its `pulid_max.json` graph were deleted in WS1 Task 4.)
 
 | Name | file:line | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:99` | Priority chain: `quality_max` (if tier=="max") → ComfyUI PuLID → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). |
+| `generate_ai_broll` | `phase_c_assembly.py:100` | Priority chain: ComfyUI PuLID (`pulid.json`) → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). `quality_tier` is still accepted but informational — the `=="max"` fork was retired in WS1 Task 4. |
 | `RunPodComfyUI` | `phase_c_assembly.py:37` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
 | `_fal_flux_fallback` | `phase_c_assembly.py:540` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:20` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
-| `generate_ai_broll_max` | `quality_max.py:966` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
-| `_probe_node_availability` | `quality_max.py:285` | One-time `/object_info` probe. |
-| `_prune_unavailable` | `quality_max.py:410` | Strip absent nodes with safe rewires. |
-| `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:535 / 718 / 752 / 773 / 796` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
-| `_inject_secondary_loras / _inject_secondary_faceswap` | `quality_max.py:607 / 674` | P1-1 slice 2 secondary identity axes: chain 701/702 LoraLoaders (≤0.55 clamp) after primary node 700; splice ReActorFaceSwap(611) after node 610 for face index "1". |
-| `_validate_overlay_value` | `quality_max.py:145` | Clamp/validate 17 ComfyUI + 8 halt UI knobs against `_MAX_TIER_KNOB_SCHEMA`. |
-| `score_candidate` | `face_validator_gate.py:171` | Composite = `0.6·arc + 0.4·aesthetic`. |
+| `score_candidate` | `face_validator_gate.py:174` | Composite = `0.6·arc + 0.4·aesthetic`. |
 | `should_halt` | `face_validator_gate.py:228` | Halt on budget or composite ≥ threshold. |
 | `needs_regenerate` | `face_validator_gate.py:327` | Regenerate (one PuLID-boost retry) if `arc < floor`. |
 | `get_workflow_params` | `workflow_selector.py:464` | Per-type params + UI overlays. |
 | `apply_workflow_params` | `workflow_selector.py:533` | Write params into the `pulid.json` node map. |
-| `get_adaptive_pulid_weight` | `workflow_selector.py:572` | Rolling-stats adaptive PuLID weight. |
+| `get_adaptive_pulid_weight` | `workflow_selector.py:329` | Rolling-stats adaptive PuLID weight. |
+
+> **Max tier retired (WS1 Task 4, `267af0cd`).** The `generate_ai_broll_max` driver (`quality_max.py`) and its `pulid_max.json` graph — N=8 adaptive best-of, node probe/prune, the five `_inject_*` axes, and the ControlNet / Redux / FaceDetailer / SUPIR post-passes — were deleted; production (`pulid.json` + FAL) is the sole image tier. `ARCHITECTURE.md` §8.3 keeps the mechanism archaeology; ADR-024 records why (the max graph over-cooks structurally, so `production`/`pulid.json` is the validated survivor). Of the scoring primitives above, `score_candidate` survives as the LoRA-quality oracle (`prep/lora_quality.py:203`); `should_halt` / `needs_regenerate` are now dormant (no live caller).
 | `generate_keyframe_take` | `cinema/shots/controller.py:622` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence
@@ -689,7 +685,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | Single SSE consumer | `web_server.py:1577` | A second `/stream` tab drains the shared queue; both miss events. |
 | `_running_cores` not invalidated on settings edit | `web_server.py:110` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2371`, `cinema_pipeline.py:783` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
-| Single-mode / zero-caller features | `face_validator_gate.py:228`, `cinema/auto_approve.py:775` | `should_halt` dispatches `composite_only` and `conjunctive` (wired via the `max_halt_rule` knob — `quality_max.py:135` schema / `:1028` params-map / `:1178` read / `:1242` dispatch); only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:303`); `summarize_audit` is defined but no web endpoint calls it. (Two former entries here are now resolved: `validate_lora_quality` is a real ArcFace oracle at `prep/lora_quality.py:172` — see §3.12 — and the hires-fix pass-2 denoise IS now injected, at `quality_max.py:836`.) |
+| Single-mode / zero-caller features | `cinema/auto_approve.py:775`, `face_validator_gate.py` | `should_halt` / `needs_regenerate` in `face_validator_gate.py` were the max-tier best-of gate; with the max tier retired (WS1 Task 4) they have no live caller (`score_candidate` survives — it backs the LoRA-quality oracle, `prep/lora_quality.py:203`). `summarize_audit` is defined but no web endpoint calls it. (`validate_lora_quality` is a real ArcFace oracle at `prep/lora_quality.py:213` — see §3.12.) |
 | `reporter.py` + dialogue helpers removed | — | The legacy `reporter.py` diagnostic orphan has been **deleted** outright; the dead dialogue helpers `format_dialogue_for_voiceover` / `dialogue_to_narration_text` were also removed (audio uses raw `generate_dialogue` output). |
 
 ---
@@ -802,7 +798,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 ### Stage 2 — Keyframe / image render
 
-**INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (tier, sampler knobs, LoRA/style paths, identity strictness), and the baseline ComfyUI workflow graph (`pulid.json` production / `pulid_max.json` max).
+**INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (sampler knobs, LoRA/style paths, identity strictness), and the production ComfyUI workflow graph (`pulid.json`).
 
 **PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:622`):
 1. Skip shots already carrying `approved_keyframe_take_id`.
@@ -813,17 +809,16 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:99`); `enhance_shot_prompt` (`domain/continuity_engine.py:449`); `classify_shot_type` (`workflow_selector.py:417`); `get_workflow_params` (`workflow_selector.py:464`) / `apply_workflow_params` (`workflow_selector.py:533`); `get_adaptive_pulid_weight` (`workflow_selector.py:572`); for max tier `generate_ai_broll_max` (`quality_max.py:966`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:100`); `enhance_shot_prompt` (`domain/continuity_engine.py:449`); `classify_shot_type` (`workflow_selector.py:173`); `get_workflow_params` (`workflow_selector.py:220`) / `apply_workflow_params` (`workflow_selector.py:290`); `get_adaptive_pulid_weight` (`workflow_selector.py:329`).
 
 **DECISION POINTS:**
 
-*Tier selection* — `generate_ai_broll` dispatches by `quality_tier` (`phase_c_assembly.py:99`):
+*Image path* — `generate_ai_broll` (`phase_c_assembly.py:100`) runs one tier (the `quality_tier == "max"` fork was retired in WS1 Task 4; `quality_tier` is now accepted but informational):
 
-| Tier | Path | Behavior |
-|---|---|---|
-| `"max"` | `quality_max.generate_ai_broll_max` | N=8 adaptive best-of, 4-channel ControlNet, Redux, FaceDetailer, ReActor, SUPIR 4K. Falls through to production on `None`/exception. |
-| `"production"` (default) | ComfyUI + PuLID via `RunPodComfyUI` | Used when `COMFYUI_SERVER_URL` set AND `pulid.json` exists. |
-| (fallback) | `_fal_flux_fallback` | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:540`). |
+| Path | Behavior |
+|---|---|
+| ComfyUI + PuLID via `RunPodComfyUI` (primary) | Used when `COMFYUI_SERVER_URL` set AND `pulid.json` exists. |
+| `_fal_flux_fallback` (fallback) | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:504`). |
 
 *Shot-type → PuLID weight* (production `WORKFLOW_TEMPLATES`, `workflow_selector.py:22`, **verified**):
 
@@ -837,17 +832,13 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 *Identity thresholds* (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:96`, **verified**): portrait 0.75/0.70/0.60, medium 0.70/0.65/0.55, wide 0.60/0.55/0.45, action 0.65/0.60/0.50, landscape 0.0 (strict/standard/lenient). On retry, the threshold degrades linearly toward `lenient` (`get_threshold_for_shot`, `identity/types.py:105`), preventing infinite retry loops.
 
-*Max-tier best-of-N* (`quality_max.py:1103`): generate `max_candidate_count` (default 8) candidates in `max_candidate_batch` batches with deterministic seeds (`base_seed + i*1009`); after each batch `should_halt` (`face_validator_gate.py:228`) checks composite ≥ `halt_threshold_composite` (portrait default 0.92) once `n ≥ halt_min_n`; composite = `0.6*ArcFace + 0.4*aesthetic`. If `needs_regenerate` (best ArcFace < `regenerate_floor_arc`, portrait 0.82), one PuLID-boost retry runs (weight += 0.15, capped 1.0).
-
 *img2img / continuity denoise* (`TemporalConsistencyManager.get_denoise_strength`, `domain/continuity_engine.py:368`): first shot 0.55, location change 0.50, same-location index ≤1 → 0.40, same-location index >1 → 0.30. UI override `continuity_options.img2img_denoise` clamps to **[0.2, 0.6]**.
 
-**OUTPUTS:** JPEG at `{project_dir}/shots/{shot_id}/{take_id}.jpg` (1344×768 production; up to 3840×2160 after SUPIR); `ImageGenResult(path, api_name)` with the backend token; take metadata carrying `identity_score`, `identity_failure_reason`, `suggested_pulid_adjustment`.
+**OUTPUTS:** JPEG at `{project_dir}/shots/{shot_id}/{take_id}.jpg` (1344×768); `ImageGenResult(path, api_name)` with the backend token; take metadata carrying `identity_score`, `identity_failure_reason`, `suggested_pulid_adjustment`.
 
 **FAILURE MODES + RECOVERY:**
 - **Per-shot failure does not fail the phase.** The phase always returns `ok=True`; the failed shot routes through `on_failure` into `failed_shots` for operator rework (`cinema/phases/keyframe_render.py:105-108`).
-- **Max-tier fall-through.** If `generate_ai_broll_max` returns `None` or raises, generation silently falls to the production path (`phase_c_assembly.py:114-143`).
 - **ComfyUI timeout** (600s, `phase_c_assembly.py:365-394`) or pod down → `_fal_flux_fallback`.
-- **Node-availability divergence (max tier).** `_probe_node_availability` returning an empty set causes `_prune_unavailable` to no-op (`quality_max.py:410`); a pod missing custom nodes then fails at *queue* time, not probe time. Documented caveat, not auto-recovered.
 
 ---
 
@@ -1019,7 +1010,7 @@ Five of those are **mandatory operator gates** (PLAN_REVIEW, KEYFRAME_REVIEW, PE
 | 2 | **Configure global settings** | `PUT /api/projects/<pid>` (`web_server.py:499`) | Writes your `global_settings` dict (aspect ratio, language, mood, quality tier, identity knobs, auto-approve thresholds…). |
 | 3 | **Add characters** (with reference images) | `POST .../characters` — multipart (`web_server.py:552`) | `create_character_with_images` face-detects the best upload, generates 5 multi-angle FLUX refs, computes a GhostFaceNet embedding, assigns a language/gender-aware voice. |
 | 4 | **Add locations** | `POST .../locations` (`web_server.py:1143`) | Builds a reusable `prompt_fragment` + deterministic `seed` so every shot at that location is architecturally consistent. |
-| 5 | **(Optional) Style board** | `POST .../style-board` (`web_server.py:928`) | Uploads style-reference images → drives FLUX Redux style transfer. |
+| 5 | **(Optional) Style board** | `POST .../style-board` (`web_server.py:928`) | Uploads style-reference images into `style_reference_paths`. (Its FLUX Redux consumer was the max tier, retired in WS1 Task 4 — the path is threaded but dormant, pending the FLUX.2 A/B rework.) |
 | 6 | **Add scenes** | `POST .../scenes` (`web_server.py:1284`) | A scene = title, action, mood, dialogue, duration, characters, location. |
 | 7 | **(Optional) Generate dialogue** | `POST .../scenes/<sid>/generate-dialogue` (`web_server.py:1362`) | LLM writes per-character spoken lines. |
 | 8 | **(Optional) Generate style rules** | `POST .../style-rules` (`web_server.py:1447`) | LLM produces cinematography/color/lighting/photorealism rules persisted into `global_settings.style_rules`. *Skipped automatically at run time if already present* (`cinema_pipeline.py:959`). |
@@ -1080,23 +1071,20 @@ flowchart TD
 
 > **Critical headless caveat.** Do **not** instantiate `NullLifecycle` for unattended runs — its `wait_for_gate` returns `True` even when the predicate is false (`cinema/lifecycle.py:89`), silently skipping all gate enforcement. The only correct unattended path is `CinemaPipeline(headless=True)`. For headless to actually complete, you must also satisfy the auto-approve gates (see the unattended recipe in §5.6).
 
-### 5.2 Quality Tiers: Standard (Production) vs. Max
+### 5.2 The Production Image Tier (the "max" tier was retired)
 
-The single biggest quality switch is `quality_tier` in `global_settings`. It is read at the top of `generate_ai_broll` (`phase_c_assembly.py:99`) and routes keyframe generation down one of two entirely different image pipelines.
+The image pipeline has a single tier since WS1 Task 4. `quality_tier` in `global_settings` is still read at the top of `generate_ai_broll` (`phase_c_assembly.py:100`) but is now **informational** — the `"max"` branch it used to select was deleted, so any value renders on the production tier.
 
-| | **`"production"`** (default) | **`"max"`** |
-|---|---|---|
-| **Image engine** | FLUX-Dev on RunPod ComfyUI + PuLID face-lock (`pulid.json`, 22 nodes, FLUX-native `ApplyPulidFlux`); FAL fallback chain | FLUX-Dev (or HiDream-I1) on `pulid_max.json` (56 nodes, FLUX-native `ApplyPulidFlux`) |
-| **Generation strategy** | Single image per shot | **N=8 adaptive best-of** with ArcFace + LAION-Aesthetic scoring and an adaptive halt (`quality_max.py:966`) |
-| **Identity** | PuLID weight by shot type | + 4-channel Union ControlNet (depth/canny/pose/tile), per-character LoRA, adaptive PuLID-boost retry |
-| **Detail / upscale** | — | FaceDetailer (Impact Pack) + SUPIR 4K upscale (3840×2160 default) |
-| **Style transfer** | IP-Adapter (img2img) | + FLUX Redux from your style board |
-| **Cost / shot** | ~$0.04 (`COMFYUI_PULID`) | ~$0.40 (`QUALITY_MAX`) — 10× (`cost_tracker.py:45`) |
-| **Output resolution** | 1344×768 keyframe | up to 3840×2160 after SUPIR |
+| Production image tier (the only tier) | |
+|---|---|
+| **Image engine** | FLUX-Dev on RunPod ComfyUI + PuLID face-lock (`pulid.json`, 22 nodes, FLUX-native `ApplyPulidFlux`), with a FAL fallback chain (Kontext → FLUX-Pro → Schnell → Pollinations) |
+| **Generation strategy** | Single image per shot, gated by a post-keyframe identity validation pass |
+| **Identity** | PuLID weight by shot type; adaptive PuLID self-calibrated from rolling ArcFace stats |
+| **Style transfer** | IP-Adapter (img2img) |
+| **Cost / shot** | ~$0.04 (`COMFYUI_PULID`) |
+| **Output resolution** | 1344×768 keyframe |
 
-**How to select it:** `PUT /api/projects/<pid>` with `{"global_settings": {"quality_tier": "max"}}`. Max tier requires `pulid_max.json` present on the pod and the pod running; on any failure or `None` return it transparently falls through to the production path (`phase_c_assembly.py:117`–143), so you never get a hard failure from choosing max.
-
-> **Watch out:** `max_halt_rule` accepts `composite_only`/`conjunctive`/`budget_only` and `should_halt` dispatches `composite_only` and `conjunctive`; only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:228`). (The `hires_fix_denoise` knob, formerly unwired, **is** now injected into the pass-2 node at `quality_max.py:836`.) The post-passes (FaceDetailer/SUPIR) carry the bulk of the max-tier quality lift.
+> **The retired `"max"` tier.** WS1 Task 4 (commit `267af0cd`) deleted the `quality_max.py` driver and its `pulid_max.json` 56-node graph. That tier ran **N=8 adaptive best-of** (ArcFace + LAION-Aesthetic composite, adaptive halt, PuLID-boost retry), added 4-channel Union ControlNet + per-character LoRA + FLUX Redux, and finished with FaceDetailer + SUPIR 4K (up to 3840×2160) — at roughly 10× the cost. It was dropped because the max graph over-cooks structurally (ADR-024: `production`/`pulid.json` is the validated survivor); `ARCHITECTURE.md` §8.3 keeps the full mechanism archaeology. Setting `quality_tier: "max"` today is a no-op that renders on the production tier.
 
 ### 5.3 The Capability-Knobs Playbook
 
@@ -1129,7 +1117,7 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 | Knob | Default | Range | Effect | File |
 |---|---|---|---|---|
 | `ip_adapter_weight` | 0.85 | 0.5–1.0 | PuLID face-lock strength (per-character and per-object) | `global_settings` |
-| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation + N=8 scoring | `domain/project_manager.py:324`, `cinema/shots/controller.py:672` |
+| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation | `domain/project_manager.py:324`, `cinema/shots/controller.py:672` |
 | `identity_threshold` | 0.55 | 0.4–0.8 | Per-shot face-similarity threshold | `global_settings` |
 | `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:535`, `workflow_selector.py:545` |
 | `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:498` |
@@ -1137,7 +1125,7 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 
 Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:96`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
 
-**LoRA training** (the highest-quality identity path): `POST .../characters/<cid>/train-lora` (`web_server.py:707`) runs a background ai-toolkit job (FLUX rank-32 fp16, 3000 steps; `prep/lora_training.py:105`). Upload **25–50 varied reference images** first. Poll `GET .../characters/<cid>/lora-status` (`web_server.py:813`). On completion the path lands in `char_lora_paths` and is used by the max-tier LoRA loader.
+**LoRA training** (the highest-quality identity path): `POST .../characters/<cid>/train-lora` (`web_server.py:707`) runs a background ai-toolkit job (FLUX rank-32 fp16, 3000 steps; `prep/lora_training.py:105`). Upload **25–50 varied reference images** first. Poll `GET .../characters/<cid>/lora-status` (`web_server.py:813`). On completion the path lands in `char_lora_paths` (and `char_lora_strengths` in lockstep — `web_server.py:857`), and the controller reads them and threads `char_lora_strength` through the identity strategy into `generate_ai_broll` (`cinema/shots/controller.py:344`). **Registration is live; consumption is dormant.** The former consumer was the max-tier LoRA loader (`quality_max._inject_identity`), retired in WS1 Task 4 — so the `char_lora_*` kwargs are now *reserved but not yet wired* to a production consumer (`prep/lora_training.py:10`), pending the FLUX.2 A/B rework (WS3).
 
 **Face swap** (post-hoc identity correction): `POST .../shots/<sid>/correct` with `action="face_swap"` (`web_server.py:2139` → `controller.apply_correction`). Cascade: fal.ai PixVerse → FaceFusion CLI (`phase_c_vision.py:53`). Note FaceFusion runs CPU-only by default.
 
@@ -1188,10 +1176,8 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 
 | Knob | Cheaper | Pricier / higher quality |
 |---|---|---|
-| `quality_tier` | `"production"` (~$0.04/keyframe) | `"max"` (~$0.40/keyframe) |
 | `competitive_generation` | `false` (single LLM) | `true` (GPT-4o + Claude quorum — doubles LLM cost, better shots) |
 | `quality_judge_llm` | `"auto"` (claude-sonnet) | `"claude-opus"` (best judge) (`llm/ensemble.py:113`) |
-| `max_quality_parallel_workers` | 1 | up to 4 (faster N=8, more pod CPU) |
 | `budget_limit_usd` | set a cap | `0`/null = uncapped |
 | video API | `LTX` (~$0.36/shot — 6s minimum @$0.06/s on fal ltx-2.3) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
@@ -1215,20 +1201,19 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2139`) or auto-reco
 ### 5.4 "To Maximize X, Do Y" Recipes
 
 **To maximize identity lock in portraits / close-ups:**
-1. `quality_tier="max"` and ensure `pulid_max.json` + pod are live.
+1. Ensure the ComfyUI/RunPod pod is live so keyframes render on the production PuLID path (`pulid.json`) rather than dropping to the FAL fallback. (There is no longer a `quality_tier="max"` switch — it was retired in WS1 Task 4.)
 2. Upload many real front-facing reference photos per character; let the 5-angle FLUX generation run.
 3. **Train a LoRA** (`POST .../characters/<cid>/train-lora`, 25–50 images) and confirm `char_lora_paths` populated.
 4. `identity_strictness=0.70`, `ip_adapter_weight≈0.90`, keep `adaptive_pulid=true`.
-5. Max-tier: `face_detailer_enabled=true`, `face_detailer_guide_size=1024`, `max_halt_threshold_composite=0.95`, `max_halt_min_n=4`.
-6. Keep `img2img_denoise` low (0.2–0.3) for consecutive same-scene shots so the prior approved keyframe anchors identity.
+5. Keep `img2img_denoise` low (0.2–0.3) for consecutive same-scene shots so the prior approved keyframe anchors identity.
 
 **To get a clean, controlled background (no smear, no stray figures):**
-1. Understand the cause first: the painterly "background smear" is the **base FLUX+PuLID generation reacting to an under-specified backdrop**, *not* a post-pass artifact. The SUPIR upscaler and hires-fix pass leave it unchanged — **validated on-pod 2026-06-09** (varying `supir_cfg_scale`/`hires_fix_denoise` does not alter the background). Fix it at the prompt, not by tuning post-passes.
+1. Understand the cause first: the painterly "background smear" is the **base FLUX+PuLID generation reacting to an under-specified backdrop** — it is authored at generation time, not by any finishing pass. Fix it at the prompt. (This was validated on-pod 2026-06-09 against the then-max-tier SUPIR/hires-fix passes, which left the background unchanged; those passes were retired with the max tier, but the root cause — and the fix — are unchanged for the production tier.)
 2. Put an **explicit backdrop in the positive prompt** (the shot/scene prompt), e.g. `"plain neutral grey seamless studio backdrop"` or `"softly-lit plain interior wall"`. Leaving the background unspecified lets FLUX hallucinate smeary depth and stray figures.
-3. **The max-tier keyframe is FLUX with `BasicGuider` (`pulid_max.json` node 22) — it has NO negative-prompt channel** (the only text node is the positive `CLIPTextEncode` node 122, set by `_inject_conditioning` at `quality_max.py:718`; `generate_ai_broll_max`'s `negative_prompt` arg is accepted but unwired). So express exclusions **positively** in the prompt: `"solo, alone, one person only, plain empty backdrop, no other people in frame"`. A negative prompt is a no-op on the max keyframe. (One pedantic exception: the SUPIR upscaler stage's `SUPIR_conditioner` node 504 carries its own fixed generic quality strings — e.g. negative `"blurry, low quality, deformed"` — but they are hard-coded upscale-pass boilerplate; shot prompts and `negative_constraints` never reach them.)
-4. For the recurring **neck/collarbone elongation** artifact, likewise use **positive** anatomy guidance (`"natural proportional neck and shoulders, well-defined collarbone"`) — not a negative term. (The shot's `negative_constraints` field still threads to the standard tier + video-gen, but the max-tier FLUX keyframe ignores it.)
+3. **The production keyframe is FLUX with `BasicGuider` (`pulid.json` node 22) — it has NO negative-prompt channel** (the only text node is the positive `CLIPTextEncode` node 122; `generate_ai_broll`'s `negative_prompt` arg is accepted but unwired). So express exclusions **positively** in the prompt: `"solo, alone, one person only, plain empty backdrop, no other people in frame"`. A negative prompt is a no-op on the FLUX keyframe.
+4. For the recurring **neck/collarbone elongation** artifact, likewise use **positive** anatomy guidance (`"natural proportional neck and shoulders, well-defined collarbone"`) — not a negative term. (The shot's `negative_constraints` field still threads to video-gen, but the FLUX keyframe's `BasicGuider` ignores it.)
 5. Keep the photoreal suffix consistent across every shot via `style_rules.photorealism_rules` (`llm/style_director.py:143`) → `style_rules_to_prompt_suffix` (`:189`, applied at `cinema/shots/controller.py:497`) so the background treatment doesn't drift shot-to-shot.
-6. **On-pod confirmation (2026-06-09):** explicit clean backdrop + positive exclusion phrasing yielded a clean 4K background with identity intact (arc 0.829). SUPIR cfg and hires-fix are *upscalers* — they do not author the background; the (positive) prompt does.
+6. **On-pod confirmation (2026-06-09):** explicit clean backdrop + positive exclusion phrasing yielded a clean background with identity intact (arc 0.829). The base FLUX+PuLID generation authors the background — the (positive) prompt does, not any finishing pass.
 
 **To maximize motion realism in action shots:**
 1. Let `classify_shot_type` route to `action` → primary `SORA_NATIVE` (best physics).
@@ -1659,16 +1644,14 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 
 | Path | LOC | Role |
 |---|---|---|
-| `phase_c_assembly.py` | 768 | Production-tier **image** gen: ComfyUI+PuLID, FLUX Kontext/Pro fallbacks, `generate_ai_broll` |
-| `quality_max.py` | 1297 | Max-tier orchestrator: node prune/inject, N=8 best-of, SUPIR/FaceDetailer/Redux |
+| `phase_c_assembly.py` | 732 | **Image** gen (the only tier): ComfyUI+PuLID, FLUX Kontext/Pro fallbacks, `generate_ai_broll` |
 | `phase_c_ffmpeg.py` | 1714 | Central video routing (`generate_ai_video`) + all per-API handlers + FFmpeg assembly utilities (concat, xfade, color grade, loudnorm) |
-| `workflow_selector.py` | 613 | `classify_shot_type`, `WORKFLOW_TEMPLATES` / `MAX_QUALITY_TEMPLATES`, adaptive PuLID weight |
+| `workflow_selector.py` | 370 | `classify_shot_type`, `WORKFLOW_TEMPLATES`, adaptive PuLID weight (`MAX_QUALITY_TEMPLATES` retired WS1 Task 2) |
 | `kling_native.py` | 449 | Kling 3.0 native client (JWT HS256, image2video, storyboard mode) |
 | `veo_native.py` | 286 | Veo 3.1 client (Vertex-preferred, Gemini fallback) — **only `native_audio` engine** |
 | `ltx_native.py` | 373 | LTX Video 2.3 client (native REST preferred, FAL fallback) |
 | `sora_native.py` | 179 | OpenAI Sora 2 client (only engine that wires driving-video) |
-| `pulid.json` | 22 nodes | Production ComfyUI workflow (FLUX-native `ApplyPulidFlux`; fixed 2026-06-13, ADR-025) |
-| `pulid_max.json` | 56 nodes | Max-tier ComfyUI workflow (FLUX-native `ApplyPulidFlux`) |
+| `pulid.json` | 22 nodes | Production ComfyUI workflow — the only image graph (FLUX-native `ApplyPulidFlux`; fixed 2026-06-13, ADR-025) |
 
 #### Identity / continuity / coherence
 
@@ -1679,7 +1662,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `identity/types.py` | 126 | `FailureReason`, `SHOT_TYPE_THRESHOLDS`, `get_threshold_for_shot` |
 | `identity/__init__.py` | 100 | `make_validator()` factory, `get_shared_validator()` singleton |
 | `coherence_analyzer.py` | 277 | Pixel-level color/lighting/composition coherence (`assess_coherence`) |
-| `face_validator_gate.py` | 341 | N=8 best-of gate (`score_candidate`, `should_halt`, `needs_regenerate`) |
+| `face_validator_gate.py` | 341 | `score_candidate` composite scorer (backs the LoRA-quality oracle); `should_halt`/`needs_regenerate` were the max-tier best-of gate, dormant since WS1 Task 4 |
 | `domain/character_manager.py` | 527 | Character creation, multi-angle FLUX refs, voice assignment |
 | `domain/location_manager.py` | 214 | Location creation, prompt fragments, deterministic seeds |
 | `performance/identity_gate.py` | 119 | Performance-take single-frame ArcFace check |
@@ -1748,8 +1731,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 
 | Function | Location | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:99` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
-| `generate_ai_broll_max` | `quality_max.py:966` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
+| `generate_ai_broll` | `phase_c_assembly.py:100` | Image-gen dispatch: ComfyUI+PuLID (`pulid.json`) → FAL fallback (single tier since WS1 Task 4) |
 | `generate_ai_video` | `phase_c_ffmpeg.py:58` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:417` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
 | `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:464 / 533` | Per-shot-type template + ComfyUI node injection |
@@ -1805,7 +1787,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 
 | Variable | Default | Effect |
 |---|---|---|
-| `COMFYUI_SERVER_URL` | `http://127.0.0.1:8188` | RunPod ComfyUI pod address (production + max tier); absence forces FAL image fallback |
+| `COMFYUI_SERVER_URL` | `http://127.0.0.1:8188` | RunPod ComfyUI pod address; absence forces FAL image fallback |
 | `EXPERIMENTS_DB_PATH` | `data/experiments.db` | Honored by every tracker via the `CostTracker` default-path env read (`cost_tracker.py:201`, T7 `4af8c05`); the `Settings.experiments_db_path` field itself is decorative (D-config-1 resolved) |
 | `PERFORMANCE_CACHE_DIR` | `data/cache/driving` | SHA256-keyed driving-video cache |
 | `MOTION_GATE_SAMPLES` | `8` | Frame-pair count for motion-fidelity scoring; read once at module load |
@@ -1844,37 +1826,19 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 
 | Key | Default | Effect | Max-quality value |
 |---|---|---|---|
-| `quality_tier` | `"production"` | `"max"` engages N=8 best-of + SUPIR | `"max"` |
+| `quality_tier` | `"production"` | Informational only — the `"max"` fork was retired in WS1 Task 4; production is the sole tier | `"production"` |
 | `identity_strictness` | `0.60` | Face-similarity threshold post-keyframe | `0.70–0.75` for portraits |
 | `adaptive_pulid` | `True` | Rolling-stats PuLID self-calibration | keep `True` |
 | `ip_adapter_weight` | `0.85` | PuLID face-lock strength (per-char & per-object) | `0.85–0.95` |
 | `prompt_optimizer_enabled` | `True`¹ | LLM rewrites prompt pre-gen, cached on `optimizer_cache` | `True` |
 | `char_lora_paths` | `{}` | Per-character LoRA `.safetensors` | train on 25–50 refs (biggest identity lever) |
-| `style_reference_paths` | `[]` | Style-board images → FLUX Redux | provide a style board |
+| `style_reference_paths` | `[]` | Style-board images (fed FLUX Redux in the retired max tier; now threaded but dormant) | provide a style board |
 | `coherence_check_enabled` | `True` | Per-shot coherence comparison | keep `True` |
 | `color_drift_sensitivity` | `0.3` | Color-grade recommendation threshold | lower to `0.2` for tight grading |
 
 ¹ The `make_project` default for `prompt_optimizer_enabled` is **True** (`domain/project_manager.py:309`, inside `make_project` at `:309`) — treat True as authoritative if any older note says otherwise.
 
-**Max-tier halt & ComfyUI knobs** (UI: `MaxQualityTierSection.tsx` / `AdvancedSection.tsx`; clamped by `_validate_overlay_value`, `quality_max.py:145`)
-
-| Key | Range / default | Effect |
-|---|---|---|
-| `max_candidate_count` | [1,16], 8 | Total best-of budget |
-| `max_candidate_batch` | [1,8], 4 | Candidates per batch |
-| `max_halt_threshold_composite` | [0.70,1.00], portrait 0.92 | Halt when best composite ≥ this |
-| `max_halt_min_n` | [1,8], 4 | Minimum candidates before halt allowed |
-| `max_regenerate_floor_arc` | [0.50,1.00], portrait 0.82 | Below → one PuLID-boost retry (+0.15) |
-| `max_halt_rule` | enum, `composite_only` | `composite_only` + `conjunctive` dispatched (`face_validator_gate.py:272`); only `budget_only` deferred (falls back to composite-only) |
-| `max_quality_parallel_workers` | [1,4], 1 | Parallel ComfyUI workers per batch |
-| `ays_steps` | [15,40] | AlignYourSteps step count (node 17) |
-| `slg_scale` | [0.0,5.0] | SkipLayerGuidance (node 770) |
-| `detail_daemon_amount` | [0.0,1.0] | Mid-sampling detail injection (node 780) |
-| `controlnet_{canny,pose,tile}_strength` | [0.0,0.5/0.6/0.5] | Per-channel ControlNet |
-| `redux_strength` | enum high/medium/low | FLUX Redux style strength (node 804) |
-| `face_detailer_enabled` + `face_detailer_guide_size` | bool / {512,1024,2048} | FaceDetailer crop |
-| `supir_enabled` + `supir_steps` | bool / [20,100] | SUPIR 4K upscale |
-| `hires_fix_enabled` + `hires_fix_denoise` | bool / [0.2,0.6] | Pass-2 denoise wired — node-18 write at `quality_max.py:836` (D-image-2 fixed 2026-06-09; floor 0.40) |
+**Max-tier halt & ComfyUI knobs — RETIRED (WS1 Task 4).** The `max_candidate_*` / `max_halt_*` / `max_regenerate_floor_arc` / `max_quality_parallel_workers` / `ays_steps` / `slg_scale` / `detail_daemon_amount` / `controlnet_*_strength` / `redux_strength` / `face_detailer_*` / `supir_*` / `hires_fix_*` knobs were all consumed by `quality_max.py`, which was deleted; setting them today is inert. `ARCHITECTURE.md` §8.3 records what they did. (The `MaxQualityTierSection.tsx` panel still ships in the web client but its backend consumer is gone — a frontend follow-up, not yet removed.)
 
 **Video / motion / audio assembly**
 
@@ -1916,8 +1880,8 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 
 | Tier | Image path | Identity | Notable |
 |---|---|---|---|
-| `production` (default) | ComfyUI FLUX-Dev + PuLID (`pulid.json`, 22 nodes) → FAL Kontext/Pro/Schnell/Pollinations | single ArcFace pass | 1344×768 keyframe; `ApplyPulidFlux` (FLUX-native; fixed 2026-06-13, start_at=0.0) |
-| `max` | `pulid_max.json` (56 nodes), N=8 best-of | ArcFace + LAION aesthetic composite, PuLID-boost retry | FaceDetailer + ReActor + SUPIR 4K (3840×2160); `ApplyPulidFlux` (FLUX-native); optional HiDream-I1 swap |
+| `production` (the only tier) | ComfyUI FLUX-Dev + PuLID (`pulid.json`, 22 nodes) → FAL Kontext/Pro/Schnell/Pollinations | single ArcFace pass | 1344×768 keyframe; `ApplyPulidFlux` (FLUX-native; fixed 2026-06-13, start_at=0.0) |
+| ~~`max`~~ (retired WS1 Task 4) | — | — | `quality_max.py`/`pulid_max.json` deleted; `quality_tier: "max"` now renders on production. See `ARCHITECTURE.md` §8.3. |
 
 ### 7.4 Glossary
 
@@ -1932,7 +1896,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | **Cascade** | The fault-tolerant ordered fallback across video engines in `generate_ai_video`. On engine failure, `try_next_api` advances; total exhaustion sleeps 30 s and retries up to `cascade_retry_limit` |
 | **Cascade metadata** | `{engine, attempts[]}` written by `_record_video_cascade` on success → persisted to the take for provenance/audit |
 | **PuLID** | Identity-locking ComfyUI node that binds a character's face to generation from a reference image. Weight is shot-type-dependent and adaptively tuned. Both production and max now use `ApplyPulidFlux` (FLUX-native; production fixed 2026-06-13, ADR-025 — see D-image-3 for the historical class divergence) |
-| **Composite score** | Max-tier candidate quality = `0.6·arc_score + 0.4·aesthetic_score`; missing component substitutes neutral 0.5 (`face_validator_gate.py`) |
+| **Composite score** | `0.6·arc_score + 0.4·aesthetic_score`; missing component substitutes neutral 0.5 (`face_validator_gate.py`'s `score_candidate` — was the max-tier candidate metric; now used by the LoRA-quality oracle) |
 | **ArcFace / GhostFaceNet** | Face-embedding models for identity cosine-similarity. `IdentityValidator` uses GhostFaceNet via DeepFace; mapped to [0,1] as `(1+cos)/2` |
 | **Coherence score** | Pixel-level cross-shot consistency: `(1−color_drift)·0.4 + lighting·0.3 + composition·0.3`. Result may be invalid (image read failed) — check `result.valid` |
 | **Identity drift** | Character face changing across shots — the core problem the continuity + PuLID + identity-validation stack exists to prevent |
@@ -1955,7 +1919,7 @@ Each entry: **symptom → diagnose → fix**, with the source location that gove
 #### Identity drift (character face changes across shots)
 
 - **Diagnose:** Check `take["metadata"]["identity_score"]` + `identity_failure_reason`. Run `IdentityValidator.get_rolling_stats(char_id)` — `common_failure` tells you the class (`FACE_ANGLE_EXTREME`, `SMALL_FACE_REGION`, `WRONG_PERSON`, `LOW_CONFIDENCE_DETECTION`).
-- **Fix:** Upload more real front-facing references (not synthetic); let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`; use `quality_tier="max"` to engage the N=8 face gate; train a per-character LoRA (single biggest lever). Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:545`).
+- **Fix:** Upload more real front-facing references (not synthetic); let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`; train a per-character LoRA (single biggest lever). Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:545`).
 
 #### Color shift / temporal discontinuity between shots
 
@@ -2005,7 +1969,7 @@ This is the most common operational failure and has three distinct causes — al
 #### Image generation silently falls back to FAL (no ComfyUI)
 
 - **Diagnose:** Keyframes return `api_name` of `FLUX_KONTEXT`/`FLUX_PRO`/`POLLINATIONS` instead of `COMFYUI_PULID`.
-- **Fix:** Set `COMFYUI_SERVER_URL` and ensure `pulid.json` is present. Note: landscape shots intentionally skip PuLID and route to FAL even when ComfyUI is available (`phase_c_assembly.py:198`). For max tier, a failed `/object_info` probe returns an empty set → `_prune_unavailable` no-ops → all nodes assumed present → failure surfaces at queue time, not probe time (D-image-4).
+- **Fix:** Set `COMFYUI_SERVER_URL` and ensure `pulid.json` is present. Note: landscape shots intentionally skip PuLID and route to FAL even when ComfyUI is available (`phase_c_assembly.py:198`).
 
 ### 7.6 Plan-vs-Source Divergences & Doc-Drift
 
@@ -2038,7 +2002,7 @@ Each top-level file is a **9-line `from domain.X import *` re-export shim**; the
 |---|---|
 | `identity_validator.py`, `identity_types.py` (flat) | **Absent.** Real files are `identity/validator.py` (908 LOC) and `identity/types.py` (126 LOC) — a package, not flat modules |
 | `phase_b_audio.py` | **Absent** at repo root and `cinema/phases/`. The audio subsystem is the `audio/` package (`dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `voiceover.py`) |
-| `Pulid.json` (historical) | **Reconciled 2026-06-13 — now a single lowercase `pulid.json`.** Was git-tracked capital-P while all code opens `open('pulid.json')`; on case-insensitive macOS both resolved to the **same inode** so it worked, but a case-sensitive checkout (Linux CI/pod) would `FileNotFoundError` and silently cascade past the production PuLID branch. Renamed via `git mv` (git/disk/code/test now agree). The two real workflows are `pulid.json` (production, 22 nodes) and `pulid_max.json` (max tier, different inode). |
+| `Pulid.json` (historical) | **Reconciled 2026-06-13 — now a single lowercase `pulid.json`.** Was git-tracked capital-P while all code opens `open('pulid.json')`; on case-insensitive macOS both resolved to the **same inode** so it worked, but a case-sensitive checkout (Linux CI/pod) would `FileNotFoundError` and silently cascade past the production PuLID branch. Renamed via `git mv` (git/disk/code/test now agree). Since WS1 Task 4 there is one workflow graph — `pulid.json` (production, 22 nodes); the former `pulid_max.json` (max tier) was deleted. |
 
 #### Two classes named `CinemaPipeline` (D-1)
 
@@ -2088,8 +2052,8 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-video-1 | `classify_shot_type` never returns `close_up`, yet `MOTION_FIDELITY_FLOORS` has a `close_up` key (with a comment acknowledging the inconsistency) — that floor is unreachable |
 | D-video-2 | **RESOLVED 2026-07-11** — Seedance dispatch rewired to the verified fal endpoints (`bytedance/seedance-2.0/image-to-video`, `.../reference-to-video` keyframe-first ≤9 refs) and promoted to action primary for the Sora sunset (2026-09-24); `SEEDANCE_API_KEY` deleted, rides `FAL_KEY` |
 | D-video-3 | `VEO_NATIVE` has no quota-cooldown guard (only the FAL-proxy `VEO` branch sets the TTL flag) |
-| D-image-1 | **RESOLVED** — `should_halt` now dispatches `composite_only` AND `conjunctive` (`face_validator_gate.py:272`); only `budget_only` remains deferred, falling back to composite-only behavior (`face_validator_gate.py:303`) |
-| D-image-3 | **RESOLVED 2026-06-13 (ADR-025)** — production `pulid.json` now uses `ApplyPulidFlux` / `PulidFluxModelLoader` (FLUX-native), matching max; was SDXL-era `ApplyPulid` / `PulidModelLoader` (a FLUX no-op, validated OFF 0.6205 → ON 0.8779). The upscale-node divergence remains: production 500–502 Real-ESRGAN vs max 500–503 SUPIR — same IDs, different subsystems |
+| D-image-1 | **RESOLVED** (historical) — `should_halt` dispatched `composite_only` AND `conjunctive`; only `budget_only` remained deferred. Moot since WS1 Task 4: `should_halt` was the max-tier best-of gate and now has no live caller |
+| D-image-3 | **RESOLVED 2026-06-13 (ADR-025)** — production `pulid.json` uses `ApplyPulidFlux` / `PulidFluxModelLoader` (FLUX-native); was SDXL-era `ApplyPulid` / `PulidModelLoader` (a FLUX no-op, validated OFF 0.6205 → ON 0.8779). (The former production-vs-max upscale-node divergence — production 500–502 Real-ESRGAN vs max 500–503 SUPIR — is moot since WS1 Task 4 deleted the max graph.) |
 | D-llm-1 | `creative_llm` override is family-checked but **not** provider-switching; a cross-family value (e.g. `claude-*` when only OpenAI is configured) is silently ignored |
 | D-llm-2 | `style_director` is **OpenAI-only** (no Anthropic path); with only `ANTHROPIC_API_KEY` set it falls straight to `_default_style_rules` |
 | D-llm-3 | `competitive_enabled` is stored from settings but never enforced — `competitive_generate` always runs full competition |
