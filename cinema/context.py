@@ -95,10 +95,12 @@ class PipelineContext:
     downloaded_vids: list = field(default_factory=list)
 
     # --- max-quality tier state (reserved) ---
-    # Dormant until the FLUX.2 A/B (WS3) revives a max-quality path; the
-    # workflow_selector.MAX_QUALITY_TEMPLATES / get_max_quality_params consumer
-    # was removed in WS1 Task 2. Fields kept (not deleted) so a future consumer
-    # doesn't need to re-thread PipelineContext.
+    # Dormant until a possible future FLUX.2 A/B revives a max-quality path
+    # (a separate, deferred track — NOT WS3, which shipped Nano Banana /
+    # gemini_multiref instead and binds identity via reference images, not a
+    # max-tier LatentBlend graph); the workflow_selector.MAX_QUALITY_TEMPLATES /
+    # get_max_quality_params consumer was removed in WS1 Task 2. Fields kept
+    # (not deleted) so a future consumer doesn't need to re-thread PipelineContext.
     # Pre-VAE-decode latent of the previous shot, cached for LatentBlend in the
     # (currently absent) max tier. Bytes (serialized torch tensor) or None.
     prev_shot_latent: Optional[bytes] = None
