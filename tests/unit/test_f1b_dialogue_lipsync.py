@@ -914,7 +914,13 @@ class TestGenerateMotionTakeOverlayWiring:
         tracker.spent_usd = 0.26
         tracker.budget_usd = 0.60
         assert tracker.spent_usd + API_COST_USD["VEO_NATIVE"] <= tracker.budget_usd
-        expected_envelope = API_COST_USD["VEO_NATIVE"] + API_COST_USD["LIPSYNC_DEFAULT"]
+        # WS2: GEMINI_OMNI (native audio) now outranks VEO_NATIVE in dialogue
+        # routing (domain/scene_decomposer.py PURPOSE_API_RANKING), so the
+        # dialogue video generate_motion_take actually dispatches is
+        # GEMINI_OMNI, not VEO_NATIVE — the envelope the budget gate checks
+        # follows the real routing change (this is an expected-value update,
+        # not a masking one: the routing change IS intended).
+        expected_envelope = API_COST_USD["GEMINI_OMNI"] + API_COST_USD["LIPSYNC_DEFAULT"]
         assert tracker.spent_usd + expected_envelope > tracker.budget_usd
         tracker.would_exceed.return_value = False
         tracker.would_exceed_cost.side_effect = (

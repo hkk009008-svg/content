@@ -383,8 +383,12 @@ class TestGeminiImagePriorityZero:
         assert res.api_name == "FLUX_KONTEXT"
 
     def test_identity_backend_pod_skips_gemini_entirely(self, tmp_path, monkeypatch, stub_fal):
-        """Default identity_backend ('pod', or key absent) must never engage
-        the PRIORITY-0 block — existing behavior is unchanged."""
+        """Explicit identity_backend='pod' (a project's WS3 opt-out from the
+        now-default gemini_multiref primary — FIX C) must never engage the
+        PRIORITY-0 block — the production pod/FAL cascade behavior stays
+        byte-for-byte unchanged for opted-out projects. (Key-ABSENT no
+        longer means 'pod' — it now means gemini_multiref; see
+        test_no_ctx_now_defaults_to_gemini_primary below.)"""
         import sys
         gemini_constructed = {"value": False}
 
@@ -417,13 +421,31 @@ class TestGeminiImagePriorityZero:
         assert isinstance(res, pca.ImageGenResult)
         assert gemini_constructed["value"] is False
 
-    def test_no_ctx_skips_gemini_entirely(self, tmp_path, monkeypatch, stub_fal):
-        """ctx=None (get_project_setting's None-safe default) also stays on
-        'pod' — the PRIORITY-0 gate is off by default with no ctx supplied."""
-        # Same COST CONTROL rationale as the sibling test above: force the
-        # ComfyUI branch off so this deterministically lands in the FAL stub
-        # instead of risking a real pod HTTP call via .env's live server URL.
-        monkeypatch.setattr(pca, "settings", dataclasses.replace(pca.settings, comfyui_server_url=""))
+    def test_no_ctx_now_defaults_to_gemini_primary(
+        self, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch
+    ):
+        """FIX C (WS3 default-on, user-confirmed): ctx=None hits
+        get_project_setting's None-safe branch (cinema/context.py:177-178),
+        which returns the passed-in default with no project to read from —
+        and that default is now 'gemini_multiref', not 'pod'. There is no
+        special-casing between "no ctx" and "ctx present but
+        identity_backend unset": both share the same
+        get_project_setting(..., default=...) plumbing, so this INVERTS the
+        prior test_no_ctx_skips_gemini_entirely pin by design (mirrors the
+        WS2 dialogue-routing test update in test_f1b_dialogue_lipsync.py —
+        a legitimate expected-value change, not a masking one).
+
+        Stubs the Gemini client/validator (COST CONTROL: this repo's .env
+        carries a real GOOGLE_API_KEY, so an unstubbed call here would hit
+        the network now that the gate is open by default) and forces a
+        deterministic fake key so the assertion never depends on local
+        .env contents.
+        """
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url=""),
+        )
 
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
@@ -432,7 +454,8 @@ class TestGeminiImagePriorityZero:
         res = pca.generate_ai_broll("a prompt", out, character_image=str(char), ctx=None)
 
         assert isinstance(res, pca.ImageGenResult)
-        assert res.api_name == "FLUX_KONTEXT"
+        assert res.api_name == "GEMINI_IMAGE"
+        assert stub_gemini_client["constructed"] is True
 
     # -----------------------------------------------------------------
     # WS3 money-loss close-out: Gemini bills ($0.03) on generation,
@@ -455,9 +478,9 @@ class TestGeminiImagePriorityZero:
 
         # COST CONTROL: this repo has a real pod URL in .env — force the
         # ComfyUI branch off (mirrors test_identity_backend_pod_skips_gemini_
-        # entirely / test_no_ctx_skips_gemini_entirely above) so the call
-        # deterministically lands in the already-stubbed FAL path instead of
-        # risking a real pod HTTP call.
+        # entirely / test_no_ctx_now_defaults_to_gemini_primary above) so the
+        # call deterministically lands in the already-stubbed FAL path
+        # instead of risking a real pod HTTP call.
         monkeypatch.setattr(
             pca, "settings",
             dataclasses.replace(pca.settings, google_api_key="test-google-key",

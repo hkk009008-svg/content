@@ -16,7 +16,16 @@ from cinema.shots.strategy import (
 from cinema.shots.controller import _resolve_identity_strategy
 from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
 
-SETTINGS_NO_LORA = {"quality_tier": "production"}
+# WS3 (FIX C): identity_backend now defaults to 'gemini_multiref' project-wide
+# (cinema/shots/controller.py::_resolve_identity_strategy, user-confirmed
+# default-on decision). Pin this "no identity_backend key" pre-WS3 fixture to
+# the explicit 'pod' opt-out so the tests below keep exercising exactly the
+# PuLID/reference mechanism they were written to test (LoRA wiring, secondary
+# caps, max-tier retirement) — not the now-default Gemini branch, which has
+# its own dedicated test class below. test_default_settings_now_default_to_
+# gemini_multiref is the regression pin for a settings dict that genuinely
+# omits the key.
+SETTINGS_NO_LORA = {"quality_tier": "production", "identity_backend": "pod"}
 CC_TWO_REGISTERED = {
     "primary_reference": "/r/a.jpg", "identity_anchor": "anchor a",
     "secondary_chars": [{"char_id": "char_b", "reference": "/r/b.jpg",
@@ -35,7 +44,8 @@ def test_single_char_with_ref_is_primary_only_and_matches_todays_bundle():
     s = _resolve_identity_strategy(
         _shot(["char_a"]), "production",
         {"char_lora_paths": {"char_a": "/l/a.safetensors"},
-         "char_lora_strengths": {"char_a": 0.55}},
+         "char_lora_strengths": {"char_a": 0.55},
+         "identity_backend": "pod"},  # WS3: pin to the pod/reference mechanism this test targets
         CC_PRIMARY_ONLY,
     )
     assert s.mechanism_tag == "PRIMARY_ONLY"
@@ -76,6 +86,7 @@ def test_secondary_lora_wiring_retired_with_max_tier():
     # arm. Even with a registered secondary LoRA, the router now leaves the
     # secondary at fidelity="reference" with the LoRA fields dormant (None).
     settings = {"quality_tier": "max",
+                "identity_backend": "pod",  # WS3: pin to pod — this test targets LoRA-field dormancy, not the Gemini branch
                 "char_lora_paths": {"char_b": "/l/b.safetensors"},
                 "char_lora_strengths": {"char_b": 0.7},
                 "char_lora_triggers": {"char_b": "TOKman"}}
@@ -200,22 +211,33 @@ def test_gemini_multiref_no_secondary_is_primary_only():
     assert s.mechanism_tag == GEMINI_MULTIREF_PRIMARY_ONLY
 
 
-def test_default_settings_unaffected_by_gemini_branch_addition():
-    """Regression guard: settings with NO identity_backend key (the default,
-    every project prior to WS3) must still produce exactly today's
-    PRIMARY_ONLY / KONTEXT_MULTI_CHAR / fidelity='reference' behavior."""
+def test_default_settings_now_default_to_gemini_multiref():
+    """FIX C (WS3 default-on, user-confirmed: "Nano Banana as image PRIMARY,
+    pod demoted to first fallback"): a settings dict with NO identity_backend
+    key at all — the shape of every project that predates WS3 and hasn't
+    touched the knob — now resolves through the SAME gemini_multiref branch
+    as an explicit opt-in. This INVERTS the prior "default stays pod"
+    regression guard by design (mirrors the WS2 dialogue-routing test
+    update in test_f1b_dialogue_lipsync.py — a legitimate expected-value
+    change, not a masking one). The explicit identity_backend='pod' opt-out
+    below is the real regression guard now: it must still keep production
+    (PuLID/reference) behavior byte-for-byte."""
+    settings_absent_key = {"quality_tier": "production"}   # genuinely no identity_backend key
+
     s_single = _resolve_identity_strategy(_shot(["char_a"]), "production",
-                                          SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
-    assert s_single.mechanism_tag == PRIMARY_ONLY
-    assert s_single.conditioned_chars[0].fidelity == "reference"
+                                          settings_absent_key, CC_PRIMARY_ONLY)
+    assert s_single.mechanism_tag == GEMINI_MULTIREF_PRIMARY_ONLY
+    assert s_single.conditioned_chars[0].fidelity == "gemini_multiref"
 
     s_multi = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "production",
-                                         SETTINGS_NO_LORA, CC_TWO_REGISTERED)
-    assert s_multi.mechanism_tag == KONTEXT_MULTI_CHAR
-    assert all(c.fidelity == "reference" for c in s_multi.conditioned_chars)
+                                         settings_absent_key, CC_TWO_REGISTERED)
+    assert s_multi.mechanism_tag == GEMINI_MULTIREF_MULTI_CHAR
+    assert all(c.fidelity == "gemini_multiref" for c in s_multi.conditioned_chars)
 
-    # identity_backend explicitly set to something other than gemini_multiref
-    # (e.g. the future default 'pod') must ALSO keep production behavior.
+    # The opt-out regression guard: identity_backend explicitly set to 'pod'
+    # must still produce exactly today's production PRIMARY_ONLY /
+    # fidelity='reference' behavior — this is how a project declines the
+    # new Gemini-primary default.
     s_pod = _resolve_identity_strategy(_shot(["char_a"]), "production",
                                        {"identity_backend": "pod"}, CC_PRIMARY_ONLY)
     assert s_pod.mechanism_tag == PRIMARY_ONLY
@@ -361,7 +383,13 @@ def _make_project(tmpdir: str, characters_in_frame: list) -> dict:
     """
     return {
         "id": "test_identity_project",
-        "global_settings": {"quality_tier": "production"},
+        # WS3 (FIX C): identity_backend now defaults to 'gemini_multiref'
+        # project-wide — pin 'pod' here so the controller-integration tests
+        # built on _build_host (PRIMARY_ONLY / KONTEXT_MULTI_CHAR / LoRA-kwarg
+        # dormancy) keep exercising the production PuLID mechanism they were
+        # written to test. The dedicated Gemini-path tests use
+        # _build_gemini_project_host, which explicitly overrides this key.
+        "global_settings": {"quality_tier": "production", "identity_backend": "pod"},
         "scenes": [
             {
                 "id": "scene_1",

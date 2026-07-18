@@ -21,7 +21,7 @@
 - §6 [Gate mechanism — predicate-poll](#6-gate-mechanism--predicate-poll)
 - §7 [Story prep — decompose, dialogue, continuity](#7-story-prep--decompose-dialogue-continuity)
 - §8 [Image generation — production tier (max-tier retired)](#8-image-generation--production-tier-max-tier-retired)
-- §9 [Video routing — 5 templates × 11 engines](#9-video-routing--5-templates--11-engines)
+- §9 [Video routing — 5 templates × 12 engines](#9-video-routing--5-templates--12-engines)
 - §10 [Performance capture & lipsync](#10-performance-capture--lipsync)
 - §11 [Identity validation — GhostFaceNet singleton](#11-identity-validation--ghostfacenet-singleton)
 - §12 [Audio pipeline](#12-audio-pipeline)
@@ -911,8 +911,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:615](phase_c_assembly.py:615)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:550](phase_c_assembly.py:550)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:618](phase_c_assembly.py:618)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:553](phase_c_assembly.py:553)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:460](phase_c_assembly.py:460)) emits per-character `@ImageN PRESERVE` blocks with a
@@ -1055,32 +1055,47 @@ bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 
 ---
 
-## 9. Video routing — 5 templates × 11 engines
+## 9. Video routing — 5 templates × 12 engines
 
-### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:22-144](workflow_selector.py:22))
+### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:22-127](workflow_selector.py:22))
 
 | Shot type | `target_api` | `video_fallbacks` |
 |---|---|---|
-| `portrait` | `KLING_3_0` | `["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"]` |
-| `medium` | `KLING_3_0` | `["KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"]` |
-| `wide` | `LTX` | `["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4"]` |
-| `action` | `SEEDANCE` | `["SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"]` |
-| `landscape` | `LTX` | `["VEO_NATIVE", "KLING_3_0"]` |
+| `portrait` | `GEMINI_OMNI` | `["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"]` |
+| `medium` | `GEMINI_OMNI` | `["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"]` |
+| `wide` | `GEMINI_OMNI` | `["VEO_NATIVE", "LTX", "KLING_3_0", "RUNWAY_GEN4"]` |
+| `action` | `GEMINI_OMNI` | `["VEO_NATIVE", "SEEDANCE", "SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"]` |
+| `landscape` | `GEMINI_OMNI` | `["VEO_NATIVE", "LTX", "KLING_3_0"]` |
 
-A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:154-390](workflow_selector.py:154)
-mirrors these with different fallback orderings.
+`MAX_QUALITY_TEMPLATES` (formerly a parallel dict mirroring these with
+different fallback orderings) was **deleted in WS1 Task 2** — `workflow_selector`
+has no such attribute (`hasattr(workflow_selector, "MAX_QUALITY_TEMPLATES")` is
+pinned False by `test_capability_scorecard.py`); the comments still naming it
+in `workflow_selector.py`/`cinema/context.py` are archaeology, not a live import.
 
-**SEEDANCE is the `action` primary** (2026-07-11 Sora-sunset migration —
-OpenAI retires Sora 2 + the Videos API on 2026-09-24; `SORA_NATIVE` stays
-first action fallback until then, erroring fast and cascading after) and a
-portrait/medium fallback. **KLING_3_0 (fal Kling v3 Pro) is the
-portrait/medium primary** (2026-07-11 Kling promotion — best-ranked Kling,
-#11 AA i2v arena Elo 1070, `elements` identity binding; `KLING_NATIVE` is the
-legacy kling-v1-6 JWT route kept as first fallback — the proven pre-v3
-identity path; its `kling-v3` bump is deferred pending a live-key param
-check, see kling_native.py's module docstring). Two-character dialogue shots
-classify as `medium` and route Kling v3 Pro → Kling Native → Runway →
-Seedance → LTX.
+**GEMINI_OMNI (Gemini Omni Flash, Preview) is the `target_api` PRIMARY for
+all five shot types** (WS2, Google-first overhaul — arena #1; PREVIEW-tier,
+no SLA, Gemini-API billing only). **VEO_NATIVE is the first fallback**
+across every template (it shares `GEMINI_OMNI`'s native-audio capability —
+see the dialogue note below). Below VEO_NATIVE, the pre-WS2 per-shot-type
+ordering survives as the second-tier cascade: **SEEDANCE is a second
+fallback for `action`** (2026-07-11 Sora-sunset migration — OpenAI retires
+Sora 2 + the Videos API on 2026-09-24; `SORA_NATIVE` stays third action
+fallback until then) and **KLING_3_0 (fal Kling v3 Pro) is a second
+fallback for `portrait`/`medium`** (2026-07-11 Kling promotion — best-ranked
+Kling, #11 AA i2v arena Elo 1070, `elements` identity binding; `KLING_NATIVE`
+is the legacy kling-v1-6 JWT route kept one slot further out — the proven
+pre-v3 identity path; its `kling-v3` bump is deferred pending a live-key
+param check, see kling_native.py's module docstring). Two-character dialogue
+shots classify as `medium` and route Gemini Omni → Veo Native → Kling v3 Pro
+→ Kling Native → Runway → Seedance → LTX (subject to the F1a dialogue
+override — `_resolve_dialogue_routing`, `cinema/shots/controller.py:134`,
+§10 below — which scans `PURPOSE_API_RANKING` for the first
+`native_audio=True AND modality=="video"` engine and can pin it ahead of
+this template order; `GEMINI_OMNI` now carries `native_audio: True` same as
+`VEO_NATIVE` and outranks it in `PURPOSE_API_RANKING["dialogue_close_up"]`
+— `domain/scene_decomposer.py:44` / `:124` — so it, not `VEO_NATIVE`, is
+what F1a actually pins today).
 
 ### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:173-218](workflow_selector.py:173))
 
@@ -1117,6 +1132,7 @@ shot type strings.)
 | `KLING_NATIVE` | :322 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
 | `SORA_NATIVE` | :363 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
 | `VEO_NATIVE` | :409 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `GEMINI_OMNI` | :1073 | `gemini_omni_native.GeminiOmniAPI` — WS2 Google-first `target_api` PRIMARY for all 5 `WORKFLOW_TEMPLATES` (§9.1); own quota-cooldown pair, separate from Veo's `_veo_quota_blocked` | GOOGLE_API_KEY or GEMINI_API_KEY |
 | `LTX` | :448 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
 | `RUNWAY_GEN4` | :494 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
 | `SORA_2` | :555 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
@@ -1660,7 +1676,7 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:628`; call at :854) and `diagnose_clip`
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:636`; call at :854) and `diagnose_clip`
   (`cinema/shots/controller.py:2325`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`

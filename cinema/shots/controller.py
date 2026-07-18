@@ -360,13 +360,21 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             unconditioned_chars=list(in_frame),
         )
 
-    # WS3: identity_backend='gemini_multiref' routes the primary through
-    # Nano Banana's multi-reference binding (identity from reference images,
-    # not a PuLID graph) — tag the spec's fidelity accordingly so downstream
-    # validation/telemetry can distinguish it from the production 'reference'
-    # (PuLID) mechanism. Any other value (including unset/'pod') keeps the
-    # existing production behavior byte-for-byte.
-    is_gemini_multiref = settings.get("identity_backend") == "gemini_multiref"
+    # WS3: identity_backend='gemini_multiref' is now the DEFAULT — Nano
+    # Banana is the image PRIMARY for all projects (user-confirmed: "Nano
+    # Banana as image PRIMARY, pod demoted to first fallback"), consistent
+    # with the PRIORITY-0 gate default in phase_c_assembly.py's
+    # generate_ai_broll. It routes the primary through Nano Banana's
+    # multi-reference binding (identity from reference images, not a PuLID
+    # graph) — tag the spec's fidelity accordingly so downstream
+    # validation/telemetry can distinguish it from the production
+    # 'reference' (PuLID) mechanism. A project sets identity_backend='pod'
+    # to opt OUT and keep the production PuLID behavior byte-for-byte.
+    # `or "gemini_multiref"` (not a bare `.get(k, default)`) matches this
+    # function's existing None-safety idiom (see char_lora_path just above)
+    # so a key present-but-None/empty-string also falls to the new default,
+    # not silently to pod.
+    is_gemini_multiref = (settings.get("identity_backend") or "gemini_multiref") == "gemini_multiref"
     primary_fidelity = "gemini_multiref" if is_gemini_multiref else "reference"
 
     conditioned = [CharIdentitySpec(

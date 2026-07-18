@@ -134,8 +134,9 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     Generates a cinematic image with face-identity preservation.
 
     Priority chain (production — the only tier since WS1's max-tier retirement):
-    0. Gemini 2.5 Flash Image (Nano Banana, when identity_backend != pod)
-    1. ComfyUI + PuLID (pod)
+    0. Gemini 2.5 Flash Image (Nano Banana) — PRIMARY for all projects (WS3,
+       user-confirmed); set identity_backend='pod' to opt OUT.
+    1. ComfyUI + PuLID (pod) — arc-gate fallback
     2. FLUX Kontext
     3. FLUX-Pro
     4. FLUX-Schnell
@@ -205,14 +206,16 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         return result
 
     # ----- PRIORITY 0: Gemini 2.5 Flash Image (Nano Banana, WS3) -----
-    # Google-first overhaul: only engages when a project explicitly opts into
-    # identity_backend='gemini_multiref' (default stays 'pod' — zero behavior
-    # change for every project that hasn't opted in). This block NEVER raises
-    # and NEVER returns None — a missing key, a generation failure, or a
-    # failed identity check all fall through into the existing PRIORITY-1 pod
-    # logic below untouched (silent-gate-degradation discipline: fall through
-    # loudly via prints, not silently).
-    identity_backend = get_project_setting(ctx, "identity_backend", "pod")
+    # Google-first overhaul: Nano Banana is the image PRIMARY for all
+    # projects (WS3, user-confirmed decision — "Nano Banana as image
+    # PRIMARY, pod demoted to first fallback"); a project sets
+    # identity_backend='pod' to opt OUT. The pod remains the arc-gate
+    # fallback below. This block NEVER raises and NEVER returns None — a
+    # missing key, a generation failure, or a failed identity check all
+    # fall through into the existing PRIORITY-1 pod logic below untouched
+    # (silent-gate-degradation discipline: fall through loudly via prints,
+    # not silently).
+    identity_backend = get_project_setting(ctx, "identity_backend", "gemini_multiref")
     if (
         (settings.google_api_key or settings.gemini_api_key)
         and character_image
