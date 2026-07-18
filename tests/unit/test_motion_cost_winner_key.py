@@ -14,22 +14,29 @@ step 8 (validation, RIFE, mutation, checkpoint) is out of scope here.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 
-def _run_finalize(take_extra: dict, target_api: str = "KLING_NATIVE", shot_type: str = "action"):
+def _run_finalize(
+    take_extra: dict,
+    target_api: str = "KLING_NATIVE",
+    shot_type: str = "action",
+    video_path: str = "/tmp/out.mp4",
+):
     from cinema.shots.controller import ShotController
 
     mock_self = MagicMock()
     mock_self.cost_tracker.is_over_budget.return_value = False
     mock_self.project = {"id": "vid-test"}
-    mock_self._maybe_auto_rife.return_value = "/tmp/out.mp4"
+    mock_self._maybe_auto_rife.return_value = video_path
     # Bind the REAL cost helpers — a MagicMock _motion_cost_kwargs unpacks
     # as empty kwargs and silently drops the duration-aware cost under test.
     mock_self._motion_cost_kwargs = (
-        lambda engine, st: ShotController._motion_cost_kwargs(mock_self, engine, st)
+        lambda engine, st, video_path="": ShotController._motion_cost_kwargs(
+            mock_self, engine, st, video_path
+        )
     )
     mock_self._record_billed_rejects = (
         lambda *a, **k: ShotController._record_billed_rejects(mock_self, *a, **k)
@@ -95,6 +102,83 @@ class TestMotionCostWinnerKey:
         call = mock_self.cost_tracker.record_api_call.call_args
         assert call.args[0] == "LTX"
         assert "cost_usd" not in call.kwargs
+
+
+class TestGeminiOmniDurationProbeCost:
+    """GEMINI_OMNI has no structured duration kwarg (duration is
+    prompt-inferred/variable on this API) — unlike SEEDANCE's shot-type
+    table lookup, the winner-path fix ffprobes the actual downloaded mp4.
+    Fails open to the flat $0.56 table estimate on any probe error, a
+    missing file, or a non-positive duration reading (never crash the
+    finalize step, never record a $0.00 cost)."""
+
+    def test_gemini_omni_winner_records_duration_aware_cost(self):
+        """A real (existing) file + a mocked 7.3s probe reading records
+        cost_usd = round(0.56/5.0*7.3, 4), not the flat $0.56 figure."""
+        with patch(
+            "cinema.shots.controller._probe_duration", return_value=7.3
+        ) as mock_probe, patch(
+            "cinema.shots.controller.os.path.exists", return_value=True
+        ):
+            mock_self = _run_finalize(
+                {"cascade_metadata": {"engine": "GEMINI_OMNI"}},
+                video_path="/tmp/gemini_out.mp4",
+            )
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "GEMINI_OMNI"
+        assert call.kwargs.get("cost_usd") == pytest.approx(round(0.56 / 5.0 * 7.3, 4))
+        mock_probe.assert_called_once_with("/tmp/gemini_out.mp4")
+
+    def test_gemini_omni_probe_failure_falls_back_to_flat_table(self):
+        """ffprobe raising (missing binary, corrupt file, malformed JSON —
+        _probe_duration uses subprocess check=True) must NOT crash the
+        finalize step; the record falls back to the flat table price."""
+        with patch(
+            "cinema.shots.controller._probe_duration", side_effect=RuntimeError("boom")
+        ), patch("cinema.shots.controller.os.path.exists", return_value=True):
+            mock_self = _run_finalize(
+                {"cascade_metadata": {"engine": "GEMINI_OMNI"}},
+                video_path="/tmp/gemini_out.mp4",
+            )
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "GEMINI_OMNI"
+        assert "cost_usd" not in call.kwargs, (
+            f"probe failure must fall back to the flat table default; got {call.kwargs}"
+        )
+
+    def test_gemini_omni_missing_file_falls_back_to_flat_table(self):
+        """video_path pointing at a nonexistent file must skip the probe
+        entirely (no subprocess call against a path that can't exist)."""
+        with patch("cinema.shots.controller._probe_duration") as mock_probe:
+            mock_self = _run_finalize(
+                {"cascade_metadata": {"engine": "GEMINI_OMNI"}},
+                video_path="/tmp/definitely_does_not_exist_gemini_omni_test.mp4",
+            )
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "GEMINI_OMNI"
+        assert "cost_usd" not in call.kwargs
+        mock_probe.assert_not_called()
+
+    def test_gemini_omni_reject_uses_flat_table_not_probe(self):
+        """A GEMINI_OMNI billed-but-rejected attempt (another engine won)
+        must NOT be probed — the shared output path may already have been
+        overwritten by a later cascade hop, so probing it would misattribute
+        the wrong engine's duration. The reject stays on the flat table
+        price (deliberate winner-only scope, see plan risk note)."""
+        with patch("cinema.shots.controller._probe_duration") as mock_probe:
+            mock_self = _run_finalize({
+                "cascade_metadata": {
+                    "engine": "LTX",
+                    "billed_attempts": ["GEMINI_OMNI", "LTX"],
+                }
+            })
+        calls = mock_self.cost_tracker.record_api_call.call_args_list
+        by_op = {c.kwargs.get("operation"): c for c in calls}
+        assert "motion_generation_rejected" in by_op
+        reject_call = by_op["motion_generation_rejected"]
+        assert reject_call.args[0] == "GEMINI_OMNI"
+        assert "cost_usd" not in reject_call.kwargs
+        mock_probe.assert_not_called()
 
 
 class TestBilledButRejectedRecording:

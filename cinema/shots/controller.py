@@ -1478,19 +1478,45 @@ class ShotController:
             )
         return video_path
 
-    def _motion_cost_kwargs(self, engine: object, resolved_shot_type: str) -> dict:
+    def _motion_cost_kwargs(
+        self, engine: object, resolved_shot_type: str, video_path: str = ""
+    ) -> dict:
         """Per-engine cost overrides for a motion generation record.
 
         SEEDANCE is per-second-billed with shot-type-dependent durations;
         API_COST_USD["SEEDANCE"] is per ~5s, so recompute for the requested
         duration (8s action clips under-record by 38% on the flat figure).
+
+        GEMINI_OMNI has no structured duration kwarg (duration is
+        prompt-inferred/variable on this API) so, unlike SEEDANCE, its
+        actual length isn't knowable from resolved_shot_type — instead
+        ffprobe the downloaded mp4 at ``video_path`` (winner-path only;
+        callers with no file to probe pass "" and get the flat table
+        estimate). Fails open to the flat API_COST_USD estimate on any
+        probe error, missing file, or non-positive duration reading —
+        never crash the finalize step and never record a $0.00 cost.
+
         Other engines use the table default (empty kwargs).
         """
-        if str(engine).upper() == "SEEDANCE":
+        _engine = str(engine).upper()
+        if _engine == "SEEDANCE":
             from cost_tracker import API_COST_USD
             from phase_c_ffmpeg import SEEDANCE_DURATIONS
             _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
             return {"cost_usd": round(API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4)}
+        if _engine == "GEMINI_OMNI" and video_path and os.path.exists(video_path):
+            from cost_tracker import API_COST_USD
+            try:
+                _dur = _probe_duration(video_path)
+                if _dur and _dur > 0:
+                    return {"cost_usd": round(API_COST_USD["GEMINI_OMNI"] / 5.0 * _dur, 4)}
+            except Exception:
+                logger.warning(
+                    "GEMINI_OMNI duration probe failed — using flat table cost",
+                    exc_info=True,
+                    extra={"video_path": video_path},
+                )
+            return {}
         return {}
 
     def _record_billed_rejects(
@@ -1718,7 +1744,9 @@ class ShotController:
                     operation="motion_generation",
                     shot_id=shot_id,
                     video_id=video_id,
-                    **self._motion_cost_kwargs(_motion_engine, resolved_shot_type),
+                    **self._motion_cost_kwargs(
+                        _motion_engine, resolved_shot_type, video_path=final_vid
+                    ),
                 )
             except Exception:
                 logger.warning(
