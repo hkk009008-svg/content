@@ -38,9 +38,9 @@ import { ErrorState, LoadingState, MICRO_LABEL } from '../ui'
  * non-failure `shot_id`; newest-first rolling tail of the last 20 events) — no
  * second SSE subscription is opened.
  *
- * New file: design tokens only for its own chrome (bg-app, bg-head, border-line,
- * text-tx/-mut/-dim). Reused legacy components keep their editorial-/console-
- * palettes as an accepted interim (Task 13 migrates them).
+ * Indigo design tokens throughout (bg-app, bg-head, border-line,
+ * text-tx/-mut/-dim). The reused legacy components now use these same tokens —
+ * the editorial- and console- palettes were retired.
  */
 
 const REVIEW_STAGES = ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW']

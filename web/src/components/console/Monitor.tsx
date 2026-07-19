@@ -59,12 +59,12 @@ export default function Monitor({
 
   return (
     <main className="col-span-7 px-6 py-6">
-      <h2 className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute mb-3 font-console-mono">
+      <h2 className="text-eyebrow-lg uppercase tracking-wider text-dim mb-3 font-mono">
         Monitor
       </h2>
 
       {keyframeUrl || performanceUrl || motionUrl ? (
-        <div className="shadow-console-viewport rounded border border-console-rule-strong overflow-hidden">
+        <div className="shadow-viewport rounded border border-line overflow-hidden">
           <TakeStrip
             keyframeUrl={keyframeUrl}
             performanceUrl={performanceUrl}
@@ -76,21 +76,21 @@ export default function Monitor({
           />
         </div>
       ) : (
-        <div className="aspect-video rounded border border-console-rule-strong bg-console-render-fill shadow-console-viewport flex items-center justify-center">
-          <div className="text-center text-xs text-console-ink-mute font-console-mono">
+        <div className="aspect-video rounded border border-line bg-viewport-fill shadow-viewport flex items-center justify-center">
+          <div className="text-center text-xs text-dim font-mono">
             {activeShotId ? 'Waiting for first take…' : 'No active shot'}
           </div>
         </div>
       )}
 
       {directorReview && (
-        <div className="mt-4 rounded border border-console-gold/30 bg-console-surface-2 px-4 py-3">
-          <div className={`text-eyebrow-lg uppercase tracking-wider font-semibold font-console-mono ${
+        <div className="mt-4 rounded border border-acc/30 bg-head px-4 py-3">
+          <div className={`text-eyebrow-lg uppercase tracking-wider font-semibold font-mono ${
             directorReview.decision === 'APPROVED'
-              ? 'text-console-gold'
+              ? 'text-acc'
               : directorReview.decision === 'REJECTED'
-                ? 'text-console-accent'
-                : 'text-console-gold'
+                ? 'text-acc'
+                : 'text-acc'
           }`}>
             Director Review · {directorReview.decision}
             {directorReview.quality_score != null && (
@@ -99,9 +99,9 @@ export default function Monitor({
               </span>
             )}
           </div>
-          <p className="mt-1 text-xs text-console-ink-dim font-display italic">{directorReview.reasoning}</p>
+          <p className="mt-1 text-xs text-mut font-display italic">{directorReview.reasoning}</p>
           {directorReview.violations.length > 0 && (
-            <ul className="mt-2 list-disc pl-5 text-xs text-console-accent font-console-mono">
+            <ul className="mt-2 list-disc pl-5 text-xs text-acc font-mono">
               {directorReview.violations.map((v, i) => <li key={i}>{v}</li>)}
             </ul>
           )}

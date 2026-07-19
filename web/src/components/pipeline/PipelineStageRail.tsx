@@ -24,18 +24,18 @@ export default function PipelineStageRail({ stages, activeStage }: Props) {
 
   return (
     <aside
-      className="w-72 px-7 py-8 bg-editorial-ink overflow-y-auto"
+      className="w-72 px-7 py-8 bg-app overflow-y-auto"
       aria-label="Production phases"
     >
       {/* Section label — matches the mockup's .section-label pattern */}
       <div
         id="stage-rail-heading"
-        className="flex justify-between items-center pb-3 mb-2 border-b border-editorial-rule
-                   font-mono text-eyebrow tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
+        className="flex justify-between items-center pb-3 mb-2 border-b border-line
+                   font-mono text-eyebrow tracking-wide-eyebrow uppercase text-mut"
       >
         <span>Production Phases</span>
         <span
-          className="text-editorial-ivory-soft tabular-nums"
+          className="text-tx tabular-nums"
           aria-label={`${doneCount} of ${stages.length} phases complete`}
         >
           {pad2(doneCount)} / {pad2(stages.length)}
@@ -51,42 +51,42 @@ export default function PipelineStageRail({ stages, activeStage }: Props) {
           /* Colors per state. The active row gets the curtain red,
              done rows the warm brass, failed rows the curtain (deeper). */
           const romanColor = isFailed
-            ? 'text-editorial-curtain'
+            ? 'text-fail'
             : isActive
-            ? 'text-editorial-curtain'
+            ? 'text-fail'
             : isDone
-            ? 'text-editorial-ivory'
-            : 'text-editorial-ivory-mute'
+            ? 'text-tx'
+            : 'text-mut'
 
           const nameColor = isFailed
-            ? 'text-editorial-curtain'
+            ? 'text-fail'
             : isActive
-            ? 'text-editorial-ivory'
+            ? 'text-tx'
             : isDone
-            ? 'text-editorial-ivory'
-            : 'text-editorial-ivory-mute'
+            ? 'text-tx'
+            : 'text-mut'
 
           const statusColor = isFailed
-            ? 'text-editorial-curtain'
+            ? 'text-fail'
             : isActive
-            ? 'text-editorial-curtain'
+            ? 'text-fail'
             : isDone
-            ? 'text-editorial-brass'
-            : 'text-editorial-ivory-mute'
+            ? 'text-acc'
+            : 'text-mut'
 
           return (
             <li
               key={stage.id}
               aria-current={isActive ? 'step' : undefined}
               className="grid grid-cols-[28px_1fr_auto] gap-3.5 items-baseline
-                         py-4 border-b border-editorial-rule
+                         py-4 border-b border-line
                          relative group"
             >
               {/* Active-row pulsing dot — sits in the gutter to the left of Roman */}
               {isActive && (
                 <span
                   className="absolute -left-4 top-1/2 -translate-y-1/2 w-1.5 h-1.5
-                             rounded-full bg-editorial-curtain flicker"
+                             rounded-full bg-fail flicker"
                   aria-hidden
                 />
               )}

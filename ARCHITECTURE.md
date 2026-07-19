@@ -2024,31 +2024,38 @@ The T1 E2E walking-skeleton (`tests/unit/test_threeway_e2e_walking_skeleton.py`)
 **No router.** **No query lib.** **No shadcn.** **No date/chart/icon lib.**
 Raw `fetch()` everywhere.
 
-### 14.2 Four-mode state machine ([web/src/App.tsx:19](web/src/App.tsx:19))
+### 14.2 Four-page shell ([web/src/context/PageContext.tsx:14](web/src/context/PageContext.tsx:14))
 
 ```tsx
-const [mode, setMode] = useState<'setup' | 'pipeline' | 'console' | 'capability'>('setup')
+export type Page = 'setup' | 'edit' | 'run' | 'capability'
 ```
 
-Switch dispatch:
+`PageProvider` holds `useState<Page>('setup')`; `usePage()` exposes `{ page, setPage }`.
+`AppShell` wraps a `switch(page)` center region in one always-mounted top bar +
+bottom page-bar, so `setPage` navigation never remounts the chrome:
 
-| Project? | Mode | Component |
+| Project? | Page | Component |
 |---|---|---|
 | `null` | (n/a) | `ProjectSelector` |
-| set | `'setup'` (default) | `EditorialShell` |
-| set | `'pipeline'` | `PipelineLayout` |
-| set | `'console'` | `DirectorsConsole` |
-| set | `'capability'` | `CapabilityConsole` |
+| set | `'setup'` (default) | `SetupPage` |
+| set | `'edit'` | `EditPage` |
+| set | `'run'` | `RunPage` |
+| set | `'capability'` | `CapabilityPage` |
 
-### 14.3 Two strict palettes ([web/tailwind.config.js:9-47](web/tailwind.config.js:9))
+This unified shell replaced the old four-mode dual-mount (`EditorialShell`,
+`PipelineLayout`, `DirectorsConsole`, `CapabilityConsole`) in the 2026-07-19
+Resolve-style redesign.
 
-| Palette | Used by | Vibe |
-|---|---|---|
-| `editorial-*` | `EditorialShell` + `pipeline/*` | cool ivory on paper-black |
-| `console-*` | `DirectorsConsole` + `console/*` | warm sepia |
+### 14.3 One indigo token namespace ([web/tailwind.config.js:6](web/tailwind.config.js:6))
 
-Strict separation — Bundle-C 3.4 (2026-05-24) closed the last leak
-(`TakeStrip.tsx` now uses `console-*` exclusively).
+A single flat, CSS-var-backed color namespace (from `web/src/theme/tokens.css`):
+`app`/`gutter`/`panel`/`head`/`line` (surfaces), `tx`/`mut`/`dim` (text ramp),
+`acc`/`acc-dim` (indigo accent), `pri`/`pri-bg`, `pod`/`pod-bg` (GPU-pod), and
+`ok`/`warn`/`fail` (status).
+
+The former `editorial-*` (paper-black/ivory/red) and `console-*` (warm sepia)
+scales were retired in the 2026-07-19 redesign — all reused components migrated
+to these tokens (brass→acc, curtain→fail, ivory→tx, ink→app, ready→ok, …).
 
 ### 14.4 SSE consumption
 

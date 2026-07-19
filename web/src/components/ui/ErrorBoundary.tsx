@@ -24,14 +24,14 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return this.props.fallback ?? (
-        <div className="editorial-curtain p-6 text-editorial-ivory">
+        <div className="fail p-6 text-tx">
           <h2 className="text-lg font-semibold mb-2">Something broke.</h2>
           <pre className="text-eyebrow font-mono whitespace-pre-wrap break-all">
             {this.state.error?.message ?? this.state.error?.toString() ?? 'Unknown error'}
           </pre>
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 rounded border border-editorial-ivory px-3 py-1.5 text-sm hover:bg-editorial-ivory/10"
+            className="mt-4 rounded border border-tx px-3 py-1.5 text-sm hover:bg-tx/10"
           >
             Reload
           </button>

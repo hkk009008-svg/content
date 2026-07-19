@@ -27,9 +27,9 @@ export function LoadingState({ label = 'Loading', size = 'md', className = '' }:
       aria-live="polite"
     >
       <span className="inline-flex items-center gap-1" aria-hidden>
-        <span className={`${s.dot} bg-editorial-brass rounded-full animate-pulse`} style={{ animationDelay: '0ms' }} />
-        <span className={`${s.dot} bg-editorial-brass rounded-full animate-pulse`} style={{ animationDelay: '180ms' }} />
-        <span className={`${s.dot} bg-editorial-brass rounded-full animate-pulse`} style={{ animationDelay: '360ms' }} />
+        <span className={`${s.dot} bg-acc rounded-full animate-pulse`} style={{ animationDelay: '0ms' }} />
+        <span className={`${s.dot} bg-acc rounded-full animate-pulse`} style={{ animationDelay: '180ms' }} />
+        <span className={`${s.dot} bg-acc rounded-full animate-pulse`} style={{ animationDelay: '360ms' }} />
       </span>
       <span className={MICRO_LABEL}>{label}</span>
     </div>

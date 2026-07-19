@@ -30,24 +30,24 @@ export function ErrorState({
     <div
       role="alert"
       aria-live="assertive"
-      className={`border border-editorial-curtain/50 bg-editorial-curtain/[0.04]
+      className={`border border-fail/50 bg-fail/[0.04]
                   px-8 py-7 ${className}`}
     >
       <span className={`${MICRO_LABEL.replace('text-mut', 'text-fail')} mb-3 block`}>Error</span>
 
       <h3
-        className="font-display italic text-editorial-ivory text-3xl leading-tight mb-3"
+        className="font-display italic text-tx text-3xl leading-tight mb-3"
         style={{ fontVariationSettings: '"opsz" 60, "SOFT" 60, "WONK" 1, "wght" 380' }}
       >
         {title}
       </h3>
 
-      <p className="font-sans text-editorial-ivory-soft text-sm leading-relaxed mb-2">
+      <p className="font-sans text-tx text-sm leading-relaxed mb-2">
         {message}
       </p>
 
       {hint && (
-        <p className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase mt-4">
+        <p className="font-mono text-eyebrow-lg text-mut tracking-wide-eyebrow uppercase mt-4">
           {hint}
         </p>
       )}

@@ -26,15 +26,15 @@ export default function BudgetHaltBanner({
   return (
     <div
       role="alert"
-      className="border-y border-editorial-curtain/60 bg-editorial-curtain/10 px-10 py-3 flex items-center justify-between gap-4"
+      className="border-y border-fail/60 bg-fail/10 px-10 py-3 flex items-center justify-between gap-4"
     >
-      <div className="font-mono text-eyebrow-lg text-editorial-curtain tracking-wide-eyebrow uppercase">
+      <div className="font-mono text-eyebrow-lg text-fail tracking-wide-eyebrow uppercase">
         Budget cap reached{amounts}. Motion halted — raise the budget in
         Settings and regenerate.
       </div>
       <button
         onClick={onDismiss}
-        className="font-mono text-eyebrow text-editorial-ivory-mute hover:text-editorial-ivory uppercase shrink-0"
+        className="font-mono text-eyebrow text-mut hover:text-tx uppercase shrink-0"
       >
         Dismiss
       </button>

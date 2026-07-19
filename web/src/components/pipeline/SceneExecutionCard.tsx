@@ -22,50 +22,50 @@ export default function SceneExecutionCard({ scene, shotStates, isActive, projec
   const hasErrors = shots.some(s => shotStates.get(s.id)?.status === 'failed')
 
   return (
-    <div className={`border border-editorial-rule rounded-lg overflow-hidden mb-3
-      ${isActive ? 'ring-1 ring-editorial-brass/50' : ''}
+    <div className={`border border-line rounded-lg overflow-hidden mb-3
+      ${isActive ? 'ring-1 ring-acc/50' : ''}
     `}>
       {/* Scene header */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-4 py-3 bg-editorial-ink-soft hover:bg-editorial-ink-soft/80 transition-colors"
+        className="w-full flex items-center justify-between px-4 py-3 bg-panel hover:bg-panel/80 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <span className="text-editorial-ivory font-medium text-sm">
+          <span className="text-tx font-medium text-sm">
             {scene.title || `Scene ${scene.order + 1}`}
           </span>
-          <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink px-2 py-0.5 rounded">
+          <span className="text-eyebrow text-mut bg-app px-2 py-0.5 rounded">
             {shots.length} shots &middot; {scene.duration_seconds}s
           </span>
           {isActive && (
-            <span className="text-eyebrow text-editorial-brass bg-editorial-brass/10 px-2 py-0.5 rounded animate-pulse">
+            <span className="text-eyebrow text-acc bg-acc/10 px-2 py-0.5 rounded animate-pulse">
               ACTIVE
             </span>
           )}
           {hasErrors && (
-            <span className="text-eyebrow text-editorial-curtain bg-editorial-curtain/10 px-2 py-0.5 rounded">
+            <span className="text-eyebrow text-fail bg-fail/10 px-2 py-0.5 rounded">
               ERRORS
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-editorial-ivory-mute">
+          <span className="text-xs text-mut">
             {completedShots}/{shots.length}
           </span>
           {/* Progress bar */}
-          <div className="w-20 h-1.5 bg-editorial-ink rounded-full overflow-hidden">
+          <div className="w-20 h-1.5 bg-app rounded-full overflow-hidden">
             <div
-              className="h-full bg-editorial-ready rounded-full transition-all"
+              className="h-full bg-ok rounded-full transition-all"
               style={{ width: shots.length > 0 ? `${(completedShots / shots.length) * 100}%` : '0%' }}
             />
           </div>
-          <span className="text-editorial-ivory-mute text-xs">{expanded ? '▲' : '▼'}</span>
+          <span className="text-mut text-xs">{expanded ? '▲' : '▼'}</span>
         </div>
       </button>
 
       {/* Shots */}
       {expanded && (
-        <div className="bg-editorial-ink">
+        <div className="bg-app">
           {shots.length > 0 ? (
             shots.map((shot, i) => (
               <ShotRow
@@ -79,7 +79,7 @@ export default function SceneExecutionCard({ scene, shotStates, isActive, projec
               />
             ))
           ) : (
-            <div className="px-4 py-6 text-center text-editorial-ivory-mute text-sm">
+            <div className="px-4 py-6 text-center text-mut text-sm">
               Shots will appear here during decomposition...
             </div>
           )}

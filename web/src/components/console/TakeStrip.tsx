@@ -44,7 +44,7 @@ export interface TakeStripProps {
     motion?: string
   }
   /** Optional cascade metadata — renders "via {engine}" chip + FALLBACK badge
-   *  below the motion pane using console-* palette only. */
+   *  below the motion pane. */
   cascadeMetadata?: CascadeMetadata | null
   /** Lip-sync overlay cascade (NF-4, P1-3): dialogue takes carry a SECOND
    *  cascade record at take.metadata.lipsync_cascade — cascade_metadata on
@@ -57,20 +57,20 @@ function CascadeChips({ meta, label }: { meta?: CascadeMetadata | null; label?: 
   if (!meta) return null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
-      <span className="rounded bg-console-surface-2 px-1.5 py-0.5 text-eyebrow text-console-ink-dim">
+      <span className="rounded bg-head px-1.5 py-0.5 text-eyebrow text-mut">
         {label ? `${label} via ${meta.engine}` : `via ${meta.engine}`}
       </span>
       {meta.score != null && meta.threshold != null && (
         <span className={`font-mono text-eyebrow ${
           meta.score >= meta.threshold
-            ? 'text-console-gold'
-            : 'text-console-ink-dim'
+            ? 'text-acc'
+            : 'text-mut'
         }`}>
           {meta.score.toFixed(3)}
         </span>
       )}
       {meta.fallback && (
-        <span className="rounded bg-console-accent/20 px-1.5 py-0.5 text-eyebrow text-console-accent">
+        <span className="rounded bg-acc/20 px-1.5 py-0.5 text-eyebrow text-acc">
           ⚠ FALLBACK
         </span>
       )}
@@ -107,49 +107,49 @@ export default function TakeStrip({
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {keyframeUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{keyframeLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-mut mb-1">{keyframeLabel}</div>
           <img
             src={resolve(keyframeUrl)}
-            className="w-full rounded border border-console-rule object-cover"
+            className="w-full rounded border border-line object-cover"
           />
         </div>
       ) : null}
 
       {drivingUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{drivingLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-mut mb-1">{drivingLabel}</div>
           <video
             src={resolve(drivingUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-console-rule bg-black"
+            className="w-full rounded border border-line bg-black"
           />
         </div>
       ) : null}
 
       {performanceUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{performanceLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-mut mb-1">{performanceLabel}</div>
           <video
             src={resolve(performanceUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-console-rule bg-black"
+            className="w-full rounded border border-line bg-black"
           />
         </div>
       ) : null}
 
       {motionUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{motionLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-mut mb-1">{motionLabel}</div>
           <video
             src={resolve(motionUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-console-rule bg-black"
+            className="w-full rounded border border-line bg-black"
           />
           <CascadeChips meta={cascadeMetadata} />
           <CascadeChips meta={lipsyncCascadeMetadata} label="lipsync" />

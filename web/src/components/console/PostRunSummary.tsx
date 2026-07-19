@@ -153,26 +153,26 @@ export function PostRunSummary({
       >
         {/* Dialog panel */}
         <div
-          className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-editorial-rule bg-editorial-ink p-6 shadow-xl"
+          className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-line bg-app p-6 shadow-xl"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-1">
+              <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-1">
                 Run Complete
               </div>
-              <h2 className="text-xl font-semibold text-editorial-ivory">
+              <h2 className="text-xl font-semibold text-tx">
                 Auto-Approve Summary
               </h2>
-              <p className="mt-1.5 text-sm text-editorial-ivory-mute">
+              <p className="mt-1.5 text-sm text-mut">
                 {totalApproved} decision{totalApproved === 1 ? '' : 's'} auto-approved
                 {totalVetoed > 0 && `, ${totalVetoed} vetoed`} across this run.
               </p>
             </div>
             <button
               onClick={onClose}
-              className="text-editorial-ivory-mute hover:text-editorial-ivory text-lg leading-none"
+              className="text-mut hover:text-tx text-lg leading-none"
               aria-label="Close summary"
             >
               ×
@@ -182,26 +182,26 @@ export function PostRunSummary({
           {/* Gate stats */}
           {gateStats.length > 0 ? (
             <section className="mb-6">
-              <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
                 Per-Gate Results
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {gateStats.map(({ gate, approved, vetoed }) => (
                   <div
                     key={gate}
-                    className="rounded border border-editorial-rule bg-editorial-ink-soft px-3 py-3"
+                    className="rounded border border-line bg-panel px-3 py-3"
                   >
-                    <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-2">
                       {GATE_LABELS[gate]}
                     </div>
                     <div className="flex items-baseline gap-1.5">
-                      <span className="text-lg font-mono text-editorial-ready">{approved}</span>
-                      <span className="text-eyebrow text-editorial-ivory-mute">approved</span>
+                      <span className="text-lg font-mono text-ok">{approved}</span>
+                      <span className="text-eyebrow text-mut">approved</span>
                     </div>
                     {vetoed > 0 && (
                       <div className="flex items-baseline gap-1.5 mt-1">
-                        <span className="text-sm font-mono text-editorial-warn">{vetoed}</span>
-                        <span className="text-eyebrow text-editorial-ivory-mute">vetoed</span>
+                        <span className="text-sm font-mono text-warn">{vetoed}</span>
+                        <span className="text-eyebrow text-mut">vetoed</span>
                       </div>
                     )}
                   </div>
@@ -209,7 +209,7 @@ export function PostRunSummary({
               </div>
             </section>
           ) : (
-            <div className="mb-6 rounded border border-editorial-rule bg-editorial-ink-soft px-4 py-6 text-center text-sm text-editorial-ivory-mute">
+            <div className="mb-6 rounded border border-line bg-panel px-4 py-6 text-center text-sm text-mut">
               No auto-approve entries found. Auto-approve may not be configured for this project.
             </div>
           )}
@@ -217,17 +217,17 @@ export function PostRunSummary({
           {/* Top rules */}
           {topRules.length > 0 && (
             <section className="mb-6">
-              <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
                 Top Firing Rules
               </div>
               <ul className="space-y-1.5">
                 {topRules.map(({ rule, count }) => (
                   <li
                     key={rule}
-                    className="flex items-center justify-between gap-3 rounded border border-editorial-rule bg-editorial-ink-soft px-3 py-2"
+                    className="flex items-center justify-between gap-3 rounded border border-line bg-panel px-3 py-2"
                   >
-                    <span className="text-sm font-mono text-editorial-ivory">{rule}</span>
-                    <span className="text-xs font-mono text-editorial-ivory-mute flex-shrink-0">
+                    <span className="text-sm font-mono text-tx">{rule}</span>
+                    <span className="text-xs font-mono text-mut flex-shrink-0">
                       ×{count}
                     </span>
                   </li>
@@ -239,33 +239,33 @@ export function PostRunSummary({
           {/* Approved decisions table with reject affordance */}
           {approvedRows.length > 0 && (
             <section>
-              <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
                 Auto-Approved Decisions — Override
               </div>
               <div className="space-y-2">
                 {approvedRows.map(({ shotId, gate, entry }) => (
                   <div
                     key={`${shotId}::${gate}`}
-                    className="flex items-center justify-between gap-3 rounded border border-editorial-rule bg-editorial-ink-soft px-3 py-2.5"
+                    className="flex items-center justify-between gap-3 rounded border border-line bg-panel px-3 py-2.5"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono text-editorial-brass">
+                        <span className="text-xs font-mono text-acc">
                           {GATE_LABELS[gate]}
                         </span>
-                        <span className="text-xs text-editorial-ivory-mute font-mono truncate">
+                        <span className="text-xs text-mut font-mono truncate">
                           {shotId}
                         </span>
                       </div>
                       {entry.rule_names.length > 0 && (
-                        <div className="mt-0.5 text-eyebrow text-editorial-ivory-mute">
+                        <div className="mt-0.5 text-eyebrow text-mut">
                           {entry.rule_names.join(', ')}
                         </div>
                       )}
                     </div>
                     <button
                       onClick={() => handleReject(shotId, gate)}
-                      className="flex-shrink-0 rounded border border-editorial-curtain/50 px-2.5 py-1 text-eyebrow text-editorial-curtain hover:bg-editorial-curtain/10"
+                      className="flex-shrink-0 rounded border border-fail/50 px-2.5 py-1 text-eyebrow text-fail hover:bg-fail/10"
                     >
                       Reject
                     </button>
@@ -279,7 +279,7 @@ export function PostRunSummary({
           <div className="mt-6 flex justify-end">
             <button
               onClick={onClose}
-              className="rounded border border-editorial-rule px-4 py-2 text-sm text-editorial-ivory-mute hover:bg-editorial-ink-soft"
+              className="rounded border border-line px-4 py-2 text-sm text-mut hover:bg-panel"
             >
               Close
             </button>

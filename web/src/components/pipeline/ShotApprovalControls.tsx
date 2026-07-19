@@ -38,7 +38,7 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
   return (
     <div className="flex flex-col gap-2 mt-2">
       {lowScore && (
-        <div className="text-eyebrow text-editorial-curtain bg-editorial-curtain/10 px-2 py-1 rounded">
+        <div className="text-eyebrow text-fail bg-fail/10 px-2 py-1 rounded">
           Low identity similarity ({Math.round((score || 0) * 100)}%) — recommend reject
         </div>
       )}
@@ -48,16 +48,16 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
           <button
             onClick={handleApprove}
             disabled={loading}
-            className="text-eyebrow-lg px-3 py-1 rounded border border-editorial-ready/50 text-editorial-ready
-              hover:bg-editorial-ready/10 disabled:opacity-40"
+            className="text-eyebrow-lg px-3 py-1 rounded border border-ok/50 text-ok
+              hover:bg-ok/10 disabled:opacity-40"
           >
             {loading ? '...' : '✓ Approve'}
           </button>
           <button
             onClick={() => setRejecting(true)}
             disabled={loading}
-            className="text-eyebrow-lg px-3 py-1 rounded border border-editorial-curtain/50 text-editorial-curtain
-              hover:bg-editorial-curtain/10 disabled:opacity-40"
+            className="text-eyebrow-lg px-3 py-1 rounded border border-fail/50 text-fail
+              hover:bg-fail/10 disabled:opacity-40"
           >
             ✕ Reject
           </button>
@@ -69,18 +69,18 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
             value={reason}
             onChange={e => setReason(e.target.value)}
             placeholder="Rejection reason (optional)"
-            className="text-eyebrow-lg bg-editorial-ink border border-editorial-rule rounded px-2 py-1 text-editorial-ivory flex-1"
+            className="text-eyebrow-lg bg-app border border-line rounded px-2 py-1 text-tx flex-1"
           />
           <button
             onClick={handleReject}
             disabled={loading}
-            className="text-eyebrow-lg px-3 py-1 rounded bg-editorial-curtain text-white disabled:opacity-40"
+            className="text-eyebrow-lg px-3 py-1 rounded bg-fail text-white disabled:opacity-40"
           >
             Reject
           </button>
           <button
             onClick={() => setRejecting(false)}
-            className="text-eyebrow-lg px-2 py-1 text-editorial-ivory-mute"
+            className="text-eyebrow-lg px-2 py-1 text-mut"
           >
             Cancel
           </button>

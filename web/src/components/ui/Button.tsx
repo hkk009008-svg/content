@@ -30,29 +30,29 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT: Record<ButtonVariant, string> = {
   brass:
-    'bg-editorial-brass text-editorial-ink ' +
-    'hover:bg-editorial-brass-deep ' +
-    'disabled:bg-editorial-rule disabled:text-editorial-ivory-faint',
+    'bg-acc text-app ' +
+    'hover:bg-acc ' +
+    'disabled:bg-line disabled:text-dim',
   curtain:
-    'bg-editorial-curtain text-editorial-ivory ' +
-    'hover:bg-editorial-curtain-deep ' +
-    'disabled:bg-editorial-rule disabled:text-editorial-ivory-faint',
+    'bg-fail text-tx ' +
+    'hover:bg-fail ' +
+    'disabled:bg-line disabled:text-dim',
   'curtain-outline':
-    'border border-editorial-curtain text-editorial-curtain bg-transparent ' +
-    'hover:bg-editorial-curtain hover:text-editorial-ivory ' +
-    'disabled:border-editorial-rule disabled:text-editorial-ivory-faint disabled:hover:bg-transparent',
+    'border border-fail text-fail bg-transparent ' +
+    'hover:bg-fail hover:text-tx ' +
+    'disabled:border-line disabled:text-dim disabled:hover:bg-transparent',
   'brass-outline':
-    'border border-editorial-brass text-editorial-brass bg-transparent ' +
-    'hover:bg-editorial-brass hover:text-editorial-ink ' +
-    'disabled:border-editorial-rule disabled:text-editorial-ivory-faint disabled:hover:bg-transparent',
+    'border border-acc text-acc bg-transparent ' +
+    'hover:bg-acc hover:text-app ' +
+    'disabled:border-line disabled:text-dim disabled:hover:bg-transparent',
   'ivory-ghost':
-    'border border-editorial-rule text-editorial-ivory ' +
-    'hover:bg-editorial-ink-soft hover:border-editorial-rule-bright ' +
-    'disabled:text-editorial-ivory-faint disabled:border-editorial-rule disabled:hover:bg-transparent',
+    'border border-line text-tx ' +
+    'hover:bg-panel hover:border-line ' +
+    'disabled:text-dim disabled:border-line disabled:hover:bg-transparent',
   'rule-only':
-    'text-editorial-ivory-mute hover:text-editorial-brass ' +
-    'border-b border-transparent hover:border-editorial-brass ' +
-    'disabled:text-editorial-ivory-faint disabled:hover:border-transparent',
+    'text-mut hover:text-acc ' +
+    'border-b border-transparent hover:border-acc ' +
+    'disabled:text-dim disabled:hover:border-transparent',
 }
 
 const SIZE: Record<ButtonSize, string> = {
@@ -67,8 +67,8 @@ const BASE =
   'disabled:cursor-not-allowed ' +
   'inline-flex items-center justify-center gap-2 ' +
   'active:translate-y-px focus-visible:outline-none ' +
-  'focus-visible:ring-1 focus-visible:ring-editorial-brass focus-visible:ring-offset-2 ' +
-  'focus-visible:ring-offset-editorial-ink'
+  'focus-visible:ring-1 focus-visible:ring-acc focus-visible:ring-offset-2 ' +
+  'focus-visible:ring-offset-app'
 
 /** Build the className string for any element that should look like a Button.
    Use this when rendering as <a>, <Link>, or any non-button element where

@@ -93,18 +93,18 @@ export function RejectAutoApproveModal({
     >
       {/* Dialog panel — stops click from bubbling to overlay */}
       <div
-        className="relative w-full max-w-md rounded-lg border border-editorial-rule bg-editorial-ink p-6 shadow-xl"
+        className="relative w-full max-w-md rounded-lg border border-line bg-app p-6 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="mb-5">
-          <div className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-1">
+          <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-1">
             Override Auto-Approve
           </div>
-          <h2 className="text-lg font-semibold text-editorial-ivory">
+          <h2 className="text-lg font-semibold text-tx">
             Reject {GATE_LABELS[gate] ?? gate} Gate Decision
           </h2>
-          <p className="mt-2 text-sm text-editorial-ivory-mute">
+          <p className="mt-2 text-sm text-mut">
             Provide a reason for overriding the auto-approve decision. This will be
             recorded in the shot's audit log as a user override.
           </p>
@@ -112,21 +112,21 @@ export function RejectAutoApproveModal({
 
         {/* Reason textarea */}
         <div className="mb-4">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute mb-2">
-            Reason <span className="text-editorial-curtain">*</span>
+          <label className="block text-xs font-semibold uppercase tracking-wide text-mut mb-2">
+            Reason <span className="text-fail">*</span>
           </label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={4}
             placeholder="Describe why this auto-approve decision should be rejected…"
-            className="w-full rounded border border-editorial-rule bg-editorial-ink-soft px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:border-editorial-brass focus:outline-none"
+            className="w-full rounded border border-line bg-panel px-3 py-2 text-sm text-tx placeholder:text-mut focus:border-acc focus:outline-none"
             autoFocus
           />
         </div>
 
         {error && (
-          <div className="mb-4 rounded border border-editorial-curtain/40 bg-editorial-curtain/10 px-3 py-2 text-sm text-editorial-curtain">
+          <div className="mb-4 rounded border border-fail/40 bg-fail/10 px-3 py-2 text-sm text-fail">
             {error}
           </div>
         )}
@@ -136,14 +136,14 @@ export function RejectAutoApproveModal({
           <button
             onClick={onClose}
             disabled={submitting}
-            className="rounded border border-editorial-rule px-4 py-2 text-sm text-editorial-ivory-mute hover:bg-editorial-ink-soft disabled:opacity-40"
+            className="rounded border border-line px-4 py-2 text-sm text-mut hover:bg-panel disabled:opacity-40"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={!reason.trim() || submitting}
-            className="rounded border border-editorial-curtain/50 bg-editorial-curtain/10 px-4 py-2 text-sm text-editorial-curtain hover:bg-editorial-curtain/20 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded border border-fail/50 bg-fail/10 px-4 py-2 text-sm text-fail hover:bg-fail/20 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? 'Submitting…' : 'Reject Decision'}
           </button>

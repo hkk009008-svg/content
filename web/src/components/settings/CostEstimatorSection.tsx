@@ -35,9 +35,9 @@ export function CostEstimatorSection({ s }: Props) {
 
   const titleNode: ReactNode = (
     <h2 className="text-eyebrow-lg font-semibold uppercase tracking-widest flex items-center gap-2">
-      <span className="text-editorial-brass">Cost Estimator</span>
+      <span className="text-acc">Cost Estimator</span>
       {costEstimate && (
-        <span className="text-eyebrow-sm font-mono bg-editorial-brass/20 text-editorial-brass px-1.5 py-0.5 rounded">
+        <span className="text-eyebrow-sm font-mono bg-acc/20 text-acc px-1.5 py-0.5 rounded">
           ${costEstimate.totals?.grand_total?.toFixed(2)}
         </span>
       )}
@@ -52,62 +52,62 @@ export function CostEstimatorSection({ s }: Props) {
     >
       {/* Sliders */}
       <div>
-        <div className="flex justify-between text-eyebrow text-editorial-ivory-mute mb-0.5">
+        <div className="flex justify-between text-eyebrow text-mut mb-0.5">
           <span className="font-mono">Shot count</span>
-          <span className="text-editorial-brass font-bold">{costShotCount}</span>
+          <span className="text-acc font-bold">{costShotCount}</span>
         </div>
         <input type="range" min={5} max={120} step={5}
           value={costShotCount}
           onChange={e => setCostShotCount(parseInt(e.target.value))}
           aria-label="Shot count"
-          className="w-full accent-editorial-brass h-1" />
+          className="w-full accent-acc h-1" />
       </div>
       <div>
-        <div className="flex justify-between text-eyebrow text-editorial-ivory-mute mb-0.5">
+        <div className="flex justify-between text-eyebrow text-mut mb-0.5">
           <span className="font-mono">Dialogue shot ratio</span>
-          <span className="text-editorial-brass font-bold">{(costDialogueRatio * 100).toFixed(0)}%</span>
+          <span className="text-acc font-bold">{(costDialogueRatio * 100).toFixed(0)}%</span>
         </div>
         <input type="range" min={0} max={1} step={0.05}
           value={costDialogueRatio}
           onChange={e => setCostDialogueRatio(parseFloat(e.target.value))}
           aria-label="Dialogue shot ratio"
-          className="w-full accent-editorial-brass h-1" />
-        <p className="text-eyebrow-sm text-editorial-ivory-mute">Fraction of shots with spoken dialogue (drives TTS + lipsync cost).</p>
+          className="w-full accent-acc h-1" />
+        <p className="text-eyebrow-sm text-mut">Fraction of shots with spoken dialogue (drives TTS + lipsync cost).</p>
       </div>
 
       {/* Breakdown */}
       {costEstimate && (
         <>
-          <div className="rounded-lg border border-editorial-brass/20 bg-editorial-brass/5 p-3">
-            <div className="text-eyebrow text-editorial-ivory-mute uppercase tracking-wider mb-1">Total (production)</div>
-            <div className="text-2xl font-bold text-editorial-brass">${costEstimate.totals?.grand_total?.toFixed(2)}</div>
-            <div className="text-eyebrow text-editorial-ivory-mute mt-0.5">
+          <div className="rounded-lg border border-acc/20 bg-acc/5 p-3">
+            <div className="text-eyebrow text-mut uppercase tracking-wider mb-1">Total (production)</div>
+            <div className="text-2xl font-bold text-acc">${costEstimate.totals?.grand_total?.toFixed(2)}</div>
+            <div className="text-eyebrow text-mut mt-0.5">
               ${costEstimate.per_shot?.avg?.toFixed(3)}/shot avg · {costEstimate.shot_count} shots ({costEstimate.dialogue_shots} dialogue)
             </div>
           </div>
 
-          <div className="rounded-lg border border-editorial-rule bg-editorial-ink overflow-hidden">
-            <div className="text-eyebrow text-editorial-ivory-soft uppercase tracking-wider px-3 py-2 border-b border-editorial-rule">By modality</div>
+          <div className="rounded-lg border border-line bg-app overflow-hidden">
+            <div className="text-eyebrow text-tx uppercase tracking-wider px-3 py-2 border-b border-line">By modality</div>
             <table className="w-full text-eyebrow">
               <tbody>
                 {Object.entries(costEstimate.totals).filter(([k]) => k !== 'grand_total').map(([k, v]: any) => (
-                  <tr key={k} className="border-b border-editorial-rule/30 last:border-0">
-                    <td className="px-3 py-1.5 text-editorial-ivory-mute font-mono">{k.replace(/_/g, ' ')}</td>
-                    <td className="px-3 py-1.5 text-right text-editorial-ivory font-mono">${v.toFixed(2)}</td>
+                  <tr key={k} className="border-b border-line/30 last:border-0">
+                    <td className="px-3 py-1.5 text-mut font-mono">{k.replace(/_/g, ' ')}</td>
+                    <td className="px-3 py-1.5 text-right text-tx font-mono">${v.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div className="rounded-lg border border-editorial-rule bg-editorial-ink overflow-hidden">
-            <div className="text-eyebrow text-editorial-ivory-soft uppercase tracking-wider px-3 py-2 border-b border-editorial-rule">By billing provider</div>
+          <div className="rounded-lg border border-line bg-app overflow-hidden">
+            <div className="text-eyebrow text-tx uppercase tracking-wider px-3 py-2 border-b border-line">By billing provider</div>
             <table className="w-full text-eyebrow">
               <tbody>
                 {Object.entries(costEstimate.by_provider).map(([k, v]: any) => (
-                  <tr key={k} className="border-b border-editorial-rule/30 last:border-0">
-                    <td className="px-3 py-1.5 text-editorial-ivory-mute font-mono">{k}</td>
-                    <td className="px-3 py-1.5 text-right text-editorial-ivory font-mono">${v.toFixed(2)}</td>
+                  <tr key={k} className="border-b border-line/30 last:border-0">
+                    <td className="px-3 py-1.5 text-mut font-mono">{k}</td>
+                    <td className="px-3 py-1.5 text-right text-tx font-mono">${v.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -115,14 +115,14 @@ export function CostEstimatorSection({ s }: Props) {
           </div>
 
           {costEstimate.notes && costEstimate.notes.length > 0 && (
-            <ul className="text-eyebrow-sm text-editorial-ivory-mute space-y-0.5 list-disc pl-4">
+            <ul className="text-eyebrow-sm text-mut space-y-0.5 list-disc pl-4">
               {costEstimate.notes.map((n: string, i: number) => <li key={i}>{n}</li>)}
             </ul>
           )}
         </>
       )}
       {!costEstimate && (
-        <p className="text-eyebrow text-editorial-ivory-mute italic">Loading estimate…</p>
+        <p className="text-eyebrow text-mut italic">Loading estimate…</p>
       )}
     </SettingsSection>
   )

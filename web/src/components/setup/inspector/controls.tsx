@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { MICRO_LABEL, Toggle, type SelectOption } from '../../ui'
 
 /* Token-styled control rows shared across the SettingsInspector sections.
-   Centralized here so the five sections stay declarative and no editorial-*
+   Centralized here so the sections stay declarative and no legacy-palette
    class leaks in. Tokens only: bg-panel / border-line / text-tx|mut|acc. */
 
 const FIELD_CLS =

@@ -29,7 +29,7 @@ import IterationPanel from './IterationPanel'
  *     - "Re-assemble" → STUB (S21)
  *     - "Compare with previous cut" → STUB (S21+)
  *
- *  Palette: editorial-* only (ARCHITECTURE.md §14.3 invariant).
+ *  Palette: indigo tokens only (ARCHITECTURE.md §14.3).
  *  Feature flag: gated server-side by CINEMA_SCREENING_STAGE; we surface
  *  the 404 as an inline error rather than guessing the flag client-side.
  */
@@ -186,23 +186,23 @@ function TakeCard({ take, isApprovedFinal, shotId, onIterate, onRefreshProject }
     <div
       className={`rounded border px-3 py-2 ${
         isApprovedFinal
-          ? 'border-editorial-brass/60 bg-editorial-brass/5'
-          : 'border-editorial-rule bg-editorial-ink-soft/40'
+          ? 'border-acc/60 bg-acc/5'
+          : 'border-line bg-panel/40'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="font-mono text-eyebrow text-editorial-ivory-mute truncate">
+          <div className="font-mono text-eyebrow text-mut truncate">
             {take.id}
           </div>
           {take.created_at && (
-            <div className="font-mono text-eyebrow-sm text-editorial-ivory-faint">
+            <div className="font-mono text-eyebrow-sm text-dim">
               {take.created_at}
             </div>
           )}
         </div>
         {isApprovedFinal && (
-          <span className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-brass shrink-0">
+          <span className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-acc shrink-0">
             Final
           </span>
         )}
@@ -213,7 +213,7 @@ function TakeCard({ take, isApprovedFinal, shotId, onIterate, onRefreshProject }
             <button
               type="button"
               onClick={() => setIterating(true)}
-              className="text-eyebrow text-editorial-brass hover:text-editorial-brass-deep"
+              className="text-eyebrow text-acc hover:text-acc"
             >
               Iterate this take →
             </button>
@@ -243,7 +243,7 @@ function Sidebar({ shot, manifestEntry, onClose, onIterate, onRefreshProject }: 
   if (!shot || !manifestEntry) {
     return (
       <div className="px-6 py-8 text-center">
-        <p className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-faint">
+        <p className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-dim">
           Click a shot marker to inspect its takes
         </p>
       </div>
@@ -255,13 +255,13 @@ function Sidebar({ shot, manifestEntry, onClose, onIterate, onRefreshProject }: 
 
   return (
     <div className="px-5 py-5 space-y-5">
-      <div className="flex items-start justify-between gap-3 pb-3 border-b border-editorial-rule">
+      <div className="flex items-start justify-between gap-3 pb-3 border-b border-line">
         <div>
-          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute">
+          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-mut">
             Shot
           </div>
-          <div className="font-mono text-sm text-editorial-ivory">{shot.id}</div>
-          <div className="mt-1 font-mono text-eyebrow-sm text-editorial-ivory-faint">
+          <div className="font-mono text-sm text-tx">{shot.id}</div>
+          <div className="mt-1 font-mono text-eyebrow-sm text-dim">
             {formatTimecode(manifestEntry.start_s)} – {formatTimecode(manifestEntry.end_s)}
             {' · '}
             {manifestEntry.take_count} take{manifestEntry.take_count === 1 ? '' : 's'}
@@ -271,7 +271,7 @@ function Sidebar({ shot, manifestEntry, onClose, onIterate, onRefreshProject }: 
           type="button"
           onClick={onClose}
           aria-label="Close sidebar"
-          className="text-editorial-ivory-mute hover:text-editorial-ivory text-sm"
+          className="text-mut hover:text-tx text-sm"
         >
           ×
         </button>
@@ -279,21 +279,21 @@ function Sidebar({ shot, manifestEntry, onClose, onIterate, onRefreshProject }: 
 
       {shot.prompt && (
         <div>
-          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute mb-1">
+          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-mut mb-1">
             Prompt
           </div>
-          <p className="text-xs text-editorial-ivory-soft leading-relaxed">{shot.prompt}</p>
+          <p className="text-xs text-tx leading-relaxed">{shot.prompt}</p>
         </div>
       )}
 
       {groups.length === 0 ? (
-        <p className="text-eyebrow text-editorial-ivory-faint">
+        <p className="text-eyebrow text-dim">
           No takes recorded for this shot.
         </p>
       ) : (
         groups.map((group) => (
           <div key={group.kind}>
-            <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute mb-2">
+            <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-mut mb-2">
               {group.label} · {group.takes.length}
             </div>
             <div className="space-y-2">
@@ -328,8 +328,8 @@ function MarkerTrack({ manifest, totalDuration, selectedShotId, onSelect }: Mark
   if (manifest.length === 0 || totalDuration <= 0) {
     return (
       <div className="px-12 py-6">
-        <div className="h-10 rounded border border-dashed border-editorial-rule flex items-center justify-center">
-          <span className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-faint">
+        <div className="h-10 rounded border border-dashed border-line flex items-center justify-center">
+          <span className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-dim">
             No shot markers
           </span>
         </div>
@@ -339,13 +339,13 @@ function MarkerTrack({ manifest, totalDuration, selectedShotId, onSelect }: Mark
 
   return (
     <div className="px-12 py-4">
-      <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute mb-2 flex items-center justify-between">
+      <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-mut mb-2 flex items-center justify-between">
         <span>Shot Markers · {manifest.length}</span>
-        <span className="text-editorial-ivory-faint">
+        <span className="text-dim">
           {formatTimecode(totalDuration)} runtime
         </span>
       </div>
-      <div className="relative h-10 bg-editorial-ink-soft border border-editorial-rule rounded overflow-hidden">
+      <div className="relative h-10 bg-panel border border-line rounded overflow-hidden">
         {manifest.map((entry) => {
           const leftPct = Math.max(0, Math.min(100, (entry.start_s / totalDuration) * 100))
           const widthPct = Math.max(
@@ -360,10 +360,10 @@ function MarkerTrack({ manifest, totalDuration, selectedShotId, onSelect }: Mark
               onClick={() => onSelect(entry)}
               title={`${entry.shot_id} · ${formatTimecode(entry.start_s)} – ${formatTimecode(entry.end_s)}`}
               aria-label={`Shot ${entry.shot_id}, ${formatTimecode(entry.start_s)} to ${formatTimecode(entry.end_s)}`}
-              className={`absolute top-0 bottom-0 border-l border-editorial-ink transition-colors ${
+              className={`absolute top-0 bottom-0 border-l border-app transition-colors ${
                 isSelected
-                  ? 'bg-editorial-brass/40 hover:bg-editorial-brass/60'
-                  : 'bg-editorial-ivory-mute/15 hover:bg-editorial-ivory-mute/30'
+                  ? 'bg-acc/40 hover:bg-acc/60'
+                  : 'bg-mut/15 hover:bg-mut/30'
               }`}
               style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
             >
@@ -534,8 +534,8 @@ export default function ScreeningStage({
   if (loading) {
     return (
       <div className="py-24 text-center">
-        <div className="inline-flex items-center gap-3 text-editorial-ivory-mute">
-          <span className="inline-block h-3 w-3 rounded-full bg-editorial-brass animate-pulse" />
+        <div className="inline-flex items-center gap-3 text-mut">
+          <span className="inline-block h-3 w-3 rounded-full bg-acc animate-pulse" />
           <span className="font-mono text-eyebrow uppercase tracking-wide-eyebrow">
             Loading screening manifest…
           </span>
@@ -547,14 +547,14 @@ export default function ScreeningStage({
   // ── Render: error ───────────────────────────────────────────
   if (error || !data) {
     return (
-      <div className="mt-6 mx-12 rounded border border-editorial-curtain/40 bg-editorial-curtain/10 px-6 py-5">
-        <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-curtain mb-2">
+      <div className="mt-6 mx-12 rounded border border-fail/40 bg-fail/10 px-6 py-5">
+        <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-fail mb-2">
           Screening Unavailable
         </div>
-        <p className="text-sm text-editorial-ivory-soft mb-3">
+        <p className="text-sm text-tx mb-3">
           {error || 'No data returned from /assemble/screen.'}
         </p>
-        <p className="text-eyebrow text-editorial-ivory-mute mb-4">
+        <p className="text-eyebrow text-mut mb-4">
           If the screening stage is explicitly opted out (CINEMA_SCREENING_STAGE=0),
           this gate will be skipped. Unset the env var or set it to a non-falsy
           value to re-enable, or proceed without screening. (Default is ON
@@ -563,7 +563,7 @@ export default function ScreeningStage({
         <button
           type="button"
           onClick={fetchManifest}
-          className="rounded border border-editorial-rule px-3 py-1.5 text-xs text-editorial-ivory hover:bg-editorial-ink-rise"
+          className="rounded border border-line px-3 py-1.5 text-xs text-tx hover:bg-head"
         >
           Retry
         </button>
@@ -584,13 +584,13 @@ export default function ScreeningStage({
   return (
     <div className="grid grid-cols-[1fr_360px] gap-0 -mx-8 -my-6 min-h-0 h-full">
       {/* ── Left: video + markers + toolbar ──────────────────────── */}
-      <div className="flex flex-col bg-editorial-ink overflow-y-auto">
+      <div className="flex flex-col bg-app overflow-y-auto">
         <div className="px-12 pt-8">
-          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-brass mb-3">
+          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-acc mb-3">
             Screening
           </div>
           <h2
-            className="font-display italic text-editorial-ivory mb-5"
+            className="font-display italic text-tx mb-5"
             style={{
               fontSize: 'clamp(28px, 3vw, 44px)',
               fontVariationSettings: '"opsz" 48, "SOFT" 60, "WONK" 1',
@@ -603,7 +603,7 @@ export default function ScreeningStage({
         </div>
 
         <div className="px-12">
-          <div className="bg-black rounded border border-editorial-rule overflow-hidden">
+          <div className="bg-black rounded border border-line overflow-hidden">
             <video
               ref={videoRef}
               src={videoSrc}
@@ -631,26 +631,26 @@ export default function ScreeningStage({
         {/* S21 reassemble error banner (above toolbar) */}
         {reassembleError && (
           <div className="px-12 pt-3" role="alert">
-            <div className="rounded border border-editorial-curtain/40 bg-editorial-curtain/10 px-4 py-2 text-xs text-editorial-curtain">
+            <div className="rounded border border-fail/40 bg-fail/10 px-4 py-2 text-xs text-fail">
               Re-assembly failed: {reassembleError}
             </div>
           </div>
         )}
 
         {/* Bottom toolbar */}
-        <div className="px-12 py-6 mt-auto border-t border-editorial-rule flex items-center justify-between gap-4 flex-wrap">
-          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute">
+        <div className="px-12 py-6 mt-auto border-t border-line flex items-center justify-between gap-4 flex-wrap">
+          <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-mut">
             {data.timeline_manifest.length} shots in cut
             {selectedShot && (
               <>
                 {' · '}
-                <span className="text-editorial-ivory">selected {selectedShot.id}</span>
+                <span className="text-tx">selected {selectedShot.id}</span>
               </>
             )}
             {dirtyShots.length > 0 && (
               <>
                 {' · '}
-                <span className="text-editorial-brass">
+                <span className="text-acc">
                   {dirtyShots.length} shot{dirtyShots.length === 1 ? '' : 's'} dirty — re-assemble suggested
                 </span>
               </>
@@ -658,7 +658,7 @@ export default function ScreeningStage({
             {ttsLinesToGenerate > 0 && (
               <>
                 {' · '}
-                <span className="text-editorial-ivory-mute">
+                <span className="text-mut">
                   ~${estimatedTtsUsd.toFixed(2)} TTS regen ({ttsLinesToGenerate} line{ttsLinesToGenerate === 1 ? '' : 's'})
                 </span>
               </>
@@ -670,7 +670,7 @@ export default function ScreeningStage({
               disabled
               title="Available in S22+"
               aria-label="Compare with previous cut — available in S22+"
-              className="rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed"
+              className="rounded border border-line px-3 py-2 text-xs text-dim cursor-not-allowed"
             >
               Compare with previous cut
             </button>
@@ -694,8 +694,8 @@ export default function ScreeningStage({
               }
               className={
                 canReassemble && !reassembling
-                  ? 'rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory hover:bg-editorial-ink-rise'
-                  : 'rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed'
+                  ? 'rounded border border-line px-3 py-2 text-xs text-tx hover:bg-head'
+                  : 'rounded border border-line px-3 py-2 text-xs text-dim cursor-not-allowed'
               }
             >
               {reassembling
@@ -708,7 +708,7 @@ export default function ScreeningStage({
               type="button"
               onClick={handleApprove}
               disabled={approving}
-              className="rounded bg-editorial-brass px-4 py-2 text-xs font-semibold text-white hover:bg-editorial-brass/90 disabled:opacity-40"
+              className="rounded bg-acc px-4 py-2 text-xs font-semibold text-white hover:bg-acc/90 disabled:opacity-40"
             >
               {approving ? 'Approving…' : 'Approve Final Cut'}
             </button>
@@ -717,7 +717,7 @@ export default function ScreeningStage({
       </div>
 
       {/* ── Right: take-history sidebar ──────────────────────── */}
-      <aside className="border-l border-editorial-rule bg-editorial-ink-soft/30 overflow-y-auto">
+      <aside className="border-l border-line bg-panel/30 overflow-y-auto">
         <Sidebar
           shot={selectedShot}
           manifestEntry={selectedManifestEntry}

@@ -52,7 +52,7 @@ export function SettingsSection({
         )}
         <span className="flex items-center gap-2">
           {rightSlot}
-          <span className="text-editorial-ivory-mute text-xs">{isOpen ? '▾' : '▸'}</span>
+          <span className="text-mut text-xs">{isOpen ? '▾' : '▸'}</span>
         </span>
       </button>
       {isOpen && <div className="space-y-4">{children}</div>}

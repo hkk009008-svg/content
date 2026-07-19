@@ -5,8 +5,8 @@
  * same shape: rounded pill with semantic color + hover tooltip showing rule_names.
  *
  * Color semantics (matching ReviewStage.tsx formatScore):
- *   text-editorial-ready   — gate passed, auto-approved
- *   text-editorial-warn    — vetoed entry (shown for transparency in PostRunSummary)
+ *   text-ok   — gate passed, auto-approved
+ *   text-warn    — vetoed entry (shown for transparency in PostRunSummary)
  *
  * When onReject is provided a small "Reject" affordance is rendered that opens
  * the RejectAutoApproveModal from the parent.
@@ -45,14 +45,14 @@ export function AutoApproveBadge({ gate, audit, onReject }: Props) {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
       <span
-        className="rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow text-editorial-ready"
+        className="rounded bg-panel px-1.5 py-0.5 text-eyebrow text-ok"
         title={tooltipText}
       >
         ✓ auto-approved · {GATE_LABELS[gate] ?? gate}
       </span>
       {entry.rule_names.length > 0 && (
         <span
-          className="text-eyebrow text-editorial-ivory-mute font-mono"
+          className="text-eyebrow text-mut font-mono"
           title={tooltipText}
         >
           [{entry.rule_names.join(', ')}]
@@ -61,7 +61,7 @@ export function AutoApproveBadge({ gate, audit, onReject }: Props) {
       {onReject && (
         <button
           onClick={onReject}
-          className="rounded border border-editorial-curtain/50 px-1.5 py-0.5 text-eyebrow text-editorial-curtain hover:bg-editorial-curtain/10"
+          className="rounded border border-fail/50 px-1.5 py-0.5 text-eyebrow text-fail hover:bg-fail/10"
           title="Override this auto-approve decision"
         >
           Reject

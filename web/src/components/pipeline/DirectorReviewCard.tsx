@@ -8,9 +8,9 @@ export default function DirectorReviewCard({ review }: Props) {
   if (!review) return null
 
   const decisionStyles = {
-    APPROVED: { bg: 'bg-editorial-ready/10', border: 'border-editorial-ready/30', text: 'text-editorial-ready', icon: '✓' },
+    APPROVED: { bg: 'bg-ok/10', border: 'border-ok/30', text: 'text-ok', icon: '✓' },
     MODIFIED: { bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', text: 'text-yellow-400', icon: '✎' },
-    REJECTED: { bg: 'bg-editorial-curtain/10', border: 'border-editorial-curtain/30', text: 'text-editorial-curtain', icon: '✕' },
+    REJECTED: { bg: 'bg-fail/10', border: 'border-fail/30', text: 'text-fail', icon: '✕' },
   }
 
   const style = decisionStyles[review.decision] || decisionStyles.APPROVED
@@ -24,19 +24,19 @@ export default function DirectorReviewCard({ review }: Props) {
             Chief Director: {review.decision}
           </span>
           {review.quality_score > 0 && (
-            <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink px-2 py-0.5 rounded">
+            <span className="text-eyebrow text-mut bg-app px-2 py-0.5 rounded">
               Quality: {Math.round(review.quality_score * 100)}%
             </span>
           )}
         </div>
       </div>
       {review.reasoning && (
-        <p className="text-xs text-editorial-ivory/70 mt-2">{review.reasoning}</p>
+        <p className="text-xs text-tx/70 mt-2">{review.reasoning}</p>
       )}
       {review.violations.length > 0 && (
         <div className="mt-2 space-y-0.5">
           {review.violations.map((v, i) => (
-            <p key={i} className="text-eyebrow text-editorial-curtain/80 font-mono">• {v}</p>
+            <p key={i} className="text-eyebrow text-fail/80 font-mono">• {v}</p>
           ))}
         </div>
       )}

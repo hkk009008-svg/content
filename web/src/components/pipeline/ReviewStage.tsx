@@ -80,7 +80,7 @@ function lastTake(takes: TakeRecord[]) {
 function formatScore(value?: number) {
   if (value == null) return null
   const pct = Math.round(value * 100)
-  const color = pct >= 75 ? 'text-editorial-ready' : pct >= 55 ? 'text-editorial-warn' : 'text-editorial-curtain'
+  const color = pct >= 75 ? 'text-ok' : pct >= 55 ? 'text-warn' : 'text-fail'
   return <span className={`text-xs font-mono ${color}`}>{pct}%</span>
 }
 
@@ -98,12 +98,12 @@ function CascadeBadge({
   if (!meta) return null
   const scoreColor = meta.score != null && meta.threshold != null
     ? meta.score >= meta.threshold
-      ? 'text-editorial-ready'
-      : 'text-editorial-warn'
+      ? 'text-ok'
+      : 'text-warn'
     : null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
-      <span className="rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow text-editorial-ivory-mute">
+      <span className="rounded bg-panel px-1.5 py-0.5 text-eyebrow text-mut">
         {label ? `${label} via ${meta.engine}` : `via ${meta.engine}`}
       </span>
       {scoreColor && meta.score != null && (
@@ -112,7 +112,7 @@ function CascadeBadge({
         </span>
       )}
       {meta.fallback && (
-        <span className="rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow text-editorial-curtain">
+        <span className="rounded bg-fail/20 px-1.5 py-0.5 text-eyebrow text-fail">
           ⚠ FALLBACK
         </span>
       )}
@@ -149,13 +149,13 @@ function TakeCard({
   const [iterating, setIterating] = useState(false)
 
   return (
-    <div className={`rounded border px-2 py-2 ${active ? 'border-editorial-brass bg-editorial-brass/10' : 'border-editorial-rule bg-editorial-ink'}`}>
+    <div className={`rounded border px-2 py-2 ${active ? 'border-acc bg-acc/10' : 'border-line bg-app'}`}>
       <button onClick={onSelect} className="w-full text-left">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-editorial-ivory font-medium">{take.kind}</span>
-          {approved && <span className="text-eyebrow text-editorial-ready">Approved</span>}
+          <span className="text-xs text-tx font-medium">{take.kind}</span>
+          {approved && <span className="text-eyebrow text-ok">Approved</span>}
         </div>
-        <div className="mt-1 text-eyebrow text-editorial-ivory-mute font-mono break-all">{take.id}</div>
+        <div className="mt-1 text-eyebrow text-mut font-mono break-all">{take.id}</div>
         <CascadeBadge meta={take.cascade_metadata} />
         <CascadeBadge meta={take.metadata?.lipsync_cascade} label="lipsync" />
       </button>
@@ -163,14 +163,14 @@ function TakeCard({
         <div className="mt-2 flex gap-2">
           <button
             onClick={onApprove}
-            className="flex-1 rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow text-editorial-ready hover:bg-editorial-ready/10"
+            className="flex-1 rounded border border-ok/50 px-2 py-1 text-eyebrow text-ok hover:bg-ok/10"
           >
             Approve
           </button>
           {showIterateButton && onIterate && !iterating && (
             <button
               onClick={() => { setIterating(true) }}
-              className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow text-editorial-brass hover:bg-editorial-brass/10"
+              className="rounded border border-acc/50 px-2 py-1 text-eyebrow text-acc hover:bg-acc/10"
               title="Open directorial iteration panel to generate a new take with your direction"
             >
               Iterate
@@ -342,19 +342,19 @@ function ClipCard({
   }
 
   return (
-    <div className="rounded-lg border border-editorial-rule bg-editorial-ink-soft">
-      <div className="flex items-center justify-between gap-3 border-b border-editorial-rule px-4 py-3">
+    <div className="rounded-lg border border-line bg-panel">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-editorial-ivory">{scene.title}</span>
-            <span className="rounded bg-editorial-ink px-2 py-0.5 text-eyebrow text-editorial-ivory-mute">{statusBadge}</span>
-            {shot.plan_status === 'approved' && <span className="text-eyebrow text-editorial-ready">Plan approved</span>}
-            {shot.approved_keyframe_take_id && <span className="text-eyebrow text-editorial-ready">Keyframe locked</span>}
-            {shot.approved_final_take_id && <span className="text-eyebrow text-editorial-ready">Final locked</span>}
+            <span className="text-sm font-semibold text-tx">{scene.title}</span>
+            <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">{statusBadge}</span>
+            {shot.plan_status === 'approved' && <span className="text-eyebrow text-ok">Plan approved</span>}
+            {shot.approved_keyframe_take_id && <span className="text-eyebrow text-ok">Keyframe locked</span>}
+            {shot.approved_final_take_id && <span className="text-eyebrow text-ok">Final locked</span>}
           </div>
-          <div className="mt-1 text-xs text-editorial-ivory-mute">{shot.id}</div>
+          <div className="mt-1 text-xs text-mut">{shot.id}</div>
         </div>
-        {loadingAction && <div className="text-xs text-editorial-brass">{loadingAction}...</div>}
+        {loadingAction && <div className="text-xs text-acc">{loadingAction}...</div>}
       </div>
 
       <div className="grid gap-4 p-4 lg:grid-cols-[280px_1fr]">
@@ -363,34 +363,34 @@ function ClipCard({
             <video
               src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(videoUrl)}`}
               controls
-              className="w-full rounded border border-editorial-rule bg-black"
+              className="w-full rounded border border-line bg-black"
             />
           ) : imageUrl ? (
             <img
               src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(imageUrl)}`}
-              className="w-full rounded border border-editorial-rule object-cover"
+              className="w-full rounded border border-line object-cover"
             />
           ) : (
-            <div className="flex aspect-video items-center justify-center rounded border border-editorial-rule bg-editorial-ink text-sm text-editorial-ivory-mute">
+            <div className="flex aspect-video items-center justify-center rounded border border-line bg-app text-sm text-mut">
               No take yet
             </div>
           )}
 
-          <div className="rounded border border-editorial-rule bg-editorial-ink px-3 py-2 text-xs">
+          <div className="rounded border border-line bg-app px-3 py-2 text-xs">
             <div className="flex items-center justify-between">
-              <span className="text-editorial-ivory-mute">Identity</span>
+              <span className="text-mut">Identity</span>
               {formatScore(shotState?.identity_score ?? latestDiagnostic?.scores?.identity)}
             </div>
             <div className="mt-1 flex items-center justify-between">
-              <span className="text-editorial-ivory-mute">Coherence</span>
+              <span className="text-mut">Coherence</span>
               {formatScore(diagnosis?.scores?.coherence ?? latestDiagnostic?.scores?.coherence)}
             </div>
             <div className="mt-1 flex items-center justify-between">
-              <span className="text-editorial-ivory-mute">Motion</span>
+              <span className="text-mut">Motion</span>
               {formatScore(diagnosis?.scores?.motion ?? latestDiagnostic?.scores?.motion)}
             </div>
             {(selectedFinal?.cascade_metadata || selectedFinal?.metadata?.lipsync_cascade) && (
-              <div className="mt-2 border-t border-editorial-rule pt-2">
+              <div className="mt-2 border-t border-line pt-2">
                 <CascadeBadge meta={selectedFinal.cascade_metadata} />
                 <CascadeBadge meta={selectedFinal.metadata?.lipsync_cascade} label="lipsync" />
               </div>
@@ -399,29 +399,29 @@ function ClipCard({
         </div>
 
         <div className="space-y-4">
-          <section className="rounded border border-editorial-rule bg-editorial-ink px-3 py-3">
+          <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">Plan</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Plan</h3>
               <div className="flex gap-2">
                 <button
                   onClick={() => runAction('approve-plan', () => onApprovePlan(shot.id))}
-                  className="rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow-lg text-editorial-ready hover:bg-editorial-ready/10"
+                  className="rounded border border-ok/50 px-2 py-1 text-eyebrow-lg text-ok hover:bg-ok/10"
                 >
                   Approve Plan
                 </button>
                 <button
                   onClick={() => runAction('reject-plan', () => onRejectPlan(shot.id, rejectReason))}
-                  className="rounded border border-editorial-curtain/50 px-2 py-1 text-eyebrow-lg text-editorial-curtain hover:bg-editorial-curtain/10"
+                  className="rounded border border-fail/50 px-2 py-1 text-eyebrow-lg text-fail hover:bg-fail/10"
                 >
                   Reject Plan
                 </button>
               </div>
             </div>
-            <p className="mt-2 text-sm text-editorial-ivory">{shot.prompt}</p>
-            <div className="mt-2 flex flex-wrap gap-2 text-eyebrow-lg text-editorial-ivory-mute">
-              <span className="rounded bg-editorial-ink-soft px-2 py-1">{shot.camera}</span>
-              <span className="rounded bg-editorial-ink-soft px-2 py-1">{shot.target_api}</span>
-              {shot.continuity_constraints && <span className="rounded bg-editorial-ink-soft px-2 py-1">{shot.continuity_constraints}</span>}
+            <p className="mt-2 text-sm text-tx">{shot.prompt}</p>
+            <div className="mt-2 flex flex-wrap gap-2 text-eyebrow-lg text-mut">
+              <span className="rounded bg-panel px-2 py-1">{shot.camera}</span>
+              <span className="rounded bg-panel px-2 py-1">{shot.target_api}</span>
+              {shot.continuity_constraints && <span className="rounded bg-panel px-2 py-1">{shot.continuity_constraints}</span>}
             </div>
             {shot.plan_auto_approved && (
               <AutoApproveBadge
@@ -434,17 +434,17 @@ function ClipCard({
               value={rejectReason}
               onChange={(event) => setRejectReason(event.target.value)}
               placeholder="Reason if rejecting this shot plan"
-              className="mt-3 w-full rounded border border-editorial-rule bg-editorial-ink-soft px-2 py-1.5 text-xs text-editorial-ivory"
+              className="mt-3 w-full rounded border border-line bg-panel px-2 py-1.5 text-xs text-tx"
             />
           </section>
 
-          <section className="rounded border border-editorial-rule bg-editorial-ink px-3 py-3">
+          <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">Keyframes</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Keyframes</h3>
               <button
                 onClick={handleGenerateKeyframeClick}
                 disabled={shot.plan_status !== 'approved'}
-                className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10 disabled:opacity-40"
+                className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
               >
                 Generate Keyframe
               </button>
@@ -467,7 +467,7 @@ function ClipCard({
                 ))}
               </div>
             ) : (
-              <div className="mt-3 text-xs text-editorial-ivory-mute">No keyframe takes yet.</div>
+              <div className="mt-3 text-xs text-mut">No keyframe takes yet.</div>
             )}
             {shot.image_auto_approved && (
               <AutoApproveBadge
@@ -478,29 +478,29 @@ function ClipCard({
             )}
 
             {showRegenForm ? (
-              <div className="mt-3 space-y-2 rounded border border-editorial-brass/30 bg-editorial-ink-soft px-3 py-3">
+              <div className="mt-3 space-y-2 rounded border border-acc/30 bg-panel px-3 py-3">
                 <textarea
                   value={positivePrompt}
                   onChange={(event) => setPositivePrompt(event.target.value)}
                   rows={3}
-                  className="w-full rounded border border-editorial-rule bg-editorial-ink px-2 py-1.5 text-xs text-editorial-ivory"
+                  className="w-full rounded border border-line bg-app px-2 py-1.5 text-xs text-tx"
                 />
                 <textarea
                   value={negativePrompt}
                   onChange={(event) => setNegativePrompt(event.target.value)}
                   rows={2}
-                  className="w-full rounded border border-editorial-rule bg-editorial-ink px-2 py-1.5 text-xs text-editorial-ivory"
+                  className="w-full rounded border border-line bg-app px-2 py-1.5 text-xs text-tx"
                 />
                 <div className="flex gap-2">
                   <button
                     onClick={handleRegenerate}
-                    className="rounded bg-editorial-brass px-3 py-1.5 text-xs text-white"
+                    className="rounded bg-acc px-3 py-1.5 text-xs text-white"
                   >
                     Create New Take
                   </button>
                   <button
                     onClick={() => setShowRegenForm(false)}
-                    className="rounded border border-editorial-rule px-3 py-1.5 text-xs text-editorial-ivory-mute"
+                    className="rounded border border-line px-3 py-1.5 text-xs text-mut"
                   >
                     Cancel
                   </button>
@@ -509,7 +509,7 @@ function ClipCard({
             ) : (
               <button
                 onClick={() => setShowRegenForm(true)}
-                className="mt-3 text-xs text-editorial-brass hover:text-editorial-brass-deep"
+                className="mt-3 text-xs text-acc hover:text-acc"
               >
                 Adjust prompts and create another keyframe take
               </button>
@@ -521,25 +521,25 @@ function ClipCard({
               Highlighted with a brass accent when PERFORMANCE_REVIEW is active. */}
           <section className={`rounded border px-3 py-3 ${
             activeStage === 'PERFORMANCE_REVIEW'
-              ? 'border-editorial-brass/60 bg-editorial-brass/5'
-              : 'border-editorial-rule bg-editorial-ink'
+              ? 'border-acc/60 bg-acc/5'
+              : 'border-line bg-app'
           }`}>
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">
                 Performance Capture
                 {performanceEngine && performanceEngine !== 'SKIP' && (
-                  <span className="ml-2 rounded bg-editorial-brass/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-brass">
+                  <span className="ml-2 rounded bg-acc/20 px-1.5 py-0.5 text-eyebrow-lg text-acc">
                     {performanceEngine}
                   </span>
                 )}
                 {performanceEngine === 'SKIP' && (
-                  <span className="ml-2 rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow-lg text-editorial-ivory-mute">
+                  <span className="ml-2 rounded bg-panel px-1.5 py-0.5 text-eyebrow-lg text-mut">
                     SKIP (wide / no characters)
                   </span>
                 )}
               </h3>
               <div className="flex gap-2">
-                <label className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10 cursor-pointer">
+                <label className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 cursor-pointer">
                   {drivingVideoPath ? '↻ Replace driving' : '+ Upload driving'}
                   <input
                     type="file"
@@ -560,7 +560,7 @@ function ClipCard({
                   <button
                     onClick={() => runAction('approve-performance', () => onApprovePerformance(shot.id, latestPerformanceTake.id))}
                     disabled={loadingAction === 'approve-performance'}
-                    className="rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow-lg text-editorial-ready hover:bg-editorial-ready/10 disabled:opacity-40"
+                    className="rounded border border-ok/50 px-2 py-1 text-eyebrow-lg text-ok hover:bg-ok/10 disabled:opacity-40"
                   >
                     {loadingAction === 'approve-performance' ? 'Approving…' : 'Approve'}
                   </button>
@@ -571,7 +571,7 @@ function ClipCard({
                       if (!confirm('Clear performance take? Next run will regenerate.')) return
                       await fetch(`${API}/projects/${projectId}/shots/${shot.id}/performance`, { method: 'DELETE' })
                     }}
-                    className="rounded border border-editorial-curtain/50 px-2 py-1 text-eyebrow-lg text-editorial-curtain hover:bg-editorial-curtain/10"
+                    className="rounded border border-fail/50 px-2 py-1 text-eyebrow-lg text-fail hover:bg-fail/10"
                   >
                     Re-record (clear)
                   </button>
@@ -586,7 +586,7 @@ function ClipCard({
                   && !iteratingPerformance && (
                   <button
                     onClick={() => setIteratingPerformance(true)}
-                    className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10"
+                    className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10"
                     title="Open directorial iteration panel to generate a new performance take"
                   >
                     Iterate
@@ -622,16 +622,16 @@ function ClipCard({
             {(performanceIdentity != null || motionFidelity != null) && (
               <>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                  <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
-                    <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Identity (ArcFace)</div>
+                  <div className="rounded bg-panel px-2 py-1.5">
+                    <div className="text-mut uppercase text-eyebrow-lg">Identity (ArcFace)</div>
                     <div className="mt-0.5 font-mono">
                       {typeof performanceIdentity === 'number'
                         ? performanceIdentity.toFixed(3)
                         : '—'}
                     </div>
                   </div>
-                  <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
-                    <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Motion fidelity</div>
+                  <div className="rounded bg-panel px-2 py-1.5">
+                    <div className="text-mut uppercase text-eyebrow-lg">Motion fidelity</div>
                     <div className="mt-0.5 font-mono">
                       {typeof motionFidelity === 'number'
                         ? motionFidelity.toFixed(3)
@@ -644,7 +644,7 @@ function ClipCard({
                 {performanceMetadata.motion_floor_failed === true && resolvedShotType && (
                   <span
                     role="status"
-                    className="ml-2 rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-curtain"
+                    className="ml-2 rounded bg-fail/20 px-1.5 py-0.5 text-eyebrow-lg text-fail"
                   >
                     below {resolvedShotType} floor
                   </span>
@@ -653,20 +653,20 @@ function ClipCard({
             )}
 
             {performanceEngine === 'SKIP' && !performanceVideoPath && (
-              <p className="mt-3 text-xs text-editorial-ivory-mute italic">
+              <p className="mt-3 text-xs text-mut italic">
                 Skipped: this shot doesn't benefit from performance capture (no characters or framing too wide).
                 Motion will use plain text-to-video.
               </p>
             )}
           </section>
 
-          <section className="rounded border border-editorial-rule bg-editorial-ink px-3 py-3">
+          <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">Motion and Final Takes</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Motion and Final Takes</h3>
               <button
                 onClick={() => runAction('motion', () => onGenerateMotion(shot.id))}
                 disabled={!shot.approved_keyframe_take_id}
-                className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10 disabled:opacity-40"
+                className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
               >
                 Generate Motion
               </button>
@@ -697,7 +697,7 @@ function ClipCard({
                 ))}
               </div>
             ) : (
-              <div className="mt-3 text-xs text-editorial-ivory-mute">No motion or postprocess takes yet.</div>
+              <div className="mt-3 text-xs text-mut">No motion or postprocess takes yet.</div>
             )}
             {shot.motion_auto_approved && (
               <AutoApproveBadge
@@ -725,7 +725,7 @@ function ClipCard({
                   key={tool.action}
                   onClick={() => handleCorrect(tool.action)}
                   disabled={!selectedFinal?.id}
-                  className="rounded border border-editorial-rule px-2 py-1 text-eyebrow-lg text-editorial-ivory hover:bg-editorial-ink-rise disabled:opacity-40"
+                  className="rounded border border-line px-2 py-1 text-eyebrow-lg text-tx hover:bg-head disabled:opacity-40"
                 >
                   {tool.label}
                 </button>
@@ -736,7 +736,7 @@ function ClipCard({
                   event.target.value = ''
                 }}
                 disabled={!selectedFinal?.id}
-                className="rounded border border-editorial-rule bg-editorial-ink-soft px-2 py-1 text-eyebrow-lg text-editorial-ivory disabled:opacity-40"
+                className="rounded border border-line bg-panel px-2 py-1 text-eyebrow-lg text-tx disabled:opacity-40"
               >
                 <option value="">Color Grade</option>
                 {COLOR_PRESETS.map((preset) => (
@@ -749,7 +749,7 @@ function ClipCard({
                   event.target.value = ''
                 }}
                 disabled={!selectedFinal?.id}
-                className="rounded border border-editorial-rule bg-editorial-ink-soft px-2 py-1 text-eyebrow-lg text-editorial-ivory disabled:opacity-40"
+                className="rounded border border-line bg-panel px-2 py-1 text-eyebrow-lg text-tx disabled:opacity-40"
               >
                 <option value="">Speed</option>
                 {SPEED_OPTIONS.map((option) => (
@@ -759,14 +759,14 @@ function ClipCard({
               <button
                 onClick={handleDiagnose}
                 disabled={!activeTakeId || diagnosing}
-                className="rounded border border-editorial-rule px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10 disabled:opacity-40"
+                className="rounded border border-line px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
               >
                 {diagnosing ? 'Diagnosing...' : 'Diagnose'}
               </button>
               <button
                 onClick={handleDeepDiagnose}
                 disabled={!activeTakeId || deepDiagnosing || diagnosis?.deep_available === false}
-                className="rounded border border-editorial-warn/50 px-2 py-1 text-eyebrow-lg text-editorial-warn hover:bg-editorial-warn/10 disabled:opacity-40"
+                className="rounded border border-warn/50 px-2 py-1 text-eyebrow-lg text-warn hover:bg-warn/10 disabled:opacity-40"
                 title={diagnosis?.deep_available === false ? 'Deep diagnosis not available for this take' : 'Run LLM-powered deep diagnosis'}
               >
                 {deepDiagnosing ? 'Deep diagnosing...' : 'Deep diagnose'}
@@ -774,11 +774,11 @@ function ClipCard({
             </div>
 
             {(diagnosis?.recommendations?.length || latestDiagnostic?.recommendations?.length) ? (
-              <div className="mt-3 rounded border border-editorial-warn/20 bg-editorial-warn/5 px-3 py-2 text-xs">
+              <div className="mt-3 rounded border border-warn/20 bg-warn/5 px-3 py-2 text-xs">
                 {(diagnosis?.recommendations || latestDiagnostic?.recommendations || []).map((recommendation: { tool: string; reason: string }, index: number) => (
                   <div key={`${recommendation.tool}-${index}`} className="mt-1 flex items-center gap-2">
-                    <span className="text-editorial-warn">{recommendation.tool}</span>
-                    <span className="text-editorial-ivory-mute">{recommendation.reason}</span>
+                    <span className="text-warn">{recommendation.tool}</span>
+                    <span className="text-mut">{recommendation.reason}</span>
                   </div>
                 ))}
               </div>
@@ -792,30 +792,30 @@ function ClipCard({
               const advisory = diagnosis?.remediation_advisory ?? activeTake?.metadata?.remediation_advisory
               if (!advisory) return null
               return (
-                <div className="mt-3 rounded border border-editorial-warn/30 bg-editorial-warn/5 px-3 py-3 text-xs space-y-2">
-                  <div className="font-semibold uppercase tracking-wide text-editorial-warn text-eyebrow-lg">
+                <div className="mt-3 rounded border border-warn/30 bg-warn/5 px-3 py-3 text-xs space-y-2">
+                  <div className="font-semibold uppercase tracking-wide text-warn text-eyebrow-lg">
                     Identity Remediation Advisory
                   </div>
                   {advisory.failure_reason && (
-                    <div className="text-editorial-ivory-mute">{advisory.failure_reason}</div>
+                    <div className="text-mut">{advisory.failure_reason}</div>
                   )}
                   {advisory.suggested_negative_prompt && (
                     <div className="space-y-1">
-                      <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Suggested negative prompt</div>
-                      <code className="block font-mono bg-editorial-ink px-2 py-1.5 rounded text-editorial-ivory break-all whitespace-pre-wrap">
+                      <div className="text-mut uppercase text-eyebrow tracking-wide">Suggested negative prompt</div>
+                      <code className="block font-mono bg-app px-2 py-1.5 rounded text-tx break-all whitespace-pre-wrap">
                         {advisory.suggested_negative_prompt}
                       </code>
                       <button
                         onClick={() => setNegativePrompt(advisory.suggested_negative_prompt)}
-                        className="text-editorial-brass hover:text-editorial-brass-deep underline underline-offset-2"
+                        className="text-acc hover:text-acc underline underline-offset-2"
                       >
                         Apply negative prompt
                       </button>
                     </div>
                   )}
                   {advisory.suggested_pulid_adjustment && (
-                    <div className="text-editorial-ivory-mute">
-                      <span className="text-editorial-warn">PuLID adjustment:</span>{' '}
+                    <div className="text-mut">
+                      <span className="text-warn">PuLID adjustment:</span>{' '}
                       {typeof advisory.suggested_pulid_adjustment === 'number'
                         ? `PuLID weight ${advisory.suggested_pulid_adjustment > 0 ? '+' : ''}${advisory.suggested_pulid_adjustment}`
                         : String(advisory.suggested_pulid_adjustment)}
@@ -827,39 +827,39 @@ function ClipCard({
 
             {/* Deep advisory — LLM diagnosis result */}
             {diagnosis?.advisory_deep && (
-              <div className="mt-3 rounded border border-editorial-warn/30 bg-editorial-warn/5 px-3 py-3 text-xs space-y-2">
-                <div className="font-semibold uppercase tracking-wide text-editorial-warn text-eyebrow-lg">
+              <div className="mt-3 rounded border border-warn/30 bg-warn/5 px-3 py-3 text-xs space-y-2">
+                <div className="font-semibold uppercase tracking-wide text-warn text-eyebrow-lg">
                   Deep Diagnosis
-                  <span className="ml-2 rounded bg-editorial-ink px-1.5 py-0.5 text-editorial-ivory-mute font-normal normal-case tracking-normal">
+                  <span className="ml-2 rounded bg-app px-1.5 py-0.5 text-mut font-normal normal-case tracking-normal">
                     {diagnosis.advisory_deep.source ?? 'llm'}
                   </span>
                 </div>
                 {diagnosis.advisory_deep.visual_findings && (
                   <div className="space-y-1">
-                    <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Visual findings</div>
-                    <div className="text-editorial-ivory-mute">{diagnosis.advisory_deep.visual_findings}</div>
+                    <div className="text-mut uppercase text-eyebrow tracking-wide">Visual findings</div>
+                    <div className="text-mut">{diagnosis.advisory_deep.visual_findings}</div>
                   </div>
                 )}
                 {diagnosis.advisory_deep.diagnosis && (
-                  <div className="text-editorial-ivory-mute">{diagnosis.advisory_deep.diagnosis}</div>
+                  <div className="text-mut">{diagnosis.advisory_deep.diagnosis}</div>
                 )}
                 {diagnosis.advisory_deep.prompt_mutation && (
                   <div className="space-y-1">
-                    <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Prompt mutation</div>
-                    <code className="block font-mono bg-editorial-ink px-2 py-1.5 rounded text-editorial-ivory break-all whitespace-pre-wrap">
+                    <div className="text-mut uppercase text-eyebrow tracking-wide">Prompt mutation</div>
+                    <code className="block font-mono bg-app px-2 py-1.5 rounded text-tx break-all whitespace-pre-wrap">
                       {diagnosis.advisory_deep.prompt_mutation}
                     </code>
                   </div>
                 )}
                 {diagnosis.advisory_deep.mutation_focus && (
-                  <div className="text-editorial-ivory-mute">
-                    <span className="text-editorial-warn">Focus:</span>{' '}
+                  <div className="text-mut">
+                    <span className="text-warn">Focus:</span>{' '}
                     {diagnosis.advisory_deep.mutation_focus}
                   </div>
                 )}
                 {diagnosis.advisory_deep.decision && (
-                  <div className="text-editorial-ivory-mute">
-                    <span className="text-editorial-warn">Decision:</span>{' '}
+                  <div className="text-mut">
+                    <span className="text-warn">Decision:</span>{' '}
                     {diagnosis.advisory_deep.decision}
                   </div>
                 )}
@@ -868,7 +868,7 @@ function ClipCard({
 
             {/* Deep error note */}
             {diagnosis?.deep_error && (
-              <div className="mt-2 text-eyebrow-lg text-editorial-ivory-faint italic">
+              <div className="mt-2 text-eyebrow-lg text-dim italic">
                 Deep diagnosis unavailable: {diagnosis.deep_error}
               </div>
             )}
@@ -936,13 +936,13 @@ export default function ReviewStage({
     <div className="space-y-4 p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-editorial-brass">Guided Production Review</h2>
-          <p className="mt-1 text-xs text-editorial-ivory-mute">{stageCopy}</p>
+          <h2 className="text-lg font-semibold text-acc">Guided Production Review</h2>
+          <p className="mt-1 text-xs text-mut">{stageCopy}</p>
         </div>
         <button
           onClick={() => void onProceedToAssembly()}
           disabled={!assemblyReady}
-          className="rounded-lg bg-editorial-ready px-6 py-2.5 text-sm font-semibold text-white shadow-glow-success disabled:opacity-40"
+          className="rounded-lg bg-ok px-6 py-2.5 text-sm font-semibold text-white shadow-glow-success disabled:opacity-40"
         >
           Assemble Approved Film
         </button>
@@ -974,7 +974,7 @@ export default function ReviewStage({
           ))}
         </div>
       ) : (
-        <div className="py-20 text-center text-editorial-ivory-mute">
+        <div className="py-20 text-center text-mut">
           <p className="text-lg">No shots available</p>
         </div>
       )}

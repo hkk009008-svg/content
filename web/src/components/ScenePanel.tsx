@@ -144,11 +144,11 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
   return (
     <div className="p-4">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-editorial-ivory-mute uppercase tracking-wider">
+        <h2 className="text-sm font-semibold text-mut uppercase tracking-wider">
           Scene Timeline ({project.scenes.length} scenes)
         </h2>
         <button onClick={() => setAdding(true)}
-          className="bg-editorial-brass hover:bg-editorial-brass px-3 py-1.5 rounded text-white text-xs font-medium">
+          className="bg-acc hover:bg-acc px-3 py-1.5 rounded text-white text-xs font-medium">
           + Add Scene
         </button>
       </div>
@@ -163,21 +163,21 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
             onDragOver={(e) => handleDragOver(e, scene.id)}
             onDrop={() => handleDrop(scene.id)}
             onDragEnd={() => { setDraggedId(null); setDragOverId(null) }}
-            className={`bg-editorial-ink-soft border rounded-lg overflow-hidden transition-all ${
-              dragOverId === scene.id ? 'border-editorial-brass ring-1 ring-editorial-brass/50' :
-              draggedId === scene.id ? 'opacity-50 border-editorial-rule' : 'border-editorial-rule'
+            className={`bg-panel border rounded-lg overflow-hidden transition-all ${
+              dragOverId === scene.id ? 'border-acc ring-1 ring-acc/50' :
+              draggedId === scene.id ? 'opacity-50 border-line' : 'border-line'
             }`}
           >
             {/* Scene Header */}
             <div
-              className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-editorial-ink/50"
+              className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-app/50"
               onClick={() => setEditing(editing === scene.id ? null : scene.id)}
             >
               <div className="flex items-center gap-3">
-                <span className="text-editorial-ivory-mute text-xs font-mono w-6">{idx + 1}</span>
+                <span className="text-mut text-xs font-mono w-6">{idx + 1}</span>
                 <div>
-                  <div className="text-editorial-ivory text-sm font-medium">{scene.title}</div>
-                  <div className="text-editorial-ivory-mute text-xs mt-0.5">
+                  <div className="text-tx text-sm font-medium">{scene.title}</div>
+                  <div className="text-mut text-xs mt-0.5">
                     {scene.characters_present.length} chars
                     {scene.location_id && ` / ${project.locations.find(l => l.id === scene.location_id)?.name || 'Unknown'}`}
                     {' / '}{scene.duration_seconds}s
@@ -186,37 +186,37 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-eyebrow px-2 py-0.5 rounded ${scene.mood === 'tense' ? 'bg-red-900/30 text-red-400' : scene.mood === 'melancholic' ? 'bg-blue-900/30 text-blue-400' : 'bg-editorial-ink text-editorial-ivory-mute'}`}>
+                <span className={`text-eyebrow px-2 py-0.5 rounded ${scene.mood === 'tense' ? 'bg-red-900/30 text-red-400' : scene.mood === 'melancholic' ? 'bg-blue-900/30 text-blue-400' : 'bg-app text-mut'}`}>
                   {scene.mood}
                 </span>
                 <button onClick={e => { e.stopPropagation(); handleDelete(scene.id) }}
-                  className="text-editorial-ivory-mute hover:text-editorial-curtain text-xs">X</button>
+                  className="text-mut hover:text-fail text-xs">X</button>
               </div>
             </div>
 
             {/* Expanded Editor */}
             {editing === scene.id && (
-              <div className="border-t border-editorial-rule px-4 py-3 space-y-3 bg-editorial-ink/30">
-                <div className="text-xs text-editorial-ivory-mute line-clamp-2">{scene.action}</div>
+              <div className="border-t border-line px-4 py-3 space-y-3 bg-app/30">
+                <div className="text-xs text-mut line-clamp-2">{scene.action}</div>
 
                 {/* Action */}
                 <div>
-                  <label className="text-xs text-editorial-ivory-mute block mb-1">Action / What happens</label>
+                  <label className="text-xs text-mut block mb-1">Action / What happens</label>
                   <textarea
                     defaultValue={scene.action}
                     onBlur={e => handleUpdate(scene.id, { action: e.target.value })}
                     rows={2} placeholder="Describe what happens in this scene..."
-                    className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass resize-none"
+                    className="w-full bg-panel border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc resize-none"
                   />
                 </div>
 
                 {/* Dialogue */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs text-editorial-ivory-mute">Dialogue</label>
+                    <label className="text-xs text-mut">Dialogue</label>
                     <button onClick={() => handleGenerateDialogue(scene.id)}
                       disabled={generatingDialogue === scene.id}
-                      className="text-eyebrow text-editorial-brass hover:text-editorial-brass">
+                      className="text-eyebrow text-acc hover:text-acc">
                       {generatingDialogue === scene.id ? 'Generating...' : 'Auto-generate'}
                     </button>
                   </div>
@@ -224,13 +224,13 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                     defaultValue={scene.dialogue}
                     onBlur={e => handleUpdate(scene.id, { dialogue: e.target.value })}
                     rows={3} placeholder="Character Name: dialogue line..."
-                    className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass resize-none font-mono text-xs"
+                    className="w-full bg-panel border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc resize-none font-mono text-xs"
                   />
                 </div>
 
                 {/* Characters in scene */}
                 <div>
-                  <label className="text-xs text-editorial-ivory-mute block mb-1">Characters in scene</label>
+                  <label className="text-xs text-mut block mb-1">Characters in scene</label>
                   <div className="flex flex-wrap gap-1">
                     {project.characters.map(c => {
                       const active = scene.characters_present.includes(c.id)
@@ -241,7 +241,7 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                               ? scene.characters_present.filter(x => x !== c.id)
                               : [...scene.characters_present, c.id]
                           })}
-                          className={`px-2 py-1 rounded text-xs ${active ? 'bg-editorial-brass text-white' : 'bg-editorial-ink-soft text-editorial-ivory-mute border border-editorial-rule'}`}>
+                          className={`px-2 py-1 rounded text-xs ${active ? 'bg-acc text-white' : 'bg-panel text-mut border border-line'}`}>
                           {c.name}
                         </button>
                       )
@@ -252,70 +252,70 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                 {/* Location + Mood + Duration row */}
                 <div className="grid grid-cols-3 gap-2">
                   <div>
-                    <label className="text-xs text-editorial-ivory-mute block mb-1">Location</label>
+                    <label className="text-xs text-mut block mb-1">Location</label>
                     <select
                       value={scene.location_id}
                       onChange={e => handleUpdate(scene.id, { location_id: e.target.value })}
-                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory">
+                      className="w-full bg-panel border border-line rounded px-2 py-1.5 text-xs text-tx">
                       <option value="">None</option>
                       {project.locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-editorial-ivory-mute block mb-1">Mood</label>
+                    <label className="text-xs text-mut block mb-1">Mood</label>
                     <select
                       value={scene.mood}
                       onChange={e => handleUpdate(scene.id, { mood: e.target.value })}
-                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory">
+                      className="w-full bg-panel border border-line rounded px-2 py-1.5 text-xs text-tx">
                       {(config?.mood_options || ['cinematic', 'melancholic', 'tense', 'hopeful', 'dark']).map(m =>
                         <option key={m} value={m}>{m}</option>
                       )}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-editorial-ivory-mute block mb-1">Duration (s)</label>
+                    <label className="text-xs text-mut block mb-1">Duration (s)</label>
                     <input type="number" min={2} max={30} step={0.5}
                       value={scene.duration_seconds}
                       onChange={e => handleUpdate(scene.id, { duration_seconds: parseFloat(e.target.value) })}
-                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory" />
+                      className="w-full bg-panel border border-line rounded px-2 py-1.5 text-xs text-tx" />
                   </div>
                 </div>
 
                 {/* Camera direction */}
                 <div>
-                  <label className="text-xs text-editorial-ivory-mute block mb-1">Camera direction (optional — AI will decide if blank)</label>
+                  <label className="text-xs text-mut block mb-1">Camera direction (optional — AI will decide if blank)</label>
                   <input type="text"
                     defaultValue={scene.camera_direction}
                     onBlur={e => handleUpdate(scene.id, { camera_direction: e.target.value })}
                     placeholder="e.g., Start ECU on hands, pull back to wide, dolly right to reveal..."
-                    className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-xs text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass" />
+                    className="w-full bg-panel border border-line rounded px-3 py-2 text-xs text-tx placeholder:text-mut focus:outline-none focus:border-acc" />
                 </div>
 
                 {(() => {
                   const guidance = getSceneGuidance(scene)
                   return (
-                    <div className="rounded-lg border border-editorial-brass/20 bg-editorial-brass/5 p-3">
+                    <div className="rounded-lg border border-acc/20 bg-acc/5 p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-xs font-semibold text-editorial-ivory">{guidance.title}</div>
-                          <p className="mt-1 text-eyebrow-lg leading-relaxed text-editorial-ivory-mute">{guidance.recommendation}</p>
+                          <div className="text-xs font-semibold text-tx">{guidance.title}</div>
+                          <p className="mt-1 text-eyebrow-lg leading-relaxed text-mut">{guidance.recommendation}</p>
                         </div>
-                        <span className="rounded bg-editorial-ink px-2 py-0.5 text-eyebrow uppercase tracking-wide text-editorial-brass">{guidance.mode}</span>
+                        <span className="rounded bg-app px-2 py-0.5 text-eyebrow uppercase tracking-wide text-acc">{guidance.mode}</span>
                       </div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <div>
-                          <div className="text-eyebrow font-mono uppercase text-editorial-brass">Coverage</div>
+                          <div className="text-eyebrow font-mono uppercase text-acc">Coverage</div>
                           <div className="mt-1 space-y-1">
                             {guidance.coverage.map((item) => (
-                              <div key={item} className="text-eyebrow-lg text-editorial-ivory-mute">{item}</div>
+                              <div key={item} className="text-eyebrow-lg text-mut">{item}</div>
                             ))}
                           </div>
                         </div>
                         <div>
-                          <div className="text-eyebrow font-mono uppercase text-editorial-brass">Parameter Focus</div>
+                          <div className="text-eyebrow font-mono uppercase text-acc">Parameter Focus</div>
                           <div className="mt-1 space-y-1">
                             {guidance.parameterTips.map((item) => (
-                              <div key={item} className="text-eyebrow-lg text-editorial-ivory-mute">{item}</div>
+                              <div key={item} className="text-eyebrow-lg text-mut">{item}</div>
                             ))}
                           </div>
                         </div>
@@ -327,7 +327,7 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                 {/* Shot breakdown preview */}
                 {scene.shots && scene.shots.length > 0 && (
                   <div>
-                    <label className="text-xs text-editorial-ivory-mute block mb-1">Shot Breakdown ({scene.shots.length} shots)</label>
+                    <label className="text-xs text-mut block mb-1">Shot Breakdown ({scene.shots.length} shots)</label>
                     <div className="space-y-1">
                       {scene.shots.map((shot, si) => {
                         const shotType = classifyShotType(shot)
@@ -368,22 +368,22 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                             )
                           : []
                         return (
-                          <div key={shot.id || si} className="rounded bg-editorial-ink-soft px-2 py-1.5 text-eyebrow text-editorial-ivory-mute">
+                          <div key={shot.id || si} className="rounded bg-panel px-2 py-1.5 text-eyebrow text-mut">
                             <div className="flex gap-2">
-                              <span className="font-mono text-editorial-brass">{si + 1}</span>
+                              <span className="font-mono text-acc">{si + 1}</span>
                               <span className="flex-1 line-clamp-1">{shot.prompt?.slice(0, 80)}...</span>
                               <span>{shot.camera}</span>
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2">
-                              <span className="rounded bg-editorial-ink px-1.5 py-0.5 text-eyebrow-sm uppercase text-editorial-brass">{shotType}</span>
+                              <span className="rounded bg-app px-1.5 py-0.5 text-eyebrow-sm uppercase text-acc">{shotType}</span>
                               {template && (
-                                <span className="rounded bg-editorial-ink px-1.5 py-0.5 text-eyebrow-sm">CFG {template.guidance} / {template.steps} steps</span>
+                                <span className="rounded bg-app px-1.5 py-0.5 text-eyebrow-sm">CFG {template.guidance} / {template.steps} steps</span>
                               )}
                               {/* Per-shot API override picker */}
                               <select
                                 value={shot.target_api || 'AUTO'}
                                 onChange={e => updateShotApi(e.target.value)}
-                                className="rounded bg-editorial-ink border border-editorial-rule px-1 py-0.5 text-eyebrow-sm text-editorial-ivory"
+                                className="rounded bg-app border border-line px-1 py-0.5 text-eyebrow-sm text-tx"
                                 title="Override target API for this shot">
                                 {videoApiOptions.map(([k, v]: any) => (
                                   <option key={k} value={k}>
@@ -392,41 +392,41 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                                 ))}
                               </select>
                               {shot.target_api && shot.target_api !== recommendedApi && (
-                                <span className="text-eyebrow-sm text-editorial-warn" title={`Best for ${shotType}: ${recommendedApi}`}>
+                                <span className="text-eyebrow-sm text-warn" title={`Best for ${shotType}: ${recommendedApi}`}>
                                   ⚠ override
                                 </span>
                               )}
                             </div>
                             {/* Performance capture status + driving video upload */}
                             <div className="mt-1 flex flex-wrap items-center gap-1">
-                              <span className="text-eyebrow-sm text-editorial-ivory-mute">Performance:</span>
+                              <span className="text-eyebrow-sm text-mut">Performance:</span>
                               {(() => {
                                 const eng = (shot as any).performance_engine || ''
                                 const approvedId = (shot as any).approved_performance_take_id || ''
                                 const drivingUploaded = !!((shot as any).driving_video_path)
                                 if (eng === 'SKIP') {
-                                  return <span className="text-eyebrow-sm text-editorial-ivory-mute italic">skipped (wide/no-dialogue)</span>
+                                  return <span className="text-eyebrow-sm text-mut italic">skipped (wide/no-dialogue)</span>
                                 }
                                 if (approvedId) {
                                   return (
                                     <>
-                                      <span className="text-eyebrow-sm text-editorial-ready font-bold">✓ {eng || 'captured'}</span>
+                                      <span className="text-eyebrow-sm text-ok font-bold">✓ {eng || 'captured'}</span>
                                       <button
                                         onClick={async () => {
                                           if (!confirm('Clear performance take? Next run will regenerate.')) return
                                           await fetch(`${API}/projects/${project.id}/shots/${shot.id}/performance`, { method: 'DELETE' })
                                           onRefresh()
                                         }}
-                                        className="text-eyebrow-sm text-editorial-curtain hover:underline">
+                                        className="text-eyebrow-sm text-fail hover:underline">
                                         clear
                                       </button>
                                     </>
                                   )
                                 }
-                                return <span className="text-eyebrow-sm text-editorial-ivory-mute">{eng || 'pending'}</span>
+                                return <span className="text-eyebrow-sm text-mut">{eng || 'pending'}</span>
                               })()}
                               {/* Driving video upload (Mode A) */}
-                              <label className="text-eyebrow-sm text-editorial-brass hover:text-editorial-brass cursor-pointer underline ml-2">
+                              <label className="text-eyebrow-sm text-acc hover:text-acc cursor-pointer underline ml-2">
                                 {((shot as any).driving_video_path) ? '↻ replace driving' : '+ upload driving'}
                                 <input
                                   type="file"
@@ -450,7 +450,7 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                             {/* Objects-in-frame editor */}
                             {(project.objects || []).length > 0 && (
                               <div className="mt-1 flex flex-wrap items-center gap-1">
-                                <span className="text-eyebrow-sm text-editorial-ivory-mute">Objects:</span>
+                                <span className="text-eyebrow-sm text-mut">Objects:</span>
                                 {(project.objects || []).map((o: any) => {
                                   const inFrame = objsInFrame.includes(o.id)
                                   return (
@@ -459,8 +459,8 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                                       onClick={() => toggleObjectInFrame(o.id)}
                                       className={`text-eyebrow-sm px-1.5 py-0.5 rounded border transition-colors ${
                                         inFrame
-                                          ? 'bg-editorial-brass/20 border-editorial-brass/50 text-editorial-brass'
-                                          : 'bg-editorial-ink border-editorial-rule text-editorial-ivory-mute hover:border-editorial-brass/30'
+                                          ? 'bg-acc/20 border-acc/50 text-acc'
+                                          : 'bg-app border-line text-mut hover:border-acc/30'
                                       }`}
                                       title={o.brand ? `${o.brand} — ${o.description}` : o.description}>
                                       {inFrame ? '✓ ' : ''}{o.name}
@@ -477,7 +477,7 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                 )}
 
                 <button onClick={() => handleDecompose(scene.id)}
-                  className="w-full border border-editorial-brass/40 hover:bg-editorial-brass/10 rounded py-1.5 text-editorial-brass text-xs">
+                  className="w-full border border-acc/40 hover:bg-acc/10 rounded py-1.5 text-acc text-xs">
                   {scene.shots?.length ? 'Re-decompose into shots' : 'Decompose into shots'}
                 </button>
               </div>
@@ -488,23 +488,23 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
 
       {/* Add Scene Form */}
       {adding && (
-        <div className="mt-4 bg-editorial-ink-soft border border-editorial-brass/30 rounded-lg p-4 space-y-3">
-          <h3 className="text-sm font-medium text-editorial-ivory">New Scene</h3>
+        <div className="mt-4 bg-panel border border-acc/30 rounded-lg p-4 space-y-3">
+          <h3 className="text-sm font-medium text-tx">New Scene</h3>
           <input type="text" placeholder="Scene title" value={form.title}
             onChange={e => setForm({ ...form, title: e.target.value })}
-            className="w-full bg-editorial-ink border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass" />
+            className="w-full bg-app border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc" />
           <textarea placeholder="What happens in this scene..."
             value={form.action} onChange={e => setForm({ ...form, action: e.target.value })}
-            rows={2} className="w-full bg-editorial-ink border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass resize-none" />
+            rows={2} className="w-full bg-app border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc resize-none" />
           <textarea placeholder="Dialogue (optional — can auto-generate later)"
             value={form.dialogue} onChange={e => setForm({ ...form, dialogue: e.target.value })}
-            rows={2} className="w-full bg-editorial-ink border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass resize-none font-mono text-xs" />
+            rows={2} className="w-full bg-app border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc resize-none font-mono text-xs" />
           <div>
-            <label className="text-xs text-editorial-ivory-mute block mb-1">Characters</label>
+            <label className="text-xs text-mut block mb-1">Characters</label>
             <div className="flex flex-wrap gap-1">
               {project.characters.map(c => (
                 <button key={c.id} onClick={() => toggleCharacter(c.id)}
-                  className={`px-2 py-1 rounded text-xs ${form.characters_present.includes(c.id) ? 'bg-editorial-brass text-white' : 'bg-editorial-ink text-editorial-ivory-mute border border-editorial-rule'}`}>
+                  className={`px-2 py-1 rounded text-xs ${form.characters_present.includes(c.id) ? 'bg-acc text-white' : 'bg-app text-mut border border-line'}`}>
                   {c.name}
                 </button>
               ))}
@@ -512,40 +512,40 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
           </div>
           <div className="grid grid-cols-3 gap-2">
             <select value={form.location_id} onChange={e => setForm({ ...form, location_id: e.target.value })}
-              className="bg-editorial-ink border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory">
+              className="bg-app border border-line rounded px-2 py-1.5 text-xs text-tx">
               <option value="">Location...</option>
               {project.locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
             </select>
             <select value={form.mood} onChange={e => setForm({ ...form, mood: e.target.value })}
-              className="bg-editorial-ink border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory">
+              className="bg-app border border-line rounded px-2 py-1.5 text-xs text-tx">
               {(config?.mood_options || ['cinematic']).map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <input type="number" min={2} max={30} step={0.5} value={form.duration_seconds}
               onChange={e => setForm({ ...form, duration_seconds: e.target.value })}
-              className="bg-editorial-ink border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory" placeholder="Duration (s)" />
+              className="bg-app border border-line rounded px-2 py-1.5 text-xs text-tx" placeholder="Duration (s)" />
           </div>
-          <div className="rounded-lg border border-editorial-brass/20 bg-editorial-brass/5 p-3">
+          <div className="rounded-lg border border-acc/20 bg-acc/5 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-xs font-semibold text-editorial-ivory">{addSceneGuidance.title}</div>
-                <p className="mt-1 text-eyebrow-lg leading-relaxed text-editorial-ivory-mute">{addSceneGuidance.recommendation}</p>
+                <div className="text-xs font-semibold text-tx">{addSceneGuidance.title}</div>
+                <p className="mt-1 text-eyebrow-lg leading-relaxed text-mut">{addSceneGuidance.recommendation}</p>
               </div>
-              <span className="rounded bg-editorial-ink px-2 py-0.5 text-eyebrow uppercase tracking-wide text-editorial-brass">{addSceneGuidance.mode}</span>
+              <span className="rounded bg-app px-2 py-0.5 text-eyebrow uppercase tracking-wide text-acc">{addSceneGuidance.mode}</span>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <div>
-                <div className="text-eyebrow font-mono uppercase text-editorial-brass">Coverage</div>
+                <div className="text-eyebrow font-mono uppercase text-acc">Coverage</div>
                 <div className="mt-1 space-y-1">
                   {addSceneGuidance.coverage.map((item) => (
-                    <div key={item} className="text-eyebrow-lg text-editorial-ivory-mute">{item}</div>
+                    <div key={item} className="text-eyebrow-lg text-mut">{item}</div>
                   ))}
                 </div>
               </div>
               <div>
-                <div className="text-eyebrow font-mono uppercase text-editorial-brass">Parameter Focus</div>
+                <div className="text-eyebrow font-mono uppercase text-acc">Parameter Focus</div>
                 <div className="mt-1 space-y-1">
                   {addSceneGuidance.parameterTips.map((item) => (
-                    <div key={item} className="text-eyebrow-lg text-editorial-ivory-mute">{item}</div>
+                    <div key={item} className="text-eyebrow-lg text-mut">{item}</div>
                   ))}
                 </div>
               </div>
@@ -553,16 +553,16 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
           </div>
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={!form.title.trim()}
-              className="flex-1 bg-editorial-brass hover:bg-editorial-brass disabled:opacity-40 py-2 rounded text-white text-sm font-medium">
+              className="flex-1 bg-acc hover:bg-acc disabled:opacity-40 py-2 rounded text-white text-sm font-medium">
               Add Scene
             </button>
-            <button onClick={() => setAdding(false)} className="px-4 py-2 text-editorial-ivory-mute text-sm">Cancel</button>
+            <button onClick={() => setAdding(false)} className="px-4 py-2 text-mut text-sm">Cancel</button>
           </div>
         </div>
       )}
 
       {project.scenes.length === 0 && !adding && (
-        <div className="text-center py-12 text-editorial-ivory-mute">
+        <div className="text-center py-12 text-mut">
           <div className="text-2xl mb-2">No scenes yet</div>
           <p className="text-sm">Add characters and locations first, then create scenes to build your film.</p>
         </div>
