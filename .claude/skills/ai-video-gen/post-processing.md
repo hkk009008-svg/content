@@ -84,7 +84,7 @@ Two operational modes for audio-visual synchronization.
 
 **Best for**: Interview-style, direct-to-camera dialogue shots.
 
-**Fallback chain** (post-WS4; Hedra Character-3 removed — dead engine): Kling Lip Sync (`fal-ai/kling-video/lipsync/audio-to-video`) → Omnihuman v1.5 (`fal-ai/bytedance/omnihuman/v1.5`) → Creatify Aurora
+**Fallback chain** (post-`40bc8c60`; the Kling generation entry was removed — `fal-ai/kling-video/lipsync/audio-to-video` is an OVERLAY endpoint that needs a `video_url`, so it 422'd on every still→talking-head call; Hedra Character-3 removed earlier in WS4): Omnihuman v1.5 (`fal-ai/bytedance/omnihuman/v1.5`, ATTEMPT 0) → Creatify Aurora (`fal-ai/creatify/aurora`, ATTEMPT 1) → SyncNet best-of-failed pick
 
 **Prerequisites**:
 - Front-facing portrait image

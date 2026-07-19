@@ -95,7 +95,7 @@ API_COST_USD: dict[str, float] = {
     "LIPSYNC_MUSETALK":    0.02,   # MuseTalk mouth-only overlay via FAL
     "LIPSYNC_LATENTSYNC":  0.03,   # LatentSync overlay fallback via FAL
     "LIPSYNC_SYNCV2":      0.23,   # Sync lipsync-2 (LEGACY tier: 512x512 face region) via FAL: $0.04-0.05/s (sync.so docs 2026-07-11) -> ~5s clip
-    "LIPSYNC_KLING":       0.05,   # Kling lipsync generation via FAL
+    "LIPSYNC_KLING":       0.05,   # gate figure for the PLANNED KLING_LIPSYNC_2 overlay engine (scene_decomposer API_REGISTRY, status=planned) — pinned equal by test_cost_tracker::test_lipsync_registry_costs_match_api_cost_usd. NOT the generation cascade: Kling was dropped there in 40bc8c60 (overlay endpoint, needs video_url).
     "LIPSYNC_OMNIHUMAN":   0.80,   # OmniHuman v1.5 via FAL: $0.16/s (fal model page 2026-07-11) -> 5s clip
     "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL
     "LIPSYNC_DEFAULT":     0.67,   # fallback when the cascade reports no engine name — assume the sync-3 primary won (undercounting the likely winner is the worse error)
