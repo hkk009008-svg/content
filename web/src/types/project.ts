@@ -495,6 +495,10 @@ export interface AppConfig {
   // Purpose-based API routing (from PURPOSE_API_RANKING)
   purpose_tags?: PurposeTag[]
   purpose_api_ranking?: Record<PurposeTag, string[]>                // purpose -> ordered list of API keys
+  // Billing attribution (from domain/scene_decomposer.BILLING_PROVIDERS) — keyed
+  // by PROVIDER (e.g. "RUNPOD_GPU", "FAL_AI"), each value the list of engine/API
+  // keys that provider bills. NOT engine-keyed — see web/src/lib/podGating.ts.
+  billing_providers?: Record<string, string[]>
 }
 
 // ── Part 4: Capability Dashboard ────────────────────────────────────────────
