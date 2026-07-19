@@ -18,7 +18,7 @@ import HeroShot from './console/HeroShot'
 import PhasesRail from './console/PhasesRail'
 import Monitor from './console/Monitor'
 import Telemetry from './console/Telemetry'
-import Filmstrip from './console/Filmstrip'
+import Filmstrip from './shared/Filmstrip'
 import Notes from './console/Notes'
 
 interface Props {
@@ -102,7 +102,9 @@ export default function DirectorsConsole({ project, onBack }: Props) {
       {project && (
         <Filmstrip
           project={project}
+          shotStates={shotStates}
           projectId={projectId}
+          activeShotId={activeShotId}
         />
       )}
 

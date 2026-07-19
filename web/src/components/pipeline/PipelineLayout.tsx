@@ -7,7 +7,7 @@ import AssemblyGate from './AssemblyGate'
 import ReviewStage from './ReviewStage'
 import ScreeningStage from './ScreeningStage'
 import GenerationPanel from '../GenerationPanel'
-import Filmstrip from './Filmstrip'
+import Filmstrip from '../shared/Filmstrip'
 import BudgetHaltBanner from '../BudgetHaltBanner'
 import { ErrorState, LoadingState } from '../ui'
 
@@ -308,7 +308,7 @@ export default function PipelineLayout({
       </section>
 
       {/* ── Filmstrip — sprocket-hole reel of all shots ────────── */}
-      <Filmstrip project={project} shotStates={shotStates} />
+      <Filmstrip project={project} shotStates={shotStates} projectId={project.id} />
 
       {/* ── Main grid — stage rail · execution board · telemetry rail ─ */}
       <div className="flex flex-1 overflow-hidden">
