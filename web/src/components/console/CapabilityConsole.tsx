@@ -1,28 +1,37 @@
 import { useEffect, useState } from 'react'
 import type { Project, CapabilityScorecard, CapabilityDimension, ScorecardMedia } from '../../types/project'
+import { Badge, Meter, StatusDot, Section, MICRO_LABEL, type BadgeVariant, type MeterTone, type Status } from '../ui'
 
-interface Props { project: Project | null; onBack: () => void }
+interface Props { project: Project | null }
 
 // ── Color helpers ────────────────────────────────────────────────────────────
 
-/** Returns a Tailwind class for a measured value vs its bar.
- *  null value → muted; no bar → neutral ink; pass → green; fail → accent. */
+/** Returns a token text class for a measured value vs its bar.
+ *  null value → dim; no bar → plain ink; pass → ok; fail → fail. */
 function scoreClass(value: number | null, bar: number | null): string {
-  if (value === null) return 'text-console-ink-mute'
-  if (bar === null) return 'text-console-ink'
-  return value >= bar ? 'text-[#7fd17f]' : 'text-console-accent'
+  if (value === null) return 'text-dim'
+  if (bar === null) return 'text-tx'
+  return value >= bar ? 'text-ok' : 'text-fail'
 }
 
-function verdictClass(verdict: 'ok' | 'warning' | 'rejected'): string {
-  if (verdict === 'ok') return 'text-[#7fd17f]'
-  if (verdict === 'warning') return 'text-[#e0b94e]'
-  return 'text-console-accent'
+function verdictVariant(verdict: 'ok' | 'warning' | 'rejected'): BadgeVariant {
+  if (verdict === 'ok') return 'ok'
+  if (verdict === 'warning') return 'warn'
+  return 'fail'
 }
 
-function statusClass(status: string): string {
-  if (status === 'live' || status === 'wired') return 'text-[#7fd17f]'
-  if (status === 'stubbed' || status === 'parked') return 'text-[#e0b94e]'
-  return 'text-console-ink-mute'
+function componentDot(status: string): Status {
+  if (status === 'live' || status === 'wired') return 'ok'
+  if (status === 'stubbed' || status === 'parked') return 'warn'
+  if (status === 'dead') return 'fail'
+  return 'idle'
+}
+
+function componentBadge(status: string): BadgeVariant {
+  if (status === 'live' || status === 'wired') return 'ok'
+  if (status === 'stubbed' || status === 'parked') return 'warn'
+  if (status === 'dead') return 'fail'
+  return 'neutral'
 }
 
 function fmt(v: number | null): string {
@@ -30,32 +39,42 @@ function fmt(v: number | null): string {
   return v.toFixed(2)
 }
 
-// ── Section: Scorecard dimension grid (Task 5) ───────────────────────────────
+// ── Section: one dimension card (Task 5, restyled Task 11) ──────────────────
+
+function DimensionCard({ d }: { d: CapabilityDimension }) {
+  const tone: MeterTone = d.value === null ? 'acc' : d.pass === false ? 'fail' : 'ok'
+  const isLipsync = d.key === 'lipsync'
+  return (
+    <div className="rounded border border-line bg-panel p-2">
+      <div className={MICRO_LABEL}>{d.label}</div>
+      <div className={`mt-1 text-lg font-semibold tabular-nums ${scoreClass(d.value, d.bar)}`}>
+        {d.value !== null ? d.value.toFixed(2) : '—'}
+        {d.value !== null && d.bar !== null && (
+          <span className="ml-1 text-xs font-normal text-dim">/ {d.bar.toFixed(2)}</span>
+        )}
+      </div>
+      <div className="mt-1.5" data-testid="dimension-meter">
+        <Meter value={d.value ?? 0} max={1} tone={tone} />
+      </div>
+      <div className="mt-1 text-[10px] text-dim">
+        {d.n_measured} shot{d.n_measured !== 1 ? 's' : ''} measured
+      </div>
+      {isLipsync && (
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-warn">
+          <StatusDot status="warn" />
+          gate needs recal
+        </div>
+      )}
+    </div>
+  )
+}
 
 function ScorecardGrid({ sc }: { sc: CapabilityScorecard }) {
   return (
     <div>
       <div className="grid grid-cols-4 gap-2">
         {sc.dimensions.map((d: CapabilityDimension) => (
-          <div key={d.key} className="border border-console-rule rounded p-2 font-console-mono text-xs">
-            <div className="text-console-ink-mute uppercase tracking-wider mb-1">{d.label}</div>
-            <div className={`text-lg font-bold ${scoreClass(d.value, d.bar)}`}>
-              {d.value !== null ? d.value.toFixed(2) : '— not measured'}
-              {d.value !== null && d.bar !== null && (
-                <span className="text-xs font-normal text-console-ink-mute ml-1">/ {d.bar.toFixed(2)}</span>
-              )}
-            </div>
-            {/* Mini progress bar */}
-            <div className="mt-1 h-1 bg-console-rule rounded overflow-hidden">
-              <div
-                className={`h-full rounded ${d.value !== null && d.bar !== null && d.value >= d.bar ? 'bg-[#7fd17f]' : d.value !== null ? 'bg-console-accent' : 'bg-console-rule'}`}
-                style={{ width: `${Math.min((d.value ?? 0) * 100, 100)}%` }}
-              />
-            </div>
-            <div className="mt-1 text-console-ink-mute">
-              {d.n_measured} shot{d.n_measured !== 1 ? 's' : ''} measured
-            </div>
-          </div>
+          <DimensionCard key={d.key} d={d} />
         ))}
       </div>
 
@@ -66,9 +85,9 @@ function ScorecardGrid({ sc }: { sc: CapabilityScorecard }) {
       {sc.future_dimensions.length > 0 && (
         <div className="mt-2 grid grid-cols-4 gap-2">
           {sc.future_dimensions.map((fd: string) => (
-            <div key={fd} className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
-              <div className="text-console-ink-mute uppercase tracking-wider">{fd.replace(/_/g, ' ')}</div>
-              <div className="text-console-ink-mute mt-1">— not yet measured</div>
+            <div key={fd} className="rounded border border-dashed border-line p-2 opacity-40">
+              <div className={MICRO_LABEL}>{fd.replace(/_/g, ' ')}</div>
+              <div className="mt-1 text-[11px] text-dim">— not yet measured</div>
             </div>
           ))}
         </div>
@@ -83,16 +102,15 @@ function ScorecardGrid({ sc }: { sc: CapabilityScorecard }) {
  *  dashed/greyed placeholders identical to future_dimensions style otherwise. */
 function MediaConformanceTiles({ media }: { media: ScorecardMedia | null }) {
   const passClass = (pass: boolean | undefined) =>
-    pass === true ? 'text-[#7fd17f]' : pass === false ? 'text-console-accent' : 'text-console-ink-mute'
+    pass === true ? 'text-ok' : pass === false ? 'text-fail' : 'text-dim'
 
   if (!media) {
-    // Dashed placeholders — identical style to future_dimensions tiles
     return (
       <div className="mt-2 grid grid-cols-4 gap-2">
         {(['audio_lufs', 'format_codec'] as const).map((fd) => (
-          <div key={fd} className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
-            <div className="text-console-ink-mute uppercase tracking-wider">{fd.replace(/_/g, ' ')}</div>
-            <div className="text-console-ink-mute mt-1">— not yet measured</div>
+          <div key={fd} className="rounded border border-dashed border-line p-2 opacity-40">
+            <div className={MICRO_LABEL}>{fd.replace(/_/g, ' ')}</div>
+            <div className="mt-1 text-[11px] text-dim">— not yet measured</div>
           </div>
         ))}
       </div>
@@ -105,37 +123,37 @@ function MediaConformanceTiles({ media }: { media: ScorecardMedia | null }) {
     <div className="mt-2 grid grid-cols-4 gap-2">
       {/* AUDIO LUFS tile */}
       {lufs ? (
-        <div className="border border-console-rule rounded p-2 font-console-mono text-xs">
-          <div className="text-console-ink-mute uppercase tracking-wider mb-1">Audio LUFS</div>
-          <div className={`text-lg font-bold ${passClass(lufs.pass)}`}>
+        <div className="rounded border border-line bg-panel p-2">
+          <div className={MICRO_LABEL}>Audio LUFS</div>
+          <div className={`mt-1 text-lg font-semibold tabular-nums ${passClass(lufs.pass)}`}>
             {lufs.value.toFixed(2)} LUFS
           </div>
-          <div className="mt-1 text-console-ink-mute">
+          <div className="mt-1 text-[10px] text-dim">
             target {lufs.target} ±{lufs.tolerance}
           </div>
         </div>
       ) : (
-        <div className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
-          <div className="text-console-ink-mute uppercase tracking-wider">Audio LUFS</div>
-          <div className="text-console-ink-mute mt-1">— not measured</div>
+        <div className="rounded border border-dashed border-line p-2 opacity-40">
+          <div className={MICRO_LABEL}>Audio LUFS</div>
+          <div className="mt-1 text-[11px] text-dim">— not measured</div>
         </div>
       )}
 
       {/* FORMAT tile */}
       {format ? (
-        <div className="border border-console-rule rounded p-2 font-console-mono text-xs">
-          <div className="text-console-ink-mute uppercase tracking-wider mb-1">Format</div>
-          <div className={`text-lg font-bold ${passClass(format.pass)}`}>
+        <div className="rounded border border-line bg-panel p-2">
+          <div className={MICRO_LABEL}>Format</div>
+          <div className={`mt-1 text-lg font-semibold tabular-nums ${passClass(format.pass)}`}>
             {format.width ?? '?'}×{format.height ?? '?'}
           </div>
-          <div className="mt-1 text-console-ink-mute">
+          <div className="mt-1 text-[10px] text-dim">
             {format.vcodec ?? '?'}+{format.acodec ?? '?'}
           </div>
         </div>
       ) : (
-        <div className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
-          <div className="text-console-ink-mute uppercase tracking-wider">Format</div>
-          <div className="text-console-ink-mute mt-1">— not measured</div>
+        <div className="rounded border border-dashed border-line p-2 opacity-40">
+          <div className={MICRO_LABEL}>Format</div>
+          <div className="mt-1 text-[11px] text-dim">— not measured</div>
         </div>
       )}
     </div>
@@ -145,7 +163,7 @@ function MediaConformanceTiles({ media }: { media: ScorecardMedia | null }) {
 // ── Section: Per-shot scores table (Task 6) ──────────────────────────────────
 
 function PerShotTable({ sc }: { sc: CapabilityScorecard }) {
-  if (sc.per_shot.length === 0) return null
+  if (sc.per_shot.length === 0) return <div className="text-[11px] italic text-dim">No shots yet</div>
 
   const barFor = (key: string): number | null =>
     sc.dimensions.find((d: CapabilityDimension) => d.key === key)?.bar ?? null
@@ -157,26 +175,26 @@ function PerShotTable({ sc }: { sc: CapabilityScorecard }) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full font-console-mono text-xs border-collapse">
+      <table className="w-full border-collapse text-[11px]">
         <thead>
-          <tr className="border-b border-console-rule text-console-ink-mute uppercase tracking-wider">
-            <th className="text-left py-1 pr-3">Shot</th>
-            <th className="text-right py-1 px-2">Identity</th>
-            <th className="text-right py-1 px-2">Coherence</th>
-            <th className="text-right py-1 px-2">Motion</th>
-            <th className="text-right py-1 px-2">Lipsync</th>
-            <th className="text-left py-1 pl-3">Engine</th>
+          <tr className="border-b border-line text-mut">
+            <th className={`${MICRO_LABEL} py-1 pr-3 text-left`}>Shot</th>
+            <th className={`${MICRO_LABEL} py-1 px-2 text-right`}>Identity</th>
+            <th className={`${MICRO_LABEL} py-1 px-2 text-right`}>Coherence</th>
+            <th className={`${MICRO_LABEL} py-1 px-2 text-right`}>Motion</th>
+            <th className={`${MICRO_LABEL} py-1 px-2 text-right`}>Lipsync</th>
+            <th className={`${MICRO_LABEL} py-1 pl-3 text-left`}>Engine</th>
           </tr>
         </thead>
         <tbody>
           {sc.per_shot.map((row) => (
-            <tr key={row.shot_id} className="border-b border-console-rule hover:bg-console-rule/20">
-              <td className="py-1 pr-3 text-console-ink-dim">{row.shot_id}</td>
-              <td className={`text-right py-1 px-2 ${scoreClass(row.identity, identityBar)}`}>{fmt(row.identity)}</td>
-              <td className={`text-right py-1 px-2 ${scoreClass(row.coherence, coherenceBar)}`}>{fmt(row.coherence)}</td>
-              <td className={`text-right py-1 px-2 ${scoreClass(row.motion, motionBar)}`}>{fmt(row.motion)}</td>
-              <td className={`text-right py-1 px-2 ${scoreClass(row.lipsync, lipsyncBar)}`}>{fmt(row.lipsync)}</td>
-              <td className="py-1 pl-3 text-console-ink-dim">{row.engine || '—'}</td>
+            <tr key={row.shot_id} className="border-b border-line hover:bg-head/60">
+              <td className="py-1 pr-3 text-dim">{row.shot_id}</td>
+              <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.identity, identityBar)}`}>{fmt(row.identity)}</td>
+              <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.coherence, coherenceBar)}`}>{fmt(row.coherence)}</td>
+              <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.motion, motionBar)}`}>{fmt(row.motion)}</td>
+              <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.lipsync, lipsyncBar)}`}>{fmt(row.lipsync)}</td>
+              <td className="py-1 pl-3 text-dim">{row.engine || '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -188,35 +206,27 @@ function PerShotTable({ sc }: { sc: CapabilityScorecard }) {
 // ── Section: Cascade provenance (Task 6 / U8) ────────────────────────────────
 
 function CascadeProvenance({ sc }: { sc: CapabilityScorecard }) {
-  if (sc.provenance.length === 0) return null
+  if (sc.provenance.length === 0) return <div className="text-[11px] italic text-dim">No shots yet</div>
 
   const hasFallbacks = sc.provenance.some((r) => r.fallback || r.attempts.length > 1)
 
   return (
-    <div className="font-console-mono text-xs space-y-1">
+    <div className="space-y-1 text-[11px]">
       {sc.provenance.map((row) => {
         const showChain = row.fallback || row.attempts.length > 1
         return (
-          <div key={row.shot_id} className="flex flex-wrap items-center gap-2 py-0.5 border-b border-console-rule/40">
-            <span className="text-console-ink-dim">{row.shot_id}</span>
-            <span className="text-console-ink-mute">·</span>
-            <span className="text-console-ink">{row.engine || '—'}</span>
+          <div key={row.shot_id} className="flex flex-wrap items-center gap-2 border-b border-line/40 py-0.5">
+            <span className="text-dim">{row.shot_id}</span>
+            <span className="text-dim">·</span>
+            <span className="text-tx">{row.engine || '—'}</span>
             {showChain && row.attempts.length > 0 && (
-              <span className="text-console-ink-mute">
-                [{row.attempts.join(' → ')}]
-              </span>
+              <span className="text-mut">[{row.attempts.join(' → ')}]</span>
             )}
-            {row.fallback && (
-              <span className="bg-[#3a1212] text-[#e88888] rounded px-1 py-0.5 text-[10px]">
-                silent fallback
-              </span>
-            )}
+            {row.fallback && <Badge variant="fail">silent fallback</Badge>}
           </div>
         )
       })}
-      {!hasFallbacks && (
-        <div className="text-console-ink-mute italic">All shots routed on first try</div>
-      )}
+      {!hasFallbacks && <div className="italic text-dim">All shots routed on first try</div>}
     </div>
   )
 }
@@ -227,20 +237,20 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
   const gates = (['plan', 'image', 'motion', 'final'] as const)
 
   return (
-    <div className="font-console-mono text-xs space-y-1">
+    <div className="space-y-1 text-[11px]">
       {gates.map((g) => {
         const entry = sc.gates[g]
         const total = entry.approved + entry.vetoed
         const topVeto = entry.top_vetoes[0]
         return (
           <div key={g} className="flex items-baseline gap-2">
-            <span className="text-console-ink-mute uppercase tracking-wider w-14 shrink-0">{g}</span>
-            <span className={entry.vetoed > 0 ? 'text-[#e0b94e]' : 'text-[#7fd17f]'}>
+            <span className={`${MICRO_LABEL} w-14 shrink-0`}>{g}</span>
+            <span className={entry.vetoed > 0 ? 'text-warn' : 'text-ok'}>
               {entry.approved}/{total}
             </span>
             {topVeto && (
-              <span className="text-console-ink-mute">
-                · {topVeto[0]} <span className="text-console-accent">×{topVeto[1]}</span>
+              <span className="text-dim">
+                · {topVeto[0]} <span className="text-fail">×{topVeto[1]}</span>
               </span>
             )}
           </div>
@@ -254,21 +264,21 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
 
 function LoraSummary({ sc }: { sc: CapabilityScorecard }) {
   if (sc.lora.length === 0) {
-    return <div className="text-console-ink-mute font-console-mono text-xs italic">No character LoRAs</div>
+    return <div className="text-[11px] italic text-dim">No character LoRAs</div>
   }
 
   return (
-    <div className="font-console-mono text-xs space-y-1">
+    <div className="space-y-1 text-[11px]">
       {sc.lora.map((row) => (
         <div key={row.char_id} className="flex items-baseline gap-2">
-          <span className="text-console-ink-dim">{row.char_id}</span>
-          {row.strength !== null && (
-            <span className="text-console-ink-mute">str {row.strength.toFixed(2)}</span>
-          )}
+          <span className="text-dim">{row.char_id}</span>
+          {row.strength !== null && <span className="text-mut">str {row.strength.toFixed(2)}</span>}
           {row.score !== null && (
-            <span className={verdictClass(row.verdict)}>{row.score.toFixed(2)}</span>
+            <span className={row.verdict === 'ok' ? 'text-ok' : row.verdict === 'warning' ? 'text-warn' : 'text-fail'}>
+              {row.score.toFixed(2)}
+            </span>
           )}
-          <span className={verdictClass(row.verdict)}>{row.verdict}</span>
+          <Badge variant={verdictVariant(row.verdict)}>{row.verdict}</Badge>
         </div>
       ))}
     </div>
@@ -278,18 +288,69 @@ function LoraSummary({ sc }: { sc: CapabilityScorecard }) {
 // ── Section: Component status (Task 7) ───────────────────────────────────────
 
 function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
-  if (sc.components.length === 0) return null
+  if (sc.components.length === 0) return <div className="text-[11px] italic text-dim">No component manifest</div>
 
   return (
     <div className="flex flex-wrap gap-2">
       {sc.components.map((c) => (
-        <span
+        <div
           key={c.id}
           title={c.note || c.title}
-          className={`font-console-mono text-xs border border-console-rule rounded px-2 py-0.5 ${statusClass(c.status)}`}
+          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
         >
-          {c.id} <span className="opacity-60">●</span>{c.status}
-        </span>
+          <StatusDot status={componentDot(c.status)} />
+          <span className="text-tx">{c.id}</span>
+          <Badge variant={componentBadge(c.status)}>{c.status}</Badge>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Section: Available — not engaged (Task 11) ───────────────────────────────
+
+/** Curated capability inventory (ComfyUI max keyframe, second-character LoRA,
+ *  Foley — per the redesign spec §"Page 4 — Capability") plus any component
+ *  the manifest marks `stubbed`/`parked` (code exists but isn't reached / is
+ *  blocked on external state, e.g. the pod). Second-char LoRA is hidden once
+ *  the project actually has ≥2 characters with a LoRA row (sourced from
+ *  `sc.lora`, not fabricated). */
+function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
+  const secondCharLoraEngaged = sc.lora.length >= 2
+
+  const curated: { id: string; label: string; note: string; pod: boolean }[] = [
+    { id: 'comfy_max_keyframe', label: 'ComfyUI max keyframe', note: 'FLUX + PuLID keyframe fallback — needs the RunPod pod running.', pod: true },
+    ...(secondCharLoraEngaged
+      ? []
+      : [{ id: 'second_char_lora', label: 'Second-character LoRA', note: 'Per-character LoRA training for a secondary cast member — trains on the pod.', pod: true }]),
+    { id: 'foley', label: 'Foley', note: 'Stable Audio 2 foley layer — needs STABILITY_API_KEY.', pod: false },
+  ]
+
+  const stubbedComponents = sc.components.filter((c) => c.status === 'stubbed' || c.status === 'parked')
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {curated.map((item) => (
+        <div
+          key={item.id}
+          title={item.note}
+          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
+        >
+          <StatusDot status="idle" />
+          <span className="text-tx">{item.label}</span>
+          <Badge variant={item.pod ? 'pod' : 'cloud'}>{item.pod ? 'Pod off' : 'Cloud'}</Badge>
+        </div>
+      ))}
+      {stubbedComponents.map((c) => (
+        <div
+          key={c.id}
+          title={c.note || c.title}
+          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
+        >
+          <StatusDot status="idle" />
+          <span className="text-tx">{c.title}</span>
+          <Badge variant="neutral">{c.status}</Badge>
+        </div>
       ))}
     </div>
   )
@@ -297,7 +358,7 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
 
 // ── Main component ───────────────────────────────────────────────────────────
 
-export default function CapabilityConsole({ project, onBack }: Props) {
+export default function CapabilityConsole({ project }: Props) {
   const projectId = project?.id || null
   const [sc, setSc] = useState<CapabilityScorecard | null>(null)
   const [state, setState] = useState<'loading'|'ready'|'empty'|'error'>('loading')
@@ -320,87 +381,79 @@ export default function CapabilityConsole({ project, onBack }: Props) {
   }
   useEffect(load, [projectId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const Label = ({ children }: { children: React.ReactNode }) =>
-    <div className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute font-console-mono">{children}</div>
+  const engagedCount = sc ? sc.components.filter((c) => c.status === 'live' || c.status === 'wired').length : 0
+  const totalComponents = sc ? sc.components.length : 0
+  const measuredDims = sc ? sc.dimensions.filter((d) => d.value !== null) : []
+  const overallScore = measuredDims.length > 0
+    ? Math.round((measuredDims.reduce((sum, d) => sum + (d.value as number), 0) / measuredDims.length) * 100)
+    : null
 
   return (
-    <div className="min-h-screen bg-console-bg text-console-ink">
-      <header className="border-b border-console-rule px-6 py-4 flex items-center justify-between">
+    <div className="min-h-full bg-app text-tx">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-head px-4 py-2.5">
         <div>
-          <button onClick={onBack} className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute hover:text-console-gold font-console-mono">← Back to setup</button>
-          <h1 className="mt-1 text-2xl font-display text-console-gold">
-            {project?.name || 'No project'}<span className="ml-2 text-sm font-normal text-console-ink-dim font-console-mono">· Capability</span>
-          </h1>
+          <div className={MICRO_LABEL}>{project?.name || 'No project'} · Capability</div>
+          <div className="mt-1 flex items-baseline gap-3">
+            <span className="font-mono text-2xl font-semibold tabular-nums text-tx">
+              {overallScore !== null ? overallScore : '—'}
+              <span className="text-sm font-normal text-dim">/100</span>
+            </span>
+            {sc && totalComponents > 0 && (
+              <span className="text-[11px] text-mut">{engagedCount} of {totalComponents} systems engaged</span>
+            )}
+          </div>
         </div>
-        <div className="text-right text-xs font-console-mono text-console-ink-dim">
-          {sc && <span><span className="bg-console-gold text-black px-2 rounded">{sc.tier.toUpperCase()}</span> · {sc.summary.shots_clearing_all_bars}/{sc.summary.shots_total} clear all bars</span>}
-          <button onClick={load} className="ml-3 text-console-ink-mute hover:text-console-gold">↻ refresh</button>
+        <div className="flex items-center gap-3">
+          {sc && (
+            <span className="flex items-center gap-2 font-mono text-[11px] text-dim">
+              <Badge variant="pri">{sc.tier.toUpperCase()}</Badge>
+              {sc.summary.shots_clearing_all_bars}/{sc.summary.shots_total} clear all bars
+            </span>
+          )}
+          <button onClick={load} className="font-mono text-[11px] uppercase tracking-wide text-mut hover:text-tx">
+            ↻ refresh
+          </button>
         </div>
       </header>
 
-      {state === 'loading' && <div className="p-8 text-console-ink-mute font-console-mono">Loading capability data…</div>}
-      {state === 'error' && <div className="p-8 text-console-accent font-console-mono">Could not load the scorecard. <button onClick={load} className="underline">Retry</button></div>}
-      {state === 'empty' && <div className="p-8 text-console-ink-mute font-console-mono">No capability data yet — run the pipeline to populate scores.</div>}
+      {state === 'loading' && <div className="p-8 text-[13px] text-mut">Loading capability data…</div>}
+      {state === 'error' && (
+        <div className="p-8 text-[13px] text-fail">
+          Could not load the scorecard. <button onClick={load} className="underline">Retry</button>
+        </div>
+      )}
+      {state === 'empty' && (
+        <div className="p-8 text-[13px] text-mut">No capability data yet — run the pipeline to populate scores.</div>
+      )}
       {state === 'ready' && sc && (
-        <div className="px-6 py-6 space-y-6">
+        <div className="px-4 py-2">
+          <Section title="Capability scorecard">
+            <ScorecardGrid sc={sc} />
+          </Section>
 
-          {/* ── 1. Scorecard dimension grid (Task 5) ── */}
-          <div>
-            <Label>Capability scorecard</Label>
-            <div className="mt-3">
-              <ScorecardGrid sc={sc} />
-            </div>
-          </div>
+          <Section title="Per-shot scores">
+            <PerShotTable sc={sc} />
+          </Section>
 
-          <div className="border-t border-console-rule" />
+          <Section title="Cascade provenance">
+            <CascadeProvenance sc={sc} />
+          </Section>
 
-          {/* ── 2. Per-shot scores table (Task 6) ── */}
-          <div>
-            <Label>Per-shot scores</Label>
-            <div className="mt-3">
-              <PerShotTable sc={sc} />
-            </div>
-          </div>
+          <Section title="Gate audit">
+            <GateAudit sc={sc} />
+          </Section>
 
-          <div className="border-t border-console-rule" />
+          <Section title="LoRA quality">
+            <LoraSummary sc={sc} />
+          </Section>
 
-          {/* ── 3. Cascade provenance (Task 6 / U8) ── */}
-          <div>
-            <Label>Cascade provenance</Label>
-            <div className="mt-2">
-              <CascadeProvenance sc={sc} />
-            </div>
-          </div>
+          <Section title="Components">
+            <ComponentStatus sc={sc} />
+          </Section>
 
-          <div className="border-t border-console-rule" />
-
-          {/* ── 4–6. Gates / LoRA / Components — two-column layout (Task 7) ── */}
-          <div className="grid grid-cols-2 gap-6">
-            {/* Left: Gate audit */}
-            <div>
-              <Label>Gate audit</Label>
-              <div className="mt-2">
-                <GateAudit sc={sc} />
-              </div>
-            </div>
-
-            {/* Right: LoRA summary + component status */}
-            <div className="space-y-4">
-              <div>
-                <Label>LoRA quality</Label>
-                <div className="mt-2">
-                  <LoraSummary sc={sc} />
-                </div>
-              </div>
-              <div>
-                <Label>Components</Label>
-                <div className="mt-2">
-                  <ComponentStatus sc={sc} />
-                </div>
-              </div>
-            </div>
-          </div>
-
+          <Section title="Available — not engaged">
+            <AvailableNotEngaged sc={sc} />
+          </Section>
         </div>
       )}
     </div>
