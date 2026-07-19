@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig, Shot } from '../../types/project'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
+import { parsePromptSections, assemblePromptSections, SECTION_LABELS } from '../../lib/promptSections'
 
 interface Props {
   shot: Shot
@@ -11,37 +12,8 @@ interface Props {
   onSaved: () => void
 }
 
-// Parse [SHOT][SCENE][ACTION][OUTFIT][QUALITY] sections
-function parseStructured(prompt: string): Record<string, string> {
-  const sections: Record<string, string> = {}
-  for (const tag of ['SHOT', 'SCENE', 'ACTION', 'OUTFIT', 'QUALITY']) {
-    const match = prompt.match(new RegExp(`\\[${tag}\\]\\s*(.+?)(?=\\[(?:SHOT|SCENE|ACTION|OUTFIT|QUALITY)\\]|$)`, 's'))
-    if (match) sections[tag] = match[1].trim()
-  }
-  // If no sections found, put everything in SCENE
-  if (Object.keys(sections).length === 0) {
-    sections['SCENE'] = prompt
-  }
-  return sections
-}
-
-function assembleSections(sections: Record<string, string>): string {
-  return Object.entries(sections)
-    .filter(([, v]) => v.trim())
-    .map(([k, v]) => `[${k}] ${v}`)
-    .join(' ')
-}
-
-const SECTION_LABELS: Record<string, { label: string; color: string; placeholder: string }> = {
-  SHOT: { label: 'Camera', color: 'text-cyan-400', placeholder: 'e.g. Medium shot, 85mm f/1.4 lens, shallow DoF' },
-  SCENE: { label: 'Scene', color: 'text-indigo-400', placeholder: 'e.g. Snowy park with bare trees, overcast sky, 4500K' },
-  ACTION: { label: 'Action', color: 'text-amber-400', placeholder: 'e.g. Walking toward camera, looking directly at camera' },
-  OUTFIT: { label: 'Outfit', color: 'text-pink-400', placeholder: 'e.g. Red wool coat over white turtleneck' },
-  QUALITY: { label: 'Quality', color: 'text-gray-400', placeholder: 'e.g. Shot on Arri Alexa, 4K RAW, photorealistic' },
-}
-
 export default function PromptEditor({ shot, shotId, projectId, currentPrompt, onClose, onSaved }: Props) {
-  const [sections, setSections] = useState(() => parseStructured(currentPrompt))
+  const [sections, setSections] = useState(() => parsePromptSections(currentPrompt, true))
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [targetApi, setTargetApi] = useState(shot.target_api || 'AUTO')
@@ -55,7 +27,7 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
     fetch('/api/config').then(r => r.json()).then(setConfig).catch(() => {})
   }, [])
 
-  const livePrompt = useMemo(() => assembleSections(sections), [sections])
+  const livePrompt = useMemo(() => assemblePromptSections(sections), [sections])
   const liveShot = useMemo(() => ({ ...shot, prompt: livePrompt, camera }), [shot, livePrompt, camera])
   const shotType = classifyShotType(liveShot)
   const template = getShotTemplate(liveShot, config)

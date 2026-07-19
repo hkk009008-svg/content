@@ -3,6 +3,7 @@ import type { Shot, ShotState, ApiInfo, AppConfig } from '../../types/project'
 import ShotApprovalControls from './ShotApprovalControls'
 import PromptEditor from './PromptEditor'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
+import { parsePromptSections } from '../../lib/promptSections'
 
 // Module-level cache for API registry (shared across all ShotRow instances)
 let _configCache: AppConfig | null = null
@@ -81,13 +82,9 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
   const isReviewable = status === 'image_review' || (imageUrl && status !== 'generating_image')
   const isFailed = status === 'failed'
 
-  // Parse structured sections from prompt
+  // Parse structured sections from prompt (shared with PromptEditor / ShotInspector)
   const prompt = shot.prompt || ''
-  const sections: Record<string, string> = {}
-  for (const tag of ['SHOT', 'SCENE', 'ACTION', 'OUTFIT', 'QUALITY']) {
-    const match = prompt.match(new RegExp(`\\[${tag}\\]\\s*(.+?)(?=\\[(?:SHOT|SCENE|ACTION|OUTFIT|QUALITY)\\]|$)`, 's'))
-    if (match) sections[tag] = match[1].trim()
-  }
+  const sections = parsePromptSections(prompt)
 
   const sectionColors: Record<string, string> = {
     SHOT: 'text-cyan-400',

@@ -195,7 +195,15 @@ export default function AppShell({
           />
         )
       case 'edit':
-        return <EditPage project={project} />
+        return (
+          <EditPage
+            project={project}
+            config={config}
+            apiBase={apiBase}
+            onRefreshProject={onRefreshProject}
+            shotStates={shotStates}
+          />
+        )
       case 'run':
         return (
           <RunPage
