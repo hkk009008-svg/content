@@ -267,7 +267,6 @@ export default function AppShell({
         {/* Credential pills — provider/tier chrome derived from settings.
            Full per-credential wiring is a later task. */}
         <Badge variant="cloud">{project.global_settings?.aspect_ratio || '16:9'}</Badge>
-        {project.global_settings?.quality_tier === 'max' && <Badge variant="pri">Max</Badge>}
 
         {/* Re-open PostRunSummary (parity with EditorialShell footer link). */}
         {lastDoneEventRef.current && !showPostRunSummary && (

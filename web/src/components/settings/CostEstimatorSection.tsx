@@ -13,16 +13,15 @@ export function CostEstimatorSection({ s }: Props) {
   const [costShotCount, setCostShotCount] = useState(60)
   const [costDialogueRatio, setCostDialogueRatio] = useState(0.5)
 
-  const isMaxTier = (s.quality_tier || 'production') === 'max'
-
   useEffect(() => {
     if (!expanded) return
+    // Production-only candidate path — the max tier was retired (single
+    // candidate per shot).
     const body = {
       shot_count: costShotCount,
       has_dialogue: costDialogueRatio > 0,
       dialogue_shot_ratio: costDialogueRatio,
-      quality_tier: isMaxTier ? 'max' : 'production',
-      candidate_count: isMaxTier ? (s.max_candidate_count ?? 8) : 1,
+      candidate_count: 1,
     }
     fetch(`${API}/cost-estimate`, {
       method: 'POST',
@@ -32,7 +31,7 @@ export function CostEstimatorSection({ s }: Props) {
       .then(r => (r.ok ? r.json() : null))
       .then(setCostEstimate)
       .catch(() => setCostEstimate(null))
-  }, [expanded, costShotCount, costDialogueRatio, isMaxTier, s.max_candidate_count])
+  }, [expanded, costShotCount, costDialogueRatio])
 
   const titleNode: ReactNode = (
     <h2 className="text-eyebrow-lg font-semibold uppercase tracking-widest flex items-center gap-2">
@@ -80,7 +79,7 @@ export function CostEstimatorSection({ s }: Props) {
       {costEstimate && (
         <>
           <div className="rounded-lg border border-editorial-brass/20 bg-editorial-brass/5 p-3">
-            <div className="text-eyebrow text-editorial-ivory-mute uppercase tracking-wider mb-1">Total ({costEstimate.quality_tier})</div>
+            <div className="text-eyebrow text-editorial-ivory-mute uppercase tracking-wider mb-1">Total (production)</div>
             <div className="text-2xl font-bold text-editorial-brass">${costEstimate.totals?.grand_total?.toFixed(2)}</div>
             <div className="text-eyebrow text-editorial-ivory-mute mt-0.5">
               ${costEstimate.per_shot?.avg?.toFixed(3)}/shot avg · {costEstimate.shot_count} shots ({costEstimate.dialogue_shots} dialogue)

@@ -11,8 +11,6 @@ interface Props {
 }
 
 export function AdvancedSection({ s, config, project }: Props) {
-  const isMaxTier = (s.quality_tier || 'production') === 'max'
-
   const [diskUsage, setDiskUsage] = useState<Record<string, number> | null>(null)
   const [cleaning, setCleaning] = useState(false)
 
@@ -128,27 +126,22 @@ export function AdvancedSection({ s, config, project }: Props) {
           {/* Sampler */}
           <div>
             <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">Sampler</label>
-            <select value={s.comfyui_sampler || (isMaxTier ? 'dpmpp_3m_sde_gpu' : 'dpmpp_2m')}
+            <select value={s.comfyui_sampler || 'dpmpp_2m'}
               onChange={e => update('comfyui_sampler', e.target.value)}
               className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
               <option value="dpmpp_2m">DPM++ 2M (production default)</option>
               <option value="euler">Euler (fast, lower quality)</option>
               <option value="dpmpp_2m_sde">DPM++ 2M SDE (stochastic, creative)</option>
               <option value="dpmpp_3m_sde">DPM++ 3M SDE (CPU)</option>
-              <option value="dpmpp_3m_sde_gpu">DPM++ 3M SDE GPU (max-tier default, sharpest)</option>
+              <option value="dpmpp_3m_sde_gpu">DPM++ 3M SDE GPU (sharpest)</option>
               <option value="uni_pc">UniPC (fast convergence)</option>
             </select>
           </div>
 
-          {/* Steps — production tier */}
-          {!isMaxTier && (
-            <Slider label="Sampling steps" field="comfyui_steps" s={s} update={update}
-              min={10} max={40} step={1} defaultValue={20}
-              hint="Higher = more detail but slower. 20 is balanced, 25+ for portraits." />
-          )}
-
-          {/* MAX-TIER ONLY */}
-          {isMaxTier && <MaxTierComfyControls s={s} update={update} />}
+          {/* Steps */}
+          <Slider label="Sampling steps" field="comfyui_steps" s={s} update={update}
+            min={10} max={40} step={1} defaultValue={20}
+            hint="Higher = more detail but slower. 20 is balanced, 25+ for portraits." />
         </div>
       </div>
 
@@ -197,181 +190,6 @@ export function AdvancedSection({ s, config, project }: Props) {
         </div>
       </div>
     </SettingsSection>
-  )
-}
-
-function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: any) => void | Promise<void> }) {
-  return (
-    <>
-      <div className="rounded-lg border border-editorial-brass/20 bg-editorial-brass/5 px-3 py-2 mt-2">
-        <span className="text-eyebrow text-editorial-brass font-mono font-bold uppercase">Max-tier engine</span>
-        <p className="text-eyebrow-sm text-editorial-ivory-mute mt-0.5">Controls below only apply when Quality Tier = Max.</p>
-      </div>
-
-      <Slider label="AYS scheduler steps" field="ays_steps" s={s} update={update}
-        min={15} max={40} step={1} defaultValue={28}
-        hint="Align Your Steps — NVIDIA-optimal sigma schedule for FLUX. 28 is the sweet spot." />
-
-      <Slider label="SLG (Skip Layer Guidance)" field="slg_scale" s={s} update={update}
-        min={0} max={5} step={0.1} defaultValue={2.5} format={(v) => v.toFixed(1)}
-        hint="Skip-layer guidance on DiT layers 7-11. Single biggest realism toggle on FLUX. 0 = off." />
-
-      <Slider label="DetailDaemon amount" field="detail_daemon_amount" s={s} update={update}
-        min={0} max={1} step={0.05} defaultValue={0.5} format={(v) => v.toFixed(2)}
-        hint="Mid-sampling sigma injection. Adds micro-texture (skin pores, fabric weave). 0 = off." />
-
-      {/* FreeU v2 */}
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-eyebrow text-editorial-ivory font-mono">FreeU v2 (skip-connection amplify)</span>
-          <span className="text-eyebrow-sm text-editorial-ivory-mute">FLUX-compatible build required on pod</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { k: 'freeu_b1', label: 'b1 (backbone 1)', def: 1.3, min: 1.0, max: 1.8 },
-            { k: 'freeu_b2', label: 'b2 (backbone 2)', def: 1.4, min: 1.0, max: 1.8 },
-            { k: 'freeu_s1', label: 's1 (skip 1)', def: 0.9, min: 0.0, max: 1.5 },
-            { k: 'freeu_s2', label: 's2 (skip 2)', def: 0.2, min: 0.0, max: 1.5 },
-          ].map((f) => (
-            <div key={f.k}>
-              <div className="flex justify-between text-eyebrow-sm text-editorial-ivory-mute mb-0.5">
-                <span className="font-mono">{f.label}</span>
-                <span className="text-editorial-brass font-bold">{((s[f.k] ?? f.def) as number).toFixed(2)}</span>
-              </div>
-              <input type="range" min={f.min} max={f.max} step={0.05}
-                value={s[f.k] ?? f.def}
-                onChange={e => update(f.k, parseFloat(e.target.value))}
-                aria-label={f.label}
-                className="w-full accent-editorial-brass h-1" />
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 3-channel Union ControlNet (depth lives in workflow_selector shot-type defaults, not UI) */}
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-eyebrow text-editorial-ivory font-mono">FLUX Union CN Pro — 3 channels</span>
-          <span className="text-eyebrow-sm text-editorial-ivory-mute">total budget &lt; 1.2</span>
-        </div>
-        {[
-          { k: 'controlnet_canny_strength', label: 'Canny (edge coherence)', def: 0.15, max: 0.5 },
-          { k: 'controlnet_pose_strength', label: 'Pose (DWPose, body+hand+face)', def: 0.35, max: 0.6 },
-          { k: 'controlnet_tile_strength', label: 'Tile (texture preservation)', def: 0.25, max: 0.5 },
-        ].map((c) => {
-          const v = s[c.k] ?? c.def
-          return (
-            <div key={c.k}>
-              <div className="flex justify-between text-eyebrow-sm text-editorial-ivory-mute mb-0.5">
-                <span className="font-mono">{c.label}</span>
-                <span className="text-editorial-brass font-bold">{(v as number).toFixed(2)}</span>
-              </div>
-              <input type="range" min={0} max={c.max} step={0.05}
-                value={v}
-                onChange={e => update(c.k, parseFloat(e.target.value))}
-                aria-label={c.label}
-                className="w-full accent-editorial-brass h-1" />
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Redux strength */}
-      <div>
-        <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">FLUX Redux style strength</label>
-        <select value={s.redux_strength || 'high'}
-          onChange={e => update('redux_strength', e.target.value)}
-          className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
-          <option value="high">High — strong style lock from board</option>
-          <option value="medium">Medium — balanced</option>
-          <option value="low">Low — subtle influence</option>
-        </select>
-        <p className="text-eyebrow-sm text-editorial-ivory-mute mt-0.5">FLUX-native image conditioning. Replaces SDXL-era IP-Adapter on FLUX.</p>
-      </div>
-
-      {/* Hires fix */}
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
-        <div className="flex items-center gap-2">
-          <input type="checkbox"
-            checked={s.hires_fix_enabled !== false}
-            onChange={e => update('hires_fix_enabled', e.target.checked)}
-            aria-label="Hires-fix (Pass 2)"
-            className="accent-editorial-brass" />
-          <div>
-            <span className="text-eyebrow text-editorial-ivory font-medium">Hires-fix (Pass 2)</span>
-            <p className="text-eyebrow-sm text-editorial-ivory-mute">1.5× latent upscale + 2nd denoise pass. Adds detail ESRGAN can't fabricate.</p>
-          </div>
-        </div>
-        {s.hires_fix_enabled !== false && (
-          <div>
-            <div className="flex justify-between text-eyebrow-sm text-editorial-ivory-mute mb-0.5">
-              <span className="font-mono">Pass 2 denoise</span>
-              <span className="text-editorial-brass font-bold">{(s.hires_fix_denoise ?? 0.40).toFixed(2)}</span>
-            </div>
-            <input type="range" min={0.4} max={0.6} step={0.05}
-              value={s.hires_fix_denoise ?? 0.40}
-              onChange={e => update('hires_fix_denoise', parseFloat(e.target.value))}
-              aria-label="Pass 2 denoise"
-              className="w-full accent-editorial-brass h-1" />
-          </div>
-        )}
-      </div>
-
-      {/* FaceDetailer */}
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
-        <div className="flex items-center gap-2">
-          <input type="checkbox"
-            checked={s.face_detailer_enabled !== false}
-            onChange={e => update('face_detailer_enabled', e.target.checked)}
-            aria-label="FaceDetailer"
-            className="accent-editorial-brass" />
-          <div>
-            <span className="text-eyebrow text-editorial-ivory font-medium">FaceDetailer (Impact Pack)</span>
-            <p className="text-eyebrow-sm text-editorial-ivory-mute">Auto-detect face → re-denoise at guide size. Recognizable → convincing.</p>
-          </div>
-        </div>
-        {s.face_detailer_enabled !== false && (
-          <div>
-            <label className="text-eyebrow-sm text-editorial-ivory-mute block mb-0.5 font-mono">Guide size</label>
-            <select value={s.face_detailer_guide_size ?? 1024}
-              onChange={e => update('face_detailer_guide_size', parseInt(e.target.value))}
-              className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1 text-eyebrow text-editorial-ivory">
-              <option value={512}>512 — fast</option>
-              <option value={1024}>1024 — recommended</option>
-              <option value={2048}>2048 — slow, max detail</option>
-            </select>
-          </div>
-        )}
-      </div>
-
-      {/* SUPIR upscale */}
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
-        <div className="flex items-center gap-2">
-          <input type="checkbox"
-            checked={s.supir_enabled !== false}
-            onChange={e => update('supir_enabled', e.target.checked)}
-            aria-label="SUPIR 4× upscale"
-            className="accent-editorial-brass" />
-          <div>
-            <span className="text-eyebrow text-editorial-ivory font-medium">SUPIR 4× upscale (replaces Real-ESRGAN)</span>
-            <p className="text-eyebrow-sm text-editorial-ivory-mute">Photorealism-tuned restoration. 5-10× better than ESRGAN on faces. Adds ~35s/shot.</p>
-          </div>
-        </div>
-        {s.supir_enabled !== false && (
-          <div>
-            <div className="flex justify-between text-eyebrow-sm text-editorial-ivory-mute mb-0.5">
-              <span className="font-mono">SUPIR steps</span>
-              <span className="text-editorial-brass font-bold">{s.supir_steps ?? 40}</span>
-            </div>
-            <input type="range" min={20} max={100} step={5}
-              value={s.supir_steps ?? 40}
-              onChange={e => update('supir_steps', parseInt(e.target.value))}
-              aria-label="SUPIR steps"
-              className="w-full accent-editorial-brass h-1" />
-          </div>
-        )}
-      </div>
-    </>
   )
 }
 

@@ -103,7 +103,7 @@ export function AudioSyncSection({ s, config, update }: Props) {
   )
 }
 
-function LipsyncPriorityList({ s, config, update }: { s: any; config: AppConfig | null; update: (k: string, v: any) => void | Promise<void> }) {
+export function LipsyncPriorityList({ s, config, update }: { s: any; config: AppConfig | null; update: (k: string, v: any) => void | Promise<void> }) {
   const lipsyncDefault = ['HEDRA_C3', 'SYNC_SO_V3', 'MUSETALK', 'LATENTSYNC', 'OMNIHUMAN_V1_5', 'SYNC_V2']
   const priority: string[] = s.lipsync_engine_priority || lipsyncDefault
   const setPriority = (next: string[]) => update('lipsync_engine_priority', next)

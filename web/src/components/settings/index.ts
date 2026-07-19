@@ -1,6 +1,5 @@
 export { SettingsSection } from './SettingsSection'
 export { ProductionSection } from './ProductionSection'
-export { MaxQualityTierSection } from './MaxQualityTierSection'
 export { CostEstimatorSection } from './CostEstimatorSection'
 export { BudgetSection } from './BudgetSection'
 export { AudioSection } from './AudioSection'

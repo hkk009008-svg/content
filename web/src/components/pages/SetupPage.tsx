@@ -1,7 +1,7 @@
 import type { Project, AppConfig, ProgressEvent } from '../../types/project'
 import ProjectTree from '../setup/ProjectTree'
 import SceneCueSheet from '../setup/SceneCueSheet'
-import SettingsPanel from '../SettingsPanel'
+import SettingsInspector from '../setup/SettingsInspector'
 
 /**
  * SetupPage — 3-column Resolve-style layout: `ProjectTree | SceneCueSheet |
@@ -9,9 +9,9 @@ import SettingsPanel from '../SettingsPanel'
  * six workshop panels unchanged) now that the left column has its own tree
  * shell and the center has a real scenes cue sheet.
  *
- * The right column is an interim mount of the existing `SettingsPanel` —
- * `SettingsInspector` (the reconciled Video/Image/Identity/Voice/Budget
- * inspector) arrives in Task 8 and will replace this column wholesale.
+ * The right column is the reconciled `SettingsInspector` (Task 8):
+ * Project → Video → Image → Identity → Voice → Budget, Google-first engines,
+ * pod/cloud badges, no retired max-quality tier.
  */
 
 interface Props {
@@ -44,10 +44,9 @@ export default function SetupPage({
 
       <SceneCueSheet project={project} />
 
-      {/* Right: settings — interim SettingsPanel mount until Task 8's
-          SettingsInspector lands. */}
+      {/* Right: reconciled settings inspector. */}
       <div className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-gutter">
-        <SettingsPanel project={project} config={config} onRefresh={onRefreshProject} />
+        <SettingsInspector project={project} config={config} onRefresh={onRefreshProject} />
       </div>
     </div>
   )

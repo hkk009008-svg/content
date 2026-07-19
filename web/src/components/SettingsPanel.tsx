@@ -1,7 +1,6 @@
 import type { Project, AppConfig } from '../types/project'
 import {
   ProductionSection,
-  MaxQualityTierSection,
   CostEstimatorSection,
   BudgetSection,
   AudioSection,
@@ -35,7 +34,6 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
   return (
     <div className="p-4">
       <ProductionSection s={s} config={config} project={project} update={update} onRefresh={onRefresh} />
-      <MaxQualityTierSection s={s} project={project} update={update} />
       <CostEstimatorSection s={s} />
       <BudgetSection s={s} update={update} />
       <AudioSection s={s} update={update} />

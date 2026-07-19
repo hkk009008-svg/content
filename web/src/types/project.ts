@@ -121,7 +121,6 @@ export interface ApiEngineConfig {
   camera_motion_native?: boolean
 }
 
-export type QualityTier = 'production' | 'max'
 export type HaltRule = 'composite_only' | 'conjunctive' | 'budget_only'
 export type ReduxStrength = 'high' | 'medium' | 'low'
 
@@ -164,11 +163,11 @@ export interface GlobalSettings {
   transition_duration?: number
 
   // -----------------------------------------------------------------
-  // MAX-QUALITY TIER — opt-in via quality_tier='max'.
-  // Powers the N=8 adaptive best-of pipeline (quality_max.py).
-  // Defaults below if undefined mirror MAX_QUALITY_TEMPLATES values.
+  // RETIRED MAX-QUALITY TIER — the selector + inspector UI were removed in the
+  // Setup redesign (Task 8). These keys are kept ONLY as type mirrors of
+  // backend-accepted global_settings fields (project_manager still round-trips
+  // them); no live UI reads or writes them.
   // -----------------------------------------------------------------
-  quality_tier?: QualityTier
   max_candidate_count?: number              // N, 1-16, default 8
   max_candidate_batch?: number              // batch size before halt check, default 4
   max_halt_threshold_composite?: number     // 0.7-1.0, default 0.92
@@ -266,8 +265,9 @@ export interface WorkflowTemplate {
   description: string
 }
 
-/** Optional max-tier override block sent by the server alongside WorkflowTemplate.
- *  When the user flips quality_tier to "max" the UI surfaces these instead. */
+/** Optional max-tier override block the server may still send alongside
+ *  WorkflowTemplate. Type mirror only — the max-tier selector/inspector UI was
+ *  retired in the Setup redesign (Task 8); no live component reads this. */
 export interface MaxQualityTemplate {
   candidate_count: number
   candidate_batch: number
