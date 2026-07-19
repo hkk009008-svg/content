@@ -45,6 +45,14 @@ export default {
           'rule':           '#2a241e', // --rule: default hairline rule
           'rule-strong':    '#4a3f33', // --rule-strong: elevated rule / border
         },
+
+        // Indigo tokens — third color namespace, sourced from web/src/theme/tokens.css
+        // CSS variables. Added alongside editorial/console; Task 13 prunes those
+        // once all consumers migrate to these plain top-level token names.
+        app:'var(--bg)', gutter:'var(--gutter)', panel:'var(--panel)', head:'var(--head)', line:'var(--line)',
+        tx:'var(--tx)', mut:'var(--mut)', dim:'var(--dim)',
+        acc:'var(--acc)', 'acc-dim':'var(--acc-dim)', pri:'var(--pri)', 'pri-bg':'var(--pri-bg)',
+        pod:'var(--pod)', 'pod-bg':'var(--pod-bg)', ok:'var(--ok)', warn:'var(--warn)', fail:'var(--fail)',
       },
       fontFamily: {
         display: ['Fraunces', 'Georgia', 'serif'],

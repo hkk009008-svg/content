@@ -1,3 +1,5 @@
+@import './theme/tokens.css';
+
 /* ─────────────────────────────────────────────────────────────
    EDITORIAL CINEMA — Typography
    ─────────────────────────────────────────────────────────────
@@ -28,8 +30,8 @@ body {
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #0a0a0a;
-  color: #f0ebe1;
+  background: var(--gutter);
+  color: var(--tx);
   min-height: 100vh;
   position: relative;
 }
@@ -152,15 +154,15 @@ body::before {
 
 /* Selection — curtain red on ivory */
 ::selection {
-  background: #bf3737;
+  background: var(--acc);
   color: #f0ebe1;
 }
 
 /* Scrollbar — invisible until hover, very thin */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0; }
-::-webkit-scrollbar-thumb:hover { background: #d4a85a; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--acc); }
 
 /* Filmstrip scrollbar — slim gold thumb, matches console.gold token */
 .filmstrip-scroll {
@@ -187,7 +189,7 @@ button:active:not(:disabled) { transform: translateY(1px); }
 /* Keyboard focus — single hairline brass outline, 2px offset.
    Applies to anything keyboard-tabbed; pointer focus stays clean. */
 *:focus-visible {
-  outline: 1px solid #d4a85a;
+  outline: 1px solid var(--acc);
   outline-offset: 2px;
 }
 input:focus-visible, textarea:focus-visible, select:focus-visible {
