@@ -145,7 +145,7 @@ export function VoiceSection({ s, config, update }: Props) {
             max={220}
             step={5}
             onChange={(v) => update('dialogue_target_wpm', v)}
-            hint="Target words-per-minute, applied via atempo post-process (eleven_v3 ignores speed)."
+            hint="Target words-per-minute — applied via atempo post-process once wired (eleven_v3 ignores speed)."
           />
 
           <SelectRow

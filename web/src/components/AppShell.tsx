@@ -262,7 +262,7 @@ export default function AppShell({
           ‹ Projects
         </button>
         <div className="flex items-center gap-2 min-w-0">
-          <span className="truncate font-display text-sm text-tx">
+          <span className="truncate font-sans text-sm text-tx">
             {project.name || 'Untitled film'}
           </span>
           <span className="font-mono text-[10px] uppercase tracking-wide text-dim">

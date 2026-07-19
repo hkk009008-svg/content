@@ -189,7 +189,7 @@ export default function RunPage({
         ))
       ) : (
         <div className="py-24 text-center">
-          <p className="font-display text-2xl text-mut">No scenes defined</p>
+          <p className="font-sans text-2xl text-mut">No scenes defined</p>
           <p className={`${MICRO_LABEL} mt-2`}>Return to setup to compose the picture</p>
         </div>
       )}

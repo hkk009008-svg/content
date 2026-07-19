@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig, Shot } from '../../types/project'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections, assemblePromptSections, SECTION_LABELS } from '../../lib/promptSections'
+import { videoEngines } from '../../lib/engines'
 
 interface Props {
   shot: Shot
@@ -31,6 +32,11 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
   const liveShot = useMemo(() => ({ ...shot, prompt: livePrompt, camera }), [shot, livePrompt, camera])
   const shotType = classifyShotType(liveShot)
   const template = getShotTemplate(liveShot, config)
+
+  const engineOptions = videoEngines(config).map((e) => ({ value: e.key, label: e.label }))
+  if (targetApi && !engineOptions.some((o) => o.value === targetApi)) {
+    engineOptions.unshift({ value: targetApi, label: targetApi })
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -102,13 +108,11 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
                 onChange={e => setTargetApi(e.target.value)}
                 className="w-full rounded border border-editorial-rule bg-editorial-ink px-3 py-2 text-sm text-editorial-ivory"
               >
-                {config?.api_registry ? Object.entries(config.api_registry).map(([key, info]) => (
-                  <option key={key} value={key}>{info.label}</option>
+                {engineOptions.length ? engineOptions.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 )) : (
                   <>
                     <option value="AUTO">Auto</option>
-                    <option value="KLING_NATIVE">Kling</option>
-                    <option value="SORA_NATIVE">Sora</option>
                     <option value="VEO_NATIVE">Veo</option>
                     <option value="LTX">LTX</option>
                   </>
