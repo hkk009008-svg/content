@@ -29,7 +29,7 @@ import SettingsPanel from './SettingsPanel'
 import GenerationPanel from './GenerationPanel'
 import BudgetHaltBanner from './BudgetHaltBanner'
 import PreviewPanel from './PreviewPanel'
-import { Button, Eyebrow, buttonClassName } from './ui'
+import { Button, MICRO_LABEL, buttonClassName } from './ui'
 import PostRunSummary from './console/PostRunSummary'
 
 interface EditorialShellProps {
@@ -154,10 +154,10 @@ function SceneCueSheet({ project }: { project: Project }) {
   return (
     <div className="px-10">
       <div className="grid grid-cols-[60px_1fr_120px_80px] gap-6 pb-3 border-b border-editorial-rule">
-        <Eyebrow>Reel</Eyebrow>
-        <Eyebrow>Scene</Eyebrow>
-        <Eyebrow className="text-right">Shots</Eyebrow>
-        <Eyebrow className="text-right">Length</Eyebrow>
+        <span className={MICRO_LABEL}>Reel</span>
+        <span className={MICRO_LABEL}>Scene</span>
+        <span className={`${MICRO_LABEL} text-right`}>Shots</span>
+        <span className={`${MICRO_LABEL} text-right`}>Length</span>
       </div>
       <ul>
         {project.scenes
@@ -343,7 +343,7 @@ export default function EditorialShell({
       {/* ── Hero ── title + acts column ───────────────────────── */}
       <section className="px-10 pt-16 pb-12 grid grid-cols-12 gap-10">
         <div className="col-span-9 ink-up" style={{ animationDelay: '80ms' }}>
-          <Eyebrow className="mb-6">A Cinema-Production Tool · Original Programme</Eyebrow>
+          <span className={`${MICRO_LABEL} mb-6 block`}>A Cinema-Production Tool · Original Programme</span>
           <h1
             className="font-display text-editorial-ivory text-[120px] leading-[0.88] tracking-tight-display"
             style={{ fontVariationSettings: "'opsz' 144, 'wght' 350, 'SOFT' 10" }}
@@ -364,7 +364,7 @@ export default function EditorialShell({
           style={{ animationDelay: '180ms' }}
         >
           <div>
-            <Eyebrow>Direction</Eyebrow>
+            <span className={`${MICRO_LABEL} block`}>Direction</span>
             <div
               className="font-display text-editorial-ivory text-2xl mt-2"
               style={{ fontVariationSettings: "'opsz' 24, 'wght' 400, 'SOFT' 30" }}
@@ -375,7 +375,7 @@ export default function EditorialShell({
             </div>
           </div>
           <div>
-            <Eyebrow>Palette</Eyebrow>
+            <span className={`${MICRO_LABEL} block`}>Palette</span>
             <div
               className="font-display text-editorial-ivory text-2xl mt-2 capitalize"
               style={{ fontVariationSettings: "'opsz' 24, 'wght' 400, 'SOFT' 30" }}
@@ -396,7 +396,7 @@ export default function EditorialShell({
         </div>
         <div className="col-span-3 flex items-end justify-end gap-8 pl-8 border-l border-editorial-rule">
           <div className="text-right">
-            <Eyebrow>Total runtime</Eyebrow>
+            <span className={`${MICRO_LABEL} block`}>Total runtime</span>
             <div
               className="font-display text-editorial-ivory text-[64px] leading-[0.85] tabular-nums mt-2"
               style={{ fontVariationSettings: "'opsz' 144, 'wght' 300, 'SOFT' 0" }}
@@ -411,7 +411,7 @@ export default function EditorialShell({
       <section className="py-10 border-b border-editorial-rule">
         <div className="px-10 flex items-end justify-between mb-8">
           <div>
-            <Eyebrow className="mb-3">Cue Sheet</Eyebrow>
+            <span className={`${MICRO_LABEL} mb-3 block`}>Cue Sheet</span>
             <h2
               className="font-display text-editorial-ivory text-4xl"
               style={{ fontVariationSettings: "'opsz' 60, 'wght' 350, 'SOFT' 20" }}
@@ -429,7 +429,7 @@ export default function EditorialShell({
       {/* ── Action bar — Generate / Download / Cancel ──────────── */}
       <section className="px-10 py-10 border-b border-editorial-rule flex items-end justify-between gap-10">
         <div className="max-w-xl">
-          <Eyebrow className="mb-3">Tonight's Print</Eyebrow>
+          <span className={`${MICRO_LABEL} mb-3 block`}>Tonight's Print</span>
           <p
             className="font-display-body text-editorial-ivory-soft text-lg leading-relaxed italic"
             style={{ fontVariationSettings: "'opsz' 14, 'wght' 350, 'SOFT' 40" }}
@@ -478,7 +478,7 @@ export default function EditorialShell({
       <section>
         <div className="px-10 pt-12 pb-6 flex items-end justify-between">
           <div>
-            <Eyebrow className="mb-3">The Workshop</Eyebrow>
+            <span className={`${MICRO_LABEL} mb-3 block`}>The Workshop</span>
             <h2
               className="font-display text-editorial-ivory text-4xl"
               style={{ fontVariationSettings: "'opsz' 60, 'wght' 350, 'SOFT' 20" }}

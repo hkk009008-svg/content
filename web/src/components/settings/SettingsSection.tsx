@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react'
-import { Eyebrow } from '../ui'
+import { MICRO_LABEL } from '../ui'
 
 /* Collapsible settings section. Encapsulates the toggle UI pattern
    repeated 10× in the original SettingsPanel monolith. */
 
 interface Props {
-  /** Plain text title (rendered inside the standard Eyebrow). For richer headers
+  /** Plain text title (rendered as a standard micro-label heading). For richer headers
       with badges or color shifts, use `titleNode` instead. */
   title?: string
   /** Full title node — escape hatch for sections with badges, dual-color titles, etc. */
@@ -46,9 +46,9 @@ export function SettingsSection({
         aria-expanded={isOpen}
       >
         {titleNode ?? (
-          <Eyebrow as="h2" size="lg" tone="brass" className="font-semibold flex items-center gap-2">
+          <h2 className={`${MICRO_LABEL} font-semibold flex items-center gap-2`}>
             {title}
-          </Eyebrow>
+          </h2>
         )}
         <span className="flex items-center gap-2">
           {rightSlot}

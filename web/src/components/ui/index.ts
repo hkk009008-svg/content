@@ -1,5 +1,4 @@
 export { Button, buttonClassName, type ButtonVariant, type ButtonSize } from './Button'
-export { Eyebrow } from './Eyebrow'
 export { LoadingState } from './LoadingState'
 export { ErrorState } from './ErrorState'
 export { ErrorBoundary } from './ErrorBoundary'
@@ -9,3 +8,8 @@ export { StatusDot, type Status } from './StatusDot'
 export { Meter, type MeterTone } from './Meter'
 export { SelectPill, type SelectOption } from './SelectPill'
 export { Section } from './Section'
+
+// Mono uppercase micro-label className — replaces the deleted `<Eyebrow>`
+// component's default styling. Compose with an explicit tone override
+// (e.g. `MICRO_LABEL.replace('text-mut', 'text-fail')`) for non-default tones.
+export const MICRO_LABEL = 'font-mono text-[10px] uppercase tracking-[0.09em] text-mut'

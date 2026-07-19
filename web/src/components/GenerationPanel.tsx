@@ -1,4 +1,5 @@
 import type { Project, ProgressEvent } from '../types/project'
+import { stageTone } from '../lib/stageTone'
 
 interface Props {
   project: Project
@@ -8,25 +9,6 @@ interface Props {
 }
 
 export default function GenerationPanel({ project, events, latest, isGenerating }: Props) {
-  const stageColors: Record<string, string> = {
-    STYLE: 'text-purple-400',
-    AUDIO: 'text-blue-400',
-    SCENE: 'text-editorial-brass',
-    DECOMPOSE: 'text-cyan-400',
-    DIALOGUE: 'text-pink-400',
-    GENERATE: 'text-yellow-400',
-    VIDEO: 'text-orange-400',
-    VALIDATED: 'text-editorial-ready',
-    IDENTITY_FAIL: 'text-editorial-curtain',
-    RETRY: 'text-editorial-warn',
-    ASSEMBLY: 'text-indigo-400',
-    COMPLETE: 'text-editorial-ready',
-    DONE: 'text-editorial-ready',
-    ERROR: 'text-editorial-curtain',
-    CANCELLED: 'text-editorial-ivory-mute',
-    WARNING: 'text-editorial-warn',
-  }
-
   return (
     <div className="p-4">
       <h2 className="text-sm font-semibold text-editorial-ivory-mute uppercase tracking-wider mb-3">
@@ -77,7 +59,7 @@ export default function GenerationPanel({ project, events, latest, isGenerating 
         )}
         {[...events].reverse().slice(0, 50).map((e, i) => (
           <div key={i} className="flex gap-2 text-eyebrow py-0.5">
-            <span className={`font-mono w-16 shrink-0 ${stageColors[e.stage] || 'text-editorial-ivory-mute'}`}>
+            <span className={`font-mono w-16 shrink-0 ${stageTone(e.stage)}`}>
               {e.stage}
             </span>
             <span className="text-editorial-ivory-mute truncate">{e.detail}</span>

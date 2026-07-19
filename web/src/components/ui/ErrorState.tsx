@@ -1,5 +1,5 @@
 import { Button } from './Button'
-import { Eyebrow } from './Eyebrow'
+import { MICRO_LABEL } from './index'
 
 /* Editorial failure card. Used at page/section level when a pipeline
    phase, request, or operation fails. The curtain accent signals the
@@ -33,7 +33,7 @@ export function ErrorState({
       className={`border border-editorial-curtain/50 bg-editorial-curtain/[0.04]
                   px-8 py-7 ${className}`}
     >
-      <Eyebrow size="md" tone="curtain" className="mb-3">Error</Eyebrow>
+      <span className={`${MICRO_LABEL.replace('text-mut', 'text-fail')} mb-3 block`}>Error</span>
 
       <h3
         className="font-display italic text-editorial-ivory text-3xl leading-tight mb-3"

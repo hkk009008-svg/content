@@ -1,4 +1,4 @@
-import { Eyebrow } from './Eyebrow'
+import { MICRO_LABEL } from './index'
 
 /* Editorial loading placeholder. Used in card bodies, panel content
    areas, and page-level slots while the pipeline waits for the backend
@@ -12,10 +12,10 @@ interface Props {
   className?: string
 }
 
-const SIZE_CLASSES: Record<Size, { dot: string; gap: string; label: 'sm' | 'md' | 'lg' }> = {
-  sm: { dot: 'w-1 h-1',     gap: 'gap-2', label: 'sm' },
-  md: { dot: 'w-1.5 h-1.5', gap: 'gap-3', label: 'md' },
-  lg: { dot: 'w-2 h-2',     gap: 'gap-4', label: 'lg' },
+const SIZE_CLASSES: Record<Size, { dot: string; gap: string }> = {
+  sm: { dot: 'w-1 h-1',     gap: 'gap-2' },
+  md: { dot: 'w-1.5 h-1.5', gap: 'gap-3' },
+  lg: { dot: 'w-2 h-2',     gap: 'gap-4' },
 }
 
 export function LoadingState({ label = 'Loading', size = 'md', className = '' }: Props) {
@@ -31,7 +31,7 @@ export function LoadingState({ label = 'Loading', size = 'md', className = '' }:
         <span className={`${s.dot} bg-editorial-brass rounded-full animate-pulse`} style={{ animationDelay: '180ms' }} />
         <span className={`${s.dot} bg-editorial-brass rounded-full animate-pulse`} style={{ animationDelay: '360ms' }} />
       </span>
-      <Eyebrow size={s.label} tone="mute" as="span">{label}</Eyebrow>
+      <span className={MICRO_LABEL}>{label}</span>
     </div>
   )
 }
