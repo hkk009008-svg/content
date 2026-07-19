@@ -4,11 +4,14 @@ import type { ProgressEvent } from '../types/project'
  *
  *  Owned by App.tsx state, NOT keyed on `latest`: the motion-phase abort
  *  emits MOTION_HALTED immediately after the halt event, which would flash a
- *  latest-keyed banner away. Rendered in BOTH PipelineLayout (where the
- *  operator actually is when the per-take gate fires mid-run) and
- *  EditorialShell (setup mode) — the wf_9877b1d1 review found the original
- *  shell-only placement unreachable in the primary flow because starting a
- *  run unmounts the shell. */
+ *  latest-keyed banner away. Historically rendered in BOTH the old
+ *  `pipeline/PipelineLayout` (where the operator actually is when the
+ *  per-take gate fires mid-run) and the old `EditorialShell` (setup mode) —
+ *  the wf_9877b1d1 review found the original shell-only placement unreachable
+ *  in the primary flow because starting a run unmounted the shell. Since
+ *  Task 13's `AppShell` (a single persistent shell that never unmounts across
+ *  page switches), it renders once, in AppShell's always-mounted top region —
+ *  both predecessor components are deleted. */
 export default function BudgetHaltBanner({
   event,
   onDismiss,

@@ -4,7 +4,6 @@ import { usePage, type Page } from '../context/PageContext'
 import { Badge, StatusDot, ErrorBoundary } from './ui'
 import BudgetHaltBanner from './BudgetHaltBanner'
 import PostRunSummary from './console/PostRunSummary'
-import PipelineLayout from './pipeline/PipelineLayout'
 import SetupPage from './pages/SetupPage'
 import EditPage from './pages/EditPage'
 import RunPage from './pages/RunPage'
@@ -21,9 +20,14 @@ import CapabilityPage from './pages/CapabilityPage'
  * to the Run page). `budgetHalt` is still owned by `App.tsx`; the shell renders
  * its banner in the always-mounted top region so the sticky halt survives page
  * switches — this replaces the old dual-mount (EditorialShell + PipelineLayout).
+ *
+ * Task 13: `pipeline/PipelineLayout.tsx` is deleted (dead — no JSX mount
+ * anywhere), so the pipeline-prop `Pick<>` below is derived from
+ * `ComponentProps<typeof RunPage>` instead; `RunPage.tsx` carries the
+ * field-for-field-identical `Props` type PipelineLayout used to own.
  */
 
-type PipelineProps = ComponentProps<typeof PipelineLayout>
+type PipelineProps = ComponentProps<typeof RunPage>
 
 interface AppShellProps
   extends Pick<

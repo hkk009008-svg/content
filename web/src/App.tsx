@@ -121,8 +121,8 @@ function AppInner() {
   }
 
   // Pipeline system-level surfaces — computed here and threaded through
-  // AppShell → RunPage → PipelineLayout unchanged (parity with the old
-  // mode==='pipeline' block).
+  // AppShell → RunPage unchanged (parity with the old mode==='pipeline' block;
+  // the intermediate `pipeline/PipelineLayout` component was deleted in Task 13).
   const pipelineError =
     latest?.stage === 'ERROR'
       ? {

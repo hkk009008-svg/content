@@ -1,5 +1,5 @@
-import { useMemo, type ComponentProps } from 'react'
-import PipelineLayout from '../pipeline/PipelineLayout'
+import { useMemo } from 'react'
+import type { Project, ProgressEvent, ShotState, PipelineStage, DirectorReview } from '../../types/project'
 import PipelineStageRail from '../pipeline/PipelineStageRail'
 import ReviewStage from '../pipeline/ReviewStage'
 import ScreeningStage from '../pipeline/ScreeningStage'
@@ -25,8 +25,12 @@ import { ErrorState, LoadingState, MICRO_LABEL } from '../ui'
  * surrounding chrome (header, stage rail, filmstrip, monitor, telemetry, notes)
  * is additive and does not touch the gate flow.
  *
- * The prop contract is `ComponentProps<typeof PipelineLayout>` — identical to
- * the stub it replaces, so `AppShell` needs no change. `budgetHalt` is owned by
+ * The prop contract below was originally `ComponentProps<typeof PipelineLayout>`
+ * (the old file this page replaced); Task 13 inlined it as an explicit local
+ * type so `pipeline/PipelineLayout.tsx` — now dead (no JSX mount anywhere) —
+ * could be deleted. Field-for-field identical to the old shape.
+ * `AppShell` derives its own pipeline-prop `Pick<>` from `ComponentProps<typeof
+ * RunPage>` (this component), not from PipelineLayout. `budgetHalt` is owned by
  * `AppShell` (single banner) and is intentionally not consumed here.
  *
  * `activeShotId` and `notesBuffer` are NOT threaded to this page, so they are
@@ -41,7 +45,56 @@ import { ErrorState, LoadingState, MICRO_LABEL } from '../ui'
 
 const REVIEW_STAGES = ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW']
 
-type Props = ComponentProps<typeof PipelineLayout>
+/** Mirrors the old `pipeline/PipelineLayout` `Props` shape (minus `budgetHalt`
+ *  / `onDismissBudgetHalt`, which RunPage never consumed — see file doc above).
+ *  `AppShell.tsx` derives its `Pick<>` from `ComponentProps<typeof RunPage>`. */
+interface PipelineErrorLike {
+  message: string
+  hint?: string
+  onRetry?: () => void
+}
+
+export interface Props {
+  project: Project
+  events: ProgressEvent[]
+  latest: ProgressEvent | null
+  stages: PipelineStage[]
+  activeStage: string | null
+  shotStates: Map<string, Partial<ShotState>>
+  directorReview: DirectorReview | null
+  isGenerating: boolean
+  isPaused: boolean
+  failedShots: string[]
+  onBack: () => void
+  onCancel: () => void
+  onPause: () => void
+  onResume: () => void
+  onApproveShotPlan: (shotId: string) => Promise<any>
+  onRejectShotPlan: (shotId: string, reason?: string) => Promise<any>
+  onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
+  onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
+  onApprovePerformance: (shotId: string, takeId: string) => Promise<any>
+  onGenerateMotion: (shotId: string) => Promise<any>
+  onApproveFinal: (shotId: string, takeId: string) => Promise<any>
+  onRegenerateShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
+  onRestartShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
+  onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
+  onDiagnoseShot: (shotId: string, takeId?: string, deep?: boolean) => Promise<any>
+  onProceedToAssembly: () => Promise<any>
+  onRefreshProject: () => Promise<void> | void
+  onIterate?: (
+    shotId: string,
+    takeId: string,
+    prose: string,
+    targetStage?: 'keyframe' | 'performance' | 'motion',
+    verb?: string,
+    params?: Record<string, unknown>,
+  ) => Promise<any>
+  onApproveFinalCut?: () => Promise<void>
+  onReassemble?: (onlyIfChanged: boolean) => Promise<any>
+  pipelineError?: PipelineErrorLike | null
+  pipelineLoadingLabel?: string | null
+}
 
 export default function RunPage({
   project, events, latest, stages, activeStage,

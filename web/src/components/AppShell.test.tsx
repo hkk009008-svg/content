@@ -6,9 +6,10 @@ import type { Project, ProgressEvent } from '../types/project'
 
 // Isolate the shell's chrome + page-routing from the network-heavy real
 // pages. SetupPage mounts six panels (some fetch on mount); RunPage pulls the
-// full PipelineLayout tree; CapabilityPage renders the console. Mock them to
-// simple markers. EditPage is left REAL (it's a lightweight LoadingState) so
-// the tab-switch assertion exercises a genuine page.
+// full stage-rail/review/screening/monitor/telemetry tree; CapabilityPage
+// renders the console. Mock them to simple markers. EditPage is left REAL
+// (it's a lightweight LoadingState) so the tab-switch assertion exercises a
+// genuine page.
 vi.mock('./pages/SetupPage', () => ({
   default: () => <div data-testid="mock-setup">setup-page</div>,
 }))

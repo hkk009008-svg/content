@@ -2,8 +2,9 @@
  * PostRunSummary — modal aggregating auto-approve audit decisions across all shots.
  *
  * Triggered by the pipeline-completion SSE event (stage: "DONE") from the parent
- * component (EditorialShell). Auto-opens on run completion; dismissable; parent
- * should provide a re-open button so the user can revisit after closing.
+ * component (`AppShell`, formerly `EditorialShell` — deleted in Task 13). Auto-opens
+ * on run completion; dismissable; parent should provide a re-open button so the
+ * user can revisit after closing.
  *
  * Displays:
  *   - Per-gate counts (plan / image / motion / final): N approved / M vetoed
