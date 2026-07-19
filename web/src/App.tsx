@@ -2,21 +2,30 @@ import { useState, useEffect, useCallback } from 'react'
 import type { Project, AppConfig, ProgressEvent } from './types/project'
 import { usePipelineState } from './hooks/usePipelineState'
 import { ErrorBoundary } from './components/ui'
+import { PageProvider, usePage } from './context/PageContext'
 import ProjectSelector from './components/ProjectSelector'
-import PipelineLayout from './components/pipeline/PipelineLayout'
-import EditorialShell from './components/EditorialShell'
-import DirectorsConsole from './components/DirectorsConsole'
-import CapabilityConsole from './components/console/CapabilityConsole'
+import AppShell from './components/AppShell'
 
 const API = '/api'
 
+/**
+ * App — thin provider wrapper. All state + wiring lives in `AppInner`, which
+ * must run under `<PageProvider>` so `handleGenerate` can flip the shell to the
+ * Run page via `usePage().setPage`.
+ */
 export default function App() {
+  return (
+    <PageProvider>
+      <AppInner />
+    </PageProvider>
+  )
+}
+
+function AppInner() {
+  const { setPage } = usePage()
   const [project, setProject] = useState<Project | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [generating, setGenerating] = useState(false)
-  // 'console' is the new Director's Console route — design/directors-console.html
-  // brought into the running app as a stub shell. Future slices flesh out the regions.
-  const [mode, setMode] = useState<'setup' | 'pipeline' | 'console' | 'capability'>('setup')
 
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
@@ -41,9 +50,9 @@ export default function App() {
     if (project) await loadProject(project.id)
   }, [project, loadProject])
 
-  // P1-3: sticky BUDGET_EXCEEDED halt. Owned HERE (not in a mode shell)
-  // because starting a run unmounts EditorialShell and the gate fires
-  // mid-run while the operator is in PipelineLayout — both render it.
+  // P1-3: sticky BUDGET_EXCEEDED halt. Owned HERE (not in a page) because the
+  // gate fires mid-run and must survive page switches — AppShell renders the
+  // banner in its always-mounted top region.
   // Not keyed on `latest`: the phase abort emits MOTION_HALTED right after
   // the halt event, which would flash a latest-keyed banner away.
   const [budgetHalt, setBudgetHalt] = useState<ProgressEvent | null>(null)
@@ -55,7 +64,7 @@ export default function App() {
     if (!project) return
     setGenerating(true)
     setBudgetHalt(null) // new run: the previous halt is history
-    setMode('pipeline')  // Switch to pipeline view
+    setPage('run')  // Switch to the Run page (replaces the old mode='pipeline')
     await fetch(`${API}/projects/${project.id}/generate`, { method: 'POST' })
     startSSE()
   }
@@ -68,7 +77,7 @@ export default function App() {
   }
 
   const handleBackToSetup = () => {
-    setMode('setup')
+    setPage('setup')
   }
 
   const withRefresh = useCallback(async (action: () => Promise<any>) => {
@@ -111,88 +120,27 @@ export default function App() {
     return <ProjectSelector onSelect={loadProject} />
   }
 
-  // --- DIRECTOR'S CONSOLE ---
-  // New route from design/directors-console.html. Stub shell — see component
-  // for region-level TODOs. Toggled via the masthead button in EditorialShell.
-  if (mode === 'console' && project) {
-    return <ErrorBoundary><DirectorsConsole project={project} onBack={() => setMode('setup')} /></ErrorBoundary>
-  }
+  // Pipeline system-level surfaces — computed here and threaded through
+  // AppShell → RunPage → PipelineLayout unchanged (parity with the old
+  // mode==='pipeline' block).
+  const pipelineError =
+    latest?.stage === 'ERROR'
+      ? {
+          message: latest.failure_reason || latest.detail || 'The pipeline reported an error.',
+          hint: 'The director has stopped the run. You can restart from setup, or retry to resume.',
+          onRetry: handleGenerate,
+        }
+      : null
 
-  // --- CAPABILITY DASHBOARD ---
-  // Part 4: scorecard view. Toggled via the "Capability →" masthead button.
-  if (mode === 'capability' && project) {
-    return <ErrorBoundary><CapabilityConsole project={project} onBack={() => setMode('setup')} /></ErrorBoundary>
-  }
+  const pipelineLoadingLabel =
+    generating && !isStreaming && events.length === 0
+      ? 'Calling the projection room'
+      : null
 
-  // --- PIPELINE MODE ---
-  if (mode === 'pipeline' && project) {
-    const pipelineError =
-      latest?.stage === 'ERROR'
-        ? {
-            message: latest.failure_reason || latest.detail || 'The pipeline reported an error.',
-            hint: 'The director has stopped the run. You can restart from setup, or retry to resume.',
-            onRetry: handleGenerate,
-          }
-        : null
-
-    const pipelineLoadingLabel =
-      generating && !isStreaming && events.length === 0
-        ? 'Calling the projection room'
-        : null
-
-    return (
-      <ErrorBoundary>
-        <PipelineLayout
-          project={project}
-          events={events}
-          latest={latest}
-          stages={stages}
-          activeStage={activeStage}
-          shotStates={shotStates}
-          directorReview={directorReview}
-          isGenerating={generating || isStreaming}
-          isPaused={isPaused}
-          failedShots={failedShots}
-          pipelineError={pipelineError}
-          pipelineLoadingLabel={pipelineLoadingLabel}
-          budgetHalt={budgetHalt}
-          onDismissBudgetHalt={() => setBudgetHalt(null)}
-          onBack={handleBackToSetup}
-          onCancel={handleCancel}
-          onPause={pausePipeline}
-          onResume={resumePipeline}
-          onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
-          onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
-          onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
-          onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
-          onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
-          onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
-          onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
-          onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
-          onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
-          onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
-          onDiagnoseShot={(shotId, takeId, deep) => diagnoseShot(shotId, takeId, deep)}
-          onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
-          onRefreshProject={refreshProject}
-          onIterate={(shotId, takeId, prose, targetStage, verb, params) =>
-            withRefresh(() => iterateTake(shotId, takeId, prose, targetStage, verb, params))
-          }
-          onApproveFinalCut={async () => {
-            await withRefresh(() => approveScreening())
-          }}
-          onReassemble={(onlyIfChanged) => reassembleProject(onlyIfChanged)}
-        />
-      </ErrorBoundary>
-    )
-  }
-
-  // --- SETUP MODE ---
-  // Render the editorial shell. It owns the chrome (hero, figures, cue
-  // sheet, action bar) and embeds the existing functional panels in its
-  // workshop section so SSE wiring + project-mutate flows are unchanged.
   return (
     <ErrorBoundary>
-      <EditorialShell
+      <AppShell
+        // ── EditorialShell-parity props ──
         project={project}
         config={config}
         events={events}
@@ -203,11 +151,43 @@ export default function App() {
         onGenerate={handleGenerate}
         onCancel={handleCancel}
         onRefreshProject={refreshProject}
-        onOpenConsole={() => setMode('console')}
-        onOpenCapability={() => setMode('capability')}
+        onOpenConsole={() => setPage('run')}
+        onOpenCapability={() => setPage('capability')}
         apiBase={API}
         budgetHalt={budgetHalt}
         onDismissBudgetHalt={() => setBudgetHalt(null)}
+        // ── Pipeline state (Run page) ──
+        stages={stages}
+        activeStage={activeStage}
+        shotStates={shotStates}
+        directorReview={directorReview}
+        isPaused={isPaused}
+        failedShots={failedShots}
+        pipelineError={pipelineError}
+        pipelineLoadingLabel={pipelineLoadingLabel}
+        // ── Pipeline callbacks (withRefresh-wrapped except onDiagnoseShot / onReassemble) ──
+        onBack={handleBackToSetup}
+        onPause={pausePipeline}
+        onResume={resumePipeline}
+        onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
+        onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
+        onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
+        onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
+        onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
+        onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
+        onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
+        onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
+        onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
+        onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
+        onDiagnoseShot={(shotId, takeId, deep) => diagnoseShot(shotId, takeId, deep)}
+        onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
+        onIterate={(shotId, takeId, prose, targetStage, verb, params) =>
+          withRefresh(() => iterateTake(shotId, takeId, prose, targetStage, verb, params))
+        }
+        onApproveFinalCut={async () => {
+          await withRefresh(() => approveScreening())
+        }}
+        onReassemble={(onlyIfChanged) => reassembleProject(onlyIfChanged)}
       />
     </ErrorBoundary>
   )
