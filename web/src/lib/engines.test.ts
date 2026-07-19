@@ -54,6 +54,18 @@ describe('videoEngines', () => {
     expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI'])
   })
 
+  it('excludes AUTO (smart-routing meta-value, not a concrete engine)', () => {
+    const config = mockConfig({
+      GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
+      AUTO: api({ label: 'Auto (Smart Routing)', category: 'smart' }),
+    })
+
+    const result = videoEngines(config as AppConfig)
+
+    expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI'])
+    expect(result.some((e) => e.key === 'AUTO')).toBe(false)
+  })
+
   it('appends a live video engine outside the canonical order/exclude lists, after the ordered set', () => {
     const config = mockConfig({
       GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),

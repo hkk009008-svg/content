@@ -9,7 +9,11 @@ export interface VideoEngineOption {
   quality?: number
 }
 
-/** Retired / sunset / legacy-proxy engines hidden from the video picker. */
+/**
+ * Retired / sunset / legacy-proxy engines hidden from the video picker, plus
+ * 'AUTO' — a smart-routing meta-value (domain/scene_decomposer.py:38,
+ * modality:'video', status:'live'), not a concrete engine the UI can select.
+ */
 const EXCLUDED_VIDEO_ENGINES = new Set([
   'SORA_NATIVE',
   'SORA_2',
@@ -18,6 +22,7 @@ const EXCLUDED_VIDEO_ENGINES = new Set([
   'HEDRA_C3',
   'KLING_NATIVE',
   'VEO',
+  'AUTO',
 ])
 
 /** Canonical Google-first order (mirrors DEFAULT_VIDEO_CASCADE in phase_c_ffmpeg.py). */
