@@ -309,12 +309,15 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
 
 // ── Section: Available — not engaged (Task 11) ───────────────────────────────
 
-/** Curated capability inventory (ComfyUI max keyframe, second-character LoRA,
- *  Foley — per the redesign spec §"Page 4 — Capability") plus any component
- *  the manifest marks `stubbed`/`parked` (code exists but isn't reached / is
+/** Curated capability inventory (ComfyUI max keyframe, second-character LoRA
+ *  — per the redesign spec §"Page 4 — Capability") plus any component the
+ *  manifest marks `stubbed`/`parked` (code exists but isn't reached / is
  *  blocked on external state, e.g. the pod). Second-char LoRA is hidden once
  *  the project actually has ≥2 characters with a LoRA row (sourced from
- *  `sc.lora`, not fabricated). */
+ *  `sc.lora`, not fabricated). Foley is deliberately excluded: it's a live,
+ *  unconditional step in every scene (`cinema_pipeline.py:_ensure_scene_foley`),
+ *  not a dormant/available-only capability — listing it here would misrepresent
+ *  real pipeline state. */
 function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
   const secondCharLoraEngaged = sc.lora.length >= 2
 
@@ -323,7 +326,6 @@ function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
     ...(secondCharLoraEngaged
       ? []
       : [{ id: 'second_char_lora', label: 'Second-character LoRA', note: 'Per-character LoRA training for a secondary cast member — trains on the pod.', pod: true }]),
-    { id: 'foley', label: 'Foley', note: 'Stable Audio 2 foley layer — needs STABILITY_API_KEY.', pod: false },
   ]
 
   const stubbedComponents = sc.components.filter((c) => c.status === 'stubbed' || c.status === 'parked')
