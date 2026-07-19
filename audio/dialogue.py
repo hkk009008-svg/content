@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import warnings
 from typing import TYPE_CHECKING, Optional
 
@@ -428,6 +429,87 @@ def _maybe_save_alignment(
     return json_path
 
 
+# ---------------------------------------------------------------------------
+# Dialogue pace control (dialogue_target_wpm -> ffmpeg atempo)
+# ---------------------------------------------------------------------------
+# eleven_v3 ignores the `speed` voice setting, so speaking pace is corrected
+# AFTER render: measure the assembled line's actual words-per-minute and
+# time-stretch (pitch-preserved atempo) toward the project's
+# `dialogue_target_wpm`. Post-render only, so TTS billing is unaffected.
+
+def _pace_factor(words: int, duration_s: float, target_wpm: int,
+                 deadband: float = 0.03, lo: float = 0.6, hi: float = 1.6):
+    """atempo factor to move `words`/`duration_s` speech toward `target_wpm`,
+    or None to skip. factor < 1 slows down (fewer wpm). Returns None when
+    disabled/unmeasurable or the change is within +/- `deadband`; otherwise
+    clamped to [lo, hi] to protect prosody on outlier inputs."""
+    if target_wpm <= 0 or words <= 0 or duration_s <= 0:
+        return None
+    actual_wpm = words / (duration_s / 60.0)
+    factor = target_wpm / actual_wpm
+    if abs(factor - 1.0) <= deadband:
+        return None
+    return max(lo, min(hi, factor))
+
+
+def _atempo_chain(factor: float) -> str:
+    """ffmpeg atempo filter string; chains passes to cover factors outside
+    atempo's native 0.5-2.0 range (mirrors phase_c_ffmpeg.adjust_speed)."""
+    parts, remaining = [], factor
+    while remaining > 2.0:
+        parts.append("atempo=2.0")
+        remaining /= 2.0
+    while remaining < 0.5:
+        parts.append("atempo=0.5")
+        remaining /= 0.5
+    parts.append(f"atempo={remaining:.4f}")
+    return ",".join(parts)
+
+
+def _probe_audio_duration(path: str) -> float:
+    """Audio duration in seconds via ffprobe; 0.0 if unmeasurable."""
+    if not path or not os.path.exists(path):
+        return 0.0
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float((out.stdout or "0").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _apply_target_pace(audio_path: str, transcript: str, target_wpm: int) -> str:
+    """Time-stretch `audio_path` IN PLACE toward `target_wpm` (pitch-preserved
+    ffmpeg atempo). No-op — returns `audio_path` unchanged — when pacing is
+    disabled, the audio/duration is unmeasurable, or the change is within the
+    deadband."""
+    factor = _pace_factor(len((transcript or "").split()),
+                          _probe_audio_duration(audio_path), target_wpm)
+    if factor is None:
+        return audio_path
+    tmp = f"{audio_path}.paced.mp3"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path, "-filter:a", _atempo_chain(factor),
+             "-c:a", "libmp3lame", "-q:a", "2", tmp],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120,
+        )
+        if os.path.exists(tmp) and os.path.getsize(tmp) > 0:
+            os.replace(tmp, audio_path)
+            print(f"   🎚️ [PACE] atempo={factor:.3f} -> target ~{target_wpm} wpm")
+    except Exception as e:
+        print(f"   [PACE] pace skip (atempo failed, kept original): {e}")
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return audio_path
+
+
 def generate_dialogue_voiceover(
     dialogue_lines: list,
     characters: list,
@@ -458,10 +540,21 @@ def generate_dialogue_voiceover(
     Returns:
         Path to assembled dialogue audio, or None on failure
     """
+    # Target speaking pace (wpm) — applied via ffmpeg atempo post-render so the
+    # UI's `dialogue_target_wpm` control is truthful. Default 145 (cinematic
+    # close-up pace); a stored 0/None disables pacing. eleven_v3 ignores the
+    # `speed` voice setting, so pacing MUST be a measure-then-stretch
+    # post-process, not a TTS parameter.
+    try:
+        target_wpm = int(get_project_setting(ctx, "dialogue_target_wpm", 145) or 0)
+    except (TypeError, ValueError):
+        target_wpm = 145
+
     # PATH 1: try ElevenLabs Dialogue Mode first
     dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename, ctx=ctx)
     if dm_result:
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
+        dm_result = _apply_target_pace(dm_result, transcript_hint, target_wpm)
         _maybe_save_alignment(dm_result, transcript_hint=transcript_hint, ctx=ctx)
         return dm_result
 
@@ -687,6 +780,12 @@ def generate_dialogue_voiceover(
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
         os.replace(_part_out, output_filename)
+
+        # Apply the project's target speaking pace (ffmpeg atempo, pitch-
+        # preserved) to the assembled dialogue BEFORE alignment, so any
+        # word-timestamp sidecar matches the final (paced) timing.
+        _dlg_transcript = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
+        _apply_target_pace(output_filename, _dlg_transcript, target_wpm)
 
         print(f"   ✅ Multi-character dialogue assembled: {output_filename}")
 
