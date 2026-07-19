@@ -231,8 +231,6 @@ export default function AppShell({
             onReassemble={onReassemble}
             pipelineError={pipelineError}
             pipelineLoadingLabel={pipelineLoadingLabel}
-            budgetHalt={budgetHalt}
-            onDismissBudgetHalt={onDismissBudgetHalt}
           />
         )
       case 'capability':
