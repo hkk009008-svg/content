@@ -42,9 +42,11 @@ for _dep in ["fal_client"]:
 class TestCascadeStepLogsEngine:
     """lipsync_generation INFO messages include the `engine` extra field."""
 
-    def test_kling_attempt_logs_engine_info(self, caplog):
-        """On Kling attempt (ATTEMPT 0, now the front of the cascade since Hedra
-        was removed — WS4), an INFO record with engine='kling' is emitted."""
+    def test_omnihuman_attempt_logs_engine_info(self, caplog):
+        """On the Omnihuman attempt (ATTEMPT 0 — Task 12 dropped the miswired
+        Kling generation attempt, which 422s on every still-image call since
+        that endpoint requires video_url), an INFO record with
+        engine='omnihuman' is emitted."""
         import logging
         import lip_sync
 
@@ -62,7 +64,7 @@ class TestCascadeStepLogsEngine:
             patch("lip_sync.safe_download", return_value=None),
             caplog.at_level(logging.INFO, logger="lip_sync"),
         ):
-            # fal_client.subscribe raises to abort the Kling/Omnihuman/Aurora attempts
+            # fal_client.subscribe raises to abort the Omnihuman/Aurora attempts
             fake_fal.subscribe.side_effect = RuntimeError("stop")
             lip_sync.lipsync_generation(
                 character_image_path="/tmp/face.jpg",
@@ -73,8 +75,12 @@ class TestCascadeStepLogsEngine:
         info_records = [r for r in caplog.records if r.levelno == logging.INFO]
         assert info_records, "Expected at least one INFO record from lipsync_generation"
         engines = [getattr(r, "engine", None) for r in info_records]
-        assert "kling" in engines, (
-            f"Expected engine='kling' in INFO records; got engines={engines!r}"
+        assert "omnihuman" in engines, (
+            f"Expected engine='omnihuman' in INFO records; got engines={engines!r}"
+        )
+        assert engines[0] == "omnihuman", (
+            f"Omnihuman must be ATTEMPT 0 (Kling was dropped — Task 12); "
+            f"got engines={engines!r}"
         )
 
 

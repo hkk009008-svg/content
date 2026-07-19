@@ -105,11 +105,11 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Image gen | [phase_c_assembly.py](phase_c_assembly.py), [pulid.json](pulid.json) | Production = RunPodComfyUI + PuLID, single tier. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
 | Video gen | [workflow_selector.py](workflow_selector.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 shot-type templates × 11-engine dispatch. Runway + Seedance dispatched inline (no adapter file). |
 | Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
-| Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (4 cloud engines). SyncNet quality gate. |
+| Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (2 cloud engines). SyncNet quality gate. |
 | Audio | [audio/](audio/) — `voiceover.py`, `dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `_client.py` | ElevenLabs SDK singleton. Pedalboard hard dep. WhisperX forced alignment. |
 | Frontend | [web/src/](web/src/) | React 19 + Vite 6 + Tailwind 3. 4-mode `useState` (no router). Two strict palettes. |
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-07-19*
 
 ---
 
@@ -1291,14 +1291,18 @@ The flow is controlled by `dialogue_voice_mode` (see §10.7).
 
 | Order | Engine | Endpoint |
 |---|---|---|
-| 0 | Kling native lip sync | `fal-ai/kling-video/lipsync/audio-to-video` |
-| 1 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
-| 2 | Creatify Aurora | `fal-ai/creatify/aurora` |
+| 0 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
+| 1 | Creatify Aurora | `fal-ai/creatify/aurora` |
 
-ATTEMPT 0: Kling / OmniHuman v1.5. (WS4, 2026-07-18: Hedra Character-3 —
-formerly a **direct** `api.hedra.com/web-app/public` REST call, `hedra_native.py`
-— removed from ATTEMPT 0; lapsed subscription, dead key. On any failure the
-surviving cascade falls through Kling → Omnihuman → Creatify.)
+ATTEMPT 0: OmniHuman v1.5. (WS4, 2026-07-18: Hedra Character-3 — formerly a
+**direct** `api.hedra.com/web-app/public` REST call, `hedra_native.py` —
+removed from ATTEMPT 0; lapsed subscription, dead key. Task 12, 2026-07-19:
+Kling's `fal-ai/kling-video/lipsync/audio-to-video` also dropped from this
+cascade — that endpoint requires `video_url` (it does not appear anywhere in
+the overlay cascade above either; it was never a real FAL avatar-lipsync
+option), so calling it with only an image_url 422s on every still-image
+generation call, verified live 2026-07-18 `x-fal-billable-units:0`. On any
+failure the surviving cascade falls through Omnihuman → Creatify.)
 
 **SyncNet quality gate** ([lip_sync.py:282](lip_sync.py:282) for overlay gate;
 [lip_sync.py:742](lip_sync.py:742) for generation gate) scores each
