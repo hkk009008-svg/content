@@ -1,24 +1,17 @@
 import type { Project, AppConfig, ProgressEvent } from '../../types/project'
-import CharacterPanel from '../CharacterPanel'
-import LocationPanel from '../LocationPanel'
-import ObjectPanel from '../ObjectPanel'
-import ScenePanel from '../ScenePanel'
+import ProjectTree from '../setup/ProjectTree'
+import SceneCueSheet from '../setup/SceneCueSheet'
 import SettingsPanel from '../SettingsPanel'
-import GenerationPanel from '../GenerationPanel'
-import PreviewPanel from '../PreviewPanel'
 
 /**
- * SetupPage (stub) — mounts the six existing workshop panels unchanged so
- * every functional flow (project mutate + SSE) keeps working while later
- * tasks flesh out the redesigned Setup surface. This is the current 3-col
- * workshop grid lifted out of `EditorialShell`; the editorial chrome around
- * it (hero, cue sheet, action bar) now lives in `AppShell`.
+ * SetupPage — 3-column Resolve-style layout: `ProjectTree | SceneCueSheet |
+ * SettingsInspector`. Replaces the flat 3-col-grid stub (which mounted the
+ * six workshop panels unchanged) now that the left column has its own tree
+ * shell and the center has a real scenes cue sheet.
  *
- * Panel prop contracts are matched EXACTLY to the existing components:
- *   Character / Location / Scene / Settings → {project, config, onRefresh}
- *   Object → {project, onRefresh}          (ObjectPanel takes no `config`)
- *   Generation → {project, events, latest, isGenerating}
- *   Preview → {project}
+ * The right column is an interim mount of the existing `SettingsPanel` —
+ * `SettingsInspector` (the reconciled Video/Image/Identity/Voice/Budget
+ * inspector) arrives in Task 8 and will replace this column wholesale.
  */
 
 interface Props {
@@ -39,36 +32,22 @@ export default function SetupPage({
   onRefreshProject,
 }: Props) {
   return (
-    <div
-      data-page="setup"
-      className="grid grid-cols-12 h-full min-h-0 bg-app text-tx"
-    >
-      {/* Left: cast + locations + objects */}
-      <div className="col-span-3 border-r border-line overflow-y-auto bg-gutter">
-        <CharacterPanel project={project} config={config} onRefresh={onRefreshProject} />
-        <div className="border-t border-line" />
-        <LocationPanel project={project} config={config} onRefresh={onRefreshProject} />
-        <div className="border-t border-line" />
-        <ObjectPanel project={project} onRefresh={onRefreshProject} />
-      </div>
+    <div data-page="setup" className="flex h-full min-h-0 bg-app text-tx">
+      <ProjectTree
+        project={project}
+        config={config}
+        events={events}
+        latest={latest}
+        isGenerating={isGenerating}
+        onRefresh={onRefreshProject}
+      />
 
-      {/* Center: scenes (editing) */}
-      <div className="col-span-6 overflow-y-auto bg-app">
-        <ScenePanel project={project} config={config} onRefresh={onRefreshProject} />
-      </div>
+      <SceneCueSheet project={project} />
 
-      {/* Right: settings + generation + preview */}
-      <div className="col-span-3 border-l border-line overflow-y-auto bg-gutter">
+      {/* Right: settings — interim SettingsPanel mount until Task 8's
+          SettingsInspector lands. */}
+      <div className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-gutter">
         <SettingsPanel project={project} config={config} onRefresh={onRefreshProject} />
-        <div className="border-t border-line" />
-        <GenerationPanel
-          project={project}
-          events={events}
-          latest={latest}
-          isGenerating={isGenerating}
-        />
-        <div className="border-t border-line" />
-        <PreviewPanel project={project} />
       </div>
     </div>
   )

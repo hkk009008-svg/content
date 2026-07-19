@@ -47,7 +47,7 @@ export default function ObjectPanel({ project, onRefresh }: Props) {
   const [editFiles, setEditFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const objects: ProductObject[] = (project as any).objects || []
+  const objects: ProductObject[] = project.objects || []
 
   const handleAdd = async () => {
     if (!form.name.trim()) return

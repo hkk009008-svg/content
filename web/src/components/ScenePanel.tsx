@@ -448,10 +448,10 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                             </div>
 
                             {/* Objects-in-frame editor */}
-                            {(((project as any).objects) || []).length > 0 && (
+                            {(project.objects || []).length > 0 && (
                               <div className="mt-1 flex flex-wrap items-center gap-1">
                                 <span className="text-eyebrow-sm text-editorial-ivory-mute">Objects:</span>
-                                {((project as any).objects || []).map((o: any) => {
+                                {(project.objects || []).map((o: any) => {
                                   const inFrame = objsInFrame.includes(o.id)
                                   return (
                                     <button
