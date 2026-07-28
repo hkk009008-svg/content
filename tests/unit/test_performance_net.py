@@ -11,9 +11,10 @@ from performance import _net
 
 
 class _FakeResponse:
-    def __init__(self, items=(), *, headers=None):
+    def __init__(self, items=(), *, headers=None, status_code=200):
         self._items = items
         self.headers = headers or {}
+        self.status_code = status_code
 
     def __enter__(self):
         return self
@@ -21,7 +22,13 @@ class _FakeResponse:
     def __exit__(self, exc_type, exc, traceback):
         return False
 
+    @property
+    def is_redirect(self):
+        return self.status_code in (301, 302, 303, 307, 308)
+
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"status {self.status_code}")
         return None
 
     def iter_content(self, *, chunk_size):
@@ -32,14 +39,28 @@ class _FakeResponse:
             yield item
 
 
-def _install_response(monkeypatch, response):
-    def fake_get(url, *, stream, timeout):
-        assert url == "https://example.test/video.mp4"
+def _install_response(monkeypatch, response, *, expected_url="https://example.test/video.mp4"):
+    _allow_public_resolution(monkeypatch)
+
+    def fake_get(url, *, stream, timeout, allow_redirects=True):
+        assert url == expected_url
         assert stream is True
+        assert allow_redirects is False
         assert timeout == (_net.DEFAULT_CONNECT_TIMEOUT, _net.DEFAULT_READ_TIMEOUT)
         return response
 
     monkeypatch.setattr(_net.requests, "get", fake_get)
+
+
+def _allow_public_resolution(monkeypatch, host="example.test", ip="93.184.216.34"):
+    """Stub DNS so external HTTPS tests do not depend on real resolution."""
+    monkeypatch.setattr(
+        _net.socket,
+        "getaddrinfo",
+        lambda hostname, port, *a, **k: [
+            (0, 0, 0, "", (ip if hostname == host else "127.0.0.1", port))
+        ],
+    )
 
 
 def _temp_residue(destination: Path):
@@ -333,3 +354,112 @@ def test_replace_failure_preserves_destination_and_removes_temp(
     assert result is None
     assert destination.read_bytes() == b"known-good"
     assert _temp_residue(destination) == []
+
+
+@pytest.mark.parametrize(
+    "blocked_url",
+    [
+        "https://127.0.0.1/secret",
+        "https://10.0.0.5/secret",
+        "https://169.254.169.254/latest/meta-data/",
+        "https://metadata.google.internal/computeMetadata/v1/",
+        "file:///etc/passwd",
+        "http://example.test/video.mp4",
+    ],
+)
+def test_ssrf_blocks_private_metadata_and_non_https(tmp_path, monkeypatch, blocked_url):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    called = []
+
+    def fail_if_called(*a, **k):
+        called.append((a, k))
+        raise AssertionError("requests.get must not run for blocked URLs")
+
+    monkeypatch.setattr(_net.requests, "get", fail_if_called)
+
+    result = _net.safe_download(blocked_url, str(destination))
+
+    assert result is None
+    assert destination.read_bytes() == b"known-good"
+    assert called == []
+
+
+def test_ssrf_blocks_hostname_resolving_to_loopback(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    monkeypatch.setattr(
+        _net.socket,
+        "getaddrinfo",
+        lambda hostname, port, *a, **k: [
+            (0, 0, 0, "", ("127.0.0.1", port))
+        ],
+    )
+    called = []
+
+    def fail_if_called(*a, **k):
+        called.append(1)
+        raise AssertionError("must not fetch")
+
+    monkeypatch.setattr(_net.requests, "get", fail_if_called)
+
+    result = _net.safe_download(
+        "https://evil.example/video.mp4",
+        str(destination),
+    )
+
+    assert result is None
+    assert destination.read_bytes() == b"known-good"
+    assert called == []
+
+
+def test_redirect_to_private_ip_is_refused(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    _allow_public_resolution(monkeypatch)
+    responses = iter(
+        [
+            _FakeResponse(
+                status_code=302,
+                headers={"Location": "https://127.0.0.1/internal"},
+            ),
+        ]
+    )
+    seen = []
+
+    def fake_get(url, *, stream, timeout, allow_redirects=True):
+        seen.append(url)
+        assert allow_redirects is False
+        return next(responses)
+
+    monkeypatch.setattr(_net.requests, "get", fake_get)
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+    )
+
+    assert result is None
+    assert seen == ["https://example.test/video.mp4"]
+    assert destination.read_bytes() == b"known-good"
+
+
+def test_allow_http_permits_trusted_private_host(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    response = _FakeResponse([b"pod-bytes"])
+
+    def fake_get(url, *, stream, timeout, allow_redirects=True):
+        assert url == "http://10.0.0.8:8188/view"
+        assert allow_redirects is False
+        return response
+
+    monkeypatch.setattr(_net.requests, "get", fake_get)
+
+    result = _net.safe_download(
+        "http://10.0.0.8:8188/view",
+        str(destination),
+        allow_http=True,
+    )
+
+    assert result == str(destination)
+    assert destination.read_bytes() == b"pod-bytes"
