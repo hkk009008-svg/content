@@ -657,3 +657,74 @@ def test_landscape_size_unchanged(monkeypatch, tmp_path):
     assert actual_size == "1280x720", (
         f"landscape should map to the clamped (not transposed) size='1280x720'; got {actual_size!r}"
     )
+
+
+def test_driving_video_does_not_require_still_image(monkeypatch, tmp_path):
+    """A valid driving video is a complete input_reference — still may be absent."""
+    api = _make_api()
+    driving = tmp_path / "driving.mp4"
+    driving.write_bytes(b"fakevideo")
+    missing_still = str(tmp_path / "missing.jpg")
+    out = str(tmp_path / "out.mp4")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
+    api.client.videos.download_content.return_value = _make_download_content(
+        (b"DRV",)
+    )
+    monkeypatch.setattr(
+        sora_native.os.path, "exists", lambda p: p == str(driving)
+    )
+
+    with (
+        patch(
+            "PIL.Image.open",
+            side_effect=AssertionError("driving path must not open still"),
+        ),
+        patch(
+            "sora_native.tempfile.NamedTemporaryFile",
+            side_effect=AssertionError("driving path must not create still temp"),
+        ),
+    ):
+        result = api.generate_video(
+            image_path=missing_still,
+            prompt="motion",
+            output_path=out,
+            driving_video_path=str(driving),
+        )
+
+    assert result == out
+    assert Path(out).read_bytes() == b"DRV"
+    assert (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+        == Path(str(driving))
+    )
+
+
+def test_midstream_download_preserves_existing_output(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = tmp_path / "out.mp4"
+    out.write_bytes(b"known-good")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(
+        status="completed"
+    )
+
+    def failing_chunks():
+        yield b"partial"
+        raise RuntimeError("stream broke")
+
+    mock_content = MagicMock()
+    mock_content.response.iter_bytes.return_value = failing_chunks()
+    api.client.videos.download_content.return_value = mock_content
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="test",
+        output_path=str(out),
+    )
+
+    assert result is None
+    assert out.read_bytes() == b"known-good"
+    assert list(tmp_path.glob(".sora-download-*.tmp")) == []
