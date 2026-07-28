@@ -398,11 +398,17 @@ Standard run/test commands live in `README.md`, `OPERATIONS.md` §4/§7, and CI
 - **Interpreter path:** use the venv explicitly (`.venv/bin/python`, `.venv/bin/python -m pytest`).
   The system `python3` is 3.12; the project targets 3.13 (installed from the deadsnakes PPA — a
   one-time system dep in the VM snapshot, not the update script).
-- **`opencv-python` must stay `<5`:** OpenCV 5.0 dropped the top-level `cv2.CascadeClassifier` /
-  `cv2.data.haarcascades` APIs that `lip_sync.py` (mouth-energy scorer) calls at runtime. The pin is
-  in `requirements.txt`; the update script also force-installs `opencv-python<5` so the env is
-  correct even before that pin merges. Unbounded `opencv-python>=4.10` resolves to 5.x and breaks the
-  lipsync path + 3 unit tests.
+- **Two native deps are version-capped in `requirements.txt` (both are drift traps):**
+  - `opencv-python<5`: OpenCV 5.0 dropped the top-level `cv2.CascadeClassifier` /
+    `cv2.data.haarcascades` APIs that `lip_sync.py` (mouth-energy scorer) calls at runtime; unbounded
+    `>=4.10` resolves to 5.x and breaks the lipsync path + 3 unit tests.
+  - `pedalboard<0.9.17`: pedalboard 0.9.17+ ships PyPI wheels built with `-march=native` (AVX-512),
+    which crash with `Illegal instruction` (SIGILL, exit 132) on import on CPUs/CI runners without
+    those instructions (spotify/pedalboard#454). It imports fine on capable dev CPUs, so the crash is
+    invisible locally but fails `pytest`/`smoke` in CI intermittently across the runner fleet. 0.9.16
+    is the last portable build.
+  - The update script also force-installs both caps so a cloud VM is correct even before the
+    `requirements.txt` pins merge.
 - **Running the offline unit suite like CI:** `config/settings.py` calls `load_dotenv(override=True)`,
   so a `.env` containing EMPTY API keys (e.g. the freshly-copied `.env.example`) OVERRIDES
   shell-exported keys. The ambient-key vision tests in `tests/unit/test_phase_c_vision.py` then fail
