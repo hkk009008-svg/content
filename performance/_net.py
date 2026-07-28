@@ -27,6 +27,21 @@ When ``allow_http=False`` (default — untrusted external HTTPS), the helper:
 When ``allow_http=True`` (trusted internal ComfyUI / RunPod), HTTP is permitted
 and private/link-local addresses are allowed. Do not pass untrusted operator
 URLs through ``allow_http=True``.
+
+RESIDUAL RISK — DNS time-of-check/time-of-use (TOCTOU)
+------------------------------------------------------
+``_validate_download_url`` resolves the hostname with ``socket.getaddrinfo``
+and rejects blocked ranges, but ``requests.get`` then resolves the hostname
+*again* when it opens the connection. A hostile authoritative DNS server that
+returns a public IP on the first lookup and a private/metadata IP on the second
+(classic DNS rebinding) can therefore still slip past the address check. Fully
+closing this needs connection-level IP pinning (resolve once, connect to that
+exact IP while preserving the Host header + TLS SNI), which is not implemented
+here. Operational mitigation, and the reason this is not a launch blocker:
+**never route customer-supplied arbitrary URLs through ``safe_download``.**
+Accept operator uploads directly and restrict downloaded URLs to trusted
+generation providers (Runway/Viggle/FAL/ComfyUI), whose DNS you trust not to
+rebind. Literal-IP URLs are not affected (no second resolution).
 """
 
 from __future__ import annotations

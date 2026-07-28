@@ -517,11 +517,21 @@ def _enrich_validated_shots(
             f"expected exactly {target_shots} shots, got {len(shots)}"
         )
 
-    default_char_ids = [c["id"] for c in characters]
+    known_ids = {c["id"] for c in characters}
     validated: List[dict] = []
     for i, shot in enumerate(shots):
         _validate_raw_shot(shot, index=i)
-        char_ids = shot["characters_in_frame"] or default_char_ids
+        # characters_in_frame is authoritative: an empty list is a valid,
+        # meaningful value (establishing / object / macro / environment shots
+        # with no character on screen). Do NOT backfill it to every character —
+        # that inflates identity pressure and alters routing. Only reject IDs
+        # the scene's character roster does not contain.
+        char_ids = shot["characters_in_frame"]
+        unknown_ids = set(char_ids) - known_ids
+        if unknown_ids:
+            raise ValueError(
+                f"shot[{i}] references unknown character IDs: {sorted(unknown_ids)}"
+            )
         shot_record = make_shot(
             prompt=shot["prompt"],
             camera=shot["camera"],
@@ -902,7 +912,11 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
     # 7. Run competitive generation via LLMEnsemble
     # ------------------------------------------------------------------
     try:
-        ensemble = LLMEnsemble(cost_tracker=cost_tracker)
+        # Pass global_settings so the project's competitive_generation toggle and
+        # quality_judge_llm override actually control competitive scene
+        # decomposition (mirrors the prompt-optimizer call site). Omitting it left
+        # the judge/competitive settings inert on this path.
+        ensemble = LLMEnsemble(global_settings, cost_tracker=cost_tracker)
         result = ensemble.competitive_generate(
             task_type="decompose",
             system_prompt=full_system,

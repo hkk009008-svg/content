@@ -19,7 +19,12 @@ google-genai>=1.0
 
 # --- Audio: TTS + mastering + foley + transcription ---
 elevenlabs>=2.0
-pedalboard>=0.9
+# Upper-bounded to <0.9.17: pedalboard 0.9.17+ ships PyPI wheels built with
+# -march=native (AVX-512), which crash with "Illegal instruction" (SIGILL) on
+# CPUs/CI runners lacking those instructions (spotify/pedalboard#454). 0.9.16 is
+# the last portable build; it exposes every effect + pedalboard.io.AudioFile
+# that audio/effects.py imports.
+pedalboard>=0.9,<0.9.17
 openai-whisper>=20240930
 
 # --- Video generation API clients ---
@@ -28,7 +33,9 @@ runwayml>=4.0
 
 # --- Identity validation (face recognition for shot continuity) ---
 deepface>=0.0.93
-opencv-python>=4.10
+# Upper-bounded to <5: OpenCV 5.0 removed the top-level cv2.CascadeClassifier /
+# cv2.data.haarcascades APIs that lip_sync.py (mouth-energy scorer) relies on.
+opencv-python>=4.10,<5
 Pillow>=11.0
 numpy>=1.26,<3
 torch>=2.5

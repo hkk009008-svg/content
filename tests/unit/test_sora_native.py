@@ -728,3 +728,29 @@ def test_midstream_download_preserves_existing_output(monkeypatch, tmp_path):
     assert result is None
     assert out.read_bytes() == b"known-good"
     assert list(tmp_path.glob(".sora-download-*.tmp")) == []
+
+
+def test_zero_byte_download_preserves_existing_output(monkeypatch, tmp_path):
+    # A completed generation whose download streams zero bytes must NOT replace a
+    # previously valid output with an empty file.
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = tmp_path / "out.mp4"
+    out.write_bytes(b"known-good")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(
+        status="completed"
+    )
+    # Empty stream — iter_bytes yields nothing.
+    api.client.videos.download_content.return_value = _make_download_content(chunks=())
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="test",
+        output_path=str(out),
+    )
+
+    assert result is None
+    assert out.read_bytes() == b"known-good"
+    assert list(tmp_path.glob(".sora-download-*.tmp")) == []
