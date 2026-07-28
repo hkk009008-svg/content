@@ -11,7 +11,9 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -29,10 +31,20 @@ def _minimal_ensemble_mock(json_spec: dict) -> MagicMock:
     return ensemble_mock
 
 
-def _valid_spec() -> dict:
+def _structured_prompt(prefix: str) -> str:
+    return (
+        f"[SHOT] {prefix}-shot "
+        f"[SCENE] {prefix}-scene "
+        f"[ACTION] {prefix}-action "
+        f"[OUTFIT] {prefix}-outfit "
+        f"[QUALITY] {prefix}-quality"
+    )
+
+
+def _valid_spec(image_prompt: str = "") -> dict:
     """Minimal spec that passes _coerce_to_valid_keys without substitution."""
     return {
-        "image_prompt": "a woman stands alone in an empty corridor",
+        "image_prompt": image_prompt or _structured_prompt("optimizer"),
         "video_prompt": "slow dolly-in",
         "purpose": "static_portrait",
         "shot_type": "portrait",
@@ -236,9 +248,10 @@ def test_fallback_empty_intent_notes_no_prefix():
 
 
 def test_fallback_product_shot_intent_notes_no_error():
-    """Product shots in the fallback path must not error when intent_notes is set."""
+    """Product fallbacks retain intent notes in the structured image prompt."""
     from llm.prompt_optimizer import _fallback_optimize
 
+    notes = "show the dial detail, dramatic side lighting"
     result = _fallback_optimize(
         user_input="luxury watch on white marble",
         characters=[],
@@ -246,12 +259,11 @@ def test_fallback_product_shot_intent_notes_no_error():
         global_settings={},
         objects=[{"name": "Watch", "brand": "Lumex", "surface_type": "metallic", "material_traits": "stainless steel"}],
         primary_subject="object",
-        intent_notes="show the dial detail, dramatic side lighting",
+        intent_notes=notes,
     )
     assert isinstance(result, dict)
     assert "image_prompt" in result
-    # Product shot image_prompt comes from the product branch (no Director's intent prefix)
-    # — intent_notes silently tolerated, no error
+    assert notes in result["image_prompt"]
     assert result["purpose"] in ("product_hero", "product_in_scene", "product_reveal_motion")
 
 
@@ -280,3 +292,371 @@ def test_llm_failure_fallback_propagates_intent_notes(capsys):
     assert notes in result["image_prompt"], (
         "intent_notes must propagate through LLM-failure → fallback path"
     )
+
+
+# ---------------------------------------------------------------------------
+# Five-section image-prompt contract
+# ---------------------------------------------------------------------------
+
+def test_invalid_optimizer_prompt_preserves_every_structured_source_section():
+    from llm.prompt_optimizer import optimize_shot_prompt
+    from phase_c_assembly import _parse_structured_prompt
+
+    source = _structured_prompt("source-sentinel")
+    ensemble_mock = _minimal_ensemble_mock(
+        _valid_spec(image_prompt="untagged optimizer prose"),
+    )
+
+    result = optimize_shot_prompt(
+        user_input=source,
+        ensemble=ensemble_mock,
+    )
+
+    assert result["image_prompt"] == source
+    parsed = _parse_structured_prompt(result["image_prompt"])
+    assert list(parsed) == ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]
+    for tag in ("SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"):
+        assert f"source-sentinel-{tag.lower()}" == parsed[tag]
+
+
+def test_valid_optimizer_structured_replacement_is_accepted():
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    source = _structured_prompt("source")
+    replacement = _structured_prompt("replacement")
+    ensemble_mock = _minimal_ensemble_mock(
+        _valid_spec(image_prompt=replacement),
+    )
+
+    result = optimize_shot_prompt(
+        user_input=source,
+        ensemble=ensemble_mock,
+    )
+
+    assert result["image_prompt"] == replacement
+    assert "source-" not in result["image_prompt"]
+
+
+@pytest.mark.parametrize(
+    "invalid_prompt",
+    [
+        "[SHOT] shot [SCENE] scene [ACTION] action [QUALITY] quality",
+        (
+            "[SHOT] shot [SCENE] scene [ACTION] action [OUTFIT] outfit "
+            "[SHOT] duplicate [QUALITY] quality"
+        ),
+        (
+            "[SHOT] shot [ACTION] action [SCENE] scene [OUTFIT] outfit "
+            "[QUALITY] quality"
+        ),
+        (
+            "[SHOT] shot [SCENE] scene [ACTION] action [OUTFIT]   "
+            "[QUALITY] quality"
+        ),
+    ],
+    ids=["missing", "duplicated", "out-of-order", "empty"],
+)
+def test_invalid_optimizer_section_shapes_are_rejected(invalid_prompt):
+    from llm.prompt_optimizer import (
+        _normalize_structured_image_prompt,
+        optimize_shot_prompt,
+    )
+
+    source = _structured_prompt("original")
+    ensemble_mock = _minimal_ensemble_mock(
+        _valid_spec(image_prompt=invalid_prompt),
+    )
+
+    result = optimize_shot_prompt(
+        user_input=source,
+        ensemble=ensemble_mock,
+    )
+
+    assert _normalize_structured_image_prompt(invalid_prompt) is None
+    assert result["image_prompt"] == source
+
+
+def test_character_fallback_is_parseable_and_preserves_source_and_intent():
+    from llm.prompt_optimizer import (
+        _fallback_optimize,
+        _normalize_structured_image_prompt,
+    )
+    from phase_c_assembly import _parse_structured_prompt
+
+    source_detail = "detective wearing the crimson-coat-sentinel in the rain"
+    intent_detail = "intent-sentinel: emphasize isolation"
+    result = _fallback_optimize(
+        user_input=source_detail,
+        characters=[
+            {
+                "id": "c1",
+                "name": "Detective",
+                "physical_traits": "tall, weathered",
+            },
+        ],
+        location={
+            "description": "alley-sentinel",
+            "lighting": "rain-reflection-sentinel",
+        },
+        global_settings={
+            "music_mood": "noir-sentinel",
+            "color_palette": "desaturated-sentinel",
+        },
+        intent_notes=intent_detail,
+    )
+
+    prompt = result["image_prompt"]
+    assert _normalize_structured_image_prompt(prompt) == prompt
+    parsed = _parse_structured_prompt(prompt)
+    assert list(parsed) == ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]
+    assert source_detail in parsed["ACTION"]
+    assert intent_detail in parsed["ACTION"]
+    assert "crimson-coat-sentinel" in parsed["OUTFIT"]
+    assert "alley-sentinel" in parsed["SCENE"]
+    assert all(parsed[tag].strip() for tag in parsed)
+
+
+def test_product_fallback_is_parseable_and_preserves_product_detail():
+    from llm.prompt_optimizer import (
+        _fallback_optimize,
+        _normalize_structured_image_prompt,
+    )
+    from phase_c_assembly import _parse_structured_prompt
+
+    source_detail = "chronometer-sentinel on white marble"
+    intent_detail = "intent-sentinel: reveal the sapphire crown"
+    result = _fallback_optimize(
+        user_input=source_detail,
+        characters=[],
+        location={
+            "description": "studio-sentinel",
+            "lighting": "controlled-light-sentinel",
+        },
+        global_settings={"color_palette": "cobalt-sentinel"},
+        objects=[
+            {
+                "name": "Chronometer",
+                "brand": "Lumex-sentinel",
+                "surface_type": "metallic",
+                "material_traits": "steel-sentinel",
+                "texture_anchor": "sapphire-crown-sentinel",
+            },
+        ],
+        primary_subject="object",
+        intent_notes=intent_detail,
+    )
+
+    prompt = result["image_prompt"]
+    assert _normalize_structured_image_prompt(prompt) == prompt
+    parsed = _parse_structured_prompt(prompt)
+    assert list(parsed) == ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]
+    assert source_detail in parsed["ACTION"]
+    assert intent_detail in parsed["ACTION"]
+    assert "steel-sentinel" in parsed["ACTION"]
+    assert "Lumex-sentinel" in parsed["OUTFIT"]
+    assert "sapphire-crown-sentinel" in parsed["OUTFIT"]
+    assert "controlled-light-sentinel" in parsed["SCENE"]
+    assert all(parsed[tag].strip() for tag in parsed)
+
+
+def test_optimizer_system_prompt_requires_exact_five_section_contract():
+    from llm.prompt_optimizer import _OPTIMIZER_SYSTEM_PROMPT
+
+    expected_structure = (
+        "[SHOT] <framing and camera prose> "
+        "[SCENE] <environment and lighting prose>\n"
+        "   [ACTION] <subject action prose> "
+        "[OUTFIT] <wardrobe or product styling prose>\n"
+        "   [QUALITY] <render-quality prose>"
+    )
+    assert expected_structure in _OPTIMIZER_SYSTEM_PROMPT
+    assert "under 150 words" in _OPTIMIZER_SYSTEM_PROMPT
+    assert "MUST occur exactly once, in that order" in _OPTIMIZER_SYSTEM_PROMPT
+    assert "non-empty" in _OPTIMIZER_SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["direct-fallback", "invalid-response", "llm-exception"],
+)
+def test_literal_canonical_tag_in_source_is_escaped_and_round_trips(path):
+    from llm.prompt_optimizer import _fallback_optimize, optimize_shot_prompt
+    from phase_c_assembly import _parse_structured_prompt
+
+    source = "actor holds slate marked [SCENE] 7"
+    if path == "direct-fallback":
+        result = _fallback_optimize(source, [], {}, {})
+    elif path == "invalid-response":
+        result = optimize_shot_prompt(
+            user_input=source,
+            ensemble=_minimal_ensemble_mock(
+                _valid_spec(image_prompt="invalid free prose"),
+            ),
+        )
+    else:
+        failing_ensemble = MagicMock()
+        failing_ensemble.competitive_generate.side_effect = RuntimeError("timeout")
+        result = optimize_shot_prompt(
+            user_input=source,
+            ensemble=failing_ensemble,
+        )
+
+    prompt = result["image_prompt"]
+    assert prompt.count("[SCENE]") == 1
+    assert "［SCENE］ 7" in prompt
+    parsed = _parse_structured_prompt(prompt)
+    assert list(parsed) == ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]
+    assert "actor holds slate marked ［SCENE］ 7" in parsed["ACTION"]
+
+
+def test_join_prompt_clauses_preserves_terminal_punctuation_exactly():
+    from llm.prompt_optimizer import _join_prompt_clauses
+
+    assert _join_prompt_clauses(
+        "period.",
+        "ellipsis...",
+        "unicode…",
+        "question?",
+        "bang!",
+        "plain",
+    ) == "period. ellipsis... unicode… question? bang! plain."
+
+
+def test_terminal_ellipsis_survives_fallback_and_invalid_optimizer_response():
+    from llm.prompt_optimizer import _fallback_optimize, optimize_shot_prompt
+    from phase_c_assembly import _parse_structured_prompt
+
+    source = "the actor listens, hesitates, and pauses..."
+    results = [
+        _fallback_optimize(source, [], {}, {}),
+        optimize_shot_prompt(
+            user_input=source,
+            ensemble=_minimal_ensemble_mock(
+                _valid_spec(image_prompt="invalid free prose"),
+            ),
+        ),
+    ]
+
+    for result in results:
+        assert source in _parse_structured_prompt(result["image_prompt"])["ACTION"]
+
+
+@pytest.mark.parametrize(
+    ("source_words", "objects", "primary_subject"),
+    [
+        (130, [], "character"),
+        (
+            100,
+            [{"name": "Chronometer", "material_traits": "brushed steel"}],
+            "object",
+        ),
+    ],
+)
+def test_long_unstructured_source_compacts_enrichment_without_data_loss(
+    source_words,
+    objects,
+    primary_subject,
+):
+    from llm.prompt_optimizer import (
+        _fallback_optimize,
+        _image_prompt_word_count,
+        optimize_shot_prompt,
+    )
+    from phase_c_assembly import _parse_structured_prompt
+
+    source = " ".join(f"source-detail-{index}" for index in range(source_words))
+    results = [
+        _fallback_optimize(
+            source,
+            [],
+            {},
+            {},
+            objects=objects,
+            primary_subject=primary_subject,
+        ),
+        optimize_shot_prompt(
+            user_input=source,
+            objects=objects,
+            primary_subject=primary_subject,
+            ensemble=_minimal_ensemble_mock(
+                _valid_spec(image_prompt="invalid free prose"),
+            ),
+        ),
+    ]
+
+    for result in results:
+        prompt = result["image_prompt"]
+        assert _image_prompt_word_count(prompt) <= 150
+        assert source in _parse_structured_prompt(prompt)["ACTION"]
+
+
+def test_overlong_optimizer_candidate_uses_compact_lossless_fallback():
+    from llm.prompt_optimizer import (
+        _image_prompt_word_count,
+        _normalize_structured_image_prompt,
+        optimize_shot_prompt,
+    )
+    from phase_c_assembly import _parse_structured_prompt
+
+    source = " ".join(f"source-detail-{index}" for index in range(70))
+    candidate_action = " ".join(
+        f"candidate-detail-{index}"
+        for index in range(151)
+    )
+    candidate = (
+        "[SHOT] candidate-shot [SCENE] candidate-scene "
+        f"[ACTION] {candidate_action} "
+        "[OUTFIT] candidate-outfit [QUALITY] candidate-quality"
+    )
+
+    result = optimize_shot_prompt(
+        user_input=source,
+        ensemble=_minimal_ensemble_mock(
+            _valid_spec(image_prompt=candidate),
+        ),
+    )
+
+    prompt = result["image_prompt"]
+    assert _normalize_structured_image_prompt(prompt) == prompt
+    assert _image_prompt_word_count(prompt) <= 150
+    assert candidate_action not in prompt
+    assert source in _parse_structured_prompt(prompt)["ACTION"]
+
+
+def test_overlong_authoritative_structured_source_is_preserved_exactly():
+    from llm.prompt_optimizer import (
+        _fallback_optimize,
+        _image_prompt_word_count,
+        optimize_shot_prompt,
+    )
+
+    source_action = " ".join(
+        f"authoritative-detail-{index}"
+        for index in range(151)
+    )
+    source = (
+        "  [SHOT] source-shot [SCENE] source-scene "
+        f"[ACTION] {source_action} "
+        "[OUTFIT] source-outfit [QUALITY] source-quality\n"
+    )
+    candidate_action = " ".join(
+        f"candidate-detail-{index}"
+        for index in range(151)
+    )
+    candidate = (
+        "[SHOT] candidate-shot [SCENE] candidate-scene "
+        f"[ACTION] {candidate_action} "
+        "[OUTFIT] candidate-outfit [QUALITY] candidate-quality"
+    )
+
+    fallback = _fallback_optimize(source, [], {}, {})
+    optimized = optimize_shot_prompt(
+        user_input=source,
+        ensemble=_minimal_ensemble_mock(
+            _valid_spec(image_prompt=candidate),
+        ),
+    )
+
+    assert _image_prompt_word_count(source) > 150
+    assert fallback["image_prompt"] == source
+    assert optimized["image_prompt"] == source

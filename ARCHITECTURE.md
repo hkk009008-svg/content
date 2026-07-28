@@ -1035,7 +1035,7 @@ re-introduced a 4K-loss + a narrow silent-clip regression (caught by the directo
 pass `wf_e378821e-04d`, 11 mappers + 5 refuters — these consumers are invisible to a
 `classify_shot_type` *caller* audit). Single-seam **completeness for routing confirmed** (no
 second classifier produces the defect; `scene_decomposer` writes no `shot_type`;
-`optimizer_cache["spec"]["shot_type"]` is a dead store for routing; `prompt_optimizer.py:177`
+`optimizer_cache["spec"]["shot_type"]` is a dead store for routing; `prompt_optimizer.py:273`
 consumes a *different* classifier (`_heuristic_shot_type`, which only returns `"landscape"` when
 `not has_chars`), so it is safe-by-construction and not a seam consumer — Rule #13 re-confirmed at
 landing). The ADR-025 scope **exemption** (the Task-4 pod gate validated portrait routing only;

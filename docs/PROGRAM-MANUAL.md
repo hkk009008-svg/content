@@ -485,7 +485,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `intent_translator` | `llm/director.py:418` | Verb DSL (`tighten_framing`/`match_shot`/`shift_emotion`) → `{revised_prompt, params_delta, anchor_refs}`. Called at `cinema/shots/controller.py:2160`. |
 | `LLMEnsemble.competitive_generate` | `llm/ensemble.py:146` | Parallel multi-model gen + judge-pick → `EnsembleResult`. Default rosters per task (`script`/`decompose`/`default`); default judge `claude-sonnet-4`. |
 | `build_anthropic_system_blocks` | `llm/ensemble.py:41` | Wraps system text with `cache_control: ephemeral` for Anthropic prompt caching; callers must pass stable strings. |
-| `optimize_shot_prompt` | `llm/prompt_optimizer.py:355` | UI text → 13-field structured shot spec via ensemble (`task_type="decompose"`); `_coerce_to_valid_keys` sanitizes enums; `_fallback_optimize` is the LLM-free path. |
+| `optimize_shot_prompt` | `llm/prompt_optimizer.py:550` | UI text → 13-field structured shot spec via ensemble (`task_type="decompose"`); `_coerce_to_valid_keys` sanitizes enums; `_fallback_optimize` is the LLM-free path. |
 | `generate_style_rules` | `llm/style_director.py:12` | **OpenAI-only** 7-key style dict (Tavily-grounded); falls back to `_default_style_rules` if no OpenAI key. Asymmetric with the Anthropic-first directors (see §3.13). |
 | `style_rules_to_prompt_suffix` | `llm/style_director.py:189` | Concatenates color/lighting/photorealism/composition rules into the suffix prepended to every image prompt (`cinema/shots/controller.py:497`). |
 | `get_negative_prompt_for_failure` | `llm/negative_prompts.py:44` | Maps `FailureReason.value` → negative-prompt phrase; used by `evaluate_generation_quality` and `build_remediation_advisory`. |
@@ -805,7 +805,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 1. Skip shots already carrying `approved_keyframe_take_id`.
 2. Require `shot["plan_status"] == "approved"`.
 3. `ContinuityEngine.enhance_shot_prompt` (`domain/continuity_engine.py:446`) builds the augmented prompt + a `continuity_config` dict (img2img flag, `init_image`, `denoise_strength`, scene/location seed, `pulid_weight_override`, identity anchor, threshold).
-4. Optional `optimize_shot_prompt` (`llm/prompt_optimizer.py:355`) when `prompt_optimizer_enabled=True`, cached on `shot["optimizer_cache"]`.
+4. Optional `optimize_shot_prompt` (`llm/prompt_optimizer.py:550`) when `prompt_optimizer_enabled=True`, cached on `shot["optimizer_cache"]`.
 5. `generate_ai_broll(...)` (`phase_c_assembly.py:111`) produces the image.
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
@@ -1508,7 +1508,7 @@ flowchart LR
 | Scene → shots | `domain/scene_decomposer.py` | GPT-4o, or GPT-4o+Claude via `LLMEnsemble` when `competitive_generation=True` | shot specs with HC1–HC5 constraints |
 | Dialogue | `domain/dialogue_writer.py:12` | GPT-4o | per-character spoken lines |
 | Pre-gen validation | `llm/chief_director.py:296` | Claude Sonnet 4 (Anthropic→OpenAI fallback) | enforces HC1–HC8; writes the `director_review` that gates PLAN_REVIEW |
-| Per-shot prompt optimize | `llm/prompt_optimizer.py:355` | `LLMEnsemble` `decompose` roster | freeform → structured 13-field spec |
+| Per-shot prompt optimize | `llm/prompt_optimizer.py:550` | `LLMEnsemble` `decompose` roster | freeform → structured 13-field spec |
 | Per-take iteration | `llm/director.py:275` | Claude Sonnet 4 | translates a `DirectorialIntent` into a `revised_prompt` (permissive — operator intent overrides HC firewalls) |
 | Ensemble engine | `llm/ensemble.py:139` | parallel Anthropic/OpenAI/Gemini + judge | `competitive_generate` dispatches all models, judge picks winner |
 
@@ -1633,7 +1633,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `llm/chief_director.py` | 664 | `ChiefDirector` — pre-gen HC1–HC8 validation gate (`validate_shot_prompts`); sole writer of `director_review` |
 | `llm/director.py` | 432 | `CinemaDirector` — permissive iteration translator (`translate_intent`, S18 verb DSL) |
 | `llm/ensemble.py` | 487 | `LLMEnsemble` — multi-provider parallel generation + judge-pick; `build_anthropic_system_blocks` caching helper |
-| `llm/prompt_optimizer.py` | 507 | UI-text → structured shot spec (`optimize_shot_prompt`) |
+| `llm/prompt_optimizer.py` | 736 | UI-text → structured shot spec (`optimize_shot_prompt`) |
 | `llm/style_director.py` | 198 | Per-project global style rules (`generate_style_rules`) — **OpenAI-only** |
 | `llm/negative_prompts.py` | 69 | Failure-reason → negative-prompt phrase lookup |
 | `domain/scene_decomposer.py` | 936 | **Canonical** scene→shots: `API_REGISTRY`, `PURPOSE_API_RANKING`, `decompose_scene`, `competitive_decompose_scene` |

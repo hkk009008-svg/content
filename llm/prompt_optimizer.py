@@ -8,7 +8,7 @@ of generation engine, negative constraints, identity anchors. This module is the
 glue.
 
 One LLM call produces a structured JSON spec covering:
-  - image_prompt: FLUX-shaped prompt with cinematography terms
+  - image_prompt: five-section FLUX-shaped prompt with cinematography terms
   - video_prompt: motion/action description for i2v
   - purpose / shot_type: drives routing
   - suggested_image_api / video_api / lipsync_engine: per-purpose recommendation
@@ -32,6 +32,112 @@ from domain.scene_decomposer import API_REGISTRY, PURPOSE_TAGS, rank_apis_for_pu
 # new strings sometimes — we coerce to nearest valid tag.
 _VALID_PURPOSES = set(PURPOSE_TAGS)
 _VALID_SHOT_TYPES = {"portrait", "medium", "wide", "action", "landscape"}
+_IMAGE_PROMPT_SECTION_TAGS = ("SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY")
+_MAX_OPTIMIZER_IMAGE_PROMPT_WORDS = 150
+_IMAGE_PROMPT_TAG_RE = re.compile(
+    r"\[(SHOT|SCENE|ACTION|OUTFIT|QUALITY)\]",
+)
+
+
+def _structured_image_prompt_sections(prompt: object) -> Optional[dict]:
+    """Return exact ordered prompt sections, or ``None`` for any contract breach."""
+    if not isinstance(prompt, str):
+        return None
+
+    matches = list(_IMAGE_PROMPT_TAG_RE.finditer(prompt))
+    if [match.group(1) for match in matches] != list(_IMAGE_PROMPT_SECTION_TAGS):
+        return None
+    if prompt[:matches[0].start()].strip():
+        return None
+
+    sections = {}
+    for index, match in enumerate(matches):
+        content_end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(prompt)
+        )
+        content = prompt[match.end():content_end].strip()
+        if not content:
+            return None
+        sections[match.group(1)] = content
+    return sections
+
+
+def _normalize_structured_image_prompt(prompt: object) -> Optional[str]:
+    """Validate and canonicalize the five-section generation-prompt contract."""
+    sections = _structured_image_prompt_sections(prompt)
+    if sections is None:
+        return None
+    return " ".join(
+        f"[{tag}] {sections[tag]}"
+        for tag in _IMAGE_PROMPT_SECTION_TAGS
+    )
+
+
+def _format_structured_image_prompt(sections: dict) -> str:
+    """Format trusted section content and enforce the same public contract."""
+    prompt = " ".join(
+        f"[{tag}] {_escape_section_delimiters(sections.get(tag, ''))}"
+        for tag in _IMAGE_PROMPT_SECTION_TAGS
+    )
+    normalized = _normalize_structured_image_prompt(prompt)
+    if normalized is None:
+        raise ValueError("structured image prompt sections must all be non-empty")
+    return normalized
+
+
+def _escape_section_delimiters(content: object) -> str:
+    """Keep literal canonical tags visible without making them delimiters."""
+    return _IMAGE_PROMPT_TAG_RE.sub(
+        lambda match: f"［{match.group(1)}］",
+        str(content).strip(),
+    )
+
+
+def _join_prompt_clauses(*parts: str) -> str:
+    """Join non-empty prose fragments without dropping their semantic content."""
+    cleaned = []
+    for part in parts:
+        if not isinstance(part, str) or not part.strip():
+            continue
+        clause = part.strip()
+        if not clause.endswith((".", "…", "?", "!")):
+            clause += "."
+        cleaned.append(clause)
+    return " ".join(cleaned)
+
+
+def _image_prompt_word_count(prompt: str) -> int:
+    """Count whitespace-delimited words, including the five contract tags."""
+    return len(prompt.split())
+
+
+def _bounded_fallback_image_prompt(
+    sections: dict,
+    *,
+    compact_sections: dict,
+) -> str:
+    """Compact deterministic enrichment without truncating the action source.
+
+    The user-authored ACTION section is the semantic payload, so it is never
+    shortened.  When the rich fallback exceeds the optimizer's word guidance,
+    progressively replace lower-priority enrichment with terse, non-empty
+    clauses.  A source that cannot fit alongside the five required tags and
+    four one-word sections remains lossless even if that makes the limit
+    mathematically impossible.
+    """
+    prompt = _format_structured_image_prompt(sections)
+    if _image_prompt_word_count(prompt) <= _MAX_OPTIMIZER_IMAGE_PROMPT_WORDS:
+        return prompt
+
+    reduced_sections = dict(sections)
+    for tag in ("OUTFIT", "QUALITY", "SCENE", "SHOT"):
+        reduced_sections[tag] = compact_sections[tag]
+        prompt = _format_structured_image_prompt(reduced_sections)
+        if _image_prompt_word_count(prompt) <= _MAX_OPTIMIZER_IMAGE_PROMPT_WORDS:
+            break
+    return prompt
 
 
 def _heuristic_purpose_with_objects(
@@ -72,7 +178,7 @@ OUTPUT FORMAT: Strict JSON. No markdown fences, no commentary, no extra fields.
 
 Schema:
 {
-  "image_prompt":           string,  // FLUX-shaped prompt: subject, action, camera, lens, lighting, mood, quality tags
+  "image_prompt":           string,  // exact ordered [SHOT] [SCENE] [ACTION] [OUTFIT] [QUALITY] prompt, under 150 words
   "video_prompt":           string,  // motion + dynamic action for image-to-video stage
   "purpose":                string,  // one of: dialogue_close_up | talking_head_full | action_motion | static_portrait | establishing_shot | macro_detail | style_locked_sequence | product_hero | product_in_scene | product_reveal_motion
   "shot_type":              string,  // one of: portrait | medium | wide | action | landscape
@@ -116,8 +222,14 @@ GUIDELINES (apply rigorously):
    - action = movement-dominated regardless of framing
    - landscape = no characters or characters tiny
 
-6. The image_prompt should READ like a film prompt, not a database schema. Lead
-   with the subject and action, then technical cinematography.
+6. IMAGE PROMPT CONTRACT. Keep the complete image_prompt under 150 words and
+   use exactly this structure:
+   [SHOT] <framing and camera prose> [SCENE] <environment and lighting prose>
+   [ACTION] <subject action prose> [OUTFIT] <wardrobe or product styling prose>
+   [QUALITY] <render-quality prose>
+   All five uppercase tags MUST occur exactly once, in that order, with non-empty
+   natural English prose in every section and no text before [SHOT]. The section
+   content should read like a film prompt, not terse database fields.
 
 7. If the user input is minimal ("a sad woman"), enrich it with sensible defaults
    drawn from the scene mood and palette. Do not invent characters or props that
@@ -243,6 +355,14 @@ def _fallback_optimize(
         # Append product anchor as secondary
         identity_anchor = f"{char_anchor}. Product: {obj_anchor}" if char_anchor else obj_anchor
 
+    source_sections = _structured_image_prompt_sections(user_input) or {}
+    source_intent = (user_input or "").strip() or "Natural cinematic performance"
+    intent_clause = (
+        f"Director's intent: {intent_notes.strip()}"
+        if intent_notes and intent_notes.strip()
+        else ""
+    )
+
     # Product shots get product-photography prompts
     is_product_shot = purpose in ("product_hero", "product_in_scene", "product_reveal_motion")
     if is_product_shot:
@@ -254,11 +374,49 @@ def _fallback_optimize(
             if surface in ("glossy", "metallic") else
             "soft directional key 45° camera-left, even fall-off, fill bounce"
         )
-        image_prompt = (
-            f"Commercial product photography of {user_input.strip().rstrip('.')}. "
-            f"{material}. {lighting_str}. "
-            f"Sharp focus throughout, no compression artifacts, hero beauty pass, "
-            f"premium advertising aesthetic, {palette} palette."
+        product_style = (
+            f"Product styling and identity: {obj_anchor}"
+            if obj_anchor
+            else "Preserve the specified product branding, materials, colors, and silhouette"
+        )
+        product_sections = {
+            "SHOT": _join_prompt_clauses(
+                source_sections.get("SHOT", ""),
+                "Commercial product photography",
+                camera_str,
+            ),
+            "SCENE": _join_prompt_clauses(
+                source_sections.get("SCENE", ""),
+                loc_desc,
+                loc_light,
+                lighting_str,
+                f"{palette} palette",
+            ),
+            "ACTION": _join_prompt_clauses(
+                source_sections.get("ACTION", source_intent),
+                material,
+                intent_clause,
+            ),
+            "OUTFIT": _join_prompt_clauses(
+                source_sections.get("OUTFIT", ""),
+                product_style,
+            ),
+            "QUALITY": _join_prompt_clauses(
+                source_sections.get("QUALITY", ""),
+                "Sharp focus throughout",
+                "no compression artifacts",
+                "hero beauty pass",
+                "premium advertising aesthetic",
+            ),
+        }
+        image_prompt = _bounded_fallback_image_prompt(
+            product_sections,
+            compact_sections={
+                "SHOT": "Product.",
+                "SCENE": "Specified.",
+                "OUTFIT": "Continuity.",
+                "QUALITY": "Photorealistic.",
+            },
         )
         video_prompt = (
             f"Slow elegant reveal of {user_input.strip()}; smooth camera dolly-in or 180° rotation; "
@@ -272,18 +430,55 @@ def _fallback_optimize(
     else:
         camera_str = "85mm f/1.4, shallow DoF, eye-level" if shot_type == "portrait" else "50mm, standard framing"
         lighting_str = loc_light
-        intent_prefix = f"Director's intent: {intent_notes.strip()}. " if intent_notes and intent_notes.strip() else ""
-        image_prompt = (
-            f"{intent_prefix}{user_input.strip().rstrip('.')}. {loc_desc}. {loc_light}. "
-            f"{mood} mood, {palette} palette. "
-            f"Photorealistic cinematic, 35mm film grain, "
-            f"shallow depth of field, professional cinematography."
+        fallback_sections = {
+            "SHOT": _join_prompt_clauses(
+                source_sections.get("SHOT", ""),
+                camera_str,
+            ),
+            "SCENE": _join_prompt_clauses(
+                source_sections.get("SCENE", ""),
+                loc_desc,
+                loc_light,
+                f"{mood} mood",
+                f"{palette} palette",
+            ),
+            "ACTION": _join_prompt_clauses(
+                source_sections.get("ACTION", source_intent),
+                intent_clause,
+            ),
+            "OUTFIT": _join_prompt_clauses(
+                source_sections.get(
+                    "OUTFIT",
+                    f"Wardrobe or styled subject details from source intent: {source_intent}",
+                ),
+            ),
+            "QUALITY": _join_prompt_clauses(
+                source_sections.get("QUALITY", ""),
+                "Photorealistic cinematic",
+                "35mm film grain",
+                "shallow depth of field",
+                "professional cinematography",
+            ),
+        }
+        image_prompt = _bounded_fallback_image_prompt(
+            fallback_sections,
+            compact_sections={
+                "SHOT": "Cinematic.",
+                "SCENE": "Specified.",
+                "OUTFIT": "Continuity.",
+                "QUALITY": "Photorealistic.",
+            },
         )
         video_prompt = f"{user_input.strip()}; subtle natural motion, cinematic camera"
         negatives = (
             "plastic skin, identity drift, deformed hands, mismatched eyes, "
             "oversaturated, extra fingers, distorted anatomy, frozen face, blurry face"
         )
+
+    # A reviewed five-section source is authoritative: do not rewrite, truncate,
+    # or length-limit it even when deterministic enrichment could be shorter.
+    if source_sections:
+        image_prompt = user_input
 
     # Image API: HiDream-I1 if planned + product shot; FLUX-Dev otherwise
     img_api = "FLUX_DEV"
@@ -469,7 +664,37 @@ def optimize_shot_prompt(
             intent_notes=intent_notes,
         )
 
-    return _coerce_to_valid_keys(spec, has_chars, has_dialogue)
+    spec = _coerce_to_valid_keys(spec, has_chars, has_dialogue)
+    optimized_prompt = _normalize_structured_image_prompt(spec["image_prompt"])
+    if (
+        optimized_prompt is not None
+        and _image_prompt_word_count(optimized_prompt)
+        <= _MAX_OPTIMIZER_IMAGE_PROMPT_WORDS
+    ):
+        spec["image_prompt"] = optimized_prompt
+        return spec
+
+    source_prompt = _normalize_structured_image_prompt(user_input)
+    if source_prompt is not None:
+        # Source intent outranks optimizer length guidance: preserve it byte-for-byte.
+        spec["image_prompt"] = user_input
+        return spec
+
+    fallback_prompt = _fallback_optimize(
+        user_input,
+        characters,
+        location,
+        global_settings,
+        has_dialogue,
+        objects=objects,
+        primary_subject=primary_subject,
+        intent_notes=intent_notes,
+    )["image_prompt"]
+    normalized_fallback = _normalize_structured_image_prompt(fallback_prompt)
+    if normalized_fallback is None:
+        raise ValueError("deterministic optimizer fallback violated prompt contract")
+    spec["image_prompt"] = normalized_fallback
+    return spec
 
 
 def batch_optimize_scene(
