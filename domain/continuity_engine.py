@@ -520,7 +520,7 @@ class ContinuityEngine:
 
         # Compute a deterministic scene seed — locked across ALL shots in this scene
         loc_seed = self.location_persistence.get_seed(loc_id) if loc_id else None
-        scene_seed = loc_seed if loc_seed else hash(scene_id) % (2**31)
+        scene_seed = loc_seed if loc_seed is not None else _stable_scene_seed(scene_id)
 
         # Classify shot type for adaptive thresholds and PuLID weights
         from workflow_selector import classify_shot_type, get_adaptive_pulid_weight
@@ -636,3 +636,10 @@ class ContinuityEngine:
             max_attempts=max_attempts,
         )
 
+
+def _stable_scene_seed(scene_id: str) -> int:
+    """Return a process- and platform-stable 31-bit seed for a scene ID."""
+    from hashlib import sha256
+
+    digest = sha256(scene_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], byteorder="big", signed=False) & 0x7FFFFFFF

@@ -3,14 +3,15 @@ Tests for continuity_engine.py — TemporalConsistencyManager denoise logic.
 Isolated unit tests: no external APIs, no DeepFace, no project files needed.
 """
 
-import sys
 import os
+import subprocess
+import sys
+from pathlib import Path
 
-
-import tempfile
 import pytest
 
 from continuity_engine import TemporalConsistencyManager
+from domain.continuity_engine import _stable_scene_seed
 
 
 # ---------------------------------------------------------------------------
@@ -288,3 +289,103 @@ class TestContinuityEngineSecondaryChars:
             {"id": "s1", "shots": []}, None, 0,
         )
         assert enhanced["continuity_config"]["secondary_chars"] == []
+
+
+# ---------------------------------------------------------------------------
+# ContinuityEngine.enhance_shot_prompt — stable scene seeds
+# ---------------------------------------------------------------------------
+
+
+def _scene_seed_from_subprocess(scene_id: str, python_hash_seed: int) -> int:
+    env = os.environ.copy()
+    env["PYTHONHASHSEED"] = str(python_hash_seed)
+    code = (
+        "import sys\n"
+        "from domain.continuity_engine import _stable_scene_seed\n"
+        "print(_stable_scene_seed(sys.argv[1]))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code, scene_id],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return int(result.stdout.strip().splitlines()[-1])
+
+
+def test_scene_seed_is_stable_across_python_hash_seeds():
+    first = _scene_seed_from_subprocess("scene_cross_process", 1)
+    second = _scene_seed_from_subprocess("scene_cross_process", 987654)
+
+    assert first == second
+
+
+@pytest.mark.parametrize("scene_id", ["", "scene_1", "장면_마지막"])
+def test_stable_scene_seed_is_31_bit_int(scene_id):
+    seed = _stable_scene_seed(scene_id)
+
+    assert type(seed) is int
+    assert 0 <= seed <= 0x7FFFFFFF
+
+
+def test_stable_scene_seed_known_sha256_vector():
+    # UTF-8 SHA-256 starts f7 ab aa 27; big-endian 0xf7abaa27 masked to
+    # 31 bits is 0x77abaa27.
+    assert _stable_scene_seed("scene_é") == 2_007_738_919
+
+
+def test_representative_scene_ids_have_different_stable_seeds():
+    assert _stable_scene_seed("scene_alpha") != _stable_scene_seed("scene_beta")
+
+
+@pytest.mark.parametrize("location_seed", [0, 482901])
+def test_explicit_location_seed_wins(engine_two_chars, location_seed):
+    engine_two_chars.location_persistence.get_prompt = mock.MagicMock(
+        return_value=""
+    )
+    engine_two_chars.location_persistence.get_seed = mock.MagicMock(
+        return_value=location_seed
+    )
+
+    enhanced = engine_two_chars.enhance_shot_prompt(
+        {"characters_in_frame": [], "prompt": "p"},
+        {"id": "scene_with_location", "location_id": "loc_a", "shots": []},
+        None,
+        0,
+    )
+
+    assert enhanced["continuity_config"]["location_seed"] == location_seed
+    assert enhanced["continuity_config"]["scene_seed"] == location_seed
+
+
+def test_missing_location_seed_uses_stable_fallback(engine_two_chars):
+    engine_two_chars.location_persistence.get_prompt = mock.MagicMock(
+        return_value=""
+    )
+    engine_two_chars.location_persistence.get_seed = mock.MagicMock(
+        return_value=None
+    )
+    scene = {
+        "id": "scene_without_location_seed",
+        "location_id": "loc_legacy",
+        "shots": [],
+    }
+
+    first = engine_two_chars.enhance_shot_prompt(
+        {"characters_in_frame": [], "prompt": "p"},
+        scene,
+        None,
+        0,
+    )
+    second = engine_two_chars.enhance_shot_prompt(
+        {"characters_in_frame": [], "prompt": "p"},
+        scene,
+        None,
+        0,
+    )
+
+    expected = _stable_scene_seed(scene["id"])
+    assert first["continuity_config"]["scene_seed"] == expected
+    assert second["continuity_config"]["scene_seed"] == expected

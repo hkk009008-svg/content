@@ -15,6 +15,7 @@ import dataclasses
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 from unittest.mock import MagicMock
 
@@ -96,6 +97,41 @@ class TestFalFallbackProvenance:
 
         assert isinstance(res, pca.ImageGenResult)
         assert res.api_name == "POLLINATIONS"
+
+    @pytest.mark.parametrize(
+        ("seed", "expected_seed"),
+        [(None, "42"), (0, "0")],
+    )
+    def test_pollinations_defaults_only_missing_seed(
+        self, stub_fal, tmp_path, monkeypatch, seed, expected_seed
+    ):
+        stub_fal.subscribe.side_effect = RuntimeError("fal down")
+        captured_urls = []
+
+        class _Resp:
+            def read(self):
+                return b"x" * 6000
+
+        def _fake_urlopen(url):
+            captured_urls.append(url)
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+        res = pca._fal_flux_fallback(
+            "a prompt",
+            str(tmp_path / "out.jpg"),
+            seed=seed,
+            character_image=None,
+        )
+
+        assert isinstance(res, pca.ImageGenResult)
+        assert res.api_name == "POLLINATIONS"
+        assert captured_urls
+        query = urllib.parse.parse_qs(
+            urllib.parse.urlparse(captured_urls[0]).query
+        )
+        assert query["seed"] == [expected_seed]
 
     def test_no_fal_key_returns_none(self, monkeypatch, tmp_path):
         # No FAL key → None (failure), so the caller's `if not result` guard

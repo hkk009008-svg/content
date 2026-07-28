@@ -829,7 +829,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         import urllib.parse
         encoded = urllib.parse.quote(prompt)
         _pw, _ph = portrait_swap(1344, 768, aspect_ratio)
-        poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width={_pw}&height={_ph}&nologo=True&model=flux&seed={seed or 42}"
+        poll_seed = 42 if seed is None else seed
+        poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width={_pw}&height={_ph}&nologo=True&model=flux&seed={poll_seed}"
         img_data = urllib.request.urlopen(poll_url).read()
         if len(img_data) > 5000:
             with open(output_filename, "wb") as f:
@@ -843,4 +844,3 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
     except Exception as e:
         print(f"❌ Fallback image generation failed: {e}")
         return None
-
