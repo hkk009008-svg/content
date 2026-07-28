@@ -9,6 +9,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 import domain.scene_decomposer as sd
 from domain.scene_decomposer import _build_cinedecompose_system_prompt
 
@@ -82,10 +84,18 @@ def _valid_shot():
     }
 
 
+def _valid_payload(n=2):
+    return {"shots": [_valid_shot() for _ in range(n)]}
+
+
 def _schema_from_rendered_prompt(rendered_prompt):
     schema_text = rendered_prompt.split("JSON Schema:\n", 1)[1]
     schema, _end = json.JSONDecoder().raw_decode(schema_text)
     return schema
+
+
+def _shot_item_schema(schema):
+    return schema["properties"]["shots"]["items"]
 
 
 def _capture_both_path_prompts(monkeypatch):
@@ -100,7 +110,13 @@ def _capture_both_path_prompts(monkeypatch):
         "action": "Alice walks into the room.",
         "duration_seconds": 5,
     }
-    characters = [{"id": "char_a", "name": "Alice"}]
+    characters = [
+        {
+            "id": "char_a",
+            "name": "Alice",
+            "physical_traits": "green eyes, black hair — MUST NOT REACH PROMPT",
+        }
+    ]
     location = {"description": "a room"}
     settings = {"aspect_ratio": "16:9"}
 
@@ -114,7 +130,8 @@ def _capture_both_path_prompts(monkeypatch):
 
     def fake_run_with_tools(*args, **kwargs):
         captured["direct"] = kwargs["system_prompt"]
-        return json.dumps([_valid_shot()])
+        captured["direct_user"] = kwargs["user_prompt"]
+        return json.dumps(_valid_payload(2))
 
     monkeypatch.setattr(web_research, "run_with_tools", fake_run_with_tools)
     sd.decompose_scene(scene, characters, location, settings)
@@ -125,9 +142,10 @@ def _capture_both_path_prompts(monkeypatch):
 
         def competitive_generate(self, **kwargs):
             captured["competitive"] = kwargs["system_prompt"]
+            captured["competitive_user"] = kwargs["user_prompt"]
             return SimpleNamespace(
                 winner_index=0,
-                winner_content=[_valid_shot()],
+                winner_content=_valid_payload(2),
                 scores=[9.0],
                 reasoning="fixture",
                 models_used=["gpt-4o"],
@@ -140,12 +158,18 @@ def _capture_both_path_prompts(monkeypatch):
 
 def test_shared_shot_schema_preserves_shape_required_fields_and_enums():
     schema = sd._build_cinedecompose_shot_schema()
-    assert schema["type"] == "array"
-    assert schema["items"]["type"] == "object"
+    assert schema["type"] == "object"
+    assert schema["required"] == ["shots"]
+    shots = schema["properties"]["shots"]
+    assert shots["type"] == "array"
+    assert shots["minItems"] == 2
+    assert shots["maxItems"] == 5
 
-    properties = schema["items"]["properties"]
+    item = _shot_item_schema(schema)
+    assert item["type"] == "object"
+    properties = item["properties"]
     assert list(properties) == _REQUIRED_SHOT_FIELDS
-    assert schema["items"]["required"] == _REQUIRED_SHOT_FIELDS
+    assert item["required"] == _REQUIRED_SHOT_FIELDS
     assert {name: definition["type"] for name, definition in properties.items()} == {
         "prompt": "string",
         "camera": "string",
@@ -170,14 +194,14 @@ def test_shared_shot_schema_enum_lists_are_mutation_isolated():
     first = sd._build_cinedecompose_shot_schema()
 
     for field, source in enum_sources.items():
-        enum_values = first["items"]["properties"][field]["enum"]
+        enum_values = _shot_item_schema(first)["properties"][field]["enum"]
         assert enum_values is not source
         enum_values.append(f"FIRST_ONLY_{field}")
 
     second = sd._build_cinedecompose_shot_schema()
     for field, source in enum_sources.items():
-        first_values = first["items"]["properties"][field]["enum"]
-        second_values = second["items"]["properties"][field]["enum"]
+        first_values = _shot_item_schema(first)["properties"][field]["enum"]
+        second_values = _shot_item_schema(second)["properties"][field]["enum"]
         assert first_values is not second_values
         assert second_values is not source
         assert second_values == source
@@ -191,9 +215,9 @@ def test_rendered_schema_respects_hc1_identity_firewall():
     assert "ALL character physical descriptions" not in rendered
 
     prompt_description = (
-        _schema_from_rendered_prompt(rendered)["items"]["properties"]["prompt"][
-            "description"
-        ]
+        _shot_item_schema(_schema_from_rendered_prompt(rendered))["properties"][
+            "prompt"
+        ]["description"]
     )
     assert "location, action, wardrobe, and cinematic quality" in prompt_description
     assert "reference/PuLID locking" in prompt_description
@@ -225,3 +249,97 @@ def test_both_paths_call_shared_schema_factory(monkeypatch):
     for path in ("direct", "competitive"):
         schema = _schema_from_rendered_prompt(captured[path])
         assert schema["x-shared-schema-marker"] == "factory"
+
+
+def test_decomposer_prompts_omit_physical_traits(monkeypatch):
+    captured = _capture_both_path_prompts(monkeypatch)
+    for path in ("direct", "competitive"):
+        assert "green eyes" not in captured[path]
+        assert "MUST NOT REACH PROMPT" not in captured[path]
+        assert "Alice (ID: char_a)" in captured[path]
+        assert '{"shots"' in captured[f"{path}_user"] or '{"shots":' in captured[f"{path}_user"]
+
+
+def test_validate_raw_shot_rejects_invalid_enum_and_prompt():
+    bad = _valid_shot()
+    bad["camera"] = "not_a_real_camera"
+    with pytest.raises(ValueError, match="invalid camera"):
+        sd._validate_raw_shot(bad, index=0)
+
+    missing_section = _valid_shot()
+    missing_section["prompt"] = "[SHOT] only one section"
+    with pytest.raises(ValueError, match="SHOT|five"):
+        sd._validate_raw_shot(missing_section, index=0)
+
+
+def test_enrich_rejects_wrong_shot_count():
+    scene = {"id": "s1", "action": "walk"}
+    with pytest.raises(ValueError, match="expected 2-5 shots, got 1"):
+        sd._enrich_validated_shots(
+            [_valid_shot()],
+            scene=scene,
+            characters=[{"id": "char_a", "name": "Alice"}],
+            target_shots=2,
+        )
+    with pytest.raises(ValueError, match="exactly 3"):
+        sd._enrich_validated_shots(
+            [_valid_shot(), _valid_shot()],
+            scene=scene,
+            characters=[{"id": "char_a", "name": "Alice"}],
+            target_shots=3,
+        )
+
+
+def test_parse_rejects_arbitrary_nested_dict():
+    with pytest.raises(ValueError, match="shots"):
+        sd._parse_decomposition_payload({"frames": [_valid_shot(), _valid_shot()]})
+
+
+def test_invalid_llm_payload_falls_back_on_both_paths(monkeypatch):
+    import openai
+    import research_engine
+    import web_research
+
+    scene = {
+        "id": "scene_a",
+        "title": "A Scene",
+        "action": "Alice walks.",
+        "duration_seconds": 5,
+    }
+    characters = [{"id": "char_a", "name": "Alice"}]
+    location = {"description": "a room"}
+    settings = {"aspect_ratio": "16:9"}
+
+    monkeypatch.setattr(
+        research_engine, "research_cinematography", lambda *a, **k: None
+    )
+    monkeypatch.setattr(sd, "settings", SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(openai, "OpenAI", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(
+        web_research,
+        "run_with_tools",
+        lambda *a, **k: json.dumps({"shots": [_valid_shot()]}),  # count=1, need 2
+    )
+
+    direct = sd.decompose_scene(scene, characters, location, settings)
+    assert len(direct) >= 1  # fallback path
+    assert all("prompt" in s for s in direct)
+
+    class BadEnsemble:
+        def __init__(self, **kwargs):
+            pass
+
+        def competitive_generate(self, **kwargs):
+            return SimpleNamespace(
+                winner_index=0,
+                winner_content={"shots": [_valid_shot()]},
+                scores=[1.0],
+                reasoning="bad",
+                models_used=["gpt-4o"],
+            )
+
+    # Competitive falls back to direct, which also fails validation → fallback_decompose
+    monkeypatch.setattr(sd, "LLMEnsemble", BadEnsemble)
+    competitive = sd.competitive_decompose_scene(scene, characters, location, settings)
+    assert len(competitive) >= 1
+    assert all("prompt" in s for s in competitive)

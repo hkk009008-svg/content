@@ -4,10 +4,11 @@ Replaces the monolithic 20-prompt auto-generation (phase_a_generator.py) with
 per-scene decomposition. Takes user-defined scenes and converts them into
 technically precise image generation prompts via GPT-4o.
 """
-from typing import Optional, List
+from typing import Any, Optional, List
 
 import os
 import json
+import re
 from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.project_manager import make_shot
@@ -325,52 +326,219 @@ MUSIC_MOODS = [
 
 
 def _build_cinedecompose_shot_schema() -> dict:
-    """Return the identity-safe JSON-array contract shared by both LLM paths."""
-    return {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": (
-                        "Detailed photorealistic image generation prompt with "
-                        "location, action, wardrobe, and cinematic quality cues; "
-                        "leave face, hair, skin, body, and all identity appearance "
-                        "to reference/PuLID locking"
-                    ),
-                },
-                "camera": {"type": "string", "enum": list(CAMERA_MOTIONS)},
-                "visual_effect": {"type": "string", "enum": list(VISUAL_EFFECTS)},
-                "target_api": {"type": "string", "enum": list(TARGET_APIS)},
-                "scene_foley": {
-                    "type": "string",
-                    "description": "Environmental sound effects for this moment",
-                },
-                "characters_in_frame": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Character IDs visible in this shot",
-                },
-                "action_context": {
-                    "type": "string",
-                    "description": (
-                        "What is physically happening in this shot for temporal "
-                        "continuity"
-                    ),
-                },
+    """Return the identity-safe JSON-object contract shared by both LLM paths.
+
+    Root shape is ``{"shots": [ ... ]}`` so OpenAI ``response_format=
+    {"type": "json_object"}`` and the prompt agree. Enum lists are copied so
+    callers cannot mutate the module-level catalogs via the returned schema.
+    """
+    shot_item = {
+        "type": "object",
+        "properties": {
+            "prompt": {
+                "type": "string",
+                "description": (
+                    "Detailed photorealistic image generation prompt with "
+                    "location, action, wardrobe, and cinematic quality cues; "
+                    "leave face, hair, skin, body, and all identity appearance "
+                    "to reference/PuLID locking"
+                ),
             },
-            "required": [
-                "prompt",
-                "camera",
-                "visual_effect",
-                "target_api",
-                "scene_foley",
-                "characters_in_frame",
-                "action_context",
-            ],
+            "camera": {"type": "string", "enum": list(CAMERA_MOTIONS)},
+            "visual_effect": {"type": "string", "enum": list(VISUAL_EFFECTS)},
+            "target_api": {"type": "string", "enum": list(TARGET_APIS)},
+            "scene_foley": {
+                "type": "string",
+                "description": "Environmental sound effects for this moment",
+            },
+            "characters_in_frame": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Character IDs visible in this shot",
+            },
+            "action_context": {
+                "type": "string",
+                "description": (
+                    "What is physically happening in this shot for temporal "
+                    "continuity"
+                ),
+            },
         },
+        "required": [
+            "prompt",
+            "camera",
+            "visual_effect",
+            "target_api",
+            "scene_foley",
+            "characters_in_frame",
+            "action_context",
+        ],
     }
+    return {
+        "type": "object",
+        "properties": {
+            "shots": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 5,
+                "items": shot_item,
+            }
+        },
+        "required": ["shots"],
+    }
+
+
+_SHOT_PROMPT_SECTION_TAGS = ("SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY")
+_SHOT_PROMPT_TAG_RE = re.compile(r"\[(SHOT|SCENE|ACTION|OUTFIT|QUALITY)\]")
+_CINEDECOMPOSE_MIN_SHOTS = 2
+_CINEDECOMPOSE_MAX_SHOTS = 5
+
+
+def _has_five_section_shot_prompt(prompt: object) -> bool:
+    """True when prompt has exactly the five labeled sections in order."""
+    if not isinstance(prompt, str) or not prompt.strip():
+        return False
+    matches = list(_SHOT_PROMPT_TAG_RE.finditer(prompt))
+    if [m.group(1) for m in matches] != list(_SHOT_PROMPT_SECTION_TAGS):
+        return False
+    if prompt[: matches[0].start()].strip():
+        return False
+    for index, match in enumerate(matches):
+        content_end = (
+            matches[index + 1].start()
+            if index + 1 < len(matches)
+            else len(prompt)
+        )
+        if not prompt[match.end():content_end].strip():
+            return False
+    return True
+
+
+def _character_routing_lines(characters: List[dict]) -> list[str]:
+    """Name + ID only — never physical traits (HC1 identity firewall)."""
+    return [f"- {c['name']} (ID: {c['id']})" for c in characters]
+
+
+def _extract_shots_list(parsed: Any) -> list:
+    """Extract the shots array from the executable contract.
+
+    Accepts ``{"shots": [...]}`` (canonical) or a bare JSON array (legacy
+    competitors). Rejects single-shot objects and arbitrary nested dicts.
+    """
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict) and isinstance(parsed.get("shots"), list):
+        return parsed["shots"]
+    raise ValueError(
+        "decomposition result must be {\"shots\": [...]} or a JSON array, "
+        f"got {type(parsed).__name__}"
+    )
+
+
+def _validate_raw_shot(shot: Any, *, index: int) -> dict:
+    """Validate one shot against the executable schema. Raises ValueError."""
+    if not isinstance(shot, dict):
+        raise ValueError(f"shot[{index}] must be an object, got {type(shot).__name__}")
+
+    required = [
+        "prompt",
+        "camera",
+        "visual_effect",
+        "target_api",
+        "scene_foley",
+        "characters_in_frame",
+        "action_context",
+    ]
+    missing = [key for key in required if key not in shot]
+    if missing:
+        raise ValueError(f"shot[{index}] missing required fields: {missing}")
+
+    if not _has_five_section_shot_prompt(shot["prompt"]):
+        raise ValueError(
+            f"shot[{index}] prompt must contain exactly "
+            "[SHOT][SCENE][ACTION][OUTFIT][QUALITY] with non-empty sections"
+        )
+    if shot["camera"] not in CAMERA_MOTIONS:
+        raise ValueError(f"shot[{index}] invalid camera: {shot['camera']!r}")
+    if shot["visual_effect"] not in VISUAL_EFFECTS:
+        raise ValueError(
+            f"shot[{index}] invalid visual_effect: {shot['visual_effect']!r}"
+        )
+    if shot["target_api"] not in TARGET_APIS:
+        raise ValueError(f"shot[{index}] invalid target_api: {shot['target_api']!r}")
+    if not isinstance(shot["scene_foley"], str) or not shot["scene_foley"].strip():
+        raise ValueError(f"shot[{index}] scene_foley must be a non-empty string")
+    if not isinstance(shot["action_context"], str) or not shot["action_context"].strip():
+        raise ValueError(f"shot[{index}] action_context must be a non-empty string")
+    char_ids = shot["characters_in_frame"]
+    if not isinstance(char_ids, list) or not all(isinstance(c, str) for c in char_ids):
+        raise ValueError(
+            f"shot[{index}] characters_in_frame must be an array of strings"
+        )
+    return shot
+
+
+def _parse_decomposition_payload(raw: Any) -> list:
+    """Parse LLM output into a raw shots list; raises on contract breach."""
+    if isinstance(raw, (dict, list)):
+        parsed = raw
+    elif isinstance(raw, str):
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[-1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        parsed = json.loads(cleaned.strip())
+    else:
+        parsed = json.loads(str(raw))
+    return _extract_shots_list(parsed)
+
+
+def _enrich_validated_shots(
+    shots: list,
+    *,
+    scene: dict,
+    characters: List[dict],
+    target_shots: int,
+    ensemble_meta: Optional[dict] = None,
+) -> List[dict]:
+    """Validate shot count + fields, then build make_shot records.
+
+    Invalid enums / missing fields / bad prompts raise ValueError rather than
+    silently defaulting — callers fall back to ``_fallback_decompose``.
+    """
+    if not (_CINEDECOMPOSE_MIN_SHOTS <= len(shots) <= _CINEDECOMPOSE_MAX_SHOTS):
+        raise ValueError(
+            f"expected {_CINEDECOMPOSE_MIN_SHOTS}-{_CINEDECOMPOSE_MAX_SHOTS} shots, "
+            f"got {len(shots)}"
+        )
+    if len(shots) != target_shots:
+        raise ValueError(
+            f"expected exactly {target_shots} shots, got {len(shots)}"
+        )
+
+    default_char_ids = [c["id"] for c in characters]
+    validated: List[dict] = []
+    for i, shot in enumerate(shots):
+        _validate_raw_shot(shot, index=i)
+        char_ids = shot["characters_in_frame"] or default_char_ids
+        shot_record = make_shot(
+            prompt=shot["prompt"],
+            camera=shot["camera"],
+            visual_effect=shot["visual_effect"],
+            target_api=shot["target_api"],
+            scene_foley=shot["scene_foley"],
+            characters_in_frame=char_ids,
+            primary_character=char_ids[0] if char_ids else "",
+            shot_id=f"shot_{scene.get('id', 'scene')}_{i}",
+        )
+        shot_record["action_context"] = shot["action_context"]
+        shot_record["intent_notes"] = scene.get("action", "")
+        if ensemble_meta:
+            shot_record["ensemble_winner"] = ensemble_meta.get("winner")
+            shot_record["ensemble_scores"] = ensemble_meta.get("scores")
+        validated.append(shot_record)
+    return validated
 
 
 def _render_cinedecompose_system_prompt(system_prompt: str) -> str:
@@ -486,7 +654,7 @@ R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, bo
 
 {PIPELINE_CONTEXT}
 
-Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
+Output ONLY a valid JSON object of the form {{"shots": [ ... ]}}. No markdown wrapping. No explanation."""
 
 
 def decompose_scene(
@@ -521,13 +689,10 @@ def decompose_scene(
 
     client = openai.OpenAI(api_key=api_key, timeout=120.0)
 
-    # Build character descriptions for the prompt
-    char_descriptions = []
+    # Build character routing lines — name + ID only (HC1: never feed traits).
+    char_descriptions = _character_routing_lines(characters)
     char_id_map = {}
     for c in characters:
-        char_descriptions.append(
-            f"- {c['name']} (ID: {c['id']}): {c.get('physical_traits', c.get('description', ''))}"
-        )
         char_id_map[c["name"].lower()] = c["id"]
 
     # Build location context
@@ -585,7 +750,7 @@ DURATION: ~{duration} seconds
 
 Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in characters])}
 
-Output ONLY the raw JSON array. No markdown wrapping."""
+Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot objects. No markdown wrapping."""
 
     full_system = _render_cinedecompose_system_prompt(system_prompt)
 
@@ -610,43 +775,13 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
             response_format={"type": "json_object"},
             cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
         )
-        parsed = json.loads(raw)
-
-        # Handle both {"shots": [...]} and bare [...] formats
-        shots = parsed if isinstance(parsed, list) else parsed.get("shots", [])
-
-        # Debug: if no shots found, check what keys we got
-        if not shots and isinstance(parsed, dict):
-            # Case 1: GPT-4o returned a single shot object (has 'prompt' key) → wrap in list
-            if "prompt" in parsed:
-                shots = [parsed]
-                print(f"   [DEBUG] GPT-4o returned single shot object — wrapped in list")
-            else:
-                # Case 2: Shots nested under a non-standard key → find array of dicts
-                for key in parsed:
-                    val = parsed[key]
-                    if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
-                        shots = val
-                        print(f"   [DEBUG] Found shots under key '{key}': {len(shots)} items")
-                        break
-
-        # Validate and enrich shots
-        validated = []
-        for i, shot in enumerate(shots):
-            char_ids = shot.get("characters_in_frame", [c["id"] for c in characters])
-            shot_record = make_shot(
-                prompt=shot.get("prompt", ""),
-                camera=shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
-                visual_effect=shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
-                target_api=shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
-                scene_foley=shot.get("scene_foley", "ambient room tone"),
-                characters_in_frame=char_ids,
-                primary_character=char_ids[0] if char_ids else "",
-                shot_id=f"shot_{scene.get('id', 'scene')}_{i}",
-            )
-            shot_record["action_context"] = shot.get("action_context", scene.get("action", ""))
-            shot_record["intent_notes"] = scene.get("action", "")
-            validated.append(shot_record)
+        shots = _parse_decomposition_payload(raw)
+        validated = _enrich_validated_shots(
+            shots,
+            scene=scene,
+            characters=characters,
+            target_shots=target_shots,
+        )
 
         print(f"   ✅ Decomposed scene '{scene.get('title')}' into {len(validated)} shots")
         return validated
@@ -686,14 +821,11 @@ def competitive_decompose_scene(
     """
 
     # ------------------------------------------------------------------
-    # 1. Build character descriptions (identical to decompose_scene)
+    # 1. Build character routing lines — name + ID only (HC1)
     # ------------------------------------------------------------------
-    char_descriptions = []
+    char_descriptions = _character_routing_lines(characters)
     char_id_map = {}
     for c in characters:
-        char_descriptions.append(
-            f"- {c['name']} (ID: {c['id']}): {c.get('physical_traits', c.get('description', ''))}"
-        )
         char_id_map[c["name"].lower()] = c["id"]
 
     # ------------------------------------------------------------------
@@ -762,7 +894,7 @@ DURATION: ~{duration} seconds
 
 Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in characters])}
 
-Output ONLY the raw JSON array. No markdown wrapping."""
+Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot objects. No markdown wrapping."""
 
     full_system = _render_cinedecompose_system_prompt(system_prompt)
 
@@ -790,59 +922,19 @@ Output ONLY the raw JSON array. No markdown wrapping."""
             return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
 
         # ------------------------------------------------------------------
-        # 8. Parse the winning output into a shot list
+        # 8. Parse + validate via the shared executable contract
         # ------------------------------------------------------------------
-        if isinstance(winning_raw, str):
-            # Strip possible markdown fences
-            cleaned = winning_raw.strip()
-            if cleaned.startswith("```"):
-                cleaned = cleaned.split("\n", 1)[-1]
-            if cleaned.endswith("```"):
-                cleaned = cleaned.rsplit("```", 1)[0]
-            parsed = json.loads(cleaned.strip())
-        elif isinstance(winning_raw, (dict, list)):
-            parsed = winning_raw
-        else:
-            parsed = json.loads(str(winning_raw))
-
-        # Handle both {"shots": [...]} and bare [...] formats
-        shots = parsed if isinstance(parsed, list) else parsed.get("shots", [])
-
-        if not shots and isinstance(parsed, dict):
-            if "prompt" in parsed:
-                shots = [parsed]
-            else:
-                for key in parsed:
-                    val = parsed[key]
-                    if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
-                        shots = val
-                        break
-
-        if not shots:
-            print("   [Ensemble] Could not extract shots from winner — falling back to decompose_scene()")
-            return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
-
-        # ------------------------------------------------------------------
-        # 9. Validate and enrich each shot (camera, visual_effect, target_api)
-        # ------------------------------------------------------------------
-        validated = []
-        for i, shot in enumerate(shots):
-            char_ids = shot.get("characters_in_frame", [c["id"] for c in characters])
-            shot_record = make_shot(
-                prompt=shot.get("prompt", ""),
-                camera=shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
-                visual_effect=shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
-                target_api=shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
-                scene_foley=shot.get("scene_foley", "ambient room tone"),
-                characters_in_frame=char_ids,
-                primary_character=char_ids[0] if char_ids else "",
-                shot_id=f"shot_{scene.get('id', 'scene')}_{i}",
-            )
-            shot_record["action_context"] = shot.get("action_context", scene.get("action", ""))
-            shot_record["intent_notes"] = scene.get("action", "")
-            shot_record["ensemble_winner"] = result.models_used[result.winner_index]
-            shot_record["ensemble_scores"] = result.scores
-            validated.append(shot_record)
+        shots = _parse_decomposition_payload(winning_raw)
+        validated = _enrich_validated_shots(
+            shots,
+            scene=scene,
+            characters=characters,
+            target_shots=target_shots,
+            ensemble_meta={
+                "winner": result.models_used[result.winner_index],
+                "scores": result.scores,
+            },
+        )
 
         print(
             f"   ✅ [Competitive] Decomposed scene '{scene.get('title')}' into "
