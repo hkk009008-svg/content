@@ -387,3 +387,33 @@ order of precedence is:
 **If a non-Claude agent reads only this file:** the universal principles
 above are complete and standalone. Apply them with your tool's analogous
 mechanisms. The `CLAUDE.md` references are optional reading.
+
+# Cursor Cloud specific instructions
+
+Environment is provisioned by the startup update script (Python 3.13 `.venv` +
+`pip install -r requirements.txt` + a defensive `opencv-python<5` + `npm install --prefix web`).
+Standard run/test commands live in `README.md`, `OPERATIONS.md` §4/§7, and CI
+(`.github/workflows/ci.yml`) — use those; the notes below are only the non-obvious caveats.
+
+- **Interpreter path:** use the venv explicitly (`.venv/bin/python`, `.venv/bin/python -m pytest`).
+  The system `python3` is 3.12; the project targets 3.13 (installed from the deadsnakes PPA — a
+  one-time system dep in the VM snapshot, not the update script).
+- **`opencv-python` must stay `<5`:** OpenCV 5.0 dropped the top-level `cv2.CascadeClassifier` /
+  `cv2.data.haarcascades` APIs that `lip_sync.py` (mouth-energy scorer) calls at runtime. The pin is
+  in `requirements.txt`; the update script also force-installs `opencv-python<5` so the env is
+  correct even before that pin merges. Unbounded `opencv-python>=4.10` resolves to 5.x and breaks the
+  lipsync path + 3 unit tests.
+- **Running the offline unit suite like CI:** `config/settings.py` calls `load_dotenv(override=True)`,
+  so a `.env` containing EMPTY API keys (e.g. the freshly-copied `.env.example`) OVERRIDES
+  shell-exported keys. The ambient-key vision tests in `tests/unit/test_phase_c_vision.py` then fail
+  with "No OPENAI_API_KEY". To reproduce CI's green, run pytest with `ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`, `GEMINI_API_KEY` set AND either no `.env` present or those keys populated in
+  `.env`. CI has no `.env`, so its shell dummy keys win. Example: temporarily move `.env` aside and
+  run `OPENAI_API_KEY=ci-dummy ANTHROPIC_API_KEY=ci-dummy GEMINI_API_KEY=ci-dummy .venv/bin/python -m pytest tests/unit/ -q`
+  (3436 passed / 2 skipped as of this setup).
+- **Services & scope for this sandbox:** two dev services — Flask backend (`.venv/bin/python web_server.py`,
+  `127.0.0.1:8080`) and the Vite dev server (`npm run dev` in `web/`, `:3000`, proxies `/api`→`:8080`).
+  These run fully keyless: creating/browsing projects and the UI work. A full generation run is NOT
+  possible in the sandbox — it needs a GPU ComfyUI pod (`COMFYUI_SERVER_URL`) and paid provider keys
+  (Anthropic/OpenAI/FAL/ElevenLabs/…), none of which are available here. Treat those as out of scope
+  for local verification.
