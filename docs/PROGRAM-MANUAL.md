@@ -537,7 +537,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `_extract_video_bytes` | `veo_native.py:85` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini). Cycle-17 native-audio fix path. |
 | `_clamp_image_to_video_duration` | `veo_native.py:38` | Duration clamp (5s→6). |
 | `KlingNativeAPI` | `kling_native.py:30` | JWT HS256 auth; `create_image_to_video` (`:97`), `poll_task` (`:181`), `generate_storyboard` (`:324`, ≤6 shots, `face_consistency`). |
-| `SoraNativeAPI.generate_video` / `LTXVideoAPI.generate_video` | `sora_native.py:56` / `ltx_native.py:68` | Sora: durations [4,8,12,16,20], driving-video as `input_reference` (only engine that fully wires it). LTX: native REST preferred, FAL fallback; `_*_transition` methods exist but are dead in the cascade. |
+| `SoraNativeAPI.generate_video` / `LTXVideoAPI.generate_video` | `sora_native.py:46` / `ltx_native.py:68` | Sora: durations [4,8,12,16,20], driving-video as `input_reference` (only engine that fully wires it). LTX: native REST preferred, FAL fallback; `_*_transition` methods exist but are dead in the cascade. |
 
 ### 3.9 Image / keyframe generation (single production tier)
 
@@ -1466,7 +1466,7 @@ Three cascade caveats engineers must know:
 
 - **Native-audio is only guaranteed on the primary attempt.** When the dialogue override nulls `video_fallbacks` (native mode; the overlay default keeps the template list), if `VEO_NATIVE` itself fails, `try_next_api` falls through to the **default** list (which contains non-audio engines). The downstream guarantee is instead enforced by the **mandatory F1b lipsync pass** (`cinema/shots/controller.py:1880`): after the take is downloaded, if `has_dialogue and not audio_embedded`, the controller runs `generate_lip_sync_video` and writes `lipsync_score`.
 - **`VEO_NATIVE` has no quota-block guard.** The `_VEO_QUOTA_EXHAUSTED_UNTIL` 30-min cooldown TTL is set/checked only for the **FAL-proxy `VEO`** branch (`phase_c_ffmpeg.py:657`); native-Veo quota errors are caught generically and cascade with no cooldown.
-- **Some engine params are accepted but silently dropped.** Veo's `reference_images`/`multi_angle_refs` (Bug #4 — Vertex rejects image+reference_images together) and `driving_video_path` (SDK `video=`/`image=` mutual exclusivity) are accepted for interface stability but have no effect; only **Sora** fully wires driving-video conditioning (`sora_native.py:77`).
+- **Some engine params are accepted but silently dropped.** Veo's `reference_images`/`multi_angle_refs` (Bug #4 — Vertex rejects image+reference_images together) and `driving_video_path` (SDK `video=`/`image=` mutual exclusivity) are accepted for interface stability but have no effect; only **Sora** fully wires driving-video conditioning (`sora_native.py:67`).
 
 The same `try_next_api`-style fault tolerance recurs in the **image** path (ComfyUI+PuLID → FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations, `phase_c_assembly.py:415`), the **lipsync** path (SyncV3 → MuseTalk → LatentSync → SyncV2 for overlay; Hedra → Kling → Omnihuman → Aurora for generation, `lip_sync.py`), and the **TTS/BGM** paths. The pattern — ordered list, skip-on-failure, best-of-failed recovery, provenance written to a cascade dict — is the project's house style for any external dependency.
 
@@ -1651,7 +1651,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `kling_native.py` | 449 | Kling 3.0 native client (JWT HS256, image2video, storyboard mode) |
 | `veo_native.py` | 286 | Veo 3.1 client (Vertex-preferred, Gemini fallback) — one of two `native_audio` engines (`gemini_omni_native.py` is the other, and now outranks it in dialogue routing — §3.8) |
 | `ltx_native.py` | 373 | LTX Video 2.3 client (native REST preferred, FAL fallback) |
-| `sora_native.py` | 179 | OpenAI Sora 2 client (only engine that wires driving-video) |
+| `sora_native.py` | 182 | OpenAI Sora 2 client (only engine that wires driving-video) |
 | `pulid.json` | 22 nodes | Production ComfyUI workflow — the only image graph (FLUX-native `ApplyPulidFlux`; fixed 2026-06-13, ADR-025) |
 
 #### Identity / continuity / coherence

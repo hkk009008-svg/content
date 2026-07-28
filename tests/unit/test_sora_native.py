@@ -6,6 +6,9 @@ Intentional behaviours are documented with # DOCUMENTED-INTENTIONAL tags.
 from __future__ import annotations
 
 import sys
+import tempfile
+from io import BytesIO
+from pathlib import Path
 
 # Other test files (test_dialogue_routing, test_ensure_shot_audio, test_f1b_dialogue_lipsync)
 # inject a lightweight stub module for 'sora_native' via sys.modules to satisfy
@@ -15,7 +18,6 @@ import sys
 # Remove the stub so our import always gets the real module.
 sys.modules.pop("sora_native", None)
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -248,11 +250,15 @@ def test_happy_path_writes_output(monkeypatch, tmp_path):
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
     result = api.generate_video(image_path=img_path, prompt="cinematic", output_path=out)
+    submitted_reference = (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+    )
 
     assert result == out
     with open(out, "rb") as f:
         assert f.read() == b"CHUNK1CHUNK2"
     api.client.videos.download_content.assert_called_once_with("vid-42")
+    assert not submitted_reference.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +276,12 @@ def test_non_completed_status_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
     result = api.generate_video(image_path=img_path, prompt="test", output_path=out)
+    submitted_reference = (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+    )
+
     assert result is None
+    assert not submitted_reference.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +298,35 @@ def test_sdk_exception_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
     result = api.generate_video(image_path=img_path, prompt="test", output_path=out)
+    submitted_reference = (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+    )
+
     assert result is None
+    assert not submitted_reference.exists()
+
+
+def test_download_exception_returns_none_and_cleans_temp(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(
+        status="completed"
+    )
+    api.client.videos.download_content.side_effect = RuntimeError(
+        "download interrupted"
+    )
+
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(image_path=img_path, prompt="test", output_path=out)
+    submitted_reference = (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+    )
+
+    assert result is None
+    assert not submitted_reference.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -310,15 +349,84 @@ def test_driving_video_used_when_exists(monkeypatch, tmp_path):
     existing = {img_path, str(driving)}
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p in existing)
 
-    api.generate_video(
-        image_path=img_path,
-        prompt="motion",
-        output_path=out,
-        driving_video_path=str(driving),
-    )
+    with (
+        patch(
+            "PIL.Image.open",
+            side_effect=AssertionError("driving reference must bypass PIL"),
+        ) as image_open,
+        patch(
+            "sora_native.tempfile.NamedTemporaryFile",
+            side_effect=AssertionError("driving reference must bypass temp files"),
+        ) as named_temp,
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="motion",
+            output_path=out,
+            driving_video_path=str(driving),
+        )
 
     call_kwargs = api.client.videos.create_and_poll.call_args
+    assert result == out
     assert call_kwargs.kwargs.get("input_reference") == Path(str(driving))
+    image_open.assert_not_called()
+    named_temp.assert_not_called()
+    assert driving.read_bytes() == b"fakevideo"
+
+
+@pytest.mark.parametrize("failure_stage", ["create", "download"])
+def test_driving_video_survives_sdk_exceptions_without_still_preprocessing(
+    failure_stage, monkeypatch, tmp_path
+):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    driving = tmp_path / "driving.mp4"
+    driving.write_bytes(b"operator-owned")
+
+    if failure_stage == "create":
+        api.client.videos.create_and_poll.side_effect = RuntimeError(
+            "create failed"
+        )
+    else:
+        api.client.videos.create_and_poll.return_value = _make_video_mock(
+            status="completed", video_id="vid-driving"
+        )
+        api.client.videos.download_content.side_effect = RuntimeError(
+            "download failed"
+        )
+
+    existing = {img_path, str(driving)}
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p in existing)
+
+    with (
+        patch(
+            "PIL.Image.open",
+            side_effect=AssertionError("driving reference must bypass PIL"),
+        ) as image_open,
+        patch(
+            "sora_native.tempfile.NamedTemporaryFile",
+            side_effect=AssertionError("driving reference must bypass temp files"),
+        ) as named_temp,
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="motion",
+            output_path=str(tmp_path / "out.mp4"),
+            driving_video_path=str(driving),
+        )
+
+    submitted_reference = (
+        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
+    )
+    assert result is None
+    assert submitted_reference == driving
+    assert driving.read_bytes() == b"operator-owned"
+    image_open.assert_not_called()
+    named_temp.assert_not_called()
+    if failure_stage == "create":
+        api.client.videos.download_content.assert_not_called()
+    else:
+        api.client.videos.download_content.assert_called_once_with("vid-driving")
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +461,96 @@ def test_driving_video_ignored_when_missing(monkeypatch, tmp_path):
     # It should be a Path to a temp .jpg (the resized still frame)
     assert isinstance(actual_ref, Path)
     assert actual_ref.suffix == ".jpg"
+    assert not actual_ref.exists()
+
+
+def test_still_reference_preserves_lanczos_resize_and_jpeg_quality_90(tmp_path):
+    """The submitted still must match the existing LANCZOS/JPEG-q90 transform."""
+    from PIL import Image
+
+    api = _make_api()
+    source = tmp_path / "pattern.png"
+    with Image.new("RGB", (5, 3)) as source_image:
+        source_image.putdata(
+            [
+                (
+                    (x * 47 + y * 11) % 256,
+                    (x * 13 + y * 71) % 256,
+                    (x * 89 + y * 7) % 256,
+                )
+                for y in range(3)
+                for x in range(5)
+            ]
+        )
+        source_image.save(source, format="PNG")
+
+    captured: dict[str, object] = {}
+    video_mock = _make_video_mock(status="completed")
+
+    def capture_reference(**kwargs):
+        reference = kwargs["input_reference"]
+        captured["reference"] = reference
+        captured["bytes"] = reference.read_bytes()
+        with Image.open(reference) as submitted:
+            captured["size"] = submitted.size
+            captured["format"] = submitted.format
+        return video_mock
+
+    api.client.videos.create_and_poll.side_effect = capture_reference
+    api.client.videos.download_content.return_value = _make_download_content()
+
+    result = api.generate_video(
+        image_path=str(source),
+        prompt="motion",
+        output_path=str(tmp_path / "out.mp4"),
+        model="sora-2-pro",
+        resolution="480p",
+    )
+
+    expected_bytes = BytesIO()
+    with Image.open(source) as source_image:
+        expected_image = source_image.resize((480, 270), Image.LANCZOS)
+        try:
+            expected_image.save(expected_bytes, format="JPEG", quality=90)
+        finally:
+            expected_image.close()
+
+    assert result == str(tmp_path / "out.mp4")
+    assert captured["size"] == (480, 270)
+    assert captured["format"] == "JPEG"
+    assert captured["bytes"] == expected_bytes.getvalue()
+    assert not captured["reference"].exists()
+
+
+def test_partial_preprocessing_failure_cleans_created_temp(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    created_temp_paths: list[Path] = []
+    real_named_temp = tempfile.NamedTemporaryFile
+
+    def record_named_temp(*args, **kwargs):
+        temp_file = real_named_temp(*args, **kwargs)
+        created_temp_paths.append(Path(temp_file.name))
+        return temp_file
+
+    monkeypatch.setattr(
+        sora_native.tempfile, "NamedTemporaryFile", record_named_temp
+    )
+
+    with patch(
+        "PIL.Image.Image.save",
+        side_effect=RuntimeError("resized still write failed"),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="motion",
+            output_path=str(tmp_path / "out.mp4"),
+        )
+
+    assert result is None
+    assert len(created_temp_paths) == 1
+    assert not created_temp_paths[0].exists()
+    api.client.videos.create_and_poll.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -391,12 +589,23 @@ def test_portrait_swaps_size_and_resize(monkeypatch, tmp_path):
     '720x1280' — a supported sora-2 size). One portrait_swap call drives both the
     API size= and the PIL resize target.
     """
+    from PIL import Image
+
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
     out = str(tmp_path / "out.mp4")
 
     video_mock = _make_video_mock(status="completed")
-    api.client.videos.create_and_poll.return_value = video_mock
+    captured: dict[str, object] = {}
+
+    def capture_reference(**kwargs):
+        reference = kwargs["input_reference"]
+        captured["reference"] = reference
+        with Image.open(reference) as submitted:
+            captured["resize"] = submitted.size
+        return video_mock
+
+    api.client.videos.create_and_poll.side_effect = capture_reference
     api.client.videos.download_content.return_value = _make_download_content()
 
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
@@ -414,6 +623,8 @@ def test_portrait_swaps_size_and_resize(monkeypatch, tmp_path):
     assert actual_size == "720x1280", (
         f"portrait should map to the clamped+transposed size='720x1280'; got {actual_size!r}"
     )
+    assert captured["resize"] == (720, 1280)
+    assert not captured["reference"].exists()
 
 
 def test_landscape_size_unchanged(monkeypatch, tmp_path):

@@ -8,9 +8,8 @@ Note: OpenAI has announced Sora will shut down September 2026.
 from __future__ import annotations
 
 import os
-import time
-import base64
-import mimetypes
+import tempfile
+from pathlib import Path
 
 import openai
 from config.settings import settings
@@ -44,15 +43,6 @@ class SoraNativeAPI:
         self.client = openai.OpenAI(api_key=api_key)
         print("[SORA-NATIVE] Client initialized")
 
-    def _image_to_data_url(self, image_path: str) -> str:
-        """Convert a local image file to a base64 data URL for the API."""
-        mime_type, _ = mimetypes.guess_type(image_path)
-        if not mime_type:
-            mime_type = "image/jpeg"
-        with open(image_path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("utf-8")
-        return f"data:{mime_type};base64,{encoded}"
-
     def generate_video(
         self,
         image_path: str,
@@ -75,12 +65,12 @@ class SoraNativeAPI:
             model: Model name — "sora-2" (default).
             resolution: Output resolution — "480p", "720p", or "1080p".
             driving_video_path: Optional path to a performance-capture clip.
-                When provided AND the file exists, Sora uses it as the
-                ``input_reference`` (video) instead of the resized still image.
-                Sora 2 supports video conditioning natively through this same
-                field — driving the character's motion from the reference clip
-                while still respecting the start-frame composition. Falls
-                through to the still-image path on any access error.
+                When provided AND the file exists, Sora submits it as the
+                ``input_reference`` (video) without opening or resizing the still.
+                When the driving path is missing, the resized still is used.
+                Any later SDK or file-access failure follows the normal failure
+                path and returns None; it does not retry with the still after
+                selecting an existing driving file.
             aspect_ratio: Project aspect ratio string — "16:9" (default, landscape)
                 or "9:16" (portrait). When portrait, both the PIL resize target
                 and the API ``size=`` parameter are transposed via portrait_swap
@@ -114,9 +104,6 @@ class SoraNativeAPI:
             print(f"[SORA-NATIVE] Generating video — {duration}s, {resolution}, model={model}")
             print(f"[SORA-NATIVE] Prompt: {prompt[:120]}...")
 
-            # Encode image as data URL
-            image_data_url = self._image_to_data_url(image_path)
-
             # Resolve resolution to the API size string, then parse W×H for resize.
             # Apply portrait_swap once: this drives BOTH the PIL resize target
             # (below) and the API size= param — one swap covers both surfaces.
@@ -125,54 +112,70 @@ class SoraNativeAPI:
             target_w, target_h = portrait_swap(int(w_str), int(h_str), aspect_ratio)
             size = f"{target_w}x{target_h}"
 
-            # Resize image to the target resolution and save as temp file.
-            from PIL import Image as PILImage
-            import tempfile
-            img = PILImage.open(image_path)
-            img = img.resize((target_w, target_h), PILImage.LANCZOS)
-            tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-            img.save(tmp.name, format="JPEG", quality=90)
-            tmp_path = tmp.name
-            tmp.close()
-            print(f"[SORA-NATIVE] Image resized to {size}: {tmp_path}")
-
-            # Pass as PathLike — the SDK expects a file path, bytes, or IO object.
-            # When a driving video was supplied, prefer it as the reference: Sora 2
-            # accepts video here for motion conditioning. The still-frame resize
-            # above still runs as a safety net (Sora needs a valid composition
-            # even when video conditioning is used).
-            from pathlib import Path
-            reference_for_sora = Path(driving_video_path) if use_driving else Path(tmp_path)
-            video = self.client.videos.create_and_poll(
-                model=model,
-                prompt=prompt,
-                input_reference=reference_for_sora,
-                seconds=duration,
-                size=size,
-            )
-
-            # Clean up the still-frame temp file (driving video is operator-owned, leave it).
+            temp_still_path: Path | None = None
             try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass  # Temp still-frame cleanup — non-fatal if OS-level delete fails
+                # Pass as PathLike — the SDK expects a file path, bytes, or IO
+                # object. A valid driving video is the complete reference, so
+                # avoid creating a still that cannot be submitted alongside it.
+                if use_driving:
+                    reference_for_sora = Path(driving_video_path)
+                else:
+                    from PIL import Image as PILImage
 
-            status = getattr(video, "status", "unknown")
-            if status != "completed":
-                print(f"[SORA-NATIVE] Generation ended with status: {status}")
-                return None
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".jpg", delete=False
+                    ) as temp_still:
+                        temp_still_path = Path(temp_still.name)
 
-            print(f"[SORA-NATIVE] Generation completed")
+                    with PILImage.open(image_path) as source_image:
+                        resized_image = source_image.resize(
+                            (target_w, target_h), PILImage.LANCZOS
+                        )
+                        try:
+                            resized_image.save(
+                                temp_still_path, format="JPEG", quality=90
+                            )
+                        finally:
+                            resized_image.close()
 
-            # Download via download_content — the primary method for Sora
-            print(f"[SORA-NATIVE] Downloading video {video.id}...")
-            content = self.client.videos.download_content(video.id)
-            with open(output_path, "wb") as f:
-                for chunk in content.response.iter_bytes():
-                    f.write(chunk)
-            file_size = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"[SORA-NATIVE] Video saved: {output_path} ({file_size:.1f} MB)")
-            return output_path
+                    reference_for_sora = temp_still_path
+                    print(
+                        f"[SORA-NATIVE] Image resized to {size}: "
+                        f"{temp_still_path}"
+                    )
+
+                video = self.client.videos.create_and_poll(
+                    model=model,
+                    prompt=prompt,
+                    input_reference=reference_for_sora,
+                    seconds=duration,
+                    size=size,
+                )
+
+                status = getattr(video, "status", "unknown")
+                if status != "completed":
+                    print(f"[SORA-NATIVE] Generation ended with status: {status}")
+                    return None
+
+                print(f"[SORA-NATIVE] Generation completed")
+
+                # Download via download_content — the primary method for Sora
+                print(f"[SORA-NATIVE] Downloading video {video.id}...")
+                content = self.client.videos.download_content(video.id)
+                with open(output_path, "wb") as f:
+                    for chunk in content.response.iter_bytes():
+                        f.write(chunk)
+                file_size = os.path.getsize(output_path) / (1024 * 1024)
+                print(f"[SORA-NATIVE] Video saved: {output_path} ({file_size:.1f} MB)")
+                return output_path
+            finally:
+                # Only this method's generated still is owned here. The driving
+                # video remains operator-owned and is never assigned to this slot.
+                if temp_still_path is not None:
+                    try:
+                        temp_still_path.unlink()
+                    except OSError:
+                        pass  # Cleanup is non-fatal if the OS refuses deletion.
 
         except Exception as e:
             print(f"[SORA-NATIVE] Generation failed: {e}")
