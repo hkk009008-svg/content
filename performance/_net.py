@@ -19,7 +19,8 @@ adapters should use this helper, not `urlretrieve`.
 from __future__ import annotations
 
 import os
-from typing import Optional
+import secrets
+from typing import BinaryIO, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -30,6 +31,39 @@ import requests
 DEFAULT_MAX_BYTES = 512 * 1024 * 1024
 DEFAULT_CONNECT_TIMEOUT = 20
 DEFAULT_READ_TIMEOUT = 300
+_TEMP_CREATE_ATTEMPTS = 10
+
+
+def _open_download_temp(dest_dir: str) -> tuple[BinaryIO, str]:
+    """Exclusively create a short, sibling temp using normal open-file modes."""
+    for _ in range(_TEMP_CREATE_ATTEMPTS):
+        temp_path = os.path.join(
+            dest_dir,
+            f".safe-download-{secrets.token_hex(8)}.tmp",
+        )
+        try:
+            fd = os.open(
+                temp_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o666,
+            )
+        except FileExistsError:
+            continue
+
+        try:
+            return os.fdopen(fd, "wb"), temp_path
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
+
+    raise FileExistsError("could not allocate a unique download temp file")
 
 
 def safe_download(
@@ -67,6 +101,7 @@ def safe_download(
         print(f"   [SAFE-DL] refusing URL without host: {url[:80]}")
         return None
 
+    temp_path: Optional[str] = None
     try:
         with requests.get(url, stream=True, timeout=(connect_timeout, read_timeout)) as r:
             r.raise_for_status()
@@ -74,23 +109,33 @@ def safe_download(
             if advertised and advertised > max_bytes:
                 print(f"   [SAFE-DL] content-length {advertised} exceeds max {max_bytes}")
                 return None
+
             written = 0
-            os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
-            with open(dest_path, "wb") as f:
+            dest_dir = os.path.dirname(dest_path) or "."
+            os.makedirs(dest_dir, exist_ok=True)
+            temp_file, temp_path = _open_download_temp(dest_dir)
+            with temp_file as f:
                 for chunk in r.iter_content(chunk_size=64 * 1024):
                     if not chunk:
                         continue
                     written += len(chunk)
                     if written > max_bytes:
                         print(f"   [SAFE-DL] stream exceeded max bytes {max_bytes}; aborting")
-                        # Truncate the partial file so callers don't accidentally use it
-                        try:
-                            f.close()
-                            os.remove(dest_path)
-                        except OSError:
-                            pass  # Delete of partial file failed — caller sees None, not a corrupted artifact
                         return None
                     f.write(chunk)
+
+            if written == 0:
+                print("   [SAFE-DL] refusing empty response")
+                return None
+
+        try:
+            destination_mode = os.stat(dest_path).st_mode & 0o777
+        except FileNotFoundError:
+            pass
+        else:
+            os.chmod(temp_path, destination_mode)
+        os.replace(temp_path, dest_path)
+        temp_path = None
         return dest_path
     except requests.exceptions.Timeout:
         print(f"   [SAFE-DL] timeout after connect={connect_timeout}s read={read_timeout}s")
@@ -98,3 +143,11 @@ def safe_download(
     except Exception as e:
         print(f"   [SAFE-DL] failed: {e}")
         return None
+    finally:
+        if temp_path is not None:
+            try:
+                os.remove(temp_path)
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"   [SAFE-DL] failed to remove temp file: {e}")
