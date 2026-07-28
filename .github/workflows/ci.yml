@@ -121,16 +121,11 @@ jobs:
     timeout-minutes: 15
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
-      # The unit suite asserts keys-PRESENT behavior: llm/ensemble.py
-      # constructs openai.OpenAI() at __init__ (hard OpenAIError keyless,
-      # 49F+1E on a bare runner), its gemini branch flips judge-map
-      # behavior on key presence, and the phase-C vision-identity path
-      # branches on ANTHROPIC_API_KEY presence (6F without it). Local runs
-      # get real keys from .env; CI gets inert placeholders so the suite
-      # exercises the same configuration. No test calls the network
-      # (offline suite, ~2 min). Hermeticity refactor (lazy/injectable
-      # LLMEnsemble) is a named follow-up per the adversarial review of
-      # docs/STRATEGIC_REVIEW-2026-06-10.md Session 1.
+      # Inert placeholders remain for phase-C vision/identity characterization
+      # tests that intentionally read key-present ambient settings. The
+      # LLMEnsemble configured-client/timeout tests inject their own keys;
+      # LLMEnsemble itself is safe to construct keyless and leaves unconfigured
+      # clients as None. No test calls the network (offline suite, ~2 min).
       OPENAI_API_KEY: ci-dummy-not-a-real-key
       GEMINI_API_KEY: ci-dummy-not-a-real-key
       ANTHROPIC_API_KEY: ci-dummy-not-a-real-key

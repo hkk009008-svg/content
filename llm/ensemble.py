@@ -95,20 +95,28 @@ class LLMEnsemble:
     """Orchestrates competitive generation across multiple LLM providers."""
 
     def __init__(self, settings: dict | None = None, cost_tracker: Any | None = None) -> None:
-        # Lazy-import clients so the module can be imported even when the
-        # underlying SDKs are not installed (they just need to be present
-        # at call time).
-        import anthropic
-        import openai
+        # Keep the public client attributes available for caller/test injection,
+        # but do not import or construct an SDK until its key is configured.
+        anthropic_key = env_settings.anthropic_api_key
+        if anthropic_key:
+            import anthropic
+            self.anthropic_client = anthropic.Anthropic(
+                api_key=anthropic_key,
+                timeout=120.0,
+            )
+        else:
+            self.anthropic_client = None
 
-        self.anthropic_client = anthropic.Anthropic(
-            api_key=env_settings.anthropic_api_key,
-            timeout=120.0,
-        )
-        self.openai_client = openai.OpenAI(
-            api_key=env_settings.openai_api_key,
-            timeout=120.0,
-        )
+        openai_key = env_settings.openai_api_key
+        if openai_key:
+            import openai
+            self.openai_client = openai.OpenAI(
+                api_key=openai_key,
+                timeout=120.0,
+            )
+        else:
+            self.openai_client = None
+
         self.cost_tracker = cost_tracker
 
         # Gemini is optional — only construct the client when a key is
@@ -309,6 +317,11 @@ class LLMEnsemble:
         operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Call the Anthropic messages API."""
+        if self.anthropic_client is None:
+            raise RuntimeError(
+                "Anthropic model requested but ANTHROPIC_API_KEY is not configured"
+            )
+
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": 4096,
@@ -353,6 +366,11 @@ class LLMEnsemble:
         operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Call the OpenAI chat completions API."""
+        if self.openai_client is None:
+            raise RuntimeError(
+                "OpenAI model requested but OPENAI_API_KEY is not configured"
+            )
+
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -396,7 +414,7 @@ class LLMEnsemble:
         """
         if self.gemini_client is None:
             raise RuntimeError(
-                "Gemini judge requested but no GEMINI_API_KEY / GOOGLE_API_KEY configured"
+                "Gemini model requested but GEMINI_API_KEY / GOOGLE_API_KEY is not configured"
             )
 
         from google.genai import types

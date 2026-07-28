@@ -15,6 +15,7 @@ review flagged that the third call site was unprotected by tests.
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
@@ -36,6 +37,15 @@ def _make_fake_response(text: str = "ok") -> MagicMock:
     return response
 
 
+def _configured_ensemble_env() -> SimpleNamespace:
+    return SimpleNamespace(
+        anthropic_api_key="fake-anthropic",
+        openai_api_key="fake-openai",
+        gemini_api_key="",
+        google_api_key="",
+    )
+
+
 def test_ensemble_system_block_has_cache_control():
     """The system message must be a list with cache_control={'type': 'ephemeral'}.
 
@@ -51,7 +61,8 @@ def test_ensemble_system_block_has_cache_control():
     # patch them at the SDK module level (not at llm.ensemble.anthropic, which
     # doesn't exist yet as a module-level name).
     with patch("anthropic.Anthropic", autospec=True) as mock_anthropic_cls, \
-         patch("openai.OpenAI", autospec=True):
+         patch("openai.OpenAI", autospec=True), \
+         patch("llm.ensemble.env_settings", _configured_ensemble_env()):
         fake_anthropic_client = MagicMock()
         fake_anthropic_client.messages.create.return_value = _make_fake_response()
         mock_anthropic_cls.return_value = fake_anthropic_client
@@ -200,9 +211,6 @@ def test_ensemble_constructor_timeouts():
         patch("google.genai.Client", mock_genai_client_cls),
         patch("google.genai.types.HttpOptions", mock_http_options_cls),
     ):
-        import importlib
-        import llm.ensemble
-        importlib.reload(llm.ensemble)
         from llm.ensemble import LLMEnsemble
         LLMEnsemble()
 
@@ -254,7 +262,8 @@ def test_judge_system_block_has_cache_control():
     heavily dynamic __init__), fall back to spec=True and document here.
     """
     with patch("anthropic.Anthropic", autospec=True) as mock_anthropic_cls, \
-         patch("openai.OpenAI", autospec=True):
+         patch("openai.OpenAI", autospec=True), \
+         patch("llm.ensemble.env_settings", _configured_ensemble_env()):
         fake_anthropic_client = MagicMock()
         # _judge parses the response as JSON — pass parseable text via helper.
         judge_text = '{"scores": [7.0, 8.0], "winner": 1, "reasoning": "B is better"}'
