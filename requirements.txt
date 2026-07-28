@@ -28,7 +28,9 @@ runwayml>=4.0
 
 # --- Identity validation (face recognition for shot continuity) ---
 deepface>=0.0.93
-opencv-python>=4.10
+# Upper-bounded to <5: OpenCV 5.0 removed the top-level cv2.CascadeClassifier /
+# cv2.data.haarcascades APIs that lip_sync.py (mouth-energy scorer) relies on.
+opencv-python>=4.10,<5
 Pillow>=11.0
 numpy>=1.26,<3
 torch>=2.5
