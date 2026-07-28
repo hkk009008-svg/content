@@ -11,6 +11,7 @@ Covers:
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -660,3 +661,40 @@ def test_overlong_authoritative_structured_source_is_preserved_exactly():
     assert _image_prompt_word_count(source) > 150
     assert fallback["image_prompt"] == source
     assert optimized["image_prompt"] == source
+
+
+@pytest.mark.parametrize(
+    "bad_payload",
+    [[], ["shot"], 42, "text", None],
+)
+def test_wrong_top_level_json_type_falls_back(bad_payload):
+    """Valid JSON with a non-object root must not crash outside the recovery boundary."""
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    notes = "recover-me"
+    ensemble = MagicMock()
+    result_mock = MagicMock()
+    result_mock.winner_content = json.dumps(bad_payload)
+    ensemble.competitive_generate.return_value = result_mock
+
+    result = optimize_shot_prompt(
+        user_input="a figure waits by the door",
+        intent_notes=notes,
+        ensemble=ensemble,
+    )
+
+    assert isinstance(result, dict)
+    assert "image_prompt" in result
+    assert notes in result["image_prompt"]
+
+
+def test_coerce_normalizes_shot_type_before_purpose():
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _coerce_to_valid_keys(
+        {"purpose": "bogus", "shot_type": "bogus"},
+        has_chars=False,
+        has_dialogue=False,
+    )
+    assert spec["shot_type"] == "landscape"
+    assert spec["purpose"] == "establishing_shot"

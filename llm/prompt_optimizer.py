@@ -509,13 +509,19 @@ def _fallback_optimize(
 
 
 def _coerce_to_valid_keys(spec: dict, has_chars: bool, has_dialogue: bool) -> dict:
-    """Sanitize LLM output — replace invalid enum values with safe defaults."""
+    """Sanitize LLM output — replace invalid enum values with safe defaults.
+
+    Normalization order: ``shot_type`` first, then ``purpose`` (which may
+    derive from shot_type). Repairing purpose before shot_type can leave
+    an inconsistent pair when both are invalid and there are no characters
+    (purpose→static_portrait while shot_type later becomes landscape).
+    """
+    if spec.get("shot_type") not in _VALID_SHOT_TYPES:
+        spec["shot_type"] = "landscape" if not has_chars else "medium"
     if spec.get("purpose") not in _VALID_PURPOSES:
         spec["purpose"] = _heuristic_purpose(
             spec.get("shot_type", "medium"), has_dialogue,
         )
-    if spec.get("shot_type") not in _VALID_SHOT_TYPES:
-        spec["shot_type"] = "landscape" if not has_chars else "medium"
     if spec.get("suggested_image_api") not in API_REGISTRY:
         spec["suggested_image_api"] = "FLUX_DEV"
     if spec.get("suggested_video_api") not in API_REGISTRY:
@@ -656,6 +662,41 @@ def optimize_shot_prompt(
             spec = raw
         else:
             spec = json.loads(_strip_json_fences(str(raw)))
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"optimizer result must be an object, got {type(spec).__name__}"
+            )
+        spec = _coerce_to_valid_keys(spec, has_chars, has_dialogue)
+        optimized_prompt = _normalize_structured_image_prompt(spec["image_prompt"])
+        if (
+            optimized_prompt is not None
+            and _image_prompt_word_count(optimized_prompt)
+            <= _MAX_OPTIMIZER_IMAGE_PROMPT_WORDS
+        ):
+            spec["image_prompt"] = optimized_prompt
+            return spec
+
+        source_prompt = _normalize_structured_image_prompt(user_input)
+        if source_prompt is not None:
+            # Source intent outranks optimizer length guidance: preserve it byte-for-byte.
+            spec["image_prompt"] = user_input
+            return spec
+
+        fallback_prompt = _fallback_optimize(
+            user_input,
+            characters,
+            location,
+            global_settings,
+            has_dialogue,
+            objects=objects,
+            primary_subject=primary_subject,
+            intent_notes=intent_notes,
+        )["image_prompt"]
+        normalized_fallback = _normalize_structured_image_prompt(fallback_prompt)
+        if normalized_fallback is None:
+            raise ValueError("deterministic optimizer fallback violated prompt contract")
+        spec["image_prompt"] = normalized_fallback
+        return spec
     except Exception as e:
         print(f"[prompt_optimizer] LLM call failed ({e}); falling back to heuristic.")
         return _fallback_optimize(
@@ -663,38 +704,6 @@ def optimize_shot_prompt(
             has_dialogue, objects=objects, primary_subject=primary_subject,
             intent_notes=intent_notes,
         )
-
-    spec = _coerce_to_valid_keys(spec, has_chars, has_dialogue)
-    optimized_prompt = _normalize_structured_image_prompt(spec["image_prompt"])
-    if (
-        optimized_prompt is not None
-        and _image_prompt_word_count(optimized_prompt)
-        <= _MAX_OPTIMIZER_IMAGE_PROMPT_WORDS
-    ):
-        spec["image_prompt"] = optimized_prompt
-        return spec
-
-    source_prompt = _normalize_structured_image_prompt(user_input)
-    if source_prompt is not None:
-        # Source intent outranks optimizer length guidance: preserve it byte-for-byte.
-        spec["image_prompt"] = user_input
-        return spec
-
-    fallback_prompt = _fallback_optimize(
-        user_input,
-        characters,
-        location,
-        global_settings,
-        has_dialogue,
-        objects=objects,
-        primary_subject=primary_subject,
-        intent_notes=intent_notes,
-    )["image_prompt"]
-    normalized_fallback = _normalize_structured_image_prompt(fallback_prompt)
-    if normalized_fallback is None:
-        raise ValueError("deterministic optimizer fallback violated prompt contract")
-    spec["image_prompt"] = normalized_fallback
-    return spec
 
 
 def batch_optimize_scene(

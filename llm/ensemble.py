@@ -210,21 +210,43 @@ class LLMEnsemble:
             Explicit list of model IDs.  ``None`` falls back to defaults
             based on *task_type*.
         judge_model:
-            Model used for judging.  Defaults to ``_DEFAULT_JUDGE``.
+            Explicit judge override for this call. Precedence is
+            ``judge_model`` argument → ``self.judge_model_override``
+            (from settings ``quality_judge_llm``) → ``_DEFAULT_JUDGE``.
         json_mode:
             When ``True``, OpenAI calls use ``response_format={"type": "json_object"}``.
         tool_schema:
             If provided, Anthropic calls use ``tools=[tool_schema]`` and
             the tool_use result is extracted as the candidate output.
 
+        Notes
+        -----
+        When ``self.competitive_enabled`` is False (settings
+        ``competitive_generation=False``), only the first model in the
+        roster is dispatched and judging is skipped (auto-win).
+
         Returns
         -------
         EnsembleResult
         """
         if models is None:
-            models = _DEFAULT_MODELS.get(task_type, _DEFAULT_MODELS["default"])
+            models = list(
+                _DEFAULT_MODELS.get(task_type, _DEFAULT_MODELS["default"])
+            )
+        else:
+            models = list(models)
 
-        # Generate from every model in parallel.
+        # Honor constructor settings: competitive_generation=False → single model.
+        if not self.competitive_enabled:
+            models = models[:1]
+
+        effective_judge = (
+            judge_model
+            or self.judge_model_override
+            or _DEFAULT_JUDGE
+        )
+
+        # Generate from every (remaining) model in parallel.
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(models)) as pool:
             futures = {
                 pool.submit(
@@ -250,12 +272,12 @@ class LLMEnsemble:
             ordered_models.append(m)
             ordered_candidates.append(result_by_model.get(m))
 
-        # Judge the candidates.
+        # Judge the candidates (auto-wins when only one candidate remains).
         winner_index, scores, reasoning = self._judge(
             ordered_candidates,
             ordered_models,
             system_prompt,
-            judge_model=judge_model,
+            judge_model=effective_judge,
         )
 
         return EnsembleResult(
@@ -265,7 +287,7 @@ class LLMEnsemble:
             reasoning=reasoning,
             candidates=ordered_candidates,
             models_used=ordered_models,
-            judge_model=judge_model or _DEFAULT_JUDGE,
+            judge_model=effective_judge,
         )
 
     # ------------------------------------------------------------------

@@ -128,6 +128,101 @@ def test_settings_and_judge_aliases_apply_keyless(
     assert ensemble.gemini_client is None
 
 
+def test_competitive_disabled_dispatches_only_first_model(monkeypatch):
+    """competitive_generation=False must shrink the roster before dispatch."""
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble(settings={"competitive_generation": False})
+
+    dispatched: list[str] = []
+
+    def fake_generate_single(model, *args, **kwargs):
+        dispatched.append(model)
+        return (model, f"out-{model}")
+
+    monkeypatch.setattr(ensemble, "_generate_single", fake_generate_single)
+
+    result = ensemble.competitive_generate(
+        task_type="decompose",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-4o", "claude-sonnet-4-6"],
+    )
+
+    assert dispatched == ["gpt-4o"]
+    assert result.models_used == ["gpt-4o"]
+    assert result.winner_content == "out-gpt-4o"
+    assert result.winner_index == 0
+
+
+@pytest.mark.parametrize(
+    ("judge_alias", "expected_model"),
+    [
+        ("claude-opus", "claude-opus-4-8"),
+        ("gpt-4o", "gpt-4o"),
+        ("gemini-pro", "gemini-2.5-pro"),
+    ],
+)
+def test_configured_judge_override_is_dispatched(
+    monkeypatch, judge_alias, expected_model
+):
+    """quality_judge_llm must reach _judge and EnsembleResult.judge_model."""
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble(settings={"quality_judge_llm": judge_alias})
+
+    monkeypatch.setattr(
+        ensemble,
+        "_generate_single",
+        lambda model, *a, **k: (model, f"candidate-{model}"),
+    )
+
+    observed: dict = {}
+
+    def fake_judge(candidates, models, system_prompt, judge_model=None):
+        observed["judge_model"] = judge_model
+        return (0, [9.0] * len(candidates), "ok")
+
+    monkeypatch.setattr(ensemble, "_judge", fake_judge)
+
+    result = ensemble.competitive_generate(
+        task_type="decompose",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-4o", "claude-sonnet-4-6"],
+    )
+
+    assert observed["judge_model"] == expected_model
+    assert result.judge_model == expected_model
+
+
+def test_explicit_judge_model_arg_outranks_settings_override(monkeypatch):
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble(settings={"quality_judge_llm": "claude-opus"})
+
+    monkeypatch.setattr(
+        ensemble,
+        "_generate_single",
+        lambda model, *a, **k: (model, "ok"),
+    )
+    observed: dict = {}
+
+    def fake_judge(candidates, models, system_prompt, judge_model=None):
+        observed["judge_model"] = judge_model
+        return (0, [8.0], "ok")
+
+    monkeypatch.setattr(ensemble, "_judge", fake_judge)
+
+    result = ensemble.competitive_generate(
+        task_type="default",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-4o"],
+        judge_model="gpt-4o",
+    )
+
+    assert observed["judge_model"] == "gpt-4o"
+    assert result.judge_model == "gpt-4o"
+
+
 def test_direct_anthropic_call_names_missing_credential(keyless_ensemble):
     with pytest.raises(RuntimeError, match=r"Anthropic.*ANTHROPIC_API_KEY"):
         keyless_ensemble._generate_anthropic("claude-sonnet", "system", "user")

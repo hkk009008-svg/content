@@ -8,6 +8,7 @@ Note: OpenAI has announced Sora will shut down September 2026.
 from __future__ import annotations
 
 import os
+import secrets
 import tempfile
 from pathlib import Path
 
@@ -58,7 +59,10 @@ class SoraNativeAPI:
         Generate video from a start frame image + text prompt using Sora 2.
 
         Args:
-            image_path: Path to the start frame image.
+            image_path: Path to the start frame image. Required when no valid
+                driving video is supplied; unused (and may be absent) when
+                ``driving_video_path`` names an existing file that becomes the
+                complete ``input_reference``.
             prompt: Text prompt describing the desired motion/scene.
             output_path: Where to save the generated video.
             duration: Video duration in seconds — 4, 8, 12, 16, or 20 (integer).
@@ -79,13 +83,17 @@ class SoraNativeAPI:
         Returns:
             output_path on success, None on failure.
         """
-        if not os.path.exists(image_path):
-            print(f"[SORA-NATIVE] Start frame not found: {image_path}")
-            return None
-        # Driving video opt-in: only used when the file actually exists.
+        # Driving video is a complete input reference — check it before requiring
+        # an otherwise unused still.
         use_driving = bool(driving_video_path) and os.path.exists(driving_video_path)
         if use_driving:
-            print(f"[SORA-NATIVE] Using performance driving video as input_reference: {os.path.basename(driving_video_path)}")
+            print(
+                f"[SORA-NATIVE] Using performance driving video as input_reference: "
+                f"{os.path.basename(driving_video_path)}"
+            )
+        elif not os.path.exists(image_path):
+            print(f"[SORA-NATIVE] Start frame not found: {image_path}")
+            return None
 
         valid_durations = [4, 8, 12, 16, 20]
         if duration not in valid_durations:
@@ -113,6 +121,7 @@ class SoraNativeAPI:
             size = f"{target_w}x{target_h}"
 
             temp_still_path: Path | None = None
+            temp_output_path: str | None = None
             try:
                 # Pass as PathLike — the SDK expects a file path, bytes, or IO
                 # object. A valid driving video is the complete reference, so
@@ -159,12 +168,28 @@ class SoraNativeAPI:
 
                 print(f"[SORA-NATIVE] Generation completed")
 
-                # Download via download_content — the primary method for Sora
+                # Download via download_content — publish atomically so a
+                # mid-stream failure cannot leave a partial new file or destroy
+                # a previously valid output_path.
                 print(f"[SORA-NATIVE] Downloading video {video.id}...")
                 content = self.client.videos.download_content(video.id)
-                with open(output_path, "wb") as f:
+                out_dir = os.path.dirname(output_path) or "."
+                os.makedirs(out_dir, exist_ok=True)
+                temp_output_path = os.path.join(
+                    out_dir,
+                    f".sora-download-{secrets.token_hex(8)}.tmp",
+                )
+                with open(temp_output_path, "wb") as f:
                     for chunk in content.response.iter_bytes():
                         f.write(chunk)
+                try:
+                    destination_mode = os.stat(output_path).st_mode & 0o777
+                except FileNotFoundError:
+                    pass
+                else:
+                    os.chmod(temp_output_path, destination_mode)
+                os.replace(temp_output_path, output_path)
+                temp_output_path = None
                 file_size = os.path.getsize(output_path) / (1024 * 1024)
                 print(f"[SORA-NATIVE] Video saved: {output_path} ({file_size:.1f} MB)")
                 return output_path
@@ -176,6 +201,13 @@ class SoraNativeAPI:
                         temp_still_path.unlink()
                     except OSError:
                         pass  # Cleanup is non-fatal if the OS refuses deletion.
+                if temp_output_path is not None:
+                    try:
+                        os.remove(temp_output_path)
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        pass
 
         except Exception as e:
             print(f"[SORA-NATIVE] Generation failed: {e}")

@@ -219,6 +219,10 @@ jobs:
         working-directory: web
         run: npx tsc --noEmit
 
+      - name: Run frontend tests
+        working-directory: web
+        run: npm test
+
   threeway-ci-result:
     name: Emit threeway ci_result
     runs-on: ubuntu-latest
