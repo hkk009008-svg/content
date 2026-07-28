@@ -137,7 +137,7 @@ def _capture_both_path_prompts(monkeypatch):
     sd.decompose_scene(scene, characters, location, settings)
 
     class FakeEnsemble:
-        def __init__(self, **kwargs):
+        def __init__(self, settings=None, **kwargs):
             pass
 
         def competitive_generate(self, **kwargs):
@@ -290,6 +290,82 @@ def test_enrich_rejects_wrong_shot_count():
         )
 
 
+def test_enrich_keeps_empty_characters_in_frame_empty():
+    # A characterless establishing shot ([]) must stay empty — NOT be backfilled
+    # to every character in the scene (that inflates identity pressure + routing).
+    scene = {"id": "s1", "action": "wide vista"}
+    characters = [
+        {"id": "char_a", "name": "Alice"},
+        {"id": "char_b", "name": "Bob"},
+    ]
+    empty_shot = _valid_shot()
+    empty_shot["characters_in_frame"] = []
+    peopled_shot = _valid_shot()
+    peopled_shot["characters_in_frame"] = ["char_b"]
+
+    records = sd._enrich_validated_shots(
+        [empty_shot, peopled_shot],
+        scene=scene,
+        characters=characters,
+        target_shots=2,
+    )
+    assert records[0]["characters_in_frame"] == []
+    assert records[0]["primary_character"] == ""
+    assert records[1]["characters_in_frame"] == ["char_b"]
+    assert records[1]["primary_character"] == "char_b"
+
+
+def test_enrich_rejects_unknown_character_id():
+    scene = {"id": "s1", "action": "walk"}
+    characters = [{"id": "char_a", "name": "Alice"}]
+    bad = _valid_shot()
+    bad["characters_in_frame"] = ["char_a", "char_ghost"]
+    good = _valid_shot()
+    with pytest.raises(ValueError, match="unknown character IDs.*char_ghost"):
+        sd._enrich_validated_shots(
+            [bad, good],
+            scene=scene,
+            characters=characters,
+            target_shots=2,
+        )
+
+
+def test_competitive_decompose_passes_global_settings_to_ensemble(monkeypatch):
+    # #3: quality_judge_llm / competitive_generation must reach LLMEnsemble on the
+    # competitive scene-decomposition path, not just the prompt optimizer.
+    scene = {"id": "scene_a", "title": "S", "action": "Alice walks.", "duration_seconds": 5}
+    characters = [{"id": "char_a", "name": "Alice"}]
+    location = {"description": "a room"}
+    settings = {"aspect_ratio": "16:9", "quality_judge_llm": "claude-opus"}
+
+    captured = {}
+
+    class SpyEnsemble:
+        def __init__(self, settings=None, cost_tracker=None):
+            captured["settings"] = settings
+            captured["cost_tracker"] = cost_tracker
+
+        def competitive_generate(self, **kwargs):
+            return SimpleNamespace(
+                winner_index=0,
+                winner_content={"shots": [_valid_shot(), _valid_shot()]},
+                scores=[1.0],
+                reasoning="ok",
+                models_used=["gpt-4o"],
+            )
+
+    import research_engine
+    monkeypatch.setattr(research_engine, "research_cinematography", lambda *a, **k: None)
+    monkeypatch.setattr(sd, "LLMEnsemble", SpyEnsemble)
+
+    sentinel_tracker = object()
+    sd.competitive_decompose_scene(
+        scene, characters, location, settings, cost_tracker=sentinel_tracker
+    )
+    assert captured["settings"] is settings
+    assert captured["cost_tracker"] is sentinel_tracker
+
+
 def test_parse_rejects_arbitrary_nested_dict():
     with pytest.raises(ValueError, match="shots"):
         sd._parse_decomposition_payload({"frames": [_valid_shot(), _valid_shot()]})
@@ -326,7 +402,7 @@ def test_invalid_llm_payload_falls_back_on_both_paths(monkeypatch):
     assert all("prompt" in s for s in direct)
 
     class BadEnsemble:
-        def __init__(self, **kwargs):
+        def __init__(self, settings=None, **kwargs):
             pass
 
         def competitive_generate(self, **kwargs):
