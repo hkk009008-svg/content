@@ -179,9 +179,22 @@ class SoraNativeAPI:
                     out_dir,
                     f".sora-download-{secrets.token_hex(8)}.tmp",
                 )
-                with open(temp_output_path, "wb") as f:
+                # Exclusive create ("xb") so we never write over a stale temp,
+                # and count bytes so an empty stream cannot atomically replace a
+                # previously valid output with a zero-byte file.
+                written = 0
+                with open(temp_output_path, "xb") as f:
                     for chunk in content.response.iter_bytes():
+                        if not chunk:
+                            continue
+                        written += len(chunk)
                         f.write(chunk)
+                if written == 0:
+                    print(
+                        f"[SORA-NATIVE] Refusing to publish empty download for {video.id}; "
+                        f"leaving {output_path} untouched"
+                    )
+                    return None
                 try:
                     destination_mode = os.stat(output_path).st_mode & 0o777
                 except FileNotFoundError:
