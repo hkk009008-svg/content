@@ -222,7 +222,7 @@ flowchart TD
 | # | Stage | What happens | Primary modules |
 |---|---|---|---|
 | 1 | **STYLE** | Once per run. If `global_settings.style_rules` is empty, `generate_style_rules()` (GPT-4o, optionally Tavily-grounded) produces a 7-key style dict (cinematography, color grading, lighting, photorealism…) persisted to the project. A `style_rules_to_prompt_suffix` is appended to every downstream image prompt. | `llm/style_director.py:12`; called `cinema_pipeline.py:958-993` |
-| 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:436`/`:624`; called `cinema_pipeline.py:997-1068` |
+| 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:492`/`:661`; called `cinema_pipeline.py:997-1068` |
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
 | 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1064` |
 | 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:513`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
@@ -346,7 +346,7 @@ Six modules exist at **both** the repo root and inside `domain/`. In every case 
 
 | Top-level shim (9 LOC) | Canonical module | Canonical LOC |
 |---|---|---|
-| `scene_decomposer.py` | `domain/scene_decomposer.py` | 919 |
+| `scene_decomposer.py` | `domain/scene_decomposer.py` | 936 |
 | `dialogue_writer.py` | `domain/dialogue_writer.py` | 156 |
 | `project_manager.py` | `domain/project_manager.py` | 1235 |
 | `character_manager.py` | `domain/character_manager.py` | 527 |
@@ -495,15 +495,15 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** converts user scenes into concrete, API-routed shot records (GPT-4o or a GPT-4o-vs-Claude ensemble enforcing five hard constraints), generates per-character dialogue, and injects live web research to ground both.
 
-**Canonical modules:** `domain/scene_decomposer.py` (919 LOC), `domain/dialogue_writer.py` (156 LOC), `domain/language_defaults.py` (212 LOC), `research_engine.py` (160 LOC), `web_research.py` (221 LOC).
+**Canonical modules:** `domain/scene_decomposer.py` (936 LOC), `domain/dialogue_writer.py` (156 LOC), `domain/language_defaults.py` (212 LOC), `research_engine.py` (160 LOC), `web_research.py` (221 LOC).
 
 | Name | file:line | What it does |
 |---|---|---|
-| `decompose_scene` | `domain/scene_decomposer.py:437` | Single-model GPT-4o decompose via `run_with_tools` (≤2 tool rounds). `target_shots = max(2, min(5, duration/2.5))`. Validates each shot through `make_shot`. Falls back to `_fallback_decompose`. |
-| `competitive_decompose_scene` | `domain/scene_decomposer.py:627` | Ensemble (GPT-4o vs Claude, judged) decompose; adds `ensemble_winner`/`ensemble_scores`. Falls back to `decompose_scene`. |
-| `_build_cinedecompose_system_prompt` | `domain/scene_decomposer.py:327` | Single-source CineDecompose prompt: HC1–HC5 (identity firewall, schema/location/lighting lock, face-toward-camera), `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` schema, `PIPELINE_CONTEXT`. |
-| `update_scene_shots` | `domain/scene_decomposer.py:891` | Persists shots via `mutate_project`. Called by `cinema_pipeline.py:1055` and `web_server.py:1438`. |
-| `_fallback_decompose` | `domain/scene_decomposer.py:848` | No-key path; always 2 hardcoded shots (establishing wide + medium CU). |
+| `decompose_scene` | `domain/scene_decomposer.py:492` | Single-model GPT-4o decompose via `run_with_tools` (≤2 tool rounds). `target_shots = max(2, min(5, duration/2.5))`. Validates each shot through `make_shot`. Falls back to `_fallback_decompose`. |
+| `competitive_decompose_scene` | `domain/scene_decomposer.py:661` | Ensemble (GPT-4o vs Claude, judged) decompose; adds `ensemble_winner`/`ensemble_scores`. Falls back to `decompose_scene`. |
+| `_build_cinedecompose_system_prompt` | `domain/scene_decomposer.py:382` | Single-source CineDecompose prompt: HC1–HC5 (identity firewall, schema/location/lighting lock, face-toward-camera), `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` schema, `PIPELINE_CONTEXT`. |
+| `update_scene_shots` | `domain/scene_decomposer.py:904` | Persists shots via `mutate_project`. Called by `cinema_pipeline.py:1055` and `web_server.py:1438`. |
+| `_fallback_decompose` | `domain/scene_decomposer.py:861` | No-key path; always 2 hardcoded shots (establishing wide + medium CU). |
 | `API_REGISTRY` | `domain/scene_decomposer.py:36` | 40+ engine capability table. (Also the source of `native_audio` for video routing — §3.8.) |
 | `PURPOSE_API_RANKING` | `domain/scene_decomposer.py:123` | Per-purpose ordered API lists. |
 | `rank_apis_for_purpose` | `domain/scene_decomposer.py:284` | Best-first ranking filter. |
@@ -759,10 +759,10 @@ flowchart TD
 
 **PROCESSING (per scene with empty `shots`):**
 1. **Route:** `use_competitive = settings.get("competitive_generation", True)` (`cinema_pipeline.py:1026`).
-2. **Decompose:** `competitive_decompose_scene()` (`domain/scene_decomposer.py:627`) runs GPT-4o + Claude-Sonnet in parallel via `LLMEnsemble.competitive_generate(task_type="decompose")` and a judge picks the winner; or `decompose_scene()` (`domain/scene_decomposer.py:437`) runs a single GPT-4o tool-loop call. Shot count: `target_shots = max(2, min(5, int(duration_seconds / 2.5)))` (`domain/scene_decomposer.py:497`).
+2. **Decompose:** `competitive_decompose_scene()` (`domain/scene_decomposer.py:661`) runs GPT-4o + Claude-Sonnet in parallel via `LLMEnsemble.competitive_generate(task_type="decompose")` and a judge picks the winner; or `decompose_scene()` (`domain/scene_decomposer.py:492`) runs a single GPT-4o tool-loop call. Shot count: `target_shots = max(2, min(5, int(duration_seconds / 2.5)))` (`domain/scene_decomposer.py:563` direct; `:737` competitive).
 3. **Validate (ChiefDirector pre-gen gate):** `self.director.validate_shot_prompts(shots, scene)` (`cinema_pipeline.py:1041`; `llm/chief_director.py:296`) enforces hard constraints HC1–HC8 and returns `APPROVED` / `MODIFIED` / `REJECTED`.
 4. **Record the verdict — critical:** `record_director_review_on_shots(shots, review)` (`cinema_pipeline.py:1064`; `cinema/auto_approve.py:235`) writes `shot["director_review"]` onto every shot. **This call is load-bearing for headless runs** (see failure mode).
-5. **Persist:** `update_scene_shots(project, scene_id, shots)` (`domain/scene_decomposer.py:891`) writes shots under the per-project lock.
+5. **Persist:** `update_scene_shots(project, scene_id, shots)` (`domain/scene_decomposer.py:904`) writes shots under the per-project lock.
 6. **Per-scene dialogue:** `_ensure_scene_audio(scene, chars)` (`cinema_pipeline.py:499`) calls `generate_dialogue` → `generate_dialogue_voiceover`, caching the MP3.
 7. `_save_checkpoint()` after each scene.
 
@@ -774,7 +774,7 @@ flowchart TD
 **OUTPUTS:** Per-shot dicts (`make_shot`, `domain/project_manager.py:262`) with `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`, `director_review`, `plan_status="pending_review"`; per-scene dialogue MP3.
 
 **FAILURE MODES + RECOVERY:**
-- **LLM unavailable / parse failure.** `decompose_scene` falls back to `_fallback_decompose` (`domain/scene_decomposer.py:844`) — exactly two hardcoded shots (an establishing wide + a medium close-up). `validate_shot_prompts` is fail-safe-for-throughput: on a None client or persistent `JSONDecodeError` (after ≤1 retry) it returns `APPROVED` with no modifications (`llm/chief_director.py:296-357`).
+- **LLM unavailable / parse failure.** `decompose_scene` falls back to `_fallback_decompose` (`domain/scene_decomposer.py:861`) — exactly two hardcoded shots (an establishing wide + a medium close-up). `validate_shot_prompts` is fail-safe-for-throughput: on a None client or persistent `JSONDecodeError` (after ≤1 retry) it returns `APPROVED` with no modifications (`llm/chief_director.py:296-357`).
 - **PLAN_REVIEW headless stall (FIXED, cycle-17).** Before `record_director_review_on_shots` was called unconditionally, `_rules_for_plan`'s `plan_decision_not_approved` veto always fired (because `shot["director_review"]` was never written), so a headless run polled forever. The fix wires the writer at `cinema_pipeline.py:1064`. **If you load shots that never passed through this call, the PLAN gate will veto.**
 
 ---
@@ -1368,7 +1368,7 @@ flowchart TD
 
 The hand-off contracts, stage by stage:
 
-1. **Decompose → Director → Plan.** `decompose_scene` (`domain/scene_decomposer.py:437`) or its competitive variant produces shot dicts from `make_shot`. `ChiefDirector.validate_shot_prompts` (`llm/chief_director.py:296`) may modify them in place. `record_director_review_on_shots` then writes `director_review` onto each shot — **this single call is what unblocks the PLAN_REVIEW auto-approve gate**; without it, `_rules_for_plan` always vetoes (the field is absent) and a headless run dead-ends. `update_scene_shots` persists.
+1. **Decompose → Director → Plan.** `decompose_scene` (`domain/scene_decomposer.py:492`) or its competitive variant produces shot dicts from `make_shot`. `ChiefDirector.validate_shot_prompts` (`llm/chief_director.py:296`) may modify them in place. `record_director_review_on_shots` then writes `director_review` onto each shot — **this single call is what unblocks the PLAN_REVIEW auto-approve gate**; without it, `_rules_for_plan` always vetoes (the field is absent) and a headless run dead-ends. `update_scene_shots` persists.
 2. **Plan → Keyframe.** Once PLAN_REVIEW clears, `KeyframeRenderPhase.run(ctx)` (`cinema/phases/keyframe_render.py:68`) iterates shots, skipping any with `approved_keyframe_take_id`, and calls `generate_keyframe_take` (delegated to `ShotController`). The keyframe is the anchor still; its identity score lands in `take.metadata.identity_score`.
 3. **Keyframe → Performance.** `PerformanceCapturePhase` (`cinema/phases/performance.py:19`) skips shots that are SKIP-routed, have no approved keyframe, or already have an approved performance take. The performance take (a driving-video / retarget) becomes optional conditioning for the motion stage.
 4. **Performance → Motion.** `MotionRenderPhase` (`cinema/phases/motion_render.py:57`) turns the approved keyframe into a video clip via the cascade (§6.4). It has a **storyboard batch path** (Kling Native, non-portrait aspect only — M-1 guard, 2–6 unapproved shots all with keyframes) that generates one combined clip and splits it (`split_video_into_segments`), falling through to per-shot on any failure.
@@ -1636,7 +1636,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `llm/prompt_optimizer.py` | 507 | UI-text → structured shot spec (`optimize_shot_prompt`) |
 | `llm/style_director.py` | 198 | Per-project global style rules (`generate_style_rules`) — **OpenAI-only** |
 | `llm/negative_prompts.py` | 69 | Failure-reason → negative-prompt phrase lookup |
-| `domain/scene_decomposer.py` | 919 | **Canonical** scene→shots: `API_REGISTRY`, `PURPOSE_API_RANKING`, `decompose_scene`, `competitive_decompose_scene` |
+| `domain/scene_decomposer.py` | 936 | **Canonical** scene→shots: `API_REGISTRY`, `PURPOSE_API_RANKING`, `decompose_scene`, `competitive_decompose_scene` |
 | `domain/dialogue_writer.py` | 156 | **Canonical** dialogue writer (`generate_dialogue`) |
 | `domain/language_defaults.py` | 212 | Per-language pipeline defaults (TTS, lipsync priority, voice IDs) |
 | `research_engine.py` / `web_research.py` | 160 / 221 | Tavily + Firecrawl wrappers; `run_with_tools` GPT-4o tool loop |
@@ -1988,7 +1988,7 @@ Each top-level file is a **9-line `from domain.X import *` re-export shim**; the
 
 | Top-level shim | LOC | Canonical | Canonical LOC |
 |---|---|---|---|
-| `scene_decomposer.py` | 9 | `domain/scene_decomposer.py` | 919 |
+| `scene_decomposer.py` | 9 | `domain/scene_decomposer.py` | 936 |
 | `dialogue_writer.py` | 9 | `domain/dialogue_writer.py` | 156 |
 | `project_manager.py` | 9 | `domain/project_manager.py` | 1235 |
 | `character_manager.py` | 9 | `domain/character_manager.py` | 527 |
@@ -2059,7 +2059,7 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-llm-2 | `style_director` is **OpenAI-only** (no Anthropic path); with only `ANTHROPIC_API_KEY` set it falls straight to `_default_style_rules` |
 | D-llm-3 | `competitive_enabled` is stored from settings but never enforced — `competitive_generate` always runs full competition |
 | D-script-1 | The on-demand decompose endpoint (`web_server.py:1400`) always uses single-model `decompose_scene`, never `competitive_decompose_scene`; only the automated pipeline honors `competitive_generation` |
-| D-script-6 | `competitive_decompose_scene`'s JSON schema description (`scene_decomposer.py:627`) says to include character physical descriptions — contradicting HC1 (identity firewall) that `decompose_scene` correctly enforces; latent prompt-contamination risk in the competitive path |
+| D-script-6 | **RESOLVED 2026-07-28:** direct and competitive decomposition now render the same HC1-safe `_build_cinedecompose_shot_schema` contract; pinned by `test_direct_and_competitive_paths_render_identical_canonical_schema` and `test_both_paths_call_shared_schema_factory` in `tests/unit/test_scene_decomposer_prompt.py`. |
 | D-driving-video | Only Sora fully wires `driving_video_path`; Veo and Kling accept the param but silently ignore it (SDK `video=`/`image=` mutual exclusivity) |
 | D-veo-refs | Veo `reference_images` are accepted by the call chain but dropped before the SDK call ("Bug #4"); identity comes from the start frame only (`veo_native.py:155`) |
 | D-state-1 | `save_project` acquires its own lock — calling it while already holding `project_lock()` deadlocks; use the unlocked variant inside a held lock |

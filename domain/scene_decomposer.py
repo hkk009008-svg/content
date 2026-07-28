@@ -324,6 +324,61 @@ MUSIC_MOODS = [
 ]
 
 
+def _build_cinedecompose_shot_schema() -> dict:
+    """Return the identity-safe JSON-array contract shared by both LLM paths."""
+    return {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": (
+                        "Detailed photorealistic image generation prompt with "
+                        "location, action, wardrobe, and cinematic quality cues; "
+                        "leave face, hair, skin, body, and all identity appearance "
+                        "to reference/PuLID locking"
+                    ),
+                },
+                "camera": {"type": "string", "enum": list(CAMERA_MOTIONS)},
+                "visual_effect": {"type": "string", "enum": list(VISUAL_EFFECTS)},
+                "target_api": {"type": "string", "enum": list(TARGET_APIS)},
+                "scene_foley": {
+                    "type": "string",
+                    "description": "Environmental sound effects for this moment",
+                },
+                "characters_in_frame": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Character IDs visible in this shot",
+                },
+                "action_context": {
+                    "type": "string",
+                    "description": (
+                        "What is physically happening in this shot for temporal "
+                        "continuity"
+                    ),
+                },
+            },
+            "required": [
+                "prompt",
+                "camera",
+                "visual_effect",
+                "target_api",
+                "scene_foley",
+                "characters_in_frame",
+                "action_context",
+            ],
+        },
+    }
+
+
+def _render_cinedecompose_system_prompt(system_prompt: str) -> str:
+    """Append the canonical shot schema to a CineDecompose system prompt."""
+    schema = _build_cinedecompose_shot_schema()
+    return system_prompt + "\n\nJSON Schema:\n" + json.dumps(schema, indent=2)
+
+
 def _build_cinedecompose_system_prompt(
     target_shots: int,
     char_descriptions: list,
@@ -519,27 +574,6 @@ def decompose_scene(
         global_settings=global_settings,
     )
 
-    shot_schema = {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "prompt": {"type": "string", "description": "Detailed photorealistic image generation prompt with location, action, wardrobe, and quality cues while leaving facial identity to reference locking"},
-                "camera": {"type": "string", "enum": CAMERA_MOTIONS},
-                "visual_effect": {"type": "string", "enum": VISUAL_EFFECTS},
-                "target_api": {"type": "string", "enum": TARGET_APIS},
-                "scene_foley": {"type": "string", "description": "Environmental sound effects for this moment"},
-                "characters_in_frame": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Character IDs visible in this shot",
-                },
-                "action_context": {"type": "string", "description": "What is physically happening in this shot for temporal continuity"},
-            },
-            "required": ["prompt", "camera", "visual_effect", "target_api", "scene_foley", "characters_in_frame", "action_context"],
-        },
-    }
-
     user_prompt = f"""Decompose this scene into exactly {target_shots} shots:
 
 SCENE TITLE: {scene.get('title', 'Untitled')}
@@ -553,7 +587,7 @@ Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in chara
 
 Output ONLY the raw JSON array. No markdown wrapping."""
 
-    full_system = system_prompt + "\n\nJSON Schema:\n" + json.dumps(shot_schema, indent=2)
+    full_system = _render_cinedecompose_system_prompt(system_prompt)
 
     try:
         from web_research import run_with_tools
@@ -717,27 +751,6 @@ def competitive_decompose_scene(
         global_settings=global_settings,
     )
 
-    shot_schema = {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "prompt": {"type": "string", "description": "Detailed photorealistic image generation prompt including ALL character physical descriptions and FULL location description"},
-                "camera": {"type": "string", "enum": CAMERA_MOTIONS},
-                "visual_effect": {"type": "string", "enum": VISUAL_EFFECTS},
-                "target_api": {"type": "string", "enum": TARGET_APIS},
-                "scene_foley": {"type": "string", "description": "Environmental sound effects for this moment"},
-                "characters_in_frame": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Character IDs visible in this shot",
-                },
-                "action_context": {"type": "string", "description": "What is physically happening in this shot for temporal continuity"},
-            },
-            "required": ["prompt", "camera", "visual_effect", "target_api", "scene_foley", "characters_in_frame", "action_context"],
-        },
-    }
-
     user_prompt = f"""Decompose this scene into exactly {target_shots} shots:
 
 SCENE TITLE: {scene.get('title', 'Untitled')}
@@ -751,7 +764,7 @@ Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in chara
 
 Output ONLY the raw JSON array. No markdown wrapping."""
 
-    full_system = system_prompt + "\n\nJSON Schema:\n" + json.dumps(shot_schema, indent=2)
+    full_system = _render_cinedecompose_system_prompt(system_prompt)
 
     # ------------------------------------------------------------------
     # 7. Run competitive generation via LLMEnsemble
