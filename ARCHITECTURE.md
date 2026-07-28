@@ -551,7 +551,7 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 | Function | Provider | Tooling |
 |---|---|---|
 | `decompose_scene` ([domain/scene_decomposer.py:492](domain/scene_decomposer.py:492)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:661](domain/scene_decomposer.py:661)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:796](domain/scene_decomposer.py:796)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1563,6 +1563,10 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 **Pattern: parallel quorum, NOT fallback.**
 
 - `competitive_generate(task_type, system_prompt, user_prompt, models=None, judge_model=None, json_mode=False, tool_schema=None)`.
+- Constructor settings: `competitive_generation=False` shrinks the roster to the
+  first model before dispatch; `quality_judge_llm` (non-`auto`) sets
+  `judge_model_override`. Effective judge precedence:
+  call-arg → `judge_model_override` → `_DEFAULT_JUDGE`.
 - `ThreadPoolExecutor(max_workers=len(models))` dispatches all models concurrently.
 - 120s per-future + as_completed timeout.
 - A judge model scores candidates and picks a winner.
@@ -1577,7 +1581,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 | `default` | `["claude-sonnet-4-6", "gpt-4o"]` |
 | Default judge | `claude-sonnet-4-6` |
 
-**Provider routing by model name prefix** ([llm/ensemble.py:231-264](llm/ensemble.py:231)):
+**Provider routing by model name prefix** ([llm/ensemble.py:297](llm/ensemble.py:297)):
 - `claude*` → Anthropic
 - `gpt*`/`o4*` → OpenAI
 - `gemini*` → Gemini (via `google.genai`)
@@ -1659,7 +1663,9 @@ Output schema (7 keys): `director_vision`, `cinematography_rules`,
 `optimize_shot_prompt(...)` runs `competitive_generate(task_type="decompose", json_mode=True)`.
 Output schema requires `suggested_video_api ∈ {KLING_3_0, KLING_NATIVE,
 SEEDANCE, SORA_NATIVE, VEO_NATIVE, LTX, RUNWAY_GEN4, AUTO}`. Sanitized via `_coerce_to_valid_keys`
-— unrecognized values collapse to `"AUTO"`.
+— unrecognized values collapse to `"AUTO"`. Non-object JSON roots and coerce
+failures fall back to the heuristic path (always-populated contract).
+`shot_type` is normalized before `purpose`.
 
 LLM guidance table in `_OPTIMIZER_SYSTEM_PROMPT`:
 ```
