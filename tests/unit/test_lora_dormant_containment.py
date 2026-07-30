@@ -97,6 +97,101 @@ def test_project_put_allows_unchanged_legacy_lora_round_trip(persisted_project):
     }
 
 
+def test_project_put_without_global_settings_does_not_update_them(
+    persisted_project,
+):
+    pid = persisted_project["id"]
+    before_settings = project_manager.load_project(pid)["global_settings"]
+
+    with web_server.app.test_client() as client:
+        response = client.put(
+            f"/api/projects/{pid}",
+            json={"name": "Name only"},
+        )
+
+    assert response.status_code == 200
+    latest = project_manager.load_project(pid)
+    assert latest["name"] == "Name only"
+    assert latest["global_settings"] == before_settings
+
+
+@pytest.mark.parametrize(
+    "malformed_global_settings",
+    [
+        pytest.param(
+            [["char_lora_paths", {"c1": "/changed.safetensors"}]],
+            id="array-of-pairs",
+        ),
+        pytest.param("char_lora_paths", id="string"),
+        pytest.param(7, id="number"),
+        pytest.param(True, id="boolean"),
+        pytest.param(None, id="null"),
+    ],
+)
+def test_project_put_rejects_non_object_global_settings_without_saving(
+    persisted_project,
+    malformed_global_settings,
+):
+    pid = persisted_project["id"]
+    project_path = Path(project_manager.PROJECTS_DIR) / pid / "project.json"
+    before = project_path.read_bytes()
+    before_project = json.loads(before)
+
+    with web_server.app.test_client() as client:
+        response = client.put(
+            f"/api/projects/{pid}",
+            json={
+                "name": "Must not land",
+                "global_settings": malformed_global_settings,
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "global_settings must be a JSON object",
+        "code": "invalid_global_settings",
+        "retryable": False,
+    }
+    assert project_path.read_bytes() == before
+    assert project_manager.load_project(pid) == before_project
+
+
+def test_project_put_rejects_bool_for_nested_numeric_lora_value_atomically(
+    persisted_project,
+):
+    pid = persisted_project["id"]
+
+    def seed_numeric_strength(latest):
+        latest["global_settings"]["char_lora_strengths"] = {"c1": 1.0}
+
+    project_manager.mutate_project(pid, seed_numeric_strength)
+    project_path = Path(project_manager.PROJECTS_DIR) / pid / "project.json"
+    before = project_path.read_bytes()
+    before_project = json.loads(before)
+
+    with web_server.app.test_client() as client:
+        response = client.put(
+            f"/api/projects/{pid}",
+            json={
+                "name": "Must not land",
+                "global_settings": {
+                    "char_lora_strengths": {"c1": True},
+                    "music_mood": "must-not-land",
+                },
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Per-character LoRA activation is dormant",
+        "code": "lora_activation_dormant",
+        "fields": ["char_lora_strengths"],
+        "retryable": False,
+    }
+    assert project_path.read_bytes() == before
+    assert project_manager.load_project(pid) == before_project
+
+
 def test_project_put_rejects_changed_and_new_lora_fields_atomically(
     persisted_project,
 ):

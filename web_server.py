@@ -530,23 +530,23 @@ def api_update_project(pid):
 
     data = request.json or {}
 
-    incoming_gs = data.get("global_settings") or {}
-    if "aspect_ratio" in incoming_gs and not is_supported(incoming_gs["aspect_ratio"]):
-        return jsonify({
-            "error": "unsupported aspect_ratio",
-            "value": incoming_gs["aspect_ratio"],
-            "supported": SUPPORTED_ASPECT_RATIOS,
-        }), 400
+    has_incoming_gs = "global_settings" in data
+    incoming_gs = data.get("global_settings")
+    if has_incoming_gs and not isinstance(incoming_gs, dict):
+        return jsonify({"error": "global_settings must be a JSON object", "code": "invalid_global_settings", "retryable": False}), 400
+    if has_incoming_gs and "aspect_ratio" in incoming_gs and not is_supported(incoming_gs["aspect_ratio"]):
+        return jsonify({"error": "unsupported aspect_ratio", "value": incoming_gs["aspect_ratio"],
+                        "supported": SUPPORTED_ASPECT_RATIOS}), 400
 
     def _mutate_project(project: dict):
         # Inner validation and protected-field comparison use the locked latest state.
         Project.model_validate(project)
-        if changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs):
+        if has_incoming_gs and (changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs)):
             raise lora_policy.LoraActivationDormantError(changed_lora_fields)
         if "name" in data:
             project["name"] = data["name"]
-        if "global_settings" in data:
-            project["global_settings"].update(data["global_settings"])
+        if has_incoming_gs:
+            project["global_settings"].update(incoming_gs)
         return project
 
     try:

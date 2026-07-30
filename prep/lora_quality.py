@@ -307,10 +307,15 @@ def train_character_lora_gated(project_dir, character, *, config_overrides=None)
         if not train.get("success"):
             return train                                  # infra/train error -> surface, NO retrain
         result = validate_lora_quality(train["lora_path"], character)
-        if result.skipped:                                # no GPU/anchor -> reject unvalidated
+        if result.best_score is None or result.skipped:   # unavailable validation can never activate
+            skip_reason = result.skip_reason or (
+                "quality_score_unavailable"
+                if result.best_score is None
+                else "validation_skipped"
+            )
             return _gated_result(train, score=None, strength=None, lora_path=None,
                                  warning=True, rejected=True, skipped=True,
-                                 skip_reason=result.skip_reason, attempts=attempt + 1)
+                                 skip_reason=skip_reason, attempts=attempt + 1)
         if best is None or result.best_score > best[0]:
             best = (result.best_score, result.best_strength, train["lora_path"])
         action = _next_lora_action(attempt, best[0], threshold=PASS_THRESHOLD,

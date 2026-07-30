@@ -210,6 +210,33 @@ def test_gated_skip_rejects_unvalidated(monkeypatch):
     assert out["skip_reason"] == "comfyui_unreachable"
 
 
+def test_gated_non_skipped_none_score_rejects_as_unavailable(monkeypatch):
+    trains = {"n": 0}
+    monkeypatch.setattr(lq, "_train_character_lora",
+                        lambda pd, ch, **k: (trains.__setitem__("n", trains["n"] + 1)
+                                             or {"success": True, "lora_path": "/l/c1.safetensors"}))
+    monkeypatch.setattr(
+        lq,
+        "validate_lora_quality",
+        lambda lp, ch, **k: _qr(None, 0.55, skipped=False),
+    )
+
+    def fail_if_formatted(*_args, **_kwargs):
+        raise AssertionError("unavailable score reached a logging formatter")
+
+    monkeypatch.setattr(lq.logger, "warning", fail_if_formatted)
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+
+    assert trains["n"] == 1
+    assert out["rejected"] is True
+    assert out["quality_warning"] is True
+    assert out["quality_score"] is None
+    assert out["best_strength"] is None
+    assert out["lora_path"] is None
+    assert out["skipped"] is True
+    assert out["skip_reason"] == "quality_score_unavailable"
+
+
 def test_gated_train_failure_returns_immediately_no_retrain(monkeypatch):
     trains = {"n": 0}
     def fail_train(pd, ch, **k):

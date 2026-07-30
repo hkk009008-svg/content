@@ -50,6 +50,27 @@ def lora_dormant_status_fields() -> dict[str, object]:
     }
 
 
+def _json_values_equal_strict(current: object, incoming: object) -> bool:
+    """Recursively compare JSON values without Python's scalar coercions."""
+    if type(current) is not type(incoming):
+        return False
+    if isinstance(current, Mapping):
+        return (
+            len(current) == len(incoming)
+            and all(
+                key in incoming
+                and _json_values_equal_strict(current[key], incoming[key])
+                for key in current
+            )
+        )
+    if isinstance(current, list):
+        return len(current) == len(incoming) and all(
+            _json_values_equal_strict(current_item, incoming_item)
+            for current_item, incoming_item in zip(current, incoming)
+        )
+    return current == incoming
+
+
 def changed_protected_lora_fields(
     current_settings: object,
     incoming_settings: object,
@@ -67,7 +88,10 @@ def changed_protected_lora_fields(
         key
         for key in PROTECTED_LORA_FIELDS
         if key in incoming_settings
-        and (key not in current or incoming_settings[key] != current[key])
+        and (
+            key not in current
+            or not _json_values_equal_strict(current[key], incoming_settings[key])
+        )
     )
 
 
