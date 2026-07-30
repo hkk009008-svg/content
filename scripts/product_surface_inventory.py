@@ -18,9 +18,50 @@ from urllib.parse import urlsplit
 
 OUTPUT = Path("docs/generated/product_surface_inventory.json")
 FRONTEND_HELPER = Path(__file__).with_name("product_surface_frontend_inventory.mjs")
+FRONTEND_TIMEOUT_SECONDS = 30
 HTTP_METHODS = {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}
 SHORTHANDS = {"delete", "get", "head", "options", "patch", "post", "put"}
 EXCLUDED_DIRS = {"__tests__", "dist", "node_modules", "test", "tests"}
+TRANSPORT_KINDS = {"fetch", "event_source"}
+OPERATION_KINDS = {
+    "direct_transport",
+    "one_hop_wrapper_call",
+    "unknown_wrapper_call",
+    "shadowed_fetch_call",
+    "shadowed_event_source_call",
+}
+OBSERVATIONS = {"observed", "not_observed", "unknown"}
+UNRESOLVED_REASONS = {
+    "aliased_transport": {"aliased transports are not expanded"},
+    "aliased_wrapper": {"same-file wrapper aliases are not expanded"},
+    "dynamic_transport_url": {
+        "transport URL is not a string, template, or module literal constant"
+    },
+    "dynamic_fetch_method": {
+        "fetch options is not an inline object literal",
+        "fetch method is not a static HTTP method",
+    },
+    "dynamic_wrapper_call_url": {
+        "safe wrapper call URL is not statically resolvable"
+    },
+    "shadowed_fetch_call": {
+        "fetch call resolves through a local, imported, parameter, method, or object binding"
+    },
+    "shadowed_event_source_call": {
+        "EventSource construction resolves through a local, imported, parameter, method, or object binding"
+    },
+    "unknown_wrapper_call": {
+        "aliased transport call",
+        "fetch options is not an inline object literal",
+        "fetch method is not a static HTTP method",
+        "wrapper transport method is not statically resolved",
+        "wrapper URL parameter is transformed",
+        "wrapper contains multiple direct transports",
+        "wrapper reaches transport through another local wrapper",
+        "wrapper is an alias of another local wrapper",
+        "imported wrapper call",
+    },
+}
 
 class FrontendInventoryError(RuntimeError):
     """The TypeScript helper could not produce a complete trusted fact set."""
@@ -243,10 +284,315 @@ def _frontend_files(root: Path) -> list[str]:
         and not re.search(r"\.(?:spec|test)\.(?:ts|tsx)$", path.name)
     )
 
+
+def _schema_error(detail: str) -> None:
+    raise FrontendInventoryError(f"invalid TypeScript frontend schema: {detail}")
+
+
+def _exact_keys(
+    row: Any,
+    required: set[str],
+    optional: set[str],
+    label: str,
+) -> dict[str, Any]:
+    if type(row) is not dict:
+        _schema_error(f"{label} must be an object")
+    keys = set(row)
+    if keys - required - optional:
+        _schema_error(f"{label} has unknown keys")
+    if required - keys:
+        _schema_error(f"{label} is missing required keys")
+    return row
+
+
+def _normalized_text(
+    value: Any,
+    label: str,
+    *,
+    allow_empty: bool = False,
+) -> str:
+    if type(value) is not str or (not allow_empty and not value):
+        _schema_error(f"{label} must be a string")
+    if " ".join(value.split()) != value:
+        _schema_error(f"{label} is not normalized")
+    return value
+
+
+def _name(value: Any, label: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or value.strip() != value
+        or any(ord(char) < 32 for char in value)
+    ):
+        _schema_error(f"{label} must be a nonempty name")
+    return value
+
+
+def _source_fact(
+    value: Any,
+    allowed_sources: set[str],
+    label: str,
+) -> None:
+    source = _exact_keys(value, {"path", "line"}, set(), f"{label}.source")
+    source_path = source["path"]
+    if (
+        type(source_path) is not str
+        or not source_path
+        or source_path not in allowed_sources
+        or source_path.startswith("/")
+        or "\\" in source_path
+        or any(part in {"", ".", ".."} for part in source_path.split("/"))
+    ):
+        _schema_error(f"{label}.source.path is invalid")
+    if type(source["line"]) is not int or source["line"] <= 0:
+        _schema_error(f"{label}.source.line must be a positive integer")
+
+
+def _url(value: Any, label: str) -> None:
+    if value is not None and type(value) is not str:
+        _schema_error(f"{label} must be a string or null")
+
+
+def _reference(
+    value: Any,
+    allowed_sources: set[str],
+    label: str,
+    *,
+    nullable: bool,
+) -> str | None:
+    if value is None and nullable:
+        return None
+    if type(value) is not str or not value:
+        _schema_error(f"{label} must be a transport reference")
+    ref_path, separator, offset = value.rpartition(":")
+    if (
+        not separator
+        or ref_path not in allowed_sources
+        or not re.fullmatch(r"(?:0|[1-9][0-9]*)", offset)
+    ):
+        _schema_error(f"{label} has invalid transport-reference shape")
+    return value
+
+
+def _method(value: Any, label: str, *, nullable: bool) -> str | None:
+    if value is None and nullable:
+        return None
+    if type(value) is not str or value not in HTTP_METHODS:
+        _schema_error(f"{label} must be a supported HTTP method")
+    return value
+
+
+def _validate_transport(
+    row: Any,
+    allowed_sources: set[str],
+    index: int,
+) -> str:
+    label = f"transports[{index}]"
+    kind = row.get("kind") if type(row) is dict else None
+    if type(kind) is not str or kind not in TRANSPORT_KINDS:
+        _schema_error(f"{label}.kind is unsupported")
+    required = {
+        "_transport_ref",
+        "kind",
+        "method",
+        "non_2xx_observation",
+        "non_2xx_observation_applicability",
+        "source",
+        "url_expression",
+        "url_template",
+    }
+    if kind == "event_source":
+        required.add("transport_error_observation")
+    _exact_keys(row, required, {"enclosing_function"}, label)
+    ref = _reference(
+        row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+    )
+    _source_fact(row["source"], allowed_sources, label)
+    _normalized_text(row["url_expression"], f"{label}.url_expression", allow_empty=True)
+    _url(row["url_template"], f"{label}.url_template")
+    if "enclosing_function" in row:
+        _name(row["enclosing_function"], f"{label}.enclosing_function")
+    if kind == "fetch":
+        _method(row["method"], f"{label}.method", nullable=True)
+        observation = row["non_2xx_observation"]
+        if type(observation) is not str or observation not in OBSERVATIONS:
+            _schema_error(f"{label}.non_2xx_observation is invalid")
+        if row["non_2xx_observation_applicability"] != "applicable":
+            _schema_error(f"{label} has invalid observation applicability")
+    else:
+        if row["method"] != "GET" or row["non_2xx_observation"] is not None:
+            _schema_error(f"{label} has invalid EventSource method/observation")
+        if row["non_2xx_observation_applicability"] != "not_applicable":
+            _schema_error(f"{label} has invalid EventSource applicability")
+        error_observation = row["transport_error_observation"]
+        if type(error_observation) is not str or error_observation not in OBSERVATIONS:
+            _schema_error(f"{label}.transport_error_observation is invalid")
+    assert ref is not None
+    return ref
+
+
+def _validate_operation(
+    row: Any,
+    allowed_sources: set[str],
+    transport_refs: set[str],
+    index: int,
+) -> None:
+    label = f"operations[{index}]"
+    kind = row.get("kind") if type(row) is dict else None
+    if type(kind) is not str or kind not in OPERATION_KINDS:
+        _schema_error(f"{label}.kind is unsupported")
+    required = {"_transport_ref", "kind", "method", "source", "url_template"}
+    optional: set[str] = set()
+    if kind in {"one_hop_wrapper_call", "unknown_wrapper_call"}:
+        required.add("expanded_wrapper")
+    if kind in {"shadowed_fetch_call", "shadowed_event_source_call"}:
+        optional.add("enclosing_function")
+    _exact_keys(row, required, optional, label)
+    _source_fact(row["source"], allowed_sources, label)
+    _url(row["url_template"], f"{label}.url_template")
+    if "expanded_wrapper" in row:
+        _name(row["expanded_wrapper"], f"{label}.expanded_wrapper")
+    if "enclosing_function" in row:
+        _name(row["enclosing_function"], f"{label}.enclosing_function")
+    if kind == "direct_transport":
+        _method(row["method"], f"{label}.method", nullable=True)
+        ref = _reference(
+            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+        )
+    elif kind == "one_hop_wrapper_call":
+        _method(row["method"], f"{label}.method", nullable=False)
+        ref = _reference(
+            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+        )
+    elif kind == "unknown_wrapper_call":
+        if row["method"] is not None:
+            _schema_error(f"{label}.method must be null")
+        ref = _reference(
+            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=True
+        )
+    else:
+        if row["method"] is not None or row["_transport_ref"] is not None:
+            _schema_error(f"{label} must not claim a method or transport reference")
+        ref = None
+    if ref is not None and ref not in transport_refs:
+        _schema_error(f"{label} has a dangling transport reference")
+
+
+def _validate_unresolved(
+    row: Any,
+    allowed_sources: set[str],
+    index: int,
+) -> None:
+    label = f"unresolved[{index}]"
+    unresolved = _exact_keys(
+        row,
+        {"domain", "expression", "kind", "reason", "source"},
+        {"owner"},
+        label,
+    )
+    if unresolved["domain"] != "frontend":
+        _schema_error(f"{label}.domain is invalid")
+    kind = unresolved["kind"]
+    if type(kind) is not str or kind not in UNRESOLVED_REASONS:
+        _schema_error(f"{label}.kind is unsupported")
+    reason = unresolved["reason"]
+    if type(reason) is not str or reason not in UNRESOLVED_REASONS[kind]:
+        _schema_error(f"{label}.reason is invalid")
+    _normalized_text(unresolved["expression"], f"{label}.expression", allow_empty=True)
+    _source_fact(unresolved["source"], allowed_sources, label)
+    if "owner" in unresolved:
+        _name(unresolved["owner"], f"{label}.owner")
+    if kind in {
+        "aliased_transport",
+        "aliased_wrapper",
+        "dynamic_wrapper_call_url",
+        "unknown_wrapper_call",
+    } and "owner" not in unresolved:
+        _schema_error(f"{label}.owner is required")
+
+
+def _validate_frontend_payload(payload: Any, root: Path) -> dict[str, Any]:
+    top = _exact_keys(
+        payload,
+        {
+            "files",
+            "operations",
+            "parser",
+            "transports",
+            "typescript_version",
+            "unresolved",
+        },
+        set(),
+        "payload",
+    )
+    if top["parser"] != "TypeScript compiler API":
+        _schema_error("payload.parser is invalid")
+    version = top["typescript_version"]
+    if type(version) is not str or not re.fullmatch(
+        r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?", version
+    ):
+        _schema_error("payload.typescript_version is invalid")
+    expected_files = _frontend_files(root)
+    if type(top["files"]) is not list or top["files"] != expected_files:
+        _schema_error("payload.files does not match the declared source scope")
+    for key in ("transports", "operations", "unresolved"):
+        if type(top[key]) is not list:
+            _schema_error(f"payload.{key} must be a list")
+    allowed_sources = set(expected_files)
+    transport_refs: set[str] = set()
+    for index, row in enumerate(top["transports"]):
+        ref = _validate_transport(row, allowed_sources, index)
+        if ref in transport_refs:
+            _schema_error("transport references must be unique")
+        transport_refs.add(ref)
+    for index, row in enumerate(top["operations"]):
+        _validate_operation(row, allowed_sources, transport_refs, index)
+    for index, row in enumerate(top["unresolved"]):
+        _validate_unresolved(row, allowed_sources, index)
+    return top
+
+
+def _decode_frontend_json(raw: str) -> Any:
+    def object_without_duplicates(
+        pairs: list[tuple[str, Any]],
+    ) -> dict[str, Any]:
+        decoded: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in decoded:
+                raise ValueError(f"duplicate JSON key {key}")
+            decoded[key] = value
+        return decoded
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"invalid JSON constant {value}")
+
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=object_without_duplicates,
+            parse_constant=reject_constant,
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise FrontendInventoryError(
+            "TypeScript frontend parser returned invalid JSON"
+        ) from exc
+
+
 def _frontend_payload(root: Path) -> dict[str, Any]:
     command = ["node", str(FRONTEND_HELPER), "--root", str(root)]
     try:
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=FRONTEND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FrontendInventoryError(
+            f"TypeScript frontend parser timed out after {FRONTEND_TIMEOUT_SECONDS}s"
+        ) from exc
     except OSError as exc:
         raise FrontendInventoryError(
             f"could not launch Node/TypeScript frontend parser: {exc}"
@@ -254,27 +600,8 @@ def _frontend_payload(root: Path) -> dict[str, Any]:
     if completed.returncode:
         detail = completed.stderr.strip() or f"exit status {completed.returncode}"
         raise FrontendInventoryError(f"TypeScript frontend parser failed: {detail}")
-    try:
-        payload = json.loads(completed.stdout)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise FrontendInventoryError("TypeScript frontend parser returned invalid JSON") from exc
-    if not isinstance(payload, dict):
-        raise FrontendInventoryError("TypeScript frontend parser returned no object")
-    expected_files = _frontend_files(root)
-    if (
-        payload.get("parser") != "TypeScript compiler API"
-        or not isinstance(payload.get("typescript_version"), str)
-        or payload.get("files") != expected_files
-    ):
-        raise FrontendInventoryError(
-            "TypeScript frontend parser returned incomplete or mismatched scope metadata"
-        )
-    for key in ("transports", "operations", "unresolved"):
-        if not isinstance(payload.get(key), list) or not all(
-            isinstance(row, dict) for row in payload[key]
-        ):
-            raise FrontendInventoryError(f"TypeScript frontend parser returned invalid {key}")
-    return payload
+    payload = _decode_frontend_json(completed.stdout)
+    return _validate_frontend_payload(payload, root)
 
 def _frontend(root: Path) -> tuple[
     list[dict[str, Any]],
@@ -283,34 +610,13 @@ def _frontend(root: Path) -> tuple[
     str,
 ]:
     payload = _frontend_payload(root)
-    allowed_sources = set(payload["files"])
-
-    def checked(rows: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
-        copied = [dict(row) for row in rows]
-        for row in copied:
-            origin = row.get("source")
-            if not (
-                isinstance(origin, dict)
-                and origin.get("path") in allowed_sources
-                and isinstance(origin.get("line"), int)
-                and origin["line"] >= 1
-            ):
-                raise FrontendInventoryError(
-                    f"TypeScript frontend parser returned invalid {kind} source"
-                )
-        return copied
-
-    transports = checked(payload["transports"], "transport")
-    operations = checked(payload["operations"], "operation")
-    unresolved = checked(payload["unresolved"], "unresolved")
+    transports = [dict(row) for row in payload["transports"]]
+    operations = [dict(row) for row in payload["operations"]]
+    unresolved = [dict(row) for row in payload["unresolved"]]
     transport_refs: dict[str, dict[str, Any]] = {}
     for row in transports:
-        ref = row.pop("_transport_ref", None)
+        ref = row.pop("_transport_ref")
         url = row.get("url_template")
-        if not isinstance(ref, str) or ref in transport_refs or not (
-            url is None or isinstance(url, str)
-        ):
-            raise FrontendInventoryError("invalid TypeScript transport link")
         row["path_shape"] = _positional(url, True) if url is not None else None
         row["query_keys"] = _query_keys(url)
         transport_refs[ref] = row
@@ -321,12 +627,8 @@ def _frontend(root: Path) -> tuple[
         group_by_source=True,
     )
     for row in operations:
-        ref = row.pop("_transport_ref", None)
-        if ref is not None and ref not in transport_refs:
-            raise FrontendInventoryError("dangling TypeScript operation link")
+        ref = row.pop("_transport_ref")
         url = row.get("url_template")
-        if not (url is None or isinstance(url, str)):
-            raise FrontendInventoryError("invalid TypeScript operation URL")
         row["path_shape"] = _positional(url, True) if url is not None else None
         row["query_keys"] = _query_keys(url)
         row["transport_id"] = transport_refs[ref]["id"] if ref is not None else None
@@ -354,8 +656,8 @@ def _join(routes: Sequence[dict[str, Any]], rows: Iterable[dict[str, Any]]) -> N
 
 def build_inventory(root: Path) -> dict[str, Any]:
     root = root.resolve()
-    routes, unresolved = _backend(root)
     transports, operations, frontend_unresolved, typescript_version = _frontend(root)
+    routes, unresolved = _backend(root)
     unresolved.extend(frontend_unresolved)
     _join(routes, transports)
     _join(routes, operations)

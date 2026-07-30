@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import subprocess
@@ -33,6 +34,63 @@ def _frontend(root: Path, relative: str, source: str) -> None:
 
 def _build(root: Path) -> dict:
     return inventory_module.build_inventory(root)
+
+
+def _valid_helper_payload() -> dict:
+    path = "web/src/fact.ts"
+    reference = f"{path}:0"
+    source = {"path": path, "line": 1}
+    return {
+        "parser": "TypeScript compiler API",
+        "typescript_version": "5.9.3",
+        "files": [path],
+        "transports": [
+            {
+                "_transport_ref": reference,
+                "kind": "fetch",
+                "method": "GET",
+                "non_2xx_observation": "unknown",
+                "non_2xx_observation_applicability": "applicable",
+                "source": dict(source),
+                "url_expression": "'/api/value'",
+                "url_template": "/api/value",
+            }
+        ],
+        "operations": [
+            {
+                "_transport_ref": reference,
+                "kind": "direct_transport",
+                "method": "GET",
+                "source": dict(source),
+                "url_template": "/api/value",
+            }
+        ],
+        "unresolved": [
+            {
+                "domain": "frontend",
+                "expression": "path",
+                "kind": "dynamic_transport_url",
+                "owner": "load",
+                "reason": "transport URL is not a string, template, or module literal constant",
+                "source": dict(source),
+            }
+        ],
+    }
+
+
+def _mock_helper_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict,
+) -> None:
+    def completed(command, **_kwargs):
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout=json.dumps(payload),
+            stderr="",
+        )
+
+    monkeypatch.setattr(inventory_module.subprocess, "run", completed)
 
 
 def test_backend_routes_preserve_stacks_methods_and_static_constructor(tmp_path: Path) -> None:
@@ -685,6 +743,92 @@ throw new Error('application module was executed')
     ]
 
 
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "transport_kind_number",
+        "transport_kind_list",
+        "method_got",
+        "url_expression_list",
+        "method_list",
+        "invalid_observation",
+        "unresolved_domain_null",
+        "unresolved_reason_list",
+        "unresolved_expression_object",
+        "unresolved_owner_null",
+        "unresolved_reason_unknown",
+        "top_unknown_key",
+        "transport_unknown_key",
+        "bool_line",
+        "operation_reference_object",
+        "operation_callee_list",
+        "url_template_object",
+        "source_path_empty",
+    ],
+)
+def test_compiler_helper_schema_corruption_fails_before_id_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corruption: str,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "fact.ts", "")
+    payload = copy.deepcopy(_valid_helper_payload())
+    transport = payload["transports"][0]
+    operation = payload["operations"][0]
+    unresolved = payload["unresolved"][0]
+
+    if corruption == "transport_kind_number":
+        transport["kind"] = 42
+    elif corruption == "transport_kind_list":
+        transport["kind"] = ["fetch"]
+    elif corruption == "method_got":
+        transport["method"] = "GOT"
+    elif corruption == "url_expression_list":
+        transport["url_expression"] = ["/api/value"]
+    elif corruption == "method_list":
+        transport["method"] = ["GET"]
+    elif corruption == "invalid_observation":
+        transport["non_2xx_observation"] = "sometimes"
+    elif corruption == "unresolved_domain_null":
+        unresolved["domain"] = None
+    elif corruption == "unresolved_reason_list":
+        unresolved["reason"] = ["bad"]
+    elif corruption == "unresolved_expression_object":
+        unresolved["expression"] = {"value": "path"}
+    elif corruption == "unresolved_owner_null":
+        unresolved["owner"] = None
+    elif corruption == "unresolved_reason_unknown":
+        unresolved["reason"] = "invented reason"
+    elif corruption == "top_unknown_key":
+        payload["surprise"] = True
+    elif corruption == "transport_unknown_key":
+        transport["surprise"] = True
+    elif corruption == "bool_line":
+        transport["source"]["line"] = True
+    elif corruption == "operation_reference_object":
+        operation["_transport_ref"] = {"path": "web/src/fact.ts"}
+    elif corruption == "operation_callee_list":
+        operation["kind"] = "one_hop_wrapper_call"
+        operation["expanded_wrapper"] = ["load"]
+    elif corruption == "url_template_object":
+        operation["url_template"] = {"path": "/api/value"}
+    elif corruption == "source_path_empty":
+        unresolved["source"]["path"] = ""
+    else:
+        raise AssertionError(f"unhandled corruption {corruption}")
+
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_ids(*_args, **_kwargs):
+        raise AssertionError("schema validation must precede ID construction")
+
+    monkeypatch.setattr(inventory_module, "_assign_ids", forbidden_ids)
+
+    with pytest.raises(inventory_module.FrontendInventoryError):
+        inventory_module._frontend(root)
+
+
 @pytest.mark.parametrize("failure_mode", ["unavailable", "nonzero", "invalid_json"])
 def test_frontend_compiler_failures_preserve_prior_output(
     tmp_path: Path,
@@ -722,6 +866,43 @@ def test_frontend_compiler_failures_preserve_prior_output(
     assert output.read_text(encoding="utf-8") == "prior artifact\n"
 
 
+@pytest.mark.parametrize("mode", ["write", "check"])
+@pytest.mark.parametrize("failure_mode", ["schema", "timeout"])
+def test_schema_and_timeout_failures_do_not_mutate_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    failure_mode: str,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    _frontend(root, "fact.ts", "")
+    output = root / "inventory.json"
+    output.write_text("prior artifact\n", encoding="utf-8")
+
+    if failure_mode == "schema":
+        payload = _valid_helper_payload()
+        payload["transports"][0]["kind"] = 42
+        _mock_helper_payload(monkeypatch, payload)
+    else:
+        def timed_out(command, **kwargs):
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+        monkeypatch.setattr(inventory_module.subprocess, "run", timed_out)
+
+    def forbidden_write(*_args, **_kwargs):
+        raise AssertionError("failed helper data must never reach the writer")
+
+    monkeypatch.setattr(inventory_module, "_atomic_write", forbidden_write)
+    arguments = ["--root", str(root), "--output", str(output)]
+    if mode == "check":
+        arguments.append("--check")
+
+    result = inventory_module.main(arguments)
+
+    assert result == 1
+    assert output.read_text(encoding="utf-8") == "prior artifact\n"
+
+
 def test_frontend_helper_uses_argument_list_without_shell(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -737,13 +918,14 @@ def test_frontend_helper_uses_argument_list_without_shell(
             str(root.resolve()),
         ]
         assert "shell" not in kwargs
+        assert kwargs["timeout"] == inventory_module.FRONTEND_TIMEOUT_SECONDS
         return subprocess.CompletedProcess(
             args=command,
             returncode=0,
             stdout=json.dumps(
                 {
                     "parser": "TypeScript compiler API",
-                    "typescript_version": "test-version",
+                    "typescript_version": "5.9.3",
                     "files": [],
                     "transports": [],
                     "operations": [],
@@ -757,7 +939,7 @@ def test_frontend_helper_uses_argument_list_without_shell(
 
     payload = inventory_module._frontend_payload(root)
 
-    assert payload["typescript_version"] == "test-version"
+    assert payload["typescript_version"] == "5.9.3"
 
 
 def test_output_outside_resolved_root_is_rejected_without_creation(
