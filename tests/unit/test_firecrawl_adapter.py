@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import builtins
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import sys
+from threading import Thread
 import types
 from types import SimpleNamespace
 
@@ -48,8 +50,8 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key):
-            constructed.append(api_key)
+        def __init__(self, *, api_key, max_retries):
+            constructed.append((api_key, max_retries))
 
         def scrape(self, url, *, formats):
             scrape_calls.append((url, formats))
@@ -62,7 +64,7 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
 
     assert constructed == []
     assert firecrawl_adapter.scrape_markdown(
-        " https://example.com/one ",
+        "https://example.com/one",
         api_key="test-key",
     ) == "# Current contract"
     assert firecrawl_adapter.scrape_markdown(
@@ -70,11 +72,73 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
         api_key="test-key",
     ) == "# Current contract"
 
-    assert constructed == ["test-key"]
+    assert constructed == [("test-key", 0)]
     assert scrape_calls == [
         ("https://example.com/one", ["markdown"]),
         ("https://example.com/two", ["markdown"]),
     ]
+
+
+def test_real_sdk_zero_retry_client_makes_one_502_post_without_backoff(
+    monkeypatch,
+):
+    import firecrawl
+    from firecrawl import Firecrawl as InstalledFirecrawl
+    from firecrawl.v2.utils import http_client as sdk_http_client
+
+    requests_seen = []
+    sleeps = []
+
+    class GatewayHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            requests_seen.append((self.path, self.rfile.read(length)))
+            body = b'{"error":"offline bad gateway"}'
+            self.send_response(502)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), GatewayHandler)
+    server_url = f"http://127.0.0.1:{server.server_port}"
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    class LoopbackFirecrawl(InstalledFirecrawl):
+        def __init__(self, **kwargs):
+            super().__init__(api_url=server_url, **kwargs)
+
+    monkeypatch.setattr(firecrawl, "Firecrawl", LoopbackFirecrawl)
+    monkeypatch.setattr(
+        sdk_http_client,
+        "time",
+        SimpleNamespace(sleep=lambda seconds: sleeps.append(seconds)),
+    )
+
+    try:
+        with pytest.raises(
+            firecrawl_adapter.FirecrawlScrapeError,
+            match="scrape request failed",
+        ):
+            firecrawl_adapter.scrape_markdown(
+                "https://example.com",
+                api_key="test-key",
+            )
+
+        assert (
+            firecrawl_adapter._client._v2_client.http_client.max_retries
+            == 0
+        )
+        assert [path for path, _body in requests_seen] == ["/v2/scrape"]
+        assert sleeps == []
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
 
 
 @pytest.mark.parametrize(
@@ -82,29 +146,104 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
     [
         "",
         "   ",
+        " https://example.com",
+        "https://example.com ",
         "example.com",
         "ftp://example.com",
         "http:///missing-host",
         "http://[malformed",
+        "https://example.com:",
+        "https://example.com:not-a-port",
+        "https://example.com:-1",
+        "https://example.com:0",
+        "https://example.com:65536",
+        "https://[::1]:not-a-port",
+        "https://[::1]:0",
+        "https://[::1]:65536",
+        "https://exa mple.com",
+        "https://example.com\t.evil",
+        "https://example.com\n.evil",
+        "https://example.com\x00.evil",
+        "https://example.com\\evil/path",
+        "https://example.com\\@evil.com",
+        "https://example.com/path with space",
+        "https://example.com/path\u00a0with-nbsp",
+        "https://example.com/reference?q=raw space",
+        "https://:443",
+        "https://user@:443",
+        "https://user@example.com",
+        "https://user:pass@example.com",
+        "https://@example.com",
+        "https://-bad.example",
+        "https://bad-.example",
+        "https://bad_label.example",
+        "https://example..com",
+        "https://xn--.example",
+        f"https://{'a' * 64}.example",
+        "https://999.999.999.999",
         None,
     ],
 )
 def test_invalid_url_fails_before_client_construction(monkeypatch, url):
     constructed = []
+    scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key):
-            constructed.append(api_key)
+        def __init__(self, *, api_key, max_retries):
+            constructed.append((api_key, max_retries))
+
+        def scrape(self, url, *, formats):
+            scrape_calls.append((url, formats))
+            return _SDKDocument("must not be returned")
 
     _install_fake_sdk(monkeypatch, FakeFirecrawl)
 
     with pytest.raises(
         firecrawl_adapter.FirecrawlURLValidationError,
-        match=r"non-empty HTTP\(S\)",
+        match=r"valid HTTP\(S\).*without credentials",
     ):
         firecrawl_adapter.scrape_markdown(url, api_key="test-key")
 
     assert constructed == []
+    assert scrape_calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.com",
+        "http://example.com:1",
+        "https://example.com:65535",
+        "https://example.com:443/path?q=value#fragment",
+        "https://example.com/path%20with%20space?q=value%20encoded",
+        "https://localhost:8443",
+        "http://127.0.0.1",
+        "http://[::1]:8080",
+        "https://[2001:db8::1]/reference",
+        "https://例え.テスト",
+        "https://example.com.",
+    ],
+)
+def test_valid_http_hosts_reach_current_scrape_call(monkeypatch, url):
+    constructed = []
+    scrape_calls = []
+
+    class FakeFirecrawl:
+        def __init__(self, *, api_key, max_retries):
+            constructed.append((api_key, max_retries))
+
+        def scrape(self, requested_url, *, formats):
+            scrape_calls.append((requested_url, formats))
+            return _SDKDocument("# Valid host")
+
+    _install_fake_sdk(monkeypatch, FakeFirecrawl)
+
+    assert firecrawl_adapter.scrape_markdown(
+        url,
+        api_key="test-key",
+    ) == "# Valid host"
+    assert constructed == [("test-key", 0)]
+    assert scrape_calls == [(url, ["markdown"])]
 
 
 def test_missing_key_fails_without_importing_sdk(monkeypatch):
@@ -176,7 +315,8 @@ def test_sdk_import_failure_has_safe_initialization_error(monkeypatch):
 
 def test_initialization_failure_does_not_expose_exception_secret(monkeypatch):
     class BrokenFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
+            assert max_retries == 0
             raise RuntimeError(f"rejected credential {api_key}")
 
     _install_fake_sdk(monkeypatch, BrokenFirecrawl)
@@ -195,8 +335,9 @@ def test_initialization_failure_does_not_expose_exception_secret(monkeypatch):
 
 def test_legacy_only_sdk_is_rejected_without_fallback(monkeypatch):
     class LegacyOnlyFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
             self.api_key = api_key
+            assert max_retries == 0
 
         def scrape_url(self, *args, **kwargs):
             pytest.fail("legacy scrape_url must never be called")
@@ -215,8 +356,9 @@ def test_legacy_only_sdk_is_rejected_without_fallback(monkeypatch):
 
 def test_call_failure_does_not_expose_exception_secret(monkeypatch):
     class FailingFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
             self.api_key = api_key
+            assert max_retries == 0
 
         def scrape(self, url, *, formats):
             raise RuntimeError("upstream leaked fc-secret-value")
@@ -252,8 +394,9 @@ def test_empty_or_malformed_markdown_fails_clearly(
     message,
 ):
     class FakeFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
             self.api_key = api_key
+            assert max_retries == 0
 
         def scrape(self, url, *, formats):
             return result
@@ -272,8 +415,9 @@ def test_empty_or_malformed_markdown_fails_clearly(
 
 def test_mapping_result_is_a_deliberate_response_compatibility_path(monkeypatch):
     class FakeFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
             self.api_key = api_key
+            assert max_retries == 0
 
         def scrape(self, url, *, formats):
             return {"markdown": "# Decoded response"}
@@ -294,7 +438,8 @@ def test_both_consumers_share_one_lazy_client_and_no_legacy_method(monkeypatch):
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, max_retries):
+            assert max_retries == 0
             instances.append(self)
 
         def scrape(self, url, *, formats):
@@ -391,7 +536,7 @@ def test_both_production_consumers_route_through_shared_adapter_and_truncate(
             firecrawl_adapter.FirecrawlURLValidationError(
                 "upstream leaked fc-secret-value"
             ),
-            "URL must be a non-empty HTTP(S) URL",
+            "valid HTTP(S) URL without credentials",
         ),
         (
             firecrawl_adapter.FirecrawlResultError("safe"),

@@ -69,7 +69,10 @@ def scrape_url(url: str) -> str:
             "key and SDK installation."
         )
     except firecrawl_adapter.FirecrawlURLValidationError:
-        return "Scrape failed: URL must be a non-empty HTTP(S) URL."
+        return (
+            "Scrape failed: URL must be a valid HTTP(S) URL without "
+            "credentials."
+        )
     except firecrawl_adapter.FirecrawlResultError:
         return "Scrape failed: Firecrawl returned no usable markdown content."
     except firecrawl_adapter.FirecrawlScrapeError:

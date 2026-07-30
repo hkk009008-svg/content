@@ -41,7 +41,7 @@ tf-keras>=2.16
 
 # --- Web research (tavily + firecrawl, used by web_research / research_engine) ---
 tavily-python>=0.5
-firecrawl-py>=3.0.2,<5
+firecrawl-py>=4.27.2,<5
 
 # --- Web server (Flask dashboard + SSE) ---
 Flask>=3.0

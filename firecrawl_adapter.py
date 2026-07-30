@@ -8,8 +8,10 @@ typed, secret-free failures and apply their own user-facing fallback policy.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from ipaddress import IPv4Address, IPv6Address
+import re
 from threading import Lock
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 
 class FirecrawlAdapterError(RuntimeError):
@@ -44,26 +46,114 @@ _client = None
 _client_api_key: str | None = None
 _client_lock = Lock()
 _MISSING = object()
+_URL_ERROR = "URL must be a valid HTTP(S) URL without credentials."
+_HOST_LABEL = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+)
+
+
+def _raise_url_error() -> None:
+    raise FirecrawlURLValidationError(_URL_ERROR)
+
+
+def _validate_hostname(hostname: str) -> None:
+    """Reject malformed IP literals and DNS/IDNA host labels."""
+    if ":" in hostname:
+        try:
+            IPv6Address(hostname)
+        except ValueError:
+            _raise_url_error()
+        return
+
+    try:
+        IPv4Address(hostname)
+        return
+    except ValueError:
+        pass
+
+    # Four decimal labels are interpreted as an IPv4 candidate, not a DNS
+    # fallback.  This keeps malformed dotted addresses deterministic.
+    raw_labels = hostname.rstrip(".").split(".")
+    if len(raw_labels) == 4 and all(label.isdecimal() for label in raw_labels):
+        _raise_url_error()
+    if not raw_labels or any(not label for label in raw_labels):
+        _raise_url_error()
+
+    ascii_labels = []
+    for label in raw_labels:
+        try:
+            ascii_label = label.encode("idna").decode("ascii")
+            if ascii_label.lower().startswith("xn--"):
+                decoded = ascii_label.encode("ascii").decode("idna")
+                round_trip = decoded.encode("idna").decode("ascii")
+                if round_trip.lower() != ascii_label.lower():
+                    _raise_url_error()
+        except (UnicodeError, ValueError):
+            _raise_url_error()
+
+        if not _HOST_LABEL.fullmatch(ascii_label):
+            _raise_url_error()
+        ascii_labels.append(ascii_label)
+
+    if len(".".join(ascii_labels)) > 253:
+        _raise_url_error()
 
 
 def _validate_url(url: str) -> str:
     """Return a normalized HTTP(S) URL without making a network request."""
-    if not isinstance(url, str) or not url.strip():
-        raise FirecrawlURLValidationError(
-            "URL must be a non-empty HTTP(S) URL."
-        )
+    if not isinstance(url, str) or not url or url != url.strip():
+        _raise_url_error()
+    if any(
+        character.isspace()
+        or ord(character) < 32
+        or ord(character) == 127
+        for character in url
+    ):
+        _raise_url_error()
 
-    normalized = url.strip()
+    normalized = url
+    scheme_delimiter = normalized.find("://")
+    if scheme_delimiter <= 0:
+        _raise_url_error()
+    authority_start = scheme_delimiter + 3
+    authority_end = len(normalized)
+    for delimiter in "/?#":
+        position = normalized.find(delimiter, authority_start)
+        if position >= 0:
+            authority_end = min(authority_end, position)
+    authority = normalized[authority_start:authority_end]
+    if (
+        not authority
+        or "\\" in authority
+        or any(character.isspace() for character in authority)
+    ):
+        _raise_url_error()
+
     try:
-        parsed = urlparse(normalized)
-    except ValueError:
-        raise FirecrawlURLValidationError(
-            "URL must be a non-empty HTTP(S) URL."
-        ) from None
+        parsed = urlsplit(normalized)
+        hostname = parsed.hostname
+        port = parsed.port
+        username = parsed.username
+        password = parsed.password
+    except (UnicodeError, ValueError):
+        raise FirecrawlURLValidationError(_URL_ERROR) from None
+
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
-        raise FirecrawlURLValidationError(
-            "URL must be a non-empty HTTP(S) URL."
-        )
+        _raise_url_error()
+    if parsed.netloc != authority:
+        _raise_url_error()
+    if username is not None or password is not None or "@" in authority:
+        _raise_url_error()
+    if not hostname or authority.endswith(":"):
+        _raise_url_error()
+
+    bracketed_authority = authority.startswith("[")
+    if bracketed_authority != (":" in hostname):
+        _raise_url_error()
+    if port is not None and not 1 <= port <= 65535:
+        _raise_url_error()
+
+    _validate_hostname(hostname)
     return normalized
 
 
@@ -94,7 +184,10 @@ def _get_client(api_key: str):
             ) from None
 
         try:
-            candidate = Firecrawl(api_key=normalized_key)
+            candidate = Firecrawl(
+                api_key=normalized_key,
+                max_retries=0,
+            )
         except Exception:
             raise FirecrawlInitializationError(
                 "The Firecrawl client could not be initialized."
