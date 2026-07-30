@@ -8,8 +8,8 @@ _validate_project in project_manager.py) to emit warnings on schema drift.
 Design choices:
 - All models use ``extra="allow"`` so organic field additions in existing
   project files don't raise errors — Session 9 can tighten this.
-- All fields default to empty / None so partially-populated early-pipeline
-  shots validate without errors.
+- Optional pipeline fields carry backward-compatible defaults so
+  partially-populated early-pipeline records validate without errors.
 - ``created_at`` stays ``str`` (not datetime) to preserve the exact
   ISO-8601+Z suffix that JSON round-trips rely on.
 - Mutable defaults use Field(default_factory=...) to avoid the shared-dict
@@ -92,6 +92,9 @@ class Shot(BaseModel):
     scene_foley: str = ""
     characters_in_frame: List[str] = Field(default_factory=list)
     primary_character: str = ""
+    objects_in_frame: List[str] = Field(default_factory=list)
+    primary_object: str = ""
+    location_id: str = ""
     action_context: str = ""
     generated_image: str = ""
     generated_video: str = ""
@@ -107,12 +110,39 @@ class Shot(BaseModel):
     postprocess_variants: List[TakeRecord] = Field(default_factory=list)
     approved_final_take_id: str = ""
     performance_takes: List[TakeRecord] = Field(default_factory=list)
+    approved_performance_take_id: str = ""
+    # Historical-only bare field. Runtime writers use the approved_* shape,
+    # but retain this declaration so old project records still round-trip.
     performance_take_id: str = ""
+    performance_engine: str = ""
+    driving_video_path: str = ""
     # Misc shot metadata
     diagnostics: List[dict] = Field(default_factory=list)
     intent_notes: str = ""
     negative_constraints: str = ""
     continuity_constraints: str = ""
+    # Active extension contract. These fields are written or read by current
+    # production paths but were previously admitted only through extra="allow".
+    # Keeping the model permissive preserves historical load compatibility;
+    # public replacement boundaries separately reject undeclared extras.
+    optimizer_cache: dict = Field(default_factory=dict)
+    image_api: str = "AUTO"
+    dialogue: str | List[dict] | None = None
+    duration: float = 5.0
+    motion_description: str = ""
+    shot_type: str = ""
+    shot_class: str = ""
+    performance_budget_mode: str = ""
+    target_api_policy_reason: str = ""
+    ensemble_winner: Optional[str] = None
+    ensemble_scores: List[float] = Field(default_factory=list)
+    director_review: dict = Field(default_factory=dict)
+    auto_approve_audit: List[dict] = Field(default_factory=list)
+    plan_auto_approved: bool = False
+    image_auto_approved: bool = False
+    motion_auto_approved: bool = False
+    final_auto_approved: bool = False
+    approved: Optional[bool] = None
 
 
 class Scene(BaseModel):

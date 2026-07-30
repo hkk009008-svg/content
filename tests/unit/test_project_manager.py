@@ -205,6 +205,28 @@ class TestSaveAndLoadProject:
         loaded = project_manager.load_project(proj["id"])
         assert loaded["name"] == "V2"
 
+    def test_historical_unknown_shot_extension_remains_load_compatible(self):
+        """Public replacement is strict without globally forbidding old data."""
+        proj = project_manager.create_project("Historical extension")
+        scene = project_manager.make_scene("Scene")
+        shot = project_manager.make_shot("Prompt")
+        shot["historical_extension"] = {"retained": True}
+        scene["shots"] = [shot]
+        scene["num_shots"] = 1
+
+        def _seed(latest):
+            latest["scenes"] = [scene]
+            return True
+
+        project_manager.mutate_project(proj["id"], _seed)
+
+        loaded = project_manager.load_project(proj["id"])
+
+        assert (
+            loaded["scenes"][0]["shots"][0]["historical_extension"]
+            == {"retained": True}
+        )
+
 
 class TestProjectIdBoundary:
     @pytest.mark.parametrize(

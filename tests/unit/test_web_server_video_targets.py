@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from domain.models import Shot
 from domain.project_manager import MAX_PROJECT_ID_LENGTH
 from domain.provider_catalog import CATALOG, Modality, RuntimeSnapshot
 
@@ -909,36 +910,333 @@ def test_nested_scene_target_rejection_is_atomic(
     assert after["shots"][1]["target_api"] == "AUTO"
 
 
+_STRICT_INVALID_SHOT_VALUES = [
+    ("id", 7),
+    ("prompt", []),
+    ("camera", []),
+    ("visual_effect", []),
+    ("target_api", []),
+    ("scene_foley", []),
+    ("characters_in_frame", "char_a"),
+    ("primary_character", []),
+    ("objects_in_frame", "object_a"),
+    ("primary_object", []),
+    ("location_id", []),
+    ("action_context", []),
+    ("generated_image", []),
+    ("generated_video", []),
+    ("plan_status", []),
+    ("plan_rejection_reason", []),
+    ("keyframe_takes", {}),
+    ("approved_keyframe_take_id", []),
+    ("motion_takes", {}),
+    ("approved_motion_take_id", []),
+    ("postprocess_variants", {}),
+    ("approved_final_take_id", []),
+    ("performance_takes", {}),
+    ("approved_performance_take_id", []),
+    ("performance_take_id", []),
+    ("performance_engine", []),
+    ("driving_video_path", []),
+    ("diagnostics", {}),
+    ("intent_notes", []),
+    ("negative_constraints", []),
+    ("continuity_constraints", []),
+    ("optimizer_cache", []),
+    ("image_api", []),
+    ("dialogue", 7),
+    ("duration", "5"),
+    ("motion_description", []),
+    ("shot_type", []),
+    ("shot_class", []),
+    ("performance_budget_mode", []),
+    ("target_api_policy_reason", []),
+    ("ensemble_winner", []),
+    ("ensemble_scores", {}),
+    ("director_review", []),
+    ("auto_approve_audit", {}),
+    ("plan_auto_approved", 1),
+    ("image_auto_approved", 1),
+    ("motion_auto_approved", 1),
+    ("final_auto_approved", 1),
+    ("approved", "true"),
+]
+
+
+def test_strict_invalid_cases_cover_every_canonical_shot_field():
+    assert {
+        field
+        for field, _invalid_value in _STRICT_INVALID_SHOT_VALUES
+    } == set(Shot.model_fields)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    _STRICT_INVALID_SHOT_VALUES,
+)
+def test_nested_scene_rejects_schema_invalid_shot_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+    field,
+    invalid_value,
+):
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed[field] = invalid_value
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    expected_error = (
+        "shots[0].target_api must be a string"
+        if field == "target_api"
+        else "shots[0] does not match the shot schema"
+    )
+    assert response.get_json() == {"error": expected_error}
+    assert _load_project(pid)["scenes"][0] == before
+
+
+def test_nested_scene_rejects_unknown_extension_before_mutation(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    import web_server
+
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed["totally_unknown_field"] = {"value": "must not persist"}
+    mutate_bomb = MagicMock(
+        side_effect=AssertionError("unknown extension reached mutation"),
+    )
+    monkeypatch.setattr(web_server, "mutate_project", mutate_bomb)
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": (
+            "shots[0] contains unsupported fields: "
+            "totally_unknown_field"
+        ),
+    }
+    mutate_bomb.assert_not_called()
+    assert _load_project(pid)["scenes"][0] == before
+
+
+@pytest.mark.parametrize("invalid_cache", [[], "cached", None])
+def test_nested_scene_rejects_non_mapping_optimizer_cache_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+    invalid_cache,
+):
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed["optimizer_cache"] = invalid_cache
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "shots[0] does not match the shot schema",
+    }
+    assert _load_project(pid)["scenes"][0] == before
+
+
+_ACTIVE_SHOT_EXTENSIONS = [
+    ("objects_in_frame", ["object_a"]),
+    ("primary_object", "object_a"),
+    ("location_id", "location_a"),
+    (
+        "optimizer_cache",
+        {
+            "source_prompt": "prompt",
+            "spec": {"purpose": "talking_head_full"},
+        },
+    ),
+    ("approved_performance_take_id", "take_performance"),
+    ("performance_engine", "SKIP"),
+    ("driving_video_path", "/tmp/driving.mp4"),
+    ("image_api", "AUTO"),
+    ("dialogue", [{"text": "Hello"}]),
+    ("duration", 4.5),
+    ("motion_description", "subtle head turn"),
+    ("shot_type", "medium"),
+    ("shot_class", "portrait"),
+    ("performance_budget_mode", "budget"),
+    ("target_api_policy_reason", "runtime_unavailable"),
+    ("ensemble_winner", "claude-sonnet-4-6"),
+    ("ensemble_scores", [0.9, 0.8]),
+    (
+        "director_review",
+        {"decision": "APPROVED", "violations": []},
+    ),
+    ("auto_approve_audit", [{"gate": "plan"}]),
+    ("plan_auto_approved", True),
+    ("image_auto_approved", True),
+    ("motion_auto_approved", True),
+    ("final_auto_approved", True),
+    ("approved", None),
+]
+
+
+_ORIGINAL_DECLARED_SHOT_FIELDS = {
+    "id",
+    "prompt",
+    "camera",
+    "visual_effect",
+    "target_api",
+    "scene_foley",
+    "characters_in_frame",
+    "primary_character",
+    "action_context",
+    "generated_image",
+    "generated_video",
+    "plan_status",
+    "plan_rejection_reason",
+    "keyframe_takes",
+    "approved_keyframe_take_id",
+    "motion_takes",
+    "approved_motion_take_id",
+    "postprocess_variants",
+    "approved_final_take_id",
+    "performance_takes",
+    "performance_take_id",
+    "diagnostics",
+    "intent_notes",
+    "negative_constraints",
+    "continuity_constraints",
+}
+
+
+def test_active_extension_cases_cover_every_new_canonical_shot_field():
+    assert {
+        field
+        for field, _valid_value in _ACTIVE_SHOT_EXTENSIONS
+    } == set(Shot.model_fields).difference(_ORIGINAL_DECLARED_SHOT_FIELDS)
+
+
+@pytest.mark.parametrize(("field", "valid_value"), _ACTIVE_SHOT_EXTENSIONS)
+def test_nested_scene_round_trips_each_active_shot_extension(
+    client,
+    tmp_path,
+    monkeypatch,
+    field,
+    valid_value,
+):
+    pid, scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    proposed = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+    proposed[0][field] = valid_value
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"shots": proposed},
+    )
+
+    assert response.status_code == 200
+    persisted = _find_shot(_load_project(pid), shot_id)
+    assert persisted[field] == valid_value
+
+
+_OBSERVED_SHOT_COMPATIBILITY_FIELDS = [
+    (
+        "plan_review",
+        {
+            "decision": "APPROVED",
+            "reason": "",
+            "source": "historical",
+            "violations": [],
+        },
+    ),
+    (
+        "keyframe_review",
+        {
+            "approved_take_id": "take_keyframe",
+            "decision": "APPROVED",
+            "reason": "",
+            "source": "historical",
+        },
+    ),
+    ("scene_location", "studio"),
+]
+
+
+def test_observed_compatibility_cases_cover_boundary_allowlist():
+    import web_server
+
+    assert {
+        field
+        for field, _value in _OBSERVED_SHOT_COMPATIBILITY_FIELDS
+    } == set(web_server._PUBLIC_SHOT_COMPATIBILITY_TYPES)
+
+
+@pytest.mark.parametrize(
+    ("field", "valid_value"),
+    _OBSERVED_SHOT_COMPATIBILITY_FIELDS,
+)
+def test_nested_scene_round_trips_observed_compatibility_field(
+    client,
+    tmp_path,
+    monkeypatch,
+    field,
+    valid_value,
+):
+    pid, scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    proposed = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+    proposed[0][field] = valid_value
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"shots": proposed},
+    )
+
+    assert response.status_code == 200
+    assert _find_shot(_load_project(pid), shot_id)[field] == valid_value
+
+
 @pytest.mark.parametrize(
     ("field", "invalid_value"),
     [
-        ("id", 7),
-        ("prompt", []),
-        ("camera", []),
-        ("visual_effect", []),
-        ("scene_foley", []),
-        ("characters_in_frame", "char_a"),
-        ("primary_character", []),
-        ("action_context", []),
-        ("generated_image", []),
-        ("generated_video", []),
-        ("plan_status", []),
-        ("plan_rejection_reason", []),
-        ("keyframe_takes", {}),
-        ("approved_keyframe_take_id", []),
-        ("motion_takes", {}),
-        ("approved_motion_take_id", []),
-        ("postprocess_variants", {}),
-        ("approved_final_take_id", []),
-        ("performance_takes", {}),
-        ("performance_take_id", []),
-        ("diagnostics", {}),
-        ("intent_notes", []),
-        ("negative_constraints", []),
-        ("continuity_constraints", []),
+        ("plan_review", []),
+        ("keyframe_review", None),
+        ("scene_location", {}),
     ],
 )
-def test_nested_scene_rejects_schema_invalid_shot_atomically(
+def test_nested_scene_rejects_invalid_compatibility_field_atomically(
     client,
     tmp_path,
     monkeypatch,

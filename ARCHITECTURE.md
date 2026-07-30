@@ -115,9 +115,9 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 
 ## 3. Entry point — `web_server.py`
 
-**3162 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
-two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2666-2667](web_server.py:2666)).
-Verified 2026-07-30 via `wc -l web_server.py` → 3162 and an AST route probe →
+**3194 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
+two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2698-2699](web_server.py:2698)).
+Verified 2026-07-30 via `wc -l web_server.py` → 3194 and an AST route probe →
 66 route decorators / 65 route functions.
 
 ### 3.1 Route inventory (grouped)
@@ -149,7 +149,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
-spawned by `POST /generate` ([web_server.py:2005](web_server.py:2005)).
+spawned by `POST /generate` ([web_server.py:2037](web_server.py:2037)).
 **Cancellation is cooperative** — `pipeline.cancel()` flips a flag the worker
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
@@ -160,11 +160,11 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2024](web_server.py:2024)) does
+  `api_stream` ([web_server.py:2056](web_server.py:2056)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:2003](web_server.py:2003)) after success or error.
+  ([web_server.py:2035](web_server.py:2035)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -186,9 +186,9 @@ wind down.
 ### 3.5 cinema/services.py usage (no-pipeline-spin path)
 
 Three endpoints avoid constructing `CinemaPipeline`:
-- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2012](web_server.py:2012))
+- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2044](web_server.py:2044))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
-  live pipeline exists ([web_server.py:2513](web_server.py:2513)).
+  live pipeline exists ([web_server.py:2545](web_server.py:2545)).
 - `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:273](web_server.py:273)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:281](web_server.py:281)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -509,7 +509,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.1 Project lifecycle
 
-1. Operator creates project ([domain/project_manager.py:626](domain/project_manager.py:626)).
+1. Operator creates project ([domain/project_manager.py:653](domain/project_manager.py:653)).
 2. Operator uploads character photos → FLUX Kontext MAX MULTI generates 5
    multi-angle synthetic refs; GhostFaceNet embedding cached as `embedding.npy`.
 3. Operator defines locations → `prompt_fragment` + deterministic seed.
@@ -548,7 +548,7 @@ seeds these `global_settings`:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
 **Filelock:** 10s default timeout via `FileLock(project.lock, timeout=10)`
-at [domain/project_manager.py:71](domain/project_manager.py:71).
+at [domain/project_manager.py:98](domain/project_manager.py:98).
 
 **Storage:** `domain/projects/<12-hex-id>/` with `project.json`,
 `characters/<cid>/`, `locations/<lid>/`, `shots/<sid>/`, `exports/`, `temp/`.
@@ -556,7 +556,7 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 ### 7.3 Decomposition has TWO trigger paths
 
 1. **Operator-initiated, eager** — `POST /api/projects/<pid>/scenes/<sid>/decompose`
-   ([web_server.py:1446](web_server.py:1446)) calls `decompose_scene` directly.
+   ([web_server.py:1871](web_server.py:1871)) calls `decompose_scene` directly.
    UI button on the setup screen.
 2. **Pipeline-internal, lazy** — `cinema_pipeline.py:1013-1047` inside the main
    scene loop, only runs if `scene.get("shots", [])` is empty. Honors
@@ -626,7 +626,7 @@ operator-opts-in-later" shape.
 ([:166](domain/models.py:166)) mirroring the project.json structure
 (scenes, characters, locations, shots, takes, settings). The boundary is
 enforced via `_validate_project()` at
-[domain/project_manager.py:641](domain/project_manager.py:641), called on
+[domain/project_manager.py:668](domain/project_manager.py:668), called on
 both save and load paths through `project_manager.py`.
 
 **Default contract is warn-only.** Any `ValidationError` (or even
@@ -644,7 +644,7 @@ Two env flags formalize an "opt-in production escalation" convention.
 **`CINEMA_STRICT_SCHEMA`** (Session 10 — `5f2fe0b`). When set, `_validate_project()`
 re-raises `ValidationError` instead of warning, letting callers crash hard
 rather than persist invalid schema. Parser at
-[domain/project_manager.py:654](domain/project_manager.py:654):
+[domain/project_manager.py:681](domain/project_manager.py:681):
 
 ```python
 strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
@@ -654,7 +654,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1802](web_server.py:1802) — uses the
+`api_generate_dialogue` at [web_server.py:1834](web_server.py:1834) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1099,13 +1099,20 @@ Direct shot writes, nested scene shot writes, and the terminal generated-shot
 writer all evaluate against the latest lock-held project settings, UTC policy
 date, and runtime snapshot before mutation. Their stable 409 schema names the
 rejected value `target_api`, matching the dispatcher/controller contract.
-Nested scene replacement also strictly validates every declared `Shot` field
-before the lock/write path; malformed IDs, textual fields, nested take lists,
-or diagnostics fail atomically instead of being coerced by the compatibility
-model. Exact historical targets may round-trip only when both their scene and
-shot identifiers resolve uniquely; ambiguous legacy data fails closed.
-Generated/reviewed shot batches are re-evaluated at their terminal write
-boundary so an upstream policy pass cannot authorize a later-mutated target.
+Nested scene replacement rejects keys outside the canonical typed `Shot`
+contract and a narrow typed compatibility set (`plan_review`,
+`keyframe_review`, `scene_location`), then validates every admitted field
+strictly before the lock/write path. The canonical contract includes active
+optimizer, object, performance, dialogue, storyboard,
+decomposition-evidence, and auto-approve fields; malformed extension values
+and unknown scratch fields fail atomically. Historical project loading remains
+permissive (`Shot.extra="allow"`) so old unknown data can be inspected and
+migrated, but the public replacement boundary cannot add or perpetuate an
+undeclared/unallowlisted field. Exact historical targets may round-trip only
+when both their scene and shot identifiers resolve uniquely; ambiguous legacy
+data fails closed. Generated/reviewed shot batches are re-evaluated at their
+terminal write boundary so an upstream policy pass cannot authorize a
+later-mutated target.
 
 Dialogue AUTO routing prepends the ranked native-audio seed before the
 template. Thus known-broken Gemini is retained as rejection evidence while a
@@ -2250,7 +2257,7 @@ script, the local check + CI move together.
 
 - **`main.py`** — already deleted. Root-shim docstrings still mention it.
 - **Root-level module status** (verified 2026-05-29 via `grep -rn 'import <mod>' --include='*.py'`, excluding tests/worktrees):
-  - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `llm/style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:60`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
+  - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `llm/style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:71`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
   - *(`reporter.py` was here as a true-orphan candidate; pruned 2026-06-03.)*
 
 *Last verified: 2026-06-13*

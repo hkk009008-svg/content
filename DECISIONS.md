@@ -3432,3 +3432,73 @@ Evidence:
 - **Cross-ref:** ADR-068; `domain/project_manager.py`; `web_server.py`;
   `domain/models.py`; `scripts/project_id_length_inventory.py`;
   `logs/audit/project-id-length-inventory-2026-07-30.txt`.
+
+## ADR-071 — Public shot replacement admits only typed production fields
+
+- **Date:** 2026-07-30
+- **Status:** Accepted; supersedes ADR-070's claim that strict `Shot`
+  validation alone prevents public organic extensions.
+- **Context.** `Shot` deliberately uses `extra="allow"` for historical project
+  loading. Pydantic therefore retained arbitrary request keys even under
+  `model_validate(..., strict=True)`, so nested scene replacement could persist
+  an unknown field. Several real production fields were also absent from the
+  model. In particular, `optimizer_cache` could be persisted as a list, string,
+  or null; keyframe generation later calls `.get()` on a truthy cache and would
+  crash for the list/string cases.
+- **Rule #12 write/read audit.** The production factory, terminal decomposer,
+  optimizer, performance controller, Chief Director, auto-approve controller,
+  storyboard phase, dialogue path, and image/performance routers establish the
+  active extension contract:
+  - object/location binding: `objects_in_frame`, `primary_object`,
+    `location_id`;
+  - optimizer/image routing: `optimizer_cache`, `image_api`;
+  - performance/dialogue/storyboard routing: `approved_performance_take_id`,
+    `performance_engine`, `driving_video_path`, `dialogue`, `duration`,
+    `motion_description`, `shot_type`, `shot_class`,
+    `performance_budget_mode`;
+  - decomposition/review evidence: `target_api_policy_reason`,
+    `ensemble_winner`, `ensemble_scores`, `director_review`;
+  - auto-approve history: `auto_approve_audit`, the four
+    `<gate>_auto_approved` booleans, and legacy `approved`.
+  The bare `performance_take_id` remains declared for historical records even
+  though runtime writers use `approved_performance_take_id`. Transient
+  `_target_api_policy_reason` (raw decomposition), `continuity_config`
+  (enhanced copy), and `spent_usd` (in-memory gate input) do not cross a
+  terminal project write and are intentionally not public replacement fields.
+- **Decision.**
+  - Declare every active extension above on the canonical `Shot` model with
+    its truthful strict type and default. `optimizer_cache` is a non-null JSON
+    object (`dict`, default `{}`); public null, array, or string values are
+    invalid.
+  - Before Pydantic validation or project mutation, compare each replacement
+    member's keys with `Shot.model_fields` plus a narrow compatibility
+    allowlist and reject any other difference with 400. The observed historical
+    fields `plan_review` and `keyframe_review` accept only objects, while
+    `scene_location` accepts only a string. Then run strict validation across
+    the complete declared contract.
+  - Keep `Shot.extra="allow"` unchanged for internal historical load,
+    inspection, and migration. That compatibility no longer grants public
+    authority to add or perpetuate an undeclared field.
+- **Consequences.**
+  - Unknown request fields and malformed active extensions fail atomically;
+    sibling scene edits in the same request are not saved.
+  - Valid optimizer, object, performance, dialogue, storyboard,
+    decomposition-evidence, and auto-approve records still round-trip.
+  - Existing projects carrying unknown historical fields continue to load.
+    The three observed typed compatibility fields also round-trip through the
+    public replacement endpoint; every other undeclared field returns 400
+    until it is modeled, narrowly allowlisted, or migrated.
+- **Evidence.** `tests/unit/test_web_server_video_targets.py` mutation-pins the
+  unknown-field bypass, bad/good optimizer cache, strict invalid values for
+  every canonical `Shot` field, and a valid round-trip for every newly declared
+  extension and observed compatibility field.
+  `tests/unit/test_project_manager.py` proves an unknown historical field still
+  survives internal save/load. The audited production sites are in
+  `domain/project_manager.py`, `domain/scene_decomposer.py`,
+  `domain/continuity_engine.py`,
+  `cinema/shots/controller.py`, `cinema/auto_approve.py`,
+  `cinema/review/controller.py`, `cinema/phases/motion_render.py`,
+  `cinema/storyboard.py`, `cinema_pipeline.py`, `llm/prompt_optimizer.py`, and
+  `web_server.py`.
+- **Cross-ref:** ADR-070; `domain/models.py`; `web_server.py`;
+  `tests/unit/test_web_server_video_targets.py`.

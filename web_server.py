@@ -120,6 +120,14 @@ _GATE_STAGES = frozenset({
 _running_cores: dict[str, PipelineCore] = {}
 _cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
+_PUBLIC_SHOT_COMPATIBILITY_TYPES = {
+    # Observed historical project fields. They are no longer active
+    # production writers/readers, so keep them outside the canonical Shot
+    # model while allowing a strictly typed public round-trip.
+    "plan_review": dict,
+    "keyframe_review": dict,
+    "scene_location": str,
+}
 
 
 def _parse_ip_adapter_weight(value) -> float:
@@ -1656,6 +1664,19 @@ def api_update_scene(pid, sid):
                 return jsonify({
                     "error": f"shots[{index}] must be a JSON object",
                 }), 400
+            unsupported_fields = sorted(
+                set(shot).difference(
+                    Shot.model_fields,
+                    _PUBLIC_SHOT_COMPATIBILITY_TYPES,
+                )
+            )
+            if unsupported_fields:
+                return jsonify({
+                    "error": (
+                        f"shots[{index}] contains unsupported fields: "
+                        + ", ".join(unsupported_fields)
+                    ),
+                }), 400
             if (
                 "target_api" not in shot
                 or not isinstance(shot["target_api"], str)
@@ -1664,6 +1685,17 @@ def api_update_scene(pid, sid):
                     "error": (
                         f"shots[{index}].target_api must be a string"
                     ),
+                }), 400
+            if any(
+                field in shot
+                and not isinstance(
+                    shot[field],
+                    _PUBLIC_SHOT_COMPATIBILITY_TYPES[field],
+                )
+                for field in _PUBLIC_SHOT_COMPATIBILITY_TYPES
+            ):
+                return jsonify({
+                    "error": f"shots[{index}] does not match the shot schema",
                 }), 400
             try:
                 # The normal persistence validator is intentionally
