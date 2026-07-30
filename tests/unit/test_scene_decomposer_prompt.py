@@ -89,7 +89,7 @@ def _valid_shot():
         "prompt": "[SHOT] test [SCENE] room [ACTION] walk [OUTFIT] coat [QUALITY] film",
         "camera": sd.CAMERA_MOTIONS[0],
         "visual_effect": sd.VISUAL_EFFECTS[0],
-        "target_api": sd.TARGET_APIS[0],
+        "target_api": "AUTO",
         "scene_foley": "room tone",
         "characters_in_frame": ["char_a"],
         "action_context": "walking",
@@ -193,15 +193,17 @@ def test_shared_shot_schema_preserves_shape_required_fields_and_enums():
     }
     assert properties["camera"]["enum"] == sd.CAMERA_MOTIONS
     assert properties["visual_effect"]["enum"] == sd.VISUAL_EFFECTS
-    assert properties["target_api"]["enum"] == sd.TARGET_APIS
+    assert properties["target_api"]["enum"] == sd.get_eligible_target_apis()
+    assert properties["target_api"]["enum"] != sd.TARGET_APIS
     assert properties["characters_in_frame"]["items"] == {"type": "string"}
 
 
 def test_shared_shot_schema_enum_lists_are_mutation_isolated():
+    authoring_target_apis = sd.get_eligible_target_apis()
     enum_sources = {
         "camera": sd.CAMERA_MOTIONS,
         "visual_effect": sd.VISUAL_EFFECTS,
-        "target_api": sd.TARGET_APIS,
+        "target_api": authoring_target_apis,
     }
     first = sd._build_cinedecompose_shot_schema()
 
@@ -229,6 +231,8 @@ def test_injected_runtime_drives_one_identical_schema_validator_and_write_set():
     )
     allowed = _shot_item_schema(schema)["properties"]["target_api"]["enum"]
     assert allowed == ["AUTO", "KLING_3_0", "SEEDANCE", "VEO"]
+    assert allowed != sd.TARGET_APIS
+    assert {"SORA_NATIVE", "KLING_NATIVE", "LTX", "SORA_2"}.isdisjoint(allowed)
 
     for target_api in allowed:
         raw = _valid_shot()

@@ -18,6 +18,43 @@ def _fal_snapshot() -> RuntimeSnapshot:
 
 
 # ---------------------------------------------------------------------------
+# Legacy update compatibility vs dynamic authoring eligibility
+# ---------------------------------------------------------------------------
+
+def test_target_apis_preserves_legacy_update_round_trip_compatibility():
+    compatibility_only = {"SORA_NATIVE", "KLING_NATIVE", "LTX", "SORA_2"}
+
+    assert sd.TARGET_APIS == list(sd.API_REGISTRY.keys())
+    assert compatibility_only <= set(sd.TARGET_APIS)
+
+    eligible = sd.get_eligible_target_apis(
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert eligible == ["AUTO", "KLING_3_0", "SEEDANCE", "VEO"]
+    assert compatibility_only.isdisjoint(eligible)
+
+
+def test_target_apis_does_not_claim_live_truth_when_runtime_changes_after_import():
+    compatibility_snapshot = list(sd.TARGET_APIS)
+
+    without_runtime = sd.get_eligible_target_apis(
+        snapshot=RuntimeSnapshot(),
+        on_date=PRE_SUNSET,
+    )
+    with_fal_runtime = sd.get_eligible_target_apis(
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert without_runtime == ["AUTO"]
+    assert with_fal_runtime == ["AUTO", "KLING_3_0", "SEEDANCE", "VEO"]
+    assert sd.TARGET_APIS == compatibility_snapshot
+    assert sd.TARGET_APIS != without_runtime
+    assert sd.TARGET_APIS != with_fal_runtime
+
+
+# ---------------------------------------------------------------------------
 # API_REGISTRY — GEMINI_OMNI entry shape
 # ---------------------------------------------------------------------------
 

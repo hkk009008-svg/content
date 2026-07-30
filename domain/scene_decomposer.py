@@ -118,10 +118,10 @@ def get_eligible_target_apis(
     return list(eligible_shot_targets(snapshot=snapshot, on_date=on_date))
 
 
-# Import-time compatibility snapshot only.  Executable schema and validation
-# paths call ``get_eligible_target_apis`` so injected runtime/date truth remains
-# identical across the LLM contract and the eventual ``make_shot`` write.
-TARGET_APIS = get_eligible_target_apis()
+# Legacy web/UI update compatibility enum for round-tripping persisted targets.
+# It deliberately does not claim live eligibility; authoring/schema/validation
+# uses ``get_eligible_target_apis`` or the same typed policy directly.
+TARGET_APIS = list(API_REGISTRY.keys())
 
 # Purpose tags — the abstraction over shot-type that drives purpose-based routing.
 # Each purpose maps to a ranked list of API keys, best-first. The orchestrator
