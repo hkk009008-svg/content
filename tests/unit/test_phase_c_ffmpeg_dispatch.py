@@ -328,6 +328,51 @@ def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
         {"key": "SORA_2", "reason": "retired"},
         {"key": "GEMINI_OMNI", "reason": "unsupported"},
     ]
+    assert cascade["attempt_history"] == [
+        "VEO_NATIVE",
+        "LTX",
+        "VEO_NATIVE",
+        "LTX",
+    ]
+
+
+def test_cooldown_winner_keeps_prior_cycle_attempt_provenance(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Cycle dedupe resets after cooldown; the audit trail must not."""
+
+    output = str(tmp_path / "second_cycle_winner.mp4")
+    attempted: list[str] = []
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.side_effect = [None, output]
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(phase_c_ffmpeg.time, "sleep", MagicMock())
+
+    cascade: dict = {}
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        attempted_apis=attempted,
+        ctx=_ctx(cascade_retry_limit=1),
+        _cascade_out=cascade,
+    )
+
+    assert result == output
+    assert ltx_instance.generate_video.call_count == 2
+    # The public cycle guard remains deduped for callers that inspect it.
+    assert attempted == ["LTX"]
+    # The success record is append-only and proves the second-cycle dispatch.
+    assert cascade["attempt_history"] == ["LTX", "LTX"]
+    assert cascade["cascade_metadata"] == {
+        "engine": "LTX",
+        "attempts": ["LTX", "LTX"],
+    }
 
 
 @pytest.mark.parametrize(

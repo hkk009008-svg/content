@@ -277,6 +277,7 @@ def generate_ai_video(
         _cascade_out=_cascade_out,
         admitted_candidates=admitted_candidates,
         aspect=aspect,
+        _attempt_history=list(attempted_apis or ()),
     )
 
 
@@ -301,6 +302,7 @@ def _execute_admitted_video_chain(
     *,
     admitted_candidates: tuple[str, ...],
     aspect: str,
+    _attempt_history: list[str],
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -342,17 +344,24 @@ def _execute_admitted_video_chain(
     _api_upper = target_api.upper()
     if _api_upper not in attempted_apis:
         attempted_apis.append(_api_upper)
+    # ``attempted_apis`` is deliberately per-cycle: it prevents a fallback
+    # from being dispatched twice before the cooldown.  Provenance has a
+    # different contract and must retain every actual dispatch, including the
+    # same engine appearing again after a cooldown retry.
+    _attempt_history.append(_api_upper)
+    if _cascade_out is not None:
+        _cascade_out["attempt_history"] = list(_attempt_history)
 
     def _record_video_cascade(winning_engine: str) -> None:
         """Write cascade_metadata into _cascade_out when this engine succeeds.
-        attempted_apis reflects all engines tried so far in chronological order
-        (oldest first; deduped on append). Called before each engine's
-        successful return — Session 6 P2-3.
+        ``_attempt_history`` reflects every actual dispatch in chronological
+        order, including repeated engines across cooldown cycles.  The separate
+        ``attempted_apis`` list remains the current cycle's dedupe guard.
         """
         if _cascade_out is not None:
             _cascade_out["cascade_metadata"] = {
                 "engine": winning_engine,
-                "attempts": list(attempted_apis),
+                "attempts": list(_attempt_history),
             }
 
     def _note_billed_attempt(engine: str) -> None:
@@ -437,6 +446,7 @@ def _execute_admitted_video_chain(
                     ctx=ctx, _cascade_out=_cascade_out,
                     admitted_candidates=admitted_candidates,
                     aspect=aspect,
+                    _attempt_history=_attempt_history,
                 )
 
         # All APIs failed — try the cascade once more after a quota cooldown.
@@ -476,6 +486,7 @@ def _execute_admitted_video_chain(
             ctx=ctx, _cascade_out=_cascade_out,
             admitted_candidates=admitted_candidates,
             aspect=aspect,
+            _attempt_history=_attempt_history,
         )
 
     # Provider imports are deliberately delayed until after the entry fence.

@@ -18,6 +18,7 @@ Harness mirrors TestAutoRoutingDecisions in test_dialogue_routing.py.
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from datetime import date
@@ -318,6 +319,94 @@ class TestPreSpendBudgetGate:
         ]
         assert motion_events, "expected a MOTION progress event"
         assert motion_events[0].kwargs.get("engine") == "KLING_NATIVE"
+
+    def test_real_aspect_reject_never_selects_leftover_or_existing_destination(
+        self,
+        tmp_path,
+    ):
+        """The real dispatcher can leave a billed file after rejecting it.
+
+        Drive the controller through that real call path.  The mutable provider
+        output must stay isolated from a pre-existing canonical take, must be
+        cleaned after terminal rejection, and must still be billed as rejected.
+        """
+        import phase_c_ffmpeg
+
+        project = self._make_project(target_api="KLING_NATIVE")
+        project["global_settings"].update(
+            {"aspect_ratio": "9:16", "cascade_retry_limit": 0}
+        )
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project, tmp_path
+        )
+        canonical = str(tmp_path / "canonical_take.mp4")
+        with open(canonical, "wb") as handle:
+            handle.write(b"pre-existing-valid-take")
+        ctrl._take_output_path = MagicMock(return_value=canonical)
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=AssertionError("rejected output reached finalize")
+        )
+
+        provider_paths: list[str] = []
+        kling = MagicMock()
+
+        def _write_landscape_candidate(**kwargs):
+            candidate = kwargs["output_path"]
+            provider_paths.append(candidate)
+            with open(candidate, "wb") as handle:
+                handle.write(b"billed-landscape-reject")
+            return candidate
+
+        kling.generate_video.side_effect = _write_landscape_candidate
+
+        with (
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch(
+                "phase_c_ffmpeg._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "phase_c_ffmpeg._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch("phase_c_ffmpeg._load_fal_client", return_value=None),
+            patch(
+                "phase_c_ffmpeg.probe_final_media",
+                return_value={"format": {"width": 1920, "height": 1080}},
+            ),
+            patch("kling_native.KlingNativeAPI", return_value=kling),
+            patch(
+                "workflow_selector.classify_shot_type",
+                return_value="medium",
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result == {"success": False, "error": "Video generation failed"}
+        ctrl._finalize_motion_take.assert_not_called()
+        assert provider_paths and provider_paths[0] != canonical
+        assert not any(os.path.exists(path) for path in provider_paths)
+        with open(canonical, "rb") as handle:
+            assert handle.read() == b"pre-existing-valid-take"
+
+        reject_calls = [
+            call
+            for call in cost_tracker.record_api_call.call_args_list
+            if call.kwargs.get("operation") == "motion_generation_rejected"
+        ]
+        assert len(reject_calls) == 1
+        assert reject_calls[0].args[0] == "KLING_NATIVE"
+        assert not any(
+            call.kwargs.get("operation") == "motion_generation"
+            for call in cost_tracker.record_api_call.call_args_list
+        )
 
     @pytest.mark.parametrize(
         ("target_api", "snapshot", "expected_reason"),

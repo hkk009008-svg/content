@@ -81,6 +81,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import tempfile
 import time
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
@@ -2122,25 +2123,60 @@ class ShotController:
             if raw_api == "AUTO"
             else None
         )
-        temp_vid = generate_ai_video(
-            source_image,
-            shot.get("camera", "zoom_in_slow"),
-            dispatch_target_api,
-            vid_path,
-            pacing="calculated",
-            character_id=cc.get("primary_character", ""),
-            multi_angle_refs=cc.get("multi_angle_refs", []),
-            negative_prompt=shot.get("negative_constraints", ""),
-            shot_type=resolved_shot_type,
-            video_fallbacks=dispatch_fallbacks,
-            driving_video_path=driving_video_path,
-            has_dialogue=has_dialogue,
-            dialogue_native_audio=dialogue_native_audio,
-            duration=_veo_duration,
-            ctx=motion_ctx,
-            _cascade_out=_video_cascade,
+        # Providers share one output path across the cascade.  Keep that
+        # mutable candidate isolated from the canonical take destination:
+        # aspect rejection may leave a non-empty file even though the
+        # dispatcher truthfully returns None.  Only a returned, existing
+        # candidate may replace ``vid_path``.  The unique tempfile is owned by
+        # this call, so rejection cleanup cannot delete a pre-existing take.
+        candidate_fd, candidate_vid = tempfile.mkstemp(
+            prefix=f".{os.path.basename(vid_path)}.",
+            suffix=".candidate.mp4",
+            dir=os.path.dirname(vid_path) or ".",
         )
-        final_vid = temp_vid or vid_path
+        os.close(candidate_fd)
+        try:
+            temp_vid = generate_ai_video(
+                source_image,
+                shot.get("camera", "zoom_in_slow"),
+                dispatch_target_api,
+                candidate_vid,
+                pacing="calculated",
+                character_id=cc.get("primary_character", ""),
+                multi_angle_refs=cc.get("multi_angle_refs", []),
+                negative_prompt=shot.get("negative_constraints", ""),
+                shot_type=resolved_shot_type,
+                video_fallbacks=dispatch_fallbacks,
+                driving_video_path=driving_video_path,
+                has_dialogue=has_dialogue,
+                dialogue_native_audio=dialogue_native_audio,
+                duration=_veo_duration,
+                ctx=motion_ctx,
+                _cascade_out=_video_cascade,
+            )
+            final_vid = temp_vid
+            if (
+                final_vid
+                and os.path.exists(final_vid)
+                and os.path.abspath(final_vid) == os.path.abspath(candidate_vid)
+            ):
+                os.replace(candidate_vid, vid_path)
+                final_vid = vid_path
+        finally:
+            # On failure/rejection the owned candidate may contain a billed
+            # provider output.  It must remain accounting evidence, not a
+            # selectable take artifact.
+            try:
+                os.remove(candidate_vid)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.warning(
+                    "Unable to remove rejected motion candidate",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "candidate_path": candidate_vid},
+                )
+
         if not final_vid or not os.path.exists(final_vid):
             if _video_cascade.get("policy_error"):
                 return {
@@ -2163,11 +2199,9 @@ class ShotController:
             take.setdefault("cascade_metadata", {})["policy_rejections"] = list(
                 _video_cascade["policy_rejections"]
             )
-        # Billed-attempt trail rides along for the finalize cost record —
-        # UNCONDITIONALLY (money-gate NIT 2026-07-11): a leftover aspect-
-        # rejected file can reach finalize with billed attempts but NO
-        # winner metadata; gating the copy under cascade_metadata dropped
-        # those rejects.
+        # Billed-attempt trail rides along for the finalize cost record
+        # unconditionally. A successful winner can follow one or more billed
+        # rejects, including repeated attempts across cooldown cycles.
         if _video_cascade.get("billed_attempts"):
             take.setdefault("cascade_metadata", {})["billed_attempts"] = list(
                 _video_cascade["billed_attempts"]
