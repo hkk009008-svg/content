@@ -3340,3 +3340,38 @@ Evidence:
 - **Cross-ref:** `domain/video_engine_policy.py`;
   `domain/scene_decomposer.py`; `domain/project_manager.py`; `web_server.py`;
   `tests/unit/test_web_server_video_targets.py`.
+
+## ADR-069 — Canonicalize storyboard stems and prove containment before side effects
+
+- **Date:** 2026-07-30
+- **Status:** Accepted; narrows ADR-067's safe-component and containment
+  requirements.
+- **Context.** ADR-067 rejected separators and dot components, but literal
+  whitespace, controls, Unicode, recursively encoded controls, and path
+  components long enough to exceed filesystem limits still crossed the stem
+  fence. Its lexical and realpath containment checks also ran only after the
+  source probe and output-directory creation, so a forced rejection could
+  leave an artifact and the containment conditions were not independently
+  mutation-pinned.
+- **Decision.** Recursively percent-decode through a fixed maximum of eight
+  passes, then accept only a canonical ASCII stem of at most 128 characters:
+  an alphanumeric first character, followed by alphanumerics, dot, underscore,
+  or hyphen, without a terminal dot. Use that canonical value in the output
+  names. Construct all deterministic names and prove both lexical and realpath
+  containment before source probing, directory creation, subprocess launch, or
+  write. Preserve the later real, non-symlink, empty invocation-owned directory
+  check and all ADR-067 media validation.
+- **Consequences.**
+  - The fixed production stem `segment` and deterministic filenames are
+    unchanged.
+  - Noncanonical, overlong, or excessively encoded caller stems fail without
+    an ffprobe, mkdir, subprocess, or output artifact.
+  - The 128-character bound leaves 119 bytes below the common 255-byte component
+    limit after the eight-byte `_000.mp4` suffix.
+- **Evidence.** `tests/unit/test_f2a_storyboard_primitives.py` pins the exact
+  max/max+1/huge boundary, literal and one-/two-level encoded whitespace and
+  controls, Unicode and separators, bounded recursive decoding, canonicalized
+  safe input, and separate lexical/realpath escape mutations with probe/mkdir/
+  subprocess bombs.
+- **Cross-ref:** ADR-067; `phase_c_ffmpeg.py`;
+  `tests/unit/test_f2a_storyboard_primitives.py`.

@@ -489,10 +489,30 @@ class TestSplitVideoIntoSegments:
             "",
             ".",
             "..",
+            "-leading-dash",
+            "_leading-underscore",
+            " leading-space",
+            "trailing-space ",
+            "trailing.",
+            "embedded space",
+            "embedded\ttab",
+            "embedded\nnewline",
+            "embedded\x1bescape",
+            "유니코드",
             "../escaped",
             "nested/escaped",
             "/absolute/escaped",
             r"..\escaped",
+            "segment%0aescaped",
+            "segment%250aescaped",
+            "segment%09escaped",
+            "segment%2509escaped",
+            "segment%1bescaped",
+            "segment%251bescaped",
+            "segment%2fescaped",
+            "segment%252fescaped",
+            "segment%5cescaped",
+            "segment%255cescaped",
             "%2e%2e%2fescaped",
             "%252e%252e%252fescaped",
             "%2e%2e%5cescaped",
@@ -523,6 +543,250 @@ class TestSplitVideoIntoSegments:
                 )
 
         assert not out_dir.exists()
+
+    def test_safe_stem_length_boundary_preserves_filename_headroom(
+        self,
+        tmp_path,
+        mocked_storyboard_media,
+    ):
+        """The accepted maximum remains below common component limits."""
+        from phase_c_ffmpeg import (
+            STORYBOARD_SEGMENT_STEM_MAX_LENGTH,
+            split_video_into_segments,
+        )
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+        stem = "a" * STORYBOARD_SEGMENT_STEM_MAX_LENGTH
+
+        with patch(
+            "phase_c_ffmpeg.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ):
+            result = split_video_into_segments(
+                source_path=str(src),
+                durations=[1.0],
+                output_dir=str(out_dir),
+                stem=stem,
+            )
+
+        assert os.path.basename(result[0]) == f"{stem}_000.mp4"
+
+    @pytest.mark.parametrize("extra_length", [1, 4096])
+    def test_oversize_stem_rejected_before_probe_mkdir_or_write(
+        self,
+        tmp_path,
+        extra_length,
+    ):
+        """Max+1 and huge components fail before any filesystem side effect."""
+        from phase_c_ffmpeg import (
+            STORYBOARD_SEGMENT_STEM_MAX_LENGTH,
+            split_video_into_segments,
+        )
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+        stem = "a" * (STORYBOARD_SEGMENT_STEM_MAX_LENGTH + extra_length)
+
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                side_effect=AssertionError("oversize stem reached ffprobe"),
+            ),
+            patch(
+                "phase_c_ffmpeg.os.makedirs",
+                side_effect=AssertionError("oversize stem reached mkdir"),
+            ),
+            patch(
+                "phase_c_ffmpeg.subprocess.run",
+                side_effect=AssertionError("oversize stem reached subprocess"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="safe filename component"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[1.0],
+                    output_dir=str(out_dir),
+                    stem=stem,
+                )
+
+        assert not out_dir.exists()
+
+    def test_excessive_percent_decode_depth_rejected_before_side_effects(
+        self,
+        tmp_path,
+    ):
+        """A stem still encoded after the fixed decode budget fails closed."""
+        from phase_c_ffmpeg import (
+            STORYBOARD_SEGMENT_STEM_MAX_DECODE_PASSES,
+            split_video_into_segments,
+        )
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+        stem = "%73egment"
+        for _ in range(STORYBOARD_SEGMENT_STEM_MAX_DECODE_PASSES):
+            stem = stem.replace("%", "%25")
+
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                side_effect=AssertionError("deep encoding reached ffprobe"),
+            ),
+            patch(
+                "phase_c_ffmpeg.os.makedirs",
+                side_effect=AssertionError("deep encoding reached mkdir"),
+            ),
+            patch(
+                "phase_c_ffmpeg.subprocess.run",
+                side_effect=AssertionError("deep encoding reached subprocess"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="safe filename component"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[1.0],
+                    output_dir=str(out_dir),
+                    stem=stem,
+                )
+
+        assert not out_dir.exists()
+
+    def test_percent_encoded_safe_stem_is_canonicalized(
+        self,
+        tmp_path,
+        mocked_storyboard_media,
+    ):
+        """Decode precedes the allowlist and only the canonical stem is used."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+
+        with patch(
+            "phase_c_ffmpeg.subprocess.run",
+            return_value=MagicMock(returncode=0),
+        ):
+            result = split_video_into_segments(
+                source_path=str(src),
+                durations=[1.0],
+                output_dir=str(out_dir),
+                stem="%2573egment",
+            )
+
+        assert result == [
+            os.path.abspath(out_dir / "segment_000.mp4")
+        ]
+
+    def test_lexical_containment_rejects_before_probe_mkdir_or_write(
+        self,
+        tmp_path,
+    ):
+        """A constructed path outside output_dir fails before any side effect."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+        escaped_path = tmp_path / "escaped.mp4"
+        real_join = os.path.join
+        real_realpath = os.path.realpath
+        source_path_text = os.fspath(src)
+        output_dir_text = os.fspath(out_dir)
+        escaped_path_text = os.fspath(escaped_path)
+        contained_realpath_text = real_join(
+            real_realpath(output_dir_text),
+            "segment_000.mp4",
+        )
+
+        def escape_segment(*parts):
+            if len(parts) == 2 and parts[1] == "segment_000.mp4":
+                return escaped_path_text
+            return real_join(*parts)
+
+        def keep_realpath_contained(path):
+            if os.fspath(path) == escaped_path_text:
+                return contained_realpath_text
+            return real_realpath(path)
+
+        with (
+            patch("phase_c_ffmpeg.os.path.join", side_effect=escape_segment),
+            patch(
+                "phase_c_ffmpeg.os.path.realpath",
+                side_effect=keep_realpath_contained,
+            ),
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                side_effect=AssertionError("escaped path reached ffprobe"),
+            ),
+            patch(
+                "phase_c_ffmpeg.os.makedirs",
+                side_effect=AssertionError("escaped path reached mkdir"),
+            ),
+            patch(
+                "phase_c_ffmpeg.subprocess.run",
+                side_effect=AssertionError("escaped path reached subprocess"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="segment path escaped"):
+                split_video_into_segments(
+                    source_path=source_path_text,
+                    durations=[1.0],
+                    output_dir=output_dir_text,
+                )
+
+        assert not out_dir.exists()
+        assert not escaped_path.exists()
+
+    def test_realpath_containment_rejects_before_probe_mkdir_or_write(
+        self,
+        tmp_path,
+    ):
+        """A symlink-resolved candidate escape fails before any side effect."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+        escaped_path = tmp_path / "external" / "segment_000.mp4"
+        real_realpath = os.path.realpath
+
+        def escape_segment(path):
+            if os.fspath(path).endswith("segment_000.mp4"):
+                return str(escaped_path)
+            return real_realpath(path)
+
+        with (
+            patch(
+                "phase_c_ffmpeg.os.path.realpath",
+                side_effect=escape_segment,
+            ),
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                side_effect=AssertionError("escaped path reached ffprobe"),
+            ),
+            patch(
+                "phase_c_ffmpeg.os.makedirs",
+                side_effect=AssertionError("escaped path reached mkdir"),
+            ),
+            patch(
+                "phase_c_ffmpeg.subprocess.run",
+                side_effect=AssertionError("escaped path reached subprocess"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="segment path escaped"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[1.0],
+                    output_dir=str(out_dir),
+                )
+
+        assert not out_dir.exists()
+        assert not escaped_path.exists()
 
     def test_symlink_output_directory_is_not_invocation_owned(
         self,

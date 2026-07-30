@@ -1226,11 +1226,11 @@ Core: `_veo_quota_blocked`, `_load_fal_client`,
 `_video_policy_current_date`, `_dispatch_policy_error`, `generate_ai_video`,
 `_execute_admitted_video_chain`,
 `stitch_modules` (ffmpeg concat demuxer), `_probe_storyboard_video`
-([phase_c_ffmpeg.py:1345](phase_c_ffmpeg.py:1345)),
+([phase_c_ffmpeg.py:1347](phase_c_ffmpeg.py:1347)),
 `validate_storyboard_segment`
-([phase_c_ffmpeg.py:1448](phase_c_ffmpeg.py:1448)),
+([phase_c_ffmpeg.py:1450](phase_c_ffmpeg.py:1450)),
 `split_video_into_segments`
-([phase_c_ffmpeg.py:1486](phase_c_ffmpeg.py:1486)),
+([phase_c_ffmpeg.py:1488](phase_c_ffmpeg.py:1488)),
 `assess_motion_quality` (OpenCV Farneback flow →
 {smoothness, frozen_ratio, recommendation∈{accept,interpolate,regenerate}}),
 `apply_color_grade` (8 named presets + optional LUT3D), `adjust_speed` (setpts
@@ -1240,11 +1240,16 @@ Core: `_veo_quota_blocked`, `_load_fal_client`,
 The storyboard splitter proves source coverage from the video stream only:
 either its explicit duration or decoded-frame count divided by a validated
 average frame rate, never the potentially audio-inflated container duration.
-Expected and allocated durations must be finite and positive. Output names are
-single contained components in a real invocation-owned directory; source and
-cut durations use an inclusive two-frame tolerance. The splitter validates each
-cut, then `MotionRenderPhase` independently validates the complete batch again
-before its first take write.
+Expected and allocated durations must be finite and positive. Output stems are
+bounded to 128 characters, recursively percent-decoded through at most eight
+passes, then restricted to a canonical ASCII component: an alphanumeric first
+character, followed only by alphanumerics, dot, underscore, or hyphen, with no
+terminal dot. Every deterministic path is proven lexically and
+realpath-contained before source probing, directory creation, subprocesses, or
+writes. The directory must then be real and invocation-owned; source and cut
+durations use an inclusive two-frame tolerance. The splitter validates each cut,
+then `MotionRenderPhase` independently validates the complete batch again before
+its first take write.
 **Scene transitions (opt-in, cycle-17):** `xfade_concat` chains per-scene videos
 with an xfade (video) + a *conditional* acrossfade — audio is crossfaded only when
 every input has an audio stream (`_has_audio_stream`); otherwise the output is

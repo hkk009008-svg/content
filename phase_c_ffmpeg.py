@@ -1340,6 +1340,8 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
 STORYBOARD_SEGMENT_MIN_TOLERANCE_S = 0.05
 STORYBOARD_SEGMENT_MAX_TOLERANCE_S = 0.25
 STORYBOARD_SEGMENT_COMPARISON_EPSILON_S = 1e-9
+STORYBOARD_SEGMENT_STEM_MAX_LENGTH = 128
+STORYBOARD_SEGMENT_STEM_MAX_DECODE_PASSES = 8
 
 
 def _probe_storyboard_video(path: str) -> tuple:
@@ -1502,8 +1504,9 @@ def split_video_into_segments(
         output_dir: Invocation-owned directory in which to write segment
             files.  It is created if absent and must be empty, real, and
             non-symlink at entry.
-        stem: One safe filename-component prefix for segment files.  Final
-            names are ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
+        stem: One canonical ASCII filename-component prefix for segment files,
+            at most 128 characters.  Final names are
+            ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
 
     Returns:
         List of absolute paths to the written segment files, in order.
@@ -1529,24 +1532,46 @@ def split_video_into_segments(
     """
     from urllib.parse import unquote
 
-    if not isinstance(stem, str) or not stem:
+    if (
+        not isinstance(stem, str)
+        or not stem
+        or len(stem) > STORYBOARD_SEGMENT_STEM_MAX_LENGTH
+    ):
         raise RuntimeError(
             "split_video_into_segments: stem must be one safe filename "
             "component"
         )
     decoded_stem = stem
-    while True:
-        next_decoded_stem = unquote(decoded_stem)
+    for decode_pass in range(STORYBOARD_SEGMENT_STEM_MAX_DECODE_PASSES + 1):
+        try:
+            next_decoded_stem = unquote(decoded_stem, errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                "split_video_into_segments: stem must be one safe filename "
+                "component"
+            ) from exc
         if next_decoded_stem == decoded_stem:
             break
+        if (
+            decode_pass == STORYBOARD_SEGMENT_STEM_MAX_DECODE_PASSES
+            or len(next_decoded_stem) > STORYBOARD_SEGMENT_STEM_MAX_LENGTH
+        ):
+            raise RuntimeError(
+                "split_video_into_segments: stem must be one safe filename "
+                "component"
+            )
         decoded_stem = next_decoded_stem
-    if any(
-        candidate in {".", ".."}
-        or "\x00" in candidate
-        or "/" in candidate
-        or "\\" in candidate
-        or os.path.isabs(candidate)
-        for candidate in (stem, decoded_stem)
+    if (
+        not decoded_stem
+        or len(decoded_stem) > STORYBOARD_SEGMENT_STEM_MAX_LENGTH
+        or not decoded_stem[0].isascii()
+        or not decoded_stem[0].isalnum()
+        or decoded_stem.endswith(".")
+        or any(
+            not char.isascii()
+            or not (char.isalnum() or char in "._-")
+            for char in decoded_stem
+        )
     ):
         raise RuntimeError(
             "split_video_into_segments: stem must be one safe filename "
@@ -1574,6 +1599,42 @@ def split_video_into_segments(
             )
         normalized_durations.append(duration_s)
 
+    # Resolve every deterministic output and prove both lexical and realpath
+    # containment before source probing, directory creation, subprocesses, or
+    # writes.  The later ownership check still rejects a final symlink or
+    # non-empty directory after the source-coverage precondition succeeds.
+    try:
+        owned_output_dir = os.path.abspath(os.fspath(output_dir))
+        real_output_dir = os.path.realpath(owned_output_dir)
+        segment_paths = []
+        for idx in range(len(normalized_durations)):
+            candidate_path = os.path.abspath(
+                os.path.join(
+                    owned_output_dir,
+                    f"{decoded_stem}_{idx:03d}.mp4",
+                )
+            )
+            if (
+                os.path.commonpath((owned_output_dir, candidate_path))
+                != owned_output_dir
+                or os.path.commonpath(
+                    (real_output_dir, os.path.realpath(candidate_path))
+                )
+                != real_output_dir
+            ):
+                raise RuntimeError(
+                    "split_video_into_segments: segment path escaped "
+                    "invocation-owned directory"
+                )
+            segment_paths.append(candidate_path)
+    except RuntimeError:
+        raise
+    except (OSError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "split_video_into_segments: segment path escaped "
+            "invocation-owned directory"
+        ) from exc
+
     source_duration_s, source_tolerance_s = _probe_storyboard_video(source_path)
     allocated_duration_s = sum(normalized_durations)
     if (
@@ -1589,7 +1650,6 @@ def split_video_into_segments(
             f"tolerance={source_tolerance_s:.3f}s)"
         )
 
-    owned_output_dir = os.path.abspath(os.fspath(output_dir))
     os.makedirs(owned_output_dir, exist_ok=True)
     output_stat = os.stat(owned_output_dir, follow_symlinks=False)
     if not stat.S_ISDIR(output_stat.st_mode):
@@ -1603,28 +1663,6 @@ def split_video_into_segments(
             "invocation-owned"
         )
 
-    real_output_dir = os.path.realpath(owned_output_dir)
-    segment_paths = []
-    for idx in range(len(normalized_durations)):
-        candidate_path = os.path.abspath(
-            os.path.join(
-                owned_output_dir,
-                f"{stem}_{idx:03d}.mp4",
-            )
-        )
-        if (
-            os.path.commonpath((owned_output_dir, candidate_path))
-            != owned_output_dir
-            or os.path.commonpath(
-                (real_output_dir, os.path.realpath(candidate_path))
-            )
-            != real_output_dir
-        ):
-            raise RuntimeError(
-                "split_video_into_segments: segment path escaped "
-                "invocation-owned directory"
-            )
-        segment_paths.append(candidate_path)
     start = 0.0
 
     try:
