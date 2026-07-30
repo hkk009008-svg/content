@@ -170,11 +170,56 @@ export function subscribe(id: string) {
     assert event_row["route_match"] == "matched"
 
 
+def test_fetch_trailing_comma_defaults_to_get_and_matches(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        """
+from flask import Flask
+app = Flask(__name__, static_folder=None)
+
+@app.route("/api/projects/<pid>/characters/<cid>/lora-status")
+def lora_status(pid, cid):
+    pass
+""",
+    )
+    _frontend(
+        root,
+        "trailing-comma.ts",
+        """
+export async function loadStatus(projectId: string, characterId: string) {
+  const response = await fetch(
+    `/api/projects/${projectId}/characters/${characterId}/lora-status`,
+
+  )
+  if (response.status >= 400) throw new Error('bad')
+}
+""",
+    )
+
+    result = _build(root)
+    transport = result["frontend_transports"][0]
+    operation = result["frontend_operations"][0]
+
+    assert transport["method"] == "GET"
+    assert transport["route_match"] == "matched"
+    assert operation["method"] == "GET"
+    assert operation["route_match"] == "matched"
+    assert "dynamic_fetch_method" not in {
+        row["kind"] for row in result["unresolved"]
+    }
+
+
 @pytest.mark.parametrize(
     ("observation_body", "expected"),
     [
         ("if (!response.ok) throw new Error('bad')", "observed"),
         ("if (response.status >= 400) throw new Error('bad')", "observed"),
+        ("if (400 <= response.status) throw new Error('bad')", "observed"),
+        (
+            "if (response.status + (flag === true ? 400 : 0)) "
+            "throw new Error('bad')",
+            "not_observed",
+        ),
         ("await response.json()", "not_observed"),
         ("try { await response.json() } catch (error) {}", "not_observed"),
     ],
@@ -259,6 +304,74 @@ export function run(id: string) {
     assert "wrapper URL parameter is transformed" in reasons
     assert "wrapper reaches transport through another local wrapper" in reasons
     assert "imported wrapper call" in reasons
+
+
+def test_dynamic_method_wrapper_calls_are_explicit_unknowns_with_transport_link(
+    tmp_path: Path,
+) -> None:
+    root = _repo(
+        tmp_path,
+        """
+from flask import Flask
+app = Flask(__name__, static_folder=None)
+
+@app.route("/api/post", methods=["POST"])
+def post():
+    pass
+""",
+    )
+    _frontend(
+        root,
+        "dynamic-wrapper.ts",
+        """
+const dynamic = (url: string, init: RequestInit) => fetch(url, init)
+const secondHop = (url: string, init: RequestInit) => dynamic(url, init)
+const alias = dynamic
+
+export function run() {
+  dynamic('/api/post', { method: 'POST' })
+  secondHop('/api/two-hop', { method: 'POST' })
+  alias('/api/alias', { method: 'POST' })
+}
+""",
+    )
+
+    result = _build(root)
+    transport = result["frontend_transports"][0]
+    unknown = {
+        row["expanded_wrapper"]: row
+        for row in result["frontend_operations"]
+        if row["kind"] == "unknown_wrapper_call"
+    }
+
+    assert transport["method"] is None
+    assert set(unknown) == {"alias", "dynamic", "secondHop"}
+    assert unknown["dynamic"]["path_shape"] == "/api/post"
+    assert unknown["dynamic"]["route_match"] == "unknown"
+    assert all(row["method"] is None for row in unknown.values())
+    assert all(row["transport_id"] == transport["id"] for row in unknown.values())
+
+    unresolved = {(row["kind"], row["owner"], row["reason"]) for row in result["unresolved"]}
+    assert (
+        "dynamic_fetch_method",
+        "dynamic",
+        "fetch options is not an inline object literal",
+    ) in unresolved
+    assert (
+        "unknown_wrapper_call",
+        "dynamic",
+        "fetch options is not an inline object literal",
+    ) in unresolved
+    assert (
+        "unknown_wrapper_call",
+        "secondHop",
+        "wrapper reaches transport through another local wrapper",
+    ) in unresolved
+    assert (
+        "unknown_wrapper_call",
+        "alias",
+        "wrapper is an alias of another local wrapper",
+    ) in unresolved
 
 
 def test_ids_are_line_independent_and_render_is_deterministic(tmp_path: Path) -> None:

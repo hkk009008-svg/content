@@ -35,6 +35,7 @@ class Transport(NamedTuple):
     kind: str
     url_expression: str
     method: str | None
+    method_reason: str | None
     function: Function | None
     row: dict[str, Any]
 
@@ -424,7 +425,7 @@ def _resolve_url(expression: str, constants: dict[str, str]) -> str | None:
 
 
 def _method(options: str | None, constants: dict[str, str]) -> tuple[str | None, str | None]:
-    if options is None or options.strip() == "undefined":
+    if options is None or not options.strip() or options.strip() == "undefined":
         return "GET", None
     stripped = options.strip()
     if not (stripped.startswith("{") and stripped.endswith("}")):
@@ -540,8 +541,13 @@ def _response_observation(mask: str, bound: str | None, start: int, end: int) ->
     if re.search(member + r"ok\b", body):
         return "observed"
     status = member + r"status\b"
-    comparison = r"(?:\s*(?:===?|!==?|<=?|>=?)|[^;\n]{0,40}(?:===?|!==?|<=?|>=?))"
-    return "observed" if re.search(status + comparison, body) else "not_observed"
+    operator = r"(?:===|!==|==|!=|<=|>=|<|>)"
+    status_code = r"(?:[1-5]\d{2})\b"
+    direct_comparison = (
+        rf"(?:{status}\s*{operator}\s*{status_code}"
+        rf"|{status_code}\s*{operator}\s*{status})"
+    )
+    return "observed" if re.search(direct_comparison, body) else "not_observed"
 
 
 def _event_error(
@@ -618,6 +624,7 @@ def _frontend_file(
             function = _container(functions, match.start())
             bound = _bound_name(mask, match.start())
             observation_end = function.body_end if function else min(len(mask), closing + 400)
+            method_reason = None
             if kind == "fetch":
                 options = source[slice(*spans[1])] if len(spans) > 1 else None
                 method, method_reason = _method(options, constants)
@@ -675,7 +682,16 @@ def _frontend_file(
                     function.name if function else None,
                 )
             calls.append(
-                Transport(match.start(), closing, kind, url_expression, method, function, row)
+                Transport(
+                    match.start(),
+                    closing,
+                    kind,
+                    url_expression,
+                    method,
+                    method_reason,
+                    function,
+                    row,
+                )
             )
     transports = [call.row for call in calls]
     _assign_ids(
@@ -698,11 +714,18 @@ def _frontend_file(
             by_function.setdefault(call.function.name, []).append(call)
     safe: dict[str, Transport] = {}
     unsafe: dict[str, str] = {}
+    unsafe_transports: dict[str, Transport] = {}
     for function in functions:
         direct = by_function.get(function.name, [])
         if len(direct) == 1 and direct[0].url_expression.strip() in function.params:
             if direct[0].method is not None:
                 safe[function.name] = direct[0]
+            else:
+                unsafe[function.name] = (
+                    direct[0].method_reason
+                    or "wrapper transport method is not statically resolved"
+                )
+                unsafe_transports[function.name] = direct[0]
         elif len(direct) > 1:
             unsafe[function.name] = "wrapper contains multiple direct transports"
         elif len(direct) == 1 and direct[0].row["path_shape"] is None and any(
@@ -710,6 +733,7 @@ def _frontend_file(
             for param in function.params
         ):
             unsafe[function.name] = "wrapper URL parameter is transformed"
+            unsafe_transports[function.name] = direct[0]
     wrapper_names = set(safe) | set(unsafe)
     for function in functions:
         if function.name in wrapper_names:
@@ -726,9 +750,35 @@ def _frontend_file(
                     unsafe[function.name] = (
                         "wrapper reaches transport through another local wrapper"
                     )
+                    transport = safe.get(name) or unsafe_transports.get(name)
+                    if transport is not None:
+                        unsafe_transports[function.name] = transport
                     break
             if function.name in unsafe:
                 break
+
+    wrapper_names = set(safe) | set(unsafe)
+    for match in re.finditer(
+        r"\b(?:const|let)\s+([A-Za-z_$]\w*)\s*=\s*([A-Za-z_$]\w*)\b",
+        mask,
+    ):
+        alias, target = match.groups()
+        if alias == target or target not in wrapper_names:
+            continue
+        unsafe[alias] = "wrapper is an alias of another local wrapper"
+        transport = safe.get(target) or unsafe_transports.get(target)
+        if transport is not None:
+            unsafe_transports[alias] = transport
+        _unknown(
+            unresolved,
+            "frontend",
+            "aliased_wrapper",
+            "same-file wrapper aliases are not expanded",
+            relative,
+            _line(source, match.start()),
+            source[match.start() : match.end()],
+            alias,
+        )
 
     aliases: set[str] = set()
     for match in re.finditer(
@@ -763,6 +813,7 @@ def _frontend_file(
             )
     imported = _imports(mask)
     names = set(safe) | set(unsafe) | aliases | imported
+    wrapper_names = set(safe) | set(unsafe)
     definition_names = {function.name_start for function in functions}
     for name in names:
         for match, (_, _, spans) in _name_calls(mask, name):
@@ -770,7 +821,7 @@ def _frontend_file(
                 continue
             container = _container(functions, match.start())
             if (
-                name in safe
+                name in wrapper_names
                 and container
                 and unsafe.get(container.name)
                 == "wrapper reaches transport through another local wrapper"
@@ -817,6 +868,7 @@ def _frontend_file(
                 unsafe.get(name)
                 or ("aliased transport call" if name in aliases else "imported wrapper call")
             )
+            transport = unsafe_transports.get(name)
             operations.append(
                 {
                     "expanded_wrapper": name,
@@ -825,7 +877,7 @@ def _frontend_file(
                     "path_shape": _positional(url, True) if url is not None else None,
                     "query_keys": _query_keys(url),
                     "source": _source(relative, line),
-                    "transport_id": None,
+                    "transport_id": transport.row["id"] if transport is not None else None,
                     "url_template": url,
                 }
             )
