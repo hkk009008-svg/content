@@ -13,10 +13,10 @@ Upgrades:
 import os
 import json
 from typing import Optional, Dict, List
+import firecrawl_adapter
 from config.settings import settings
 # Initialize clients
 _tavily_client = None
-_firecrawl_app = None
 
 
 def _get_tavily():
@@ -28,17 +28,6 @@ def _get_tavily():
         except Exception:
             pass  # Tavily package missing or init failed — research calls return empty results ("" from the text helpers, [] from research_location_visual)
     return _tavily_client
-
-
-def _get_firecrawl():
-    global _firecrawl_app
-    if _firecrawl_app is None and settings.firecrawl_api_key:
-        try:
-            from firecrawl import FirecrawlApp
-            _firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
-        except Exception:
-            pass  # Firecrawl package missing or init failed — research calls will skip crawl
-    return _firecrawl_app
 
 
 def research_cinematography(mood: str, location: str, action: str) -> str:
@@ -123,19 +112,16 @@ def scrape_technique_reference(url: str) -> str:
     Scrape a specific URL (cinematography tutorial, film analysis) for technique details.
     Uses Firecrawl for clean markdown extraction.
     """
-    firecrawl = _get_firecrawl()
-    if not firecrawl:
-        return ""
-
     try:
-        result = firecrawl.scrape_url(url, params={"formats": ["markdown"]})
-        content = result.get("markdown", "")
-        if content:
-            # Truncate to useful length
-            return content[:1000]
-        return ""
-    except Exception as e:
-        print(f"   [RESEARCH] Scrape failed: {e}")
+        content = firecrawl_adapter.scrape_markdown(
+            url,
+            api_key=settings.firecrawl_api_key,
+        )
+        return content[:1000]
+    except Exception:
+        # Optional research stays silent when configuration, SDK, request, or
+        # response validation fails.  The shared adapter removes secret-bearing
+        # exception details before they can cross this boundary.
         return ""
 
 

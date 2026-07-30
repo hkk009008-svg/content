@@ -6,18 +6,15 @@ Reused from phase_0_director.py pattern, extracted for shared use.
 
 import os
 import json
+import firecrawl_adapter
 from config.settings import settings
 # Initialize clients once
 _tavily_client = None
-_firecrawl_app = None
 
 
-# When the lazy import / construction of a client fails, we cache the
-# reason so subsequent callers see "import failed: foo" rather than the
-# misleading "API not configured" (which actually means the key was set
-# but loading the SDK failed).
+# When lazy Tavily import / construction fails, cache the reason so subsequent
+# callers do not misreport a configured key as missing.
 _tavily_init_error: str = ""
-_firecrawl_init_error: str = ""
 
 
 def _get_tavily():
@@ -30,18 +27,6 @@ def _get_tavily():
             _tavily_init_error = f"{type(e).__name__}: {e}"
             print(f"   ⚠️ [WEB] Tavily client init failed: {_tavily_init_error}")
     return _tavily_client
-
-
-def _get_firecrawl():
-    global _firecrawl_app, _firecrawl_init_error
-    if _firecrawl_app is None and settings.firecrawl_api_key:
-        try:
-            from firecrawl import FirecrawlApp
-            _firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
-        except Exception as e:
-            _firecrawl_init_error = f"{type(e).__name__}: {e}"
-            print(f"   ⚠️ [WEB] Firecrawl client init failed: {_firecrawl_init_error}")
-    return _firecrawl_app
 
 
 def search_web(query: str) -> str:
@@ -64,17 +49,39 @@ def search_web(query: str) -> str:
 
 def scrape_url(url: str) -> str:
     """Scrape a URL via Firecrawl for detailed content."""
-    print(f"   🕷️ [WEB] Scraping: {url}")
-    app = _get_firecrawl()
-    if not app:
-        if _firecrawl_init_error:
-            return f"Firecrawl client failed to initialize: {_firecrawl_init_error}"
-        return "Firecrawl API not configured (FIRECRAWL_API_KEY missing)."
+    print("   🕷️ [WEB] Scraping URL")
     try:
-        res = app.scrape_url(url, params={"formats": ["markdown"]})
-        return res.get("markdown", str(res))[:4000]
-    except Exception as e:
-        return f"Scrape failed: {e}"
+        content = firecrawl_adapter.scrape_markdown(
+            url,
+            api_key=settings.firecrawl_api_key,
+        )
+        return content[:4000]
+    except firecrawl_adapter.FirecrawlConfigurationError:
+        return "Firecrawl API not configured (FIRECRAWL_API_KEY missing)."
+    except firecrawl_adapter.FirecrawlDependencyError:
+        return (
+            "Firecrawl client failed to initialize: install a compatible "
+            "firecrawl-py package."
+        )
+    except firecrawl_adapter.FirecrawlInitializationError:
+        return (
+            "Firecrawl client failed to initialize. Check the Firecrawl API "
+            "key and SDK installation."
+        )
+    except firecrawl_adapter.FirecrawlURLValidationError:
+        return "Scrape failed: URL must be a non-empty HTTP(S) URL."
+    except firecrawl_adapter.FirecrawlResultError:
+        return "Scrape failed: Firecrawl returned no usable markdown content."
+    except firecrawl_adapter.FirecrawlScrapeError:
+        return (
+            "Scrape failed: Firecrawl request failed. Check the URL and "
+            "Firecrawl service status."
+        )
+    except Exception:
+        return (
+            "Scrape failed: Firecrawl is unavailable. Check the SDK, API key, "
+            "and service status."
+        )
 
 
 # Tool definitions for GPT-4o tool-calling
@@ -148,7 +155,10 @@ def run_with_tools(
         {"role": "user", "content": user_prompt},
     ]
 
-    tools_available = bool(_get_tavily() or _get_firecrawl())
+    tools_available = bool(
+        _get_tavily()
+        or firecrawl_adapter.is_available(settings.firecrawl_api_key)
+    )
 
     # Phase 1: Tool-calling rounds (no response_format — can't mix with tools)
     if tools_available:
