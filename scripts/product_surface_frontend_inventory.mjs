@@ -104,10 +104,24 @@ function literal(checker, constants, node) {
   if (ts.isIdentifier(value)) return constants.get(checker.getSymbolAtLocation(value));
   return undefined;
 }
-function resolveUrl(checker, constants, node) {
+function fixedUrl(checker, constants, node) {
   const value = unwrap(node);
   const fixed = literal(checker, constants, value);
   if (fixed !== undefined) return fixed;
+  if (!value || !ts.isTemplateExpression(value)) return undefined;
+  let result = value.head.text;
+  for (const span of value.templateSpans) {
+    const replacement = literal(checker, constants, span.expression);
+    if (replacement === undefined) return undefined;
+    result += replacement;
+    result += span.literal.text;
+  }
+  return result;
+}
+function resolveUrl(checker, constants, node) {
+  const fixed = fixedUrl(checker, constants, node);
+  if (fixed !== undefined) return fixed;
+  const value = unwrap(node);
   if (!value || !ts.isTemplateExpression(value)) return null;
   let result = value.head.text;
   let index = 0;
@@ -501,12 +515,14 @@ function analyzeFile(root, file, checker) {
       ts.forEachChild(node, inspect);
     }
     if (transport.urlNode) inspect(transport.urlNode);
-    if (transport.row.url_template === null && usedParameters.size) {
+    if (usedParameters.size) {
       return {
         kind: "unknown",
         reason: "wrapper URL parameter is transformed",
       };
     }
+    const fixed = fixedUrl(checker, constants, transport.urlNode);
+    if (fixed !== undefined) return { kind: "fixed", value: fixed };
     return undefined;
   }
   function mergeUrlSources(sources) {
@@ -597,18 +613,50 @@ function analyzeFile(root, file, checker) {
     if (parameter?.supported) {
       return { kind: "parameter", index: parameter.index };
     }
-    const fixed = literal(checker, constants, argument);
+    const fixed = fixedUrl(checker, constants, argument);
     return fixed === undefined
       ? { kind: "unknown" }
       : { kind: "fixed", value: fixed };
   }
+  const wrapperAliases = [];
+  function collectWrapperAliasDeclarations(node) {
+    if (
+      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      node.initializer && ts.isIdentifier(unwrap(node.initializer))
+    ) {
+      const aliasSymbol = checker.getSymbolAtLocation(node.name);
+      const targetSymbol = symbol(checker, node.initializer);
+      if (aliasSymbol && targetSymbol) wrapperAliases.push({
+        aliasSymbol,
+        targetSymbol,
+        node,
+        name: node.name.text,
+      });
+    }
+    ts.forEachChild(node, collectWrapperAliasDeclarations);
+  }
+  collectWrapperAliasDeclarations(file);
+  function aliasWrapper(alias, target) {
+    return {
+      info: { name: alias.name },
+      safe: false,
+      reason: "wrapper is an alias of another local wrapper",
+      transport: target.transport,
+      urlParameterIndex: target.urlParameterIndex,
+      _ambiguousTransport: target._ambiguousTransport,
+      _reachableTransports: new Set(target._reachableTransports),
+      _urlSource: { ...target._urlSource },
+      dependsOnLocalWrapper: true,
+    };
+  }
   // Resolve from a complete previous-pass snapshot.  Each pass can discover
-  // one more dependency layer; classifying only after unioning every reachable
-  // transport keeps branching wrappers independent of declaration/call order.
-  // The candidate count bounds convergence and leaves transport-free cycles
-  // unresolved.
+  // one more function or alias dependency layer; classifying only after
+  // unioning every reachable transport keeps branching wrappers independent
+  // of declaration/call order.  The total graph-node count bounds convergence
+  // and leaves transport-free cycles unresolved.
   let wrappers = new Map(directWrappers);
-  for (let pass = 0; pass < functions.candidates.length; pass += 1) {
+  const wrapperPassLimit = functions.candidates.length + wrapperAliases.length;
+  for (let pass = 0; pass < wrapperPassLimit; pass += 1) {
     const previous = wrappers;
     const next = new Map();
     for (const info of functions.candidates) {
@@ -655,56 +703,139 @@ function analyzeFile(root, file, checker) {
         dependsOnLocalWrapper,
       });
     }
+    for (const alias of wrapperAliases) {
+      const target = previous.get(alias.targetSymbol);
+      if (target) next.set(alias.aliasSymbol, aliasWrapper(alias, target));
+    }
     wrappers = next;
   }
-  function collectWrapperAliases(node) {
-    if (
-      ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
-      node.initializer && ts.isIdentifier(unwrap(node.initializer))
-    ) {
-      const target = wrappers.get(symbol(checker, node.initializer));
-      if (target) {
-        const aliasSymbol = checker.getSymbolAtLocation(node.name);
-        wrappers.set(aliasSymbol, {
-          info: { name: node.name.text },
-          safe: false,
-          reason: "wrapper is an alias of another local wrapper",
-          transport: target.transport,
-          urlParameterIndex: target.urlParameterIndex,
-          _ambiguousTransport: target._ambiguousTransport,
-          _reachableTransports: new Set(target._reachableTransports),
-          _urlSource: { ...target._urlSource },
-          dependsOnLocalWrapper: target.dependsOnLocalWrapper,
-        });
-        unresolved.push(unknown(
-          root, file, node, "aliased_wrapper", "same-file wrapper aliases are not expanded",
-          text(file, node), node.name.text,
-        ));
+  for (const alias of wrapperAliases) {
+    if (!wrappers.has(alias.aliasSymbol)) continue;
+    unresolved.push(unknown(
+      root, file, alias.node, "aliased_wrapper", "same-file wrapper aliases are not expanded",
+      text(file, alias.node), alias.name,
+    ));
+  }
+  const wrapperCallEdges = [];
+  function collectWrapperCallEdges(node) {
+    if (ts.isCallExpression(node)) {
+      const targetSymbol = symbol(checker, node.expression);
+      if (wrappers.has(targetSymbol)) {
+        const container = nearestFunction(node, functions);
+        const sourceSymbol = container?.symbol && wrappers.has(container.symbol)
+          ? container.symbol
+          : undefined;
+        wrapperCallEdges.push({ sourceSymbol, targetSymbol });
       }
     }
-    ts.forEachChild(node, collectWrapperAliases);
+    ts.forEachChild(node, collectWrapperCallEdges);
   }
-  collectWrapperAliases(file);
-  const calledWrapperSymbols = new Set();
-  function collectCalledWrappers(node) {
-    if (ts.isCallExpression(node)) {
-      const callSymbol = symbol(checker, node.expression);
-      if (wrappers.has(callSymbol)) calledWrapperSymbols.add(callSymbol);
+  collectWrapperCallEdges(file);
+  const wrapperGraph = new Map(
+    [...wrappers.keys()].map((wrapperSymbol) => [wrapperSymbol, new Set()]),
+  );
+  for (const edge of wrapperCallEdges) {
+    if (edge.sourceSymbol) wrapperGraph.get(edge.sourceSymbol)?.add(edge.targetSymbol);
+  }
+  for (const alias of wrapperAliases) {
+    if (wrappers.has(alias.aliasSymbol) && wrappers.has(alias.targetSymbol)) {
+      wrapperGraph.get(alias.aliasSymbol)?.add(alias.targetSymbol);
     }
-    ts.forEachChild(node, collectCalledWrappers);
   }
-  collectCalledWrappers(file);
+  // Recursive edges are component-internal implementation detail, not proof
+  // that an external/root operation represents the component.  Tarjan's
+  // partition lets suppression preserve uncalled recursive roots while still
+  // collapsing a component reached by a real outer call.
+  const wrapperIndex = new Map();
+  const wrapperLowLink = new Map();
+  const wrapperStack = [];
+  const wrappersOnStack = new Set();
+  const componentByWrapper = new Map();
+  const componentMembers = [];
+  let nextWrapperIndex = 0;
+  function connectWrapper(wrapperSymbol) {
+    wrapperIndex.set(wrapperSymbol, nextWrapperIndex);
+    wrapperLowLink.set(wrapperSymbol, nextWrapperIndex);
+    nextWrapperIndex += 1;
+    wrapperStack.push(wrapperSymbol);
+    wrappersOnStack.add(wrapperSymbol);
+    for (const targetSymbol of wrapperGraph.get(wrapperSymbol) || []) {
+      if (!wrapperIndex.has(targetSymbol)) {
+        connectWrapper(targetSymbol);
+        wrapperLowLink.set(
+          wrapperSymbol,
+          Math.min(wrapperLowLink.get(wrapperSymbol), wrapperLowLink.get(targetSymbol)),
+        );
+      } else if (wrappersOnStack.has(targetSymbol)) {
+        wrapperLowLink.set(
+          wrapperSymbol,
+          Math.min(wrapperLowLink.get(wrapperSymbol), wrapperIndex.get(targetSymbol)),
+        );
+      }
+    }
+    if (wrapperLowLink.get(wrapperSymbol) !== wrapperIndex.get(wrapperSymbol)) return;
+    const component = new Set();
+    const componentIndex = componentMembers.length;
+    while (wrapperStack.length) {
+      const member = wrapperStack.pop();
+      wrappersOnStack.delete(member);
+      componentByWrapper.set(member, componentIndex);
+      component.add(member);
+      if (member === wrapperSymbol) break;
+    }
+    componentMembers.push(component);
+  }
+  for (const wrapperSymbol of wrapperGraph.keys()) {
+    if (!wrapperIndex.has(wrapperSymbol)) connectWrapper(wrapperSymbol);
+  }
+  const representedComponents = new Set();
+  for (const edge of wrapperCallEdges) {
+    const targetComponent = componentByWrapper.get(edge.targetSymbol);
+    const sourceComponent = edge.sourceSymbol === undefined
+      ? undefined
+      : componentByWrapper.get(edge.sourceSymbol);
+    if (sourceComponent !== targetComponent) representedComponents.add(targetComponent);
+  }
+  const componentEdges = new Map(
+    componentMembers.map((_, component) => [component, new Set()]),
+  );
+  for (const [sourceSymbol, targets] of wrapperGraph) {
+    const sourceComponent = componentByWrapper.get(sourceSymbol);
+    for (const targetSymbol of targets) {
+      const targetComponent = componentByWrapper.get(targetSymbol);
+      if (sourceComponent !== targetComponent) {
+        componentEdges.get(sourceComponent)?.add(targetComponent);
+      }
+    }
+  }
+  const representedQueue = [...representedComponents];
+  while (representedQueue.length) {
+    const component = representedQueue.pop();
+    for (const targetComponent of componentEdges.get(component) || []) {
+      if (representedComponents.has(targetComponent)) continue;
+      representedComponents.add(targetComponent);
+      representedQueue.push(targetComponent);
+    }
+  }
+  function wrapperIsRepresented(wrapperSymbol) {
+    return representedComponents.has(componentByWrapper.get(wrapperSymbol));
+  }
+  function sameWrapperComponent(left, right) {
+    return left !== undefined && right !== undefined &&
+      componentByWrapper.get(left) === componentByWrapper.get(right);
+  }
   const representedDefinitions = new Set();
   for (const transport of transports) {
-    const wrapper = transport.container?.symbol
-      ? wrappers.get(transport.container.symbol)
+    const containerSymbol = transport.container?.symbol;
+    const wrapper = containerSymbol
+      ? wrappers.get(containerSymbol)
       : undefined;
+    const abstractSafeDefinition = (
+      wrapper?.safe && wrapper._urlSource?.kind === "parameter"
+    );
     if (
-      wrapper?.safe ||
-      (
-        wrapper?.dependsOnLocalWrapper &&
-        calledWrapperSymbols.has(transport.container.symbol)
-      )
+      abstractSafeDefinition ||
+      (wrapper && wrapperIsRepresented(containerSymbol))
     ) {
       representedDefinitions.add(transport.node.getStart(file));
     }
@@ -726,11 +857,10 @@ function analyzeFile(root, file, checker) {
       if (wrapper) {
         const container = nearestFunction(node, functions);
         const containerWrapper = container ? wrappers.get(container.symbol) : undefined;
-        const containerIsRepresented = (
-          containerWrapper?.dependsOnLocalWrapper &&
-          calledWrapperSymbols.has(container.symbol)
-        );
-        if (!containerIsRepresented) {
+        const containerSymbol = containerWrapper ? container.symbol : undefined;
+        const containerIsRepresented = wrapperIsRepresented(containerSymbol);
+        const internalRecursiveCall = sameWrapperComponent(containerSymbol, callSymbol);
+        if (!containerIsRepresented && !internalRecursiveCall) {
           const urlNode = wrapper._urlSource?.kind !== "parameter"
             ? undefined
             : node.arguments[wrapper.urlParameterIndex];

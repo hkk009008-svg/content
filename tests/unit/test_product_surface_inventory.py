@@ -1200,6 +1200,369 @@ def test_large_wrapper_graph_converges_with_unmapped_leaf(
     assert operation["route_match"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+function get(url: string) { return fetch(url) }
+function fixedPost() {
+  return fetch('/api/fixed', { method: 'POST' })
+}
+function choose(url: string, usePost: boolean) {
+  if (usePost) return fixedPost()
+  return get(url)
+}
+choose('/api/top', true)
+""",
+        """
+const segment = 'fixed'
+function choose(url: string, usePost: boolean) {
+  if (!usePost) return get(url)
+  return fixedPost()
+}
+function fixedPost() {
+  return fetch(`/api/${segment}`, { method: 'POST' })
+}
+function get(url: string) { return fetch(url) }
+choose('/api/top', true)
+""",
+        """
+function get(url: string) { return fetch(url) }
+function transformedPost(url: string) {
+  return fetch(`${url}/fixed`, { method: 'POST' })
+}
+function choose(url: string, usePost: boolean) {
+  if (usePost) return transformedPost(url)
+  return get(url)
+}
+choose('/api/top', true)
+""",
+        """
+function fixedGet() { return fetch('/api/get') }
+function transformedPost(url: string) {
+  return fetch(`${url}/fixed`, { method: 'POST' })
+}
+function choose(url: string, usePost: boolean) {
+  if (usePost) return transformedPost(url)
+  return fixedGet()
+}
+choose('/api/top', true)
+""",
+    ],
+)
+def test_fixed_and_transformed_direct_wrappers_enter_transport_closure(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Fixed and transformed leaves cannot escape an outer branch closure."""
+    root = _repo(tmp_path)
+    _frontend(root, "direct-url-source.ts", source)
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert {row["method"] for row in result["frontend_transports"]} == {
+        "GET",
+        "POST",
+    }
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["path_shape"] is None
+    assert operation["route_match"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("post_url", "expected_url"),
+    [
+        ("/api/shared", "/api/shared"),
+        ("/api/post", None),
+    ],
+)
+def test_fixed_url_branches_merge_only_when_proven_equal(
+    tmp_path: Path,
+    post_url: str,
+    expected_url: str | None,
+) -> None:
+    """Fixed descriptors retain a URL only when every branch proves the same one."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "fixed-branches.ts",
+        f"""
+function fixedGet() {{ return fetch('/api/shared') }}
+function fixedPost() {{
+  return fetch('{post_url}', {{ method: 'POST' }})
+}}
+function choose(usePost: boolean) {{
+  if (usePost) return fixedPost()
+  return fixedGet()
+}}
+choose(true)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] == expected_url
+    assert operation["route_match"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("external_call", "expected_kind"),
+    [
+        ("", "direct_transport"),
+        ("fixedRoot()", "one_hop_wrapper_call"),
+    ],
+)
+def test_fixed_direct_root_is_suppressed_only_when_a_call_represents_it(
+    tmp_path: Path,
+    external_call: str,
+    expected_kind: str,
+) -> None:
+    """Classifying a fixed wrapper must not erase an uncalled exported root."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "fixed-root.ts",
+        f"""
+export function fixedRoot() {{
+  return fetch('/api/fixed-root')
+}}
+{external_call}
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 1
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["kind"] == expected_kind
+    assert operation["method"] == "GET"
+    assert operation["url_template"] == "/api/fixed-root"
+    if expected_kind == "one_hop_wrapper_call":
+        assert operation["expanded_wrapper"] == "fixedRoot"
+        assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+
+
+@pytest.mark.parametrize(
+    "aliases",
+    [
+        """
+const firstPostAlias = post
+const secondPostAlias = firstPostAlias
+""",
+        """
+const secondPostAlias = firstPostAlias
+const firstPostAlias = post
+""",
+    ],
+)
+def test_wrapper_alias_chains_participate_in_branch_closure(
+    tmp_path: Path,
+    aliases: str,
+) -> None:
+    """Alias declaration order cannot hide a reachable POST transport."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "alias-branch.ts",
+        f"""
+function get(url: string) {{ return fetch(url) }}
+function post(url: string) {{ return fetch(url, {{ method: 'POST' }}) }}
+{aliases}
+function choose(url: string, usePost: boolean) {{
+  if (usePost) return secondPostAlias('/api/fixed')
+  return get(url)
+}}
+choose('/api/top', true)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert {
+        row.get("owner")
+        for row in result["unresolved"]
+        if row["kind"] == "aliased_wrapper"
+    } == {"firstPostAlias", "secondPostAlias"}
+
+
+def test_deep_alias_chain_converges_before_outer_classification(
+    tmp_path: Path,
+) -> None:
+    """A long alias chain remains part of the bounded wrapper fixed point."""
+    root = _repo(tmp_path)
+    depth = 40
+    aliases = ["const postAlias0 = post"]
+    aliases.extend(
+        f"const postAlias{index} = postAlias{index - 1}"
+        for index in range(1, depth)
+    )
+    alias_source = "\n".join(aliases)
+    _frontend(
+        root,
+        "deep-alias.ts",
+        (
+            "function get(url: string) { return fetch(url) }\n"
+            "function post(url: string) {\n"
+            "  return fetch(url, { method: 'POST' })\n"
+            "}\n"
+            f"{alias_source}\n"
+            "function choose(url: string, usePost: boolean) {\n"
+            f"  if (usePost) return postAlias{depth - 1}('/api/fixed')\n"
+            "  return get(url)\n"
+            "}\n"
+            "choose('/api/top', true)\n"
+        ),
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+
+
+@pytest.mark.parametrize(
+    ("external_call", "expected_kind", "expected_owner"),
+    [
+        ("", "direct_transport", None),
+        ("root('/api/top', false)", "unknown_wrapper_call", "root"),
+    ],
+)
+def test_alias_cycle_preserves_unrepresented_root_and_collapses_reachable_call(
+    tmp_path: Path,
+    external_call: str,
+    expected_kind: str,
+    expected_owner: str | None,
+) -> None:
+    """An alias cycle is internal unless an external call represents its closure."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "alias-cycle.ts",
+        f"""
+export function root(url: string, stop: boolean) {{
+  if (!stop) return rootAlias(url, true)
+  return fetch(url)
+}}
+const rootAlias = root
+{external_call}
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 1
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["kind"] == expected_kind
+    assert operation.get("expanded_wrapper") == expected_owner
+    assert operation["method"] == "GET"
+    if expected_kind == "unknown_wrapper_call":
+        assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+        assert operation["url_template"] is None
+
+
+@pytest.mark.parametrize(
+    ("cycle_body", "external_call", "expected_kind", "expected_owner"),
+    [
+        (
+            """
+export function root(url: string, stop: boolean) {
+  if (!stop) return root(url, true)
+  return fetch('/api/self')
+}
+""",
+            "",
+            "direct_transport",
+            None,
+        ),
+        (
+            """
+export function root(url: string, stop: boolean) {
+  if (!stop) return root(url, true)
+  return fetch('/api/self')
+}
+""",
+            "root('/api/top', false)",
+            "unknown_wrapper_call",
+            "root",
+        ),
+        (
+            """
+export function first(url: string) { return second(url) }
+function second(url: string) {
+  if (url) first(url)
+  return fetch('/api/mutual')
+}
+""",
+            "",
+            "direct_transport",
+            None,
+        ),
+        (
+            """
+export function first(url: string) { return second(url) }
+function second(url: string) {
+  if (url) first(url)
+  return fetch('/api/mutual')
+}
+""",
+            "first('/api/top')",
+            "unknown_wrapper_call",
+            "first",
+        ),
+    ],
+)
+def test_recursive_components_distinguish_internal_edges_from_external_roots(
+    tmp_path: Path,
+    cycle_body: str,
+    external_call: str,
+    expected_kind: str,
+    expected_owner: str | None,
+) -> None:
+    """Internal self/mutual calls neither erase roots nor duplicate reachable calls."""
+    root = _repo(tmp_path)
+    _frontend(root, "recursive-root.ts", f"{cycle_body}\n{external_call}\n")
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 1
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["kind"] == expected_kind
+    assert operation.get("expanded_wrapper") == expected_owner
+    assert operation["method"] == "GET"
+    if expected_kind == "unknown_wrapper_call":
+        assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+        assert operation["url_template"] is None
+
+
 def test_branch_transport_removal_mutation_restores_single_transport_link(
     tmp_path: Path,
 ) -> None:
