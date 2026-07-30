@@ -291,6 +291,182 @@ class TestProjectIdBoundary:
         )
         assert os.listdir(tmp_projects_dir) == []
 
+    def test_load_and_mutate_missing_project_skip_existing_target_lock(
+        self,
+        tmp_projects_dir,
+        monkeypatch,
+    ):
+        import domain.project_manager as dpm
+        from unittest.mock import MagicMock
+
+        lock_bomb = MagicMock(
+            side_effect=AssertionError("missing target reached lock"),
+        )
+        ensure_bomb = MagicMock(
+            side_effect=AssertionError("missing target created directory"),
+        )
+        mutator = MagicMock(
+            side_effect=AssertionError("missing target reached mutator"),
+        )
+        monkeypatch.setattr(dpm, "_acquire_existing_project_lock", lock_bomb)
+        monkeypatch.setattr(dpm, "_ensure_project_dir", ensure_bomb)
+
+        assert project_manager.load_project("valid-missing") is None
+        assert project_manager.mutate_project("valid-missing", mutator) is None
+
+        lock_bomb.assert_not_called()
+        ensure_bomb.assert_not_called()
+        mutator.assert_not_called()
+        assert os.listdir(tmp_projects_dir) == []
+
+    def test_stored_project_id_mismatch_fails_before_lock_or_cross_write(
+        self,
+        tmp_projects_dir,
+        monkeypatch,
+    ):
+        import domain.project_manager as dpm
+        from unittest.mock import MagicMock
+
+        project = project_manager.create_project("Corrupt identity")
+        route_id = project["id"]
+        stored_id = "other-project"
+        project_path = os.path.join(
+            tmp_projects_dir,
+            route_id,
+            "project.json",
+        )
+        with open(project_path, "r", encoding="utf-8") as handle:
+            corrupted = json.load(handle)
+        corrupted["id"] = stored_id
+        with open(project_path, "w", encoding="utf-8") as handle:
+            json.dump(corrupted, handle)
+        before = open(project_path, "rb").read()
+
+        lock_bomb = MagicMock(
+            side_effect=AssertionError("identity mismatch reached lock"),
+        )
+        write_bomb = MagicMock(
+            side_effect=AssertionError("identity mismatch reached write"),
+        )
+        mutator = MagicMock(
+            side_effect=AssertionError("identity mismatch reached mutator"),
+        )
+        monkeypatch.setattr(dpm, "_acquire_existing_project_lock", lock_bomb)
+        monkeypatch.setattr(dpm, "_save_project_unlocked", write_bomb)
+
+        assert project_manager.load_project(route_id) is None
+        assert project_manager.load_existing_project_readonly(route_id) is None
+        assert project_manager.mutate_project(route_id, mutator) is None
+
+        lock_bomb.assert_not_called()
+        write_bomb.assert_not_called()
+        mutator.assert_not_called()
+        assert open(project_path, "rb").read() == before
+        assert not os.path.exists(os.path.join(tmp_projects_dir, stored_id))
+
+    def test_delete_between_preflight_and_lock_creates_no_artifact(
+        self,
+        tmp_projects_dir,
+        monkeypatch,
+    ):
+        import shutil
+        import domain.project_manager as dpm
+        from unittest.mock import MagicMock
+
+        project = project_manager.create_project("Delete race")
+        project_dir = os.path.join(tmp_projects_dir, project["id"])
+        real_file_lock = dpm.FileLock
+
+        class DeleteBeforeAcquire:
+            def __init__(self, path, timeout):
+                self._lock = real_file_lock(path, timeout=timeout)
+
+            def __enter__(self):
+                shutil.rmtree(project_dir)
+                return self._lock.__enter__()
+
+            def __exit__(self, exc_type, exc, tb):
+                return self._lock.__exit__(exc_type, exc, tb)
+
+        mutator = MagicMock(
+            side_effect=AssertionError("deleted target reached mutator"),
+        )
+        ensure_bomb = MagicMock(
+            side_effect=AssertionError("deleted target was recreated"),
+        )
+        monkeypatch.setattr(dpm, "FileLock", DeleteBeforeAcquire)
+        monkeypatch.setattr(dpm, "_ensure_project_dir", ensure_bomb)
+
+        assert project_manager.mutate_project(project["id"], mutator) is None
+
+        mutator.assert_not_called()
+        ensure_bomb.assert_not_called()
+        assert not os.path.exists(project_dir)
+
+    def test_stored_id_change_between_preflight_and_lock_fails_closed(
+        self,
+        tmp_projects_dir,
+        monkeypatch,
+    ):
+        import domain.project_manager as dpm
+        from unittest.mock import MagicMock
+
+        project = project_manager.create_project("Identity race")
+        corrupted = dict(project)
+        corrupted["id"] = "other-project"
+        load = MagicMock(side_effect=[dict(project), corrupted])
+        mutator = MagicMock(
+            side_effect=AssertionError("identity race reached mutator"),
+        )
+        write_bomb = MagicMock(
+            side_effect=AssertionError("identity race reached write"),
+        )
+        monkeypatch.setattr(dpm, "_load_project_unlocked", load)
+        monkeypatch.setattr(dpm, "_save_project_unlocked", write_bomb)
+
+        assert project_manager.mutate_project(project["id"], mutator) is None
+
+        assert load.call_count == 2
+        mutator.assert_not_called()
+        write_bomb.assert_not_called()
+        assert not os.path.exists(
+            os.path.join(tmp_projects_dir, "other-project"),
+        )
+
+    def test_mutator_cannot_redirect_save_by_changing_project_id(
+        self,
+        tmp_projects_dir,
+    ):
+        project = project_manager.create_project("Route identity")
+        route_id = project["id"]
+        project_path = os.path.join(
+            tmp_projects_dir,
+            route_id,
+            "project.json",
+        )
+        with open(project_path, "rb") as handle:
+            before = handle.read()
+        snapshot = json.loads(json.dumps(project))
+
+        def _redirect(latest):
+            latest["name"] = "must not persist"
+            latest["id"] = "other-project"
+            return True
+
+        result = project_manager.mutate_project(
+            route_id,
+            _redirect,
+            snapshot=snapshot,
+        )
+
+        assert result is None
+        with open(project_path, "rb") as handle:
+            assert handle.read() == before
+        assert snapshot == project
+        assert not os.path.exists(
+            os.path.join(tmp_projects_dir, "other-project"),
+        )
+
     def test_readonly_existing_project_never_persists_normalization(
         self,
         monkeypatch,

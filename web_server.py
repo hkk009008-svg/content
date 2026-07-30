@@ -128,6 +128,28 @@ _PUBLIC_SHOT_COMPATIBILITY_TYPES = {
     "keyframe_review": dict,
     "scene_location": str,
 }
+_PUBLIC_OPTIMIZER_CACHE_FIELD_TYPES = {
+    "source_prompt": str,
+}
+_PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES = {
+    # Every currently consumed/written optimizer value is pinned to its
+    # truthful JSON type. Unknown keys remain forward-compatible, but the
+    # mapping and known values can never reach controller `.get()` calls with
+    # list/scalar shapes.
+    "image_prompt": str,
+    "video_prompt": str,
+    "purpose": str,
+    "shot_type": str,
+    "suggested_image_api": str,
+    "suggested_video_api": str,
+    "suggested_lipsync": (str, type(None)),
+    "negative_constraints": str,
+    "identity_anchor": str,
+    "camera": str,
+    "lighting": str,
+    "color_palette": str,
+    "reasoning": str,
+}
 
 
 def _parse_ip_adapter_weight(value) -> float:
@@ -145,6 +167,25 @@ def _parse_ip_adapter_weight(value) -> float:
 def _json_object_or_none():
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else None
+
+
+def _public_optimizer_cache_is_valid(cache) -> bool:
+    if not isinstance(cache, dict):
+        return False
+    if any(
+        field in cache and not isinstance(cache[field], expected_type)
+        for field, expected_type in _PUBLIC_OPTIMIZER_CACHE_FIELD_TYPES.items()
+    ):
+        return False
+    if "spec" not in cache:
+        return True
+    spec = cache["spec"]
+    if not isinstance(spec, dict):
+        return False
+    return all(
+        field not in spec or isinstance(spec[field], expected_type)
+        for field, expected_type in _PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES.items()
+    )
 
 
 def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
@@ -749,11 +790,20 @@ def api_capability_scorecard(pid):
 @app.route("/api/projects/<pid>", methods=["PUT"])
 @_project_lock_guard
 def api_update_project(pid):
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    if "id" in data and data["id"] != pid:
+        return jsonify({
+            "error": "Body id must match route id",
+            "route_id": pid,
+        }), 400
+
     busy_response = _reject_if_project_busy(pid)
     if busy_response:
         return busy_response
-
-    data = request.json or {}
 
     has_incoming_gs = "global_settings" in data
     incoming_gs = data.get("global_settings")
@@ -1640,19 +1690,16 @@ def api_add_scene(pid):
 @app.route("/api/projects/<pid>/scenes/<sid>", methods=["PUT"])
 @_project_lock_guard
 def api_update_scene(pid, sid):
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
-
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
     data = _json_object_or_none()
     if data is None:
         return jsonify({"error": "JSON object required"}), 400
+    if "id" in data and data["id"] != sid:
+        return jsonify({
+            "error": "Body id must match route id",
+            "route_id": sid,
+        }), 400
 
     shots_are_updated = "shots" in data
     proposed_shots = data.get("shots")
@@ -1697,6 +1744,12 @@ def api_update_scene(pid, sid):
                 return jsonify({
                     "error": f"shots[{index}] does not match the shot schema",
                 }), 400
+            if not _public_optimizer_cache_is_valid(
+                shot.get("optimizer_cache", {}),
+            ):
+                return jsonify({
+                    "error": f"shots[{index}] does not match the shot schema",
+                }), 400
             try:
                 # The normal persistence validator is intentionally
                 # compatibility-permissive.  A public replacement payload is
@@ -1708,6 +1761,14 @@ def api_update_scene(pid, sid):
                 return jsonify({
                     "error": f"shots[{index}] does not match the shot schema",
                 }), 400
+
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
 
     def _mutate_project(latest_project: dict):
         latest_typed = Project.model_validate(latest_project)
@@ -1775,7 +1836,16 @@ def api_update_scene(pid, sid):
                     aspect_ratio=aspect_ratio,
                 )
 
-        scene_updates = dict(data)
+        if len(matching_scene_indices) != 1:
+            return MutationResult(None, save=False)
+
+        # The path selects an immutable scene identity. An equal body ID is
+        # accepted for full-object round-trips but never written back.
+        scene_updates = {
+            field: value
+            for field, value in data.items()
+            if field != "id"
+        }
         if shots_are_updated:
             scene_updates["num_shots"] = len(proposed_shots)
         latest_project["scenes"][scene_index].update(scene_updates)

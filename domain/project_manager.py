@@ -5,6 +5,7 @@ Projects are stored as JSON files under projects/<project_id>/.
 """
 
 import os
+import fcntl
 import json
 import logging
 import uuid
@@ -16,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Optional, List, Dict
 
-from filelock import FileLock, Timeout
+from filelock import FileLock as _BaseFileLock, Timeout
 from pydantic import ValidationError
 
 from cinema.auto_approve import AutoApproveConfig
@@ -37,6 +38,34 @@ class ProjectLockError(RuntimeError):
         super().__init__(
             f"Project '{project_id}' is locked by another operation. Retry shortly."
         )
+
+
+class FileLock(_BaseFileLock):
+    """Repository lock that leaves parent-directory creation to its caller.
+
+    Creation-capable call paths explicitly run ``_ensure_project_dir`` first.
+    Existing-target call paths do not, so a concurrent deletion cannot be
+    silently reversed by the third-party lock's directory helper.
+    """
+
+    def _acquire(self) -> None:
+        open_flags = os.O_RDWR | os.O_CREAT
+        no_follow = getattr(os, "O_NOFOLLOW", None)
+        if no_follow is not None:
+            open_flags |= no_follow
+        fd = os.open(self.lock_file, open_flags, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            return
+        except BaseException:
+            os.close(fd)
+            raise
+        if os.fstat(fd).st_nlink == 0:
+            os.close(fd)
+            return
+        self._context.lock_file_fd = fd
 
 
 @dataclass
@@ -105,6 +134,40 @@ def _acquire_project_lock(project_id: str, timeout: float = 10):
         raise ProjectLockError(project_id, timeout) from exc
 
 
+@contextmanager
+def _acquire_existing_project_lock(project_id: str, timeout: float = 10):
+    """Acquire a route project's lock without creating a missing target.
+
+    Unlike the creation-capable lock used by ``save_project`` and
+    ``project_lock``, this path never calls ``_ensure_project_dir``. If the
+    project disappears before or during lock acquisition, it yields ``False``
+    and leaves the missing route absent.
+    """
+
+    if not os.path.isfile(_project_file(project_id)):
+        yield False
+        return
+
+    lock = FileLock(_project_lock_path(project_id), timeout=timeout)
+    try:
+        lock.__enter__()
+    except FileNotFoundError:
+        # The project directory was deleted between the existence check and
+        # FileLock opening its lock file. Never recreate it.
+        yield False
+        return
+    except Timeout as exc:
+        raise ProjectLockError(project_id, timeout) from exc
+
+    try:
+        if not os.path.isfile(_project_file(project_id)):
+            yield False
+            return
+        yield True
+    finally:
+        lock.__exit__(None, None, None)
+
+
 def _load_project_unlocked(project_id: str) -> Optional[dict]:
     path = _project_file(project_id)
     try:
@@ -114,6 +177,40 @@ def _load_project_unlocked(project_id: str) -> Optional[dict]:
         # A missing project is normal, including deletion between path
         # resolution and open.  Do not create a directory or lock artifact.
         return None
+
+
+def _load_expected_project_unlocked(project_id: str) -> Optional[dict]:
+    """Read only a project whose stored ID matches its path identity.
+
+    Mutation saves derive their destination from the stored ``id``. Accepting
+    a document from ``projects/<route-id>/project.json`` with a different
+    stored ID could therefore redirect a route-scoped write into another
+    project directory. This helper performs no normalization, locking,
+    directory creation, or write; callers use it both before and under lock.
+    """
+
+    try:
+        project = _load_project_unlocked(project_id)
+    except FileNotFoundError:
+        # Also tolerate a test double or alternate filesystem implementation
+        # surfacing the disappearance race above the low-level helper.
+        return None
+    if project is None:
+        return None
+    if not isinstance(project, dict) or project.get("id") != project_id:
+        logger.error(
+            "project path identity does not match stored identity",
+            extra={
+                "route_project_id": project_id,
+                "stored_project_id": (
+                    project.get("id")
+                    if isinstance(project, dict)
+                    else None
+                ),
+            },
+        )
+        return None
+    return project
 
 
 def _save_project_unlocked(project: dict) -> None:
@@ -725,9 +822,18 @@ def save_project(project: dict, timeout: float = 10) -> None:
 
 
 def load_project(project_id: str, timeout: float = 10) -> Optional[dict]:
-    """Load project JSON with file-lock protection against concurrent writes."""
-    with _acquire_project_lock(project_id, timeout):
-        project = _load_project_unlocked(project_id)
+    """Load matching project JSON without creating artifacts for a miss.
+
+    The first read is a side-effect-free preflight. The authoritative second
+    read remains under the project lock, preserving normalization and
+    concurrent-write guarantees.
+    """
+    if _load_expected_project_unlocked(project_id) is None:
+        return None
+    with _acquire_existing_project_lock(project_id, timeout) as acquired:
+        if not acquired:
+            return None
+        project = _load_expected_project_unlocked(project_id)
         if project is None:
             return None
         if normalize_project_schema(project):
@@ -745,12 +851,7 @@ def load_existing_project_readonly(project_id: str) -> Optional[dict]:
     but is deliberately not persisted from this read-only boundary.
     """
 
-    try:
-        project = _load_project_unlocked(project_id)
-    except FileNotFoundError:
-        # Also tolerate a test double or alternate filesystem implementation
-        # surfacing the disappearance race above the low-level helper.
-        return None
+    project = _load_expected_project_unlocked(project_id)
     if project is None:
         return None
     normalize_project_schema(project)
@@ -775,13 +876,31 @@ def mutate_project(
     result_value: Any = None
     save_project_state = True
 
-    with _acquire_project_lock(project_id, timeout):
-        latest_project = _load_project_unlocked(project_id)
+    # Missing and path/stored-ID-mismatched targets must fail before the lock
+    # helper can create a project directory or lock artifact. This read is
+    # only a preflight: the authoritative snapshot is still reloaded below
+    # under the route-scoped lock.
+    if _load_expected_project_unlocked(project_id) is None:
+        return None
+
+    with _acquire_existing_project_lock(project_id, timeout) as acquired:
+        if not acquired:
+            return None
+        latest_project = _load_expected_project_unlocked(project_id)
         if latest_project is None:
             return None
         normalized = normalize_project_schema(latest_project)
 
         result = mutator(latest_project)
+        if latest_project.get("id") != project_id:
+            logger.error(
+                "project mutator changed route-scoped identity",
+                extra={
+                    "route_project_id": project_id,
+                    "mutated_project_id": latest_project.get("id"),
+                },
+            )
+            return None
         if isinstance(result, MutationResult):
             result_value = result.value
             save_project_state = result.save

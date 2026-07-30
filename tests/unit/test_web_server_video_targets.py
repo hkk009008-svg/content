@@ -118,6 +118,17 @@ def _find_shot(project, shot_id):
     )
 
 
+def _corrupt_stored_project_id(tmp_path, route_id, stored_id):
+    project_path = tmp_path / route_id / "project.json"
+    project = json.loads(project_path.read_text(encoding="utf-8"))
+    project["id"] = stored_id
+    project_path.write_text(
+        json.dumps(project, indent=2),
+        encoding="utf-8",
+    )
+    return project_path
+
+
 def test_legacy_config_surface_is_unchanged_without_project(client):
     response = client.get("/api/config")
 
@@ -401,6 +412,169 @@ def test_project_config_valid_slug_reaches_missing_project_404(
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "Project not found"}
+
+
+@pytest.mark.parametrize(
+    ("request_kwargs", "expected_error"),
+    [
+        ({"json": []}, "JSON object required"),
+        ({"json": "scalar"}, "JSON object required"),
+        ({"json": 7}, "JSON object required"),
+        (
+            {"data": "null", "content_type": "application/json"},
+            "JSON object required",
+        ),
+        (
+            {"data": "name=ignored", "content_type": "text/plain"},
+            "JSON body required",
+        ),
+    ],
+)
+def test_project_update_requires_json_object_without_write(
+    client,
+    tmp_path,
+    monkeypatch,
+    request_kwargs,
+    expected_error,
+):
+    pid, _scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    project_path = tmp_path / pid / "project.json"
+    before = project_path.read_bytes()
+
+    response = client.put(
+        f"/api/projects/{pid}",
+        **request_kwargs,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": expected_error}
+    assert project_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("include_equal_id", [False, True])
+def test_project_update_accepts_absent_or_equal_body_id(
+    client,
+    tmp_path,
+    monkeypatch,
+    include_equal_id,
+):
+    pid, _scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    payload = {"name": "Updated project"}
+    if include_equal_id:
+        payload["id"] = pid
+
+    response = client.put(f"/api/projects/{pid}", json=payload)
+
+    assert response.status_code == 200
+    persisted = _load_project(pid)
+    assert persisted["id"] == pid
+    assert persisted["name"] == "Updated project"
+
+
+def test_project_update_missing_pid_returns_404_without_artifacts(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
+
+    response = client.put(
+        "/api/projects/valid-missing",
+        json={"name": "must not create"},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Project not found"}
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_project_update_rejects_mismatched_body_id_before_collision(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+    import web_server
+
+    pid, _scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    other = project_manager.create_project("Other project")
+    route_path = tmp_path / pid / "project.json"
+    other_path = tmp_path / other["id"] / "project.json"
+    route_before = route_path.read_bytes()
+    other_before = other_path.read_bytes()
+    mutate_bomb = MagicMock(
+        side_effect=AssertionError("mismatched id reached mutation"),
+    )
+    monkeypatch.setattr(web_server, "mutate_project", mutate_bomb)
+
+    response = client.put(
+        f"/api/projects/{pid}",
+        json={"id": other["id"], "name": "must not persist"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Body id must match route id",
+        "route_id": pid,
+    }
+    mutate_bomb.assert_not_called()
+    assert route_path.read_bytes() == route_before
+    assert other_path.read_bytes() == other_before
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    ["config", "project_get", "project_put", "scene_put", "target_put"],
+)
+def test_stored_project_id_mismatch_fails_q3_boundaries_without_cross_write(
+    client,
+    tmp_path,
+    monkeypatch,
+    boundary,
+):
+    pid, scene_id, (shot_id,) = _persist_project(tmp_path, monkeypatch)
+    stored_id = "other-project"
+    project_path = _corrupt_stored_project_id(
+        tmp_path,
+        pid,
+        stored_id,
+    )
+    before = project_path.read_bytes()
+    lock_path = tmp_path / pid / "project.lock"
+    lock_path.unlink(missing_ok=True)
+
+    if boundary == "config":
+        response = client.get(f"/api/config?project_id={pid}")
+    elif boundary == "project_get":
+        response = client.get(f"/api/projects/{pid}")
+    elif boundary == "project_put":
+        response = client.put(
+            f"/api/projects/{pid}",
+            json={"id": pid, "name": "must not persist"},
+        )
+    elif boundary == "scene_put":
+        response = client.put(
+            f"/api/projects/{pid}/scenes/{scene_id}",
+            json={"id": scene_id, "title": "must not persist"},
+        )
+    else:
+        response = client.put(
+            f"/api/projects/{pid}/shots/{shot_id}",
+            json={"target_api": "AUTO"},
+        )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Project not found"}
+    assert project_path.read_bytes() == before
+    assert not lock_path.exists()
+    assert not (tmp_path / stored_id).exists()
 
 
 def test_project_config_external_path_preserves_outside_sentinel(
@@ -829,6 +1003,102 @@ def test_direct_duplicate_id_cannot_clone_historical_grandfather(
     )
 
 
+@pytest.mark.parametrize("include_equal_id", [False, True])
+def test_nested_scene_accepts_absent_or_equal_body_id(
+    client,
+    tmp_path,
+    monkeypatch,
+    include_equal_id,
+):
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    payload = {"title": "Updated scene"}
+    if include_equal_id:
+        payload["id"] = scene_id
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    persisted = _load_project(pid)["scenes"][0]
+    assert persisted["id"] == scene_id
+    assert persisted["title"] == "Updated scene"
+
+
+def test_nested_scene_rejects_mismatched_body_id_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+    import web_server
+
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    other_scene = project_manager.make_scene("Other scene")
+
+    def _append_other(latest):
+        latest["scenes"].append(other_scene)
+        return True
+
+    project_manager.mutate_project(pid, _append_other)
+    before = deepcopy(_load_project(pid))
+    load_bomb = MagicMock(
+        side_effect=AssertionError("mismatched id reached project load"),
+    )
+    mutate_bomb = MagicMock(
+        side_effect=AssertionError("mismatched id reached mutation"),
+    )
+    monkeypatch.setattr(web_server, "load_project", load_bomb)
+    monkeypatch.setattr(web_server, "mutate_project", mutate_bomb)
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={
+            "id": other_scene["id"],
+            "title": "must not persist",
+            "shots": [],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Body id must match route id",
+        "route_id": scene_id,
+    }
+    load_bomb.assert_not_called()
+    mutate_bomb.assert_not_called()
+    assert _load_project(pid) == before
+
+
+def test_nested_scene_duplicate_path_identity_is_ambiguous_and_atomic(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    duplicate = project_manager.make_scene("Duplicate")
+    duplicate["id"] = scene_id
+
+    def _append_duplicate(latest):
+        latest["scenes"].append(duplicate)
+        return True
+
+    project_manager.mutate_project(pid, _append_duplicate)
+    before = deepcopy(_load_project(pid))
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"id": scene_id, "title": "must not persist"},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Scene not found"}
+    assert _load_project(pid) == before
+
+
 def test_nested_scene_empty_shots_clears_atomically(
     client,
     tmp_path,
@@ -1067,6 +1337,151 @@ def test_nested_scene_rejects_non_mapping_optimizer_cache_atomically(
         "error": "shots[0] does not match the shot schema",
     }
     assert _load_project(pid)["scenes"][0] == before
+
+
+@pytest.mark.parametrize("invalid_spec", [[], ["not-a-mapping"], "cached", None])
+def test_nested_scene_rejects_non_mapping_optimizer_spec_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+    invalid_spec,
+):
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed["optimizer_cache"] = {
+        "source_prompt": malformed["prompt"],
+        "spec": invalid_spec,
+    }
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "shots[0] does not match the shot schema",
+    }
+    assert _load_project(pid)["scenes"][0] == before
+
+
+_OPTIMIZER_SPEC_FIELDS = {
+    "image_prompt",
+    "video_prompt",
+    "purpose",
+    "shot_type",
+    "suggested_image_api",
+    "suggested_video_api",
+    "suggested_lipsync",
+    "negative_constraints",
+    "identity_anchor",
+    "camera",
+    "lighting",
+    "color_palette",
+    "reasoning",
+}
+
+
+def test_optimizer_spec_type_cases_cover_every_public_consumer_field():
+    import web_server
+
+    assert _OPTIMIZER_SPEC_FIELDS == set(
+        web_server._PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES,
+    )
+
+
+@pytest.mark.parametrize("field", sorted(_OPTIMIZER_SPEC_FIELDS))
+def test_nested_scene_rejects_malformed_known_optimizer_spec_value(
+    client,
+    tmp_path,
+    monkeypatch,
+    field,
+):
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed["optimizer_cache"] = {
+        "source_prompt": malformed["prompt"],
+        "spec": {field: ["not-the-declared-scalar"]},
+    }
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "shots[0] does not match the shot schema",
+    }
+    assert _load_project(pid)["scenes"][0] == before
+
+
+def test_nested_scene_rejects_non_string_optimizer_source_prompt(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, scene_id, _shot_ids = _persist_project(tmp_path, monkeypatch)
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed["optimizer_cache"] = {
+        "source_prompt": ["not-a-string"],
+        "spec": {},
+    }
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "shots[0] does not match the shot schema",
+    }
+    assert _load_project(pid)["scenes"][0] == before
+
+
+_VALID_OPTIMIZER_SPEC = {
+    "image_prompt": "image prompt",
+    "video_prompt": "video prompt",
+    "purpose": "action_motion",
+    "shot_type": "medium",
+    "suggested_image_api": "FLUX_DEV",
+    "suggested_video_api": "SORA_NATIVE",
+    "suggested_lipsync": None,
+    "negative_constraints": "blur",
+    "identity_anchor": "identity",
+    "camera": "static",
+    "lighting": "soft",
+    "color_palette": "neutral",
+    "reasoning": "validated",
+}
+
+
+def test_nested_scene_round_trips_complete_optimizer_consumer_shape(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, scene_id, (shot_id,) = _persist_project(tmp_path, monkeypatch)
+    proposed = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+    proposed[0]["optimizer_cache"] = {
+        "source_prompt": proposed[0]["prompt"],
+        "spec": _VALID_OPTIMIZER_SPEC,
+    }
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"shots": proposed},
+    )
+
+    assert response.status_code == 200
+    assert _find_shot(_load_project(pid), shot_id)["optimizer_cache"] == {
+        "source_prompt": proposed[0]["prompt"],
+        "spec": _VALID_OPTIMIZER_SPEC,
+    }
 
 
 _ACTIVE_SHOT_EXTENSIONS = [

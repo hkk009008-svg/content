@@ -115,9 +115,9 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 
 ## 3. Entry point — `web_server.py`
 
-**3194 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
-two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2698-2699](web_server.py:2698)).
-Verified 2026-07-30 via `wc -l web_server.py` → 3194 and an AST route probe →
+**3264 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
+two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2768-2769](web_server.py:2768)).
+Verified 2026-07-30 via `wc -l web_server.py` → 3264 and an AST route probe →
 66 route decorators / 65 route functions.
 
 ### 3.1 Route inventory (grouped)
@@ -149,7 +149,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
-spawned by `POST /generate` ([web_server.py:2037](web_server.py:2037)).
+spawned by `POST /generate` ([web_server.py:2107](web_server.py:2107)).
 **Cancellation is cooperative** — `pipeline.cancel()` flips a flag the worker
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
@@ -160,11 +160,11 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2056](web_server.py:2056)) does
+  `api_stream` ([web_server.py:2126](web_server.py:2126)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:2035](web_server.py:2035)) after success or error.
+  ([web_server.py:2105](web_server.py:2105)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -186,9 +186,9 @@ wind down.
 ### 3.5 cinema/services.py usage (no-pipeline-spin path)
 
 Three endpoints avoid constructing `CinemaPipeline`:
-- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2044](web_server.py:2044))
+- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2114](web_server.py:2114))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
-  live pipeline exists ([web_server.py:2545](web_server.py:2545)).
+  live pipeline exists ([web_server.py:2615](web_server.py:2615)).
 - `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:281](web_server.py:281)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:322](web_server.py:322)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -430,7 +430,7 @@ when a budget cap is hit.
 For an AUTO shot, the controller retains the first admitted engine for budget,
 progress, and take metadata, but calls the public dispatcher with
 `target_api="AUTO"` plus the ordered admitted chain
-([cinema/shots/controller.py:2110-2142](cinema/shots/controller.py:2110)).
+([cinema/shots/controller.py:2142-2172](cinema/shots/controller.py:2142)).
 The dispatcher therefore performs its own mandatory observation and filtering;
 the controller cannot pass its snapshot, date, or admission result through the
 public signature.
@@ -509,7 +509,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.1 Project lifecycle
 
-1. Operator creates project ([domain/project_manager.py:653](domain/project_manager.py:653)).
+1. Operator creates project ([domain/project_manager.py:750](domain/project_manager.py:750)).
 2. Operator uploads character photos → FLUX Kontext MAX MULTI generates 5
    multi-angle synthetic refs; GhostFaceNet embedding cached as `embedding.npy`.
 3. Operator defines locations → `prompt_fragment` + deterministic seed.
@@ -524,7 +524,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.2 `project_manager.py` defaults
 
-`make_project()` ([domain/project_manager.py:341](domain/project_manager.py:341))
+`make_project()` ([domain/project_manager.py:438](domain/project_manager.py:438))
 seeds these `global_settings`:
 
 ```python
@@ -543,12 +543,20 @@ seeds these `global_settings`:
 "color_drift_sensitivity": 0.3,
 ```
 
-`normalize_project_schema()` ([domain/project_manager.py:579](domain/project_manager.py:579))
+`normalize_project_schema()` ([domain/project_manager.py:676](domain/project_manager.py:676))
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
-**Filelock:** 10s default timeout via `FileLock(project.lock, timeout=10)`
-at [domain/project_manager.py:98](domain/project_manager.py:98).
+**Filelock:** 10s default timeout via `FileLock(project.lock, timeout=10)`.
+Creation-capable paths (`save_project`, project creation, and explicit
+`project_lock`) create the parent first. Existing-target `load_project` and
+`mutate_project` instead perform a read-only existence/stored-ID preflight and
+use a no-parent-creation lock, then re-read under lock. A missing or
+concurrently deleted project therefore stays absent. The stored project ID
+must equal the route/path ID before lock and under lock, and `mutate_project`
+reasserts it after the callback before save/snapshot sync, preventing a
+route-scoped callback or corrupt file from redirecting
+`_save_project_unlocked`.
 
 **Storage:** `domain/projects/<12-hex-id>/` with `project.json`,
 `characters/<cid>/`, `locations/<lid>/`, `shots/<sid>/`, `exports/`, `temp/`.
@@ -556,7 +564,7 @@ at [domain/project_manager.py:98](domain/project_manager.py:98).
 ### 7.3 Decomposition has TWO trigger paths
 
 1. **Operator-initiated, eager** — `POST /api/projects/<pid>/scenes/<sid>/decompose`
-   ([web_server.py:1871](web_server.py:1871)) calls `decompose_scene` directly.
+   ([web_server.py:1941](web_server.py:1941)) calls `decompose_scene` directly.
    UI button on the setup screen.
 2. **Pipeline-internal, lazy** — `cinema_pipeline.py:1013-1047` inside the main
    scene loop, only runs if `scene.get("shots", [])` is empty. Honors
@@ -623,10 +631,10 @@ operator-opts-in-later" shape.
 #### 7.7.1 Pydantic schema boundary (Session 8 — `ceb0a32` + `f9b0aff`)
 
 [domain/models.py](domain/models.py) defines a Pydantic v2 `Project` model
-([:166](domain/models.py:166)) mirroring the project.json structure
+([:196](domain/models.py:196)) mirroring the project.json structure
 (scenes, characters, locations, shots, takes, settings). The boundary is
 enforced via `_validate_project()` at
-[domain/project_manager.py:668](domain/project_manager.py:668), called on
+[domain/project_manager.py:765](domain/project_manager.py:765), called on
 both save and load paths through `project_manager.py`.
 
 **Default contract is warn-only.** Any `ValidationError` (or even
@@ -644,7 +652,7 @@ Two env flags formalize an "opt-in production escalation" convention.
 **`CINEMA_STRICT_SCHEMA`** (Session 10 — `5f2fe0b`). When set, `_validate_project()`
 re-raises `ValidationError` instead of warning, letting callers crash hard
 rather than persist invalid schema. Parser at
-[domain/project_manager.py:681](domain/project_manager.py:681):
+[domain/project_manager.py:778](domain/project_manager.py:778):
 
 ```python
 strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
@@ -654,7 +662,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1834](web_server.py:1834) — uses the
+`api_generate_dialogue` at [web_server.py:1904](web_server.py:1904) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -848,7 +856,7 @@ Task 4 (TEARDOWN) deleted the driver + graph + tests
 parameter (informational only — `generate_ai_broll`'s docstring notes
 production is "the only tier since WS1's max-tier retirement") sourced from
 `settings.get("quality_tier", "production")` at
-[cinema/shots/controller.py:689](cinema/shots/controller.py:689); no per-shot
+[cinema/shots/controller.py:800](cinema/shots/controller.py:800); no per-shot
 heuristic. §8.3 (below) covers what the max tier did, for archaeology.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
@@ -923,9 +931,9 @@ Polling: 2s × up to 300 iterations (~10 min) in production (the max tier's
 Task 4).
 
 **Multi-char keyframe flow (P1-1 slice 1).** `_resolve_identity_strategy`
-([cinema/shots/controller.py:330](cinema/shots/controller.py:330)) inspects registered characters and writes
+([cinema/shots/controller.py:397](cinema/shots/controller.py:397)) inspects registered characters and writes
 the `identity_strategy` promise into take metadata
-([cinema/shots/controller.py:694](cinema/shots/controller.py:694)); `secondary_chars` is populated in
+([cinema/shots/controller.py:805](cinema/shots/controller.py:805)); `secondary_chars` is populated in
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
@@ -938,7 +946,7 @@ keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 `take["metadata"]["identity_per_char"]`
-([cinema/shots/controller.py:859](cinema/shots/controller.py:859)) and are surfaced as `identity_multi`
+([cinema/shots/controller.py:1014](cinema/shots/controller.py:1014)) and are surfaced as `identity_multi`
 in the capability scorecard ([cinema/capability_scorecard.py:166](cinema/capability_scorecard.py:166)).
 
 ### 8.3 Max tier (RETIRED WS1 Task 4) — history, for archaeology
@@ -1014,7 +1022,7 @@ effect (zero face-lock), mutually exclusive by tier**:
   `has_character` guard passed for a char-bearing shot, so the `0.0` floor —
   not the guard — was the operative kill). The char LoRA fired only if the
   project explicitly set a non-zero per-character `char_lora_strengths`
-  ([cinema/shots/controller.py:334](cinema/shots/controller.py:334)).
+  ([cinema/shots/controller.py:414](cinema/shots/controller.py:414)).
   (All of `quality_max.py`'s injection functions cited above no longer exist —
   deleted WS1 Task 4.)
 
@@ -1105,14 +1113,19 @@ contract and a narrow typed compatibility set (`plan_review`,
 strictly before the lock/write path. The canonical contract includes active
 optimizer, object, performance, dialogue, storyboard,
 decomposition-evidence, and auto-approve fields; malformed extension values
-and unknown scratch fields fail atomically. Historical project loading remains
-permissive (`Shot.extra="allow"`) so old unknown data can be inspected and
-migrated, but the public replacement boundary cannot add or perpetuate an
-undeclared/unallowlisted field. Exact historical targets may round-trip only
-when both their scene and shot identifiers resolve uniquely; ambiguous legacy
-data fails closed. Generated/reviewed shot batches are re-evaluated at their
-terminal write boundary so an upstream policy pass cannot authorize a
-later-mutated target.
+and unknown scratch fields fail atomically. `optimizer_cache.spec` must itself
+be an object, and every known cache/spec value is checked against the type
+written and consumed by prompt/video routing. Historical project loading
+remains permissive (`Shot.extra="allow"`) so old unknown data can be inspected
+and migrated; both real controller cache consumers treat a historical
+non-mapping cache/spec as empty. The public replacement boundary cannot add or
+perpetuate an undeclared/unallowlisted field. Exact historical targets may
+round-trip only when both their scene and shot identifiers resolve uniquely;
+ambiguous legacy data fails closed. Project PUT accepts only a JSON object, and
+project/scene body IDs must be absent or exactly match the path ID; equal scene
+IDs are accepted for full-object round-trips but are not rewritten.
+Generated/reviewed shot batches are re-evaluated at their terminal write
+boundary so an upstream policy pass cannot authorize a later-mutated target.
 
 Dialogue AUTO routing prepends the ranked native-audio seed before the
 template. Thus known-broken Gemini is retained as rejection evidence while a
@@ -1522,13 +1535,13 @@ Verified by id-comparison:
 interpolates from `mode` to `lenient` over retries.
 
 Project-wide `identity_strictness` setting (default 0.60) overrides per-shot
-defaults at [cinema/shots/controller.py:824](cinema/shots/controller.py:824).
+defaults at [cinema/shots/controller.py:960](cinema/shots/controller.py:960).
 
 ### 11.5 Rolling-stats update sites (4 sites total)
 
 `IdentityValidator.history` accumulates from:
 
-1. **Keyframe validation** — `cinema/shots/controller.py:831` and `:867`
+1. **Keyframe validation** — `cinema/shots/controller.py:967` and `:1008`
 2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
 3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
 4. **Continuity video validation** — `domain/continuity_engine.py:630` → `validate_video`
@@ -1706,7 +1719,7 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `llm.negative_prompts`) appended based on first failing character's reason.
 
 **Wired by T6 (`10a0eb4`, 2026-06-06):** called from
-[`cinema/shots/controller.py:2724`](cinema/shots/controller.py:2724) inside
+[`cinema/shots/controller.py:2798`](cinema/shots/controller.py:2798) inside
 `diagnose_clip(deep=True)`.
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose`
 with JSON body `{"deep": true}`.
@@ -1763,8 +1776,8 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:702`; call at :982) and `diagnose_clip`
-  (`cinema/shots/controller.py:2639`; call at :2691); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:703`; call at :995) and `diagnose_clip`
+  (`cinema/shots/controller.py:2660`; call at :2712); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
 

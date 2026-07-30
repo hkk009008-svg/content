@@ -3502,3 +3502,76 @@ Evidence:
   `web_server.py`.
 - **Cross-ref:** ADR-070; `domain/models.py`; `web_server.py`;
   `tests/unit/test_web_server_video_targets.py`.
+
+## ADR-072 — Bind public updates to one existing project and typed cache shape
+
+- **Date:** 2026-07-30
+- **Status:** Accepted; supersedes ADR-071 where an outer
+  `optimizer_cache: dict` check was treated as sufficient, and ADR-070 where
+  route-slug validity was treated as sufficient project identity.
+- **Context.** Five boundary gaps remained:
+  - project PUT used `request.json or {}` and called `.get()`, so a JSON array
+    or scalar could raise instead of returning a client error;
+  - load/mutate entered a creation-capable project lock, so a valid missing ID
+    or deletion race could recreate a directory or lock artifact;
+  - a file at `projects/<route-id>/project.json` could carry another stored
+    `id`; `_save_project_unlocked` then derived its destination from that
+    stored value and could redirect the write;
+  - scene PUT applied the whole body with `dict.update`, allowing body `id` to
+    rename the path-selected scene or collide with a sibling;
+  - a public cache such as `{"spec": ["not-a-mapping"]}` passed the outer dict
+    check, while both keyframe and motion consumers call `.get()` on the
+    nested spec.
+- **Rule #12 / Rule #13 audit.** The only intentional project-creation paths
+  are `save_project`, `create_project`, and the explicit `project_lock`
+  helper. HTTP reads and mutations target an existing project.
+  `load_project` and `mutate_project` are the shared high-fanout boundaries,
+  so fixing them covers direct shot, nested scene, generated-shot,
+  auto-approve, language-default, character, object, and location mutations.
+  `delete_project` already checks existence before its lock. Optimizer writers
+  persist `source_prompt: str` and `spec: dict`; the known spec values consumed
+  by keyframe/motion routing are strings except nullable
+  `suggested_lipsync`.
+- **Decision.**
+  - Project PUT requires a JSON object. Wrong media type returns
+    `JSON body required`; JSON null, array, or scalar returns
+    `JSON object required`.
+  - Project and scene PUT accept an absent body `id` or one exactly equal to
+    the route identity. A mismatch returns 400 before load/mutation. Scene
+    identity is never included in the update dict, and an ambiguous duplicate
+    scene route fails closed.
+  - Existing-target load/mutate first read without side effects, require the
+    stored project ID to equal the route/path ID, acquire the same project lock
+    with a no-parent-creation lock implementation, and re-read/recheck under
+    lock. `mutate_project` reasserts the identity after the callback and before
+    save or snapshot sync. Creation-capable paths explicitly create their
+    parent before using that lock implementation.
+  - Public nested-shot replacement requires `optimizer_cache` to be an object,
+    `source_prompt` to be a string when present, `spec` to be an object when
+    present, and every known optimizer spec value to have its production type.
+    Unknown spec keys remain forward-compatible. Historical internal loading
+    stays permissive; both controller consumers defensively treat a
+    non-mapping cache or spec as empty.
+- **Consequences.**
+  - A missing or concurrently deleted mutation target returns 404 without
+    resurrecting its directory. A stored-ID mismatch, lock-time identity
+    change, or callback identity rewrite cannot create or write a second
+    project.
+  - Full-object UI round-trips may keep equal IDs, but path identity remains
+    immutable and duplicate scene IDs cannot select an arbitrary sibling.
+  - Malformed optimizer caches fail atomically at the public boundary, while
+    pre-existing malformed historical caches no longer crash either real
+    controller consumer.
+- **Evidence.** `tests/unit/test_web_server_video_targets.py` pins every
+  request shape, absent/equal/mismatched IDs, scene collision/atomicity,
+  stored-ID corruption across config/project/scene/target paths, and complete
+  optimizer consumer-field types. `tests/unit/test_project_manager.py` pins
+  ordinary misses, deletion during lock acquisition, pre-lock and lock-time
+  stored-ID corruption, and callback redirection.
+  `tests/unit/test_optimizer_cache_boundary.py` executes both real controller
+  cache consumers with historical non-mapping cache/spec mutations.
+- **Cross-ref:** ADR-070; ADR-071; `domain/project_manager.py`;
+  `web_server.py`; `cinema/shots/controller.py`;
+  `tests/unit/test_web_server_video_targets.py`;
+  `tests/unit/test_project_manager.py`;
+  `tests/unit/test_optimizer_cache_boundary.py`.

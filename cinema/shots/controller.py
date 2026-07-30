@@ -84,6 +84,7 @@ import os
 import stat
 import tempfile
 import time
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
@@ -813,10 +814,20 @@ class ShotController:
         opt_enabled = settings.get("prompt_optimizer_enabled", False)
         opt_spec = None
         if opt_enabled:
-            cached = shot.get("optimizer_cache")
+            cached_value = shot.get("optimizer_cache")
+            cached = (
+                cached_value
+                if isinstance(cached_value, Mapping)
+                else {}
+            )
             # Re-optimize when the source prompt changed OR no cache exists
             if cached and cached.get("source_prompt") == full_prompt:
-                opt_spec = cached.get("spec")
+                cached_spec = cached.get("spec")
+                opt_spec = (
+                    cached_spec
+                    if isinstance(cached_spec, Mapping)
+                    else None
+                )
             else:
                 try:
                     from llm.prompt_optimizer import optimize_shot_prompt
@@ -1897,8 +1908,18 @@ class ShotController:
         # F1a: Read the optimizer cache to recover the purpose + suggested_video_api
         # that was computed during keyframe generation but not forwarded here.
         # The cache structure is: shot["optimizer_cache"]["spec"]["purpose"] / ["suggested_video_api"]
-        opt_cache = shot.get("optimizer_cache") or {}
-        opt_spec_cached = opt_cache.get("spec") or {}
+        opt_cache_value = shot.get("optimizer_cache")
+        opt_cache = (
+            opt_cache_value
+            if isinstance(opt_cache_value, Mapping)
+            else {}
+        )
+        opt_spec_value = opt_cache.get("spec")
+        opt_spec_cached = (
+            opt_spec_value
+            if isinstance(opt_spec_value, Mapping)
+            else {}
+        )
         cached_purpose = opt_spec_cached.get("purpose", "")
         _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
         has_dialogue = cached_purpose in _dialogue_purposes
