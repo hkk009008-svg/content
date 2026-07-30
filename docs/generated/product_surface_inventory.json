@@ -3004,7 +3004,7 @@
       ]
     },
     "frontend": {
-      "analysis": "conservative masked lexical scan with balanced call delimiters; TypeScript is not executed",
+      "analysis": "conservative masked lexical scan with balanced call delimiters and regex-literal handling; TypeScript is not executed",
       "declarative_resource_urls": {
         "reason": "JSX src/href/poster and CSS resource loads are outside executable call-expression schema v1",
         "status": "excluded"
@@ -3024,6 +3024,7 @@
       ],
       "root": "web/src",
       "unresolved": [
+        "ambiguous regex/division/JSX slashes and bare fetch calls under detected local/module bindings",
         "dynamic URLs/methods; imported, aliased, transformed, multi-hop, or multi-transport wrappers"
       ]
     },
@@ -3034,7 +3035,7 @@
       "query_keys": "static query keys are retained separately"
     },
     "non_2xx_observation": {
-      "definition": "fetch is observed only when the same bound response has .ok read or .status compared in its enclosing function; catch/json alone do not count",
+      "definition": "fetch is observed only when the same bound response has .ok read or a direct .status-to-status-code comparison in its enclosing function; catch/json alone do not count",
       "event_source": "not applicable; transport_error_observation separately records onerror/error-listener presence",
       "states": [
         "observed",
@@ -3044,6 +3045,39 @@
     }
   },
   "unresolved": [
+    {
+      "domain": "frontend",
+      "expression": "/ {template.steps} steps</s",
+      "id": "unresolved:9c7636c48e90d176",
+      "kind": "ambiguous_javascript_slash",
+      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
+      "source": {
+        "line": 380,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "/100</s",
+      "id": "unresolved:bb53f1fb20eb412c",
+      "kind": "ambiguous_javascript_slash",
+      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
+      "source": {
+        "line": 399,
+        "path": "web/src/components/console/CapabilityConsole.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "/ {d.bar.toFixed(2)}</s",
+      "id": "unresolved:ec75d5bb31ed908e",
+      "kind": "ambiguous_javascript_slash",
+      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
+      "source": {
+        "line": 49,
+        "path": "web/src/components/console/CapabilityConsole.tsx"
+      }
+    },
     {
       "domain": "frontend",
       "expression": "path",

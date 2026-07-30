@@ -7,8 +7,10 @@ import argparse
 import ast
 import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable, NamedTuple, Sequence
 from urllib.parse import urlsplit
@@ -38,6 +40,13 @@ class Transport(NamedTuple):
     method_reason: str | None
     function: Function | None
     row: dict[str, Any]
+
+
+class LexicalIssue(NamedTuple):
+    start: int
+    end: int
+    kind: str
+    reason: str
 
 
 def _source(path: str, line: int) -> dict[str, Any]:
@@ -283,17 +292,104 @@ def _backend(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return routes, unresolved
 
 
-def _mask_typescript(source: str) -> str:
-    """Blank comments and string/template contents while preserving positions."""
+_EXPRESSION_SENTINEL = "\x00"
+_REGEX_PREFIX_WORDS = {
+    "await",
+    "case",
+    "delete",
+    "do",
+    "else",
+    "in",
+    "instanceof",
+    "new",
+    "of",
+    "return",
+    "throw",
+    "typeof",
+    "void",
+    "yield",
+}
+
+
+def _regex_literal_end(source: str, opening: int) -> int | None:
+    """Return the end after flags for one single-line regex candidate."""
+
+    index = opening + 1
+    in_class = False
+    while index < len(source):
+        char = source[index]
+        if char in {"\n", "\r"}:
+            return None
+        if char == "\\":
+            index += 2
+            continue
+        if char == "[" and not in_class:
+            in_class = True
+        elif char == "]" and in_class:
+            in_class = False
+        elif char == "/" and not in_class:
+            index += 1
+            while index < len(source) and source[index] in "dgimsuvy":
+                index += 1
+            return index
+        index += 1
+    return None
+
+
+def _slash_context(source: str, context: Sequence[str], index: int) -> str:
+    """Classify slash as regex, division/JSX, or lexically ambiguous."""
+
+    if index + 1 < len(source) and source[index + 1] == ">":
+        return "division"
+    if (
+        index > 0
+        and source[index - 1] == "<"
+        and index + 1 < len(source)
+        and (source[index + 1] == ">" or re.match(r"[A-Za-z]", source[index + 1]))
+    ):
+        return "division"
+
+    previous = index - 1
+    while previous >= 0 and context[previous].isspace():
+        previous -= 1
+    if previous < 0:
+        return "regex"
+
+    char = context[previous]
+    if char == _EXPRESSION_SENTINEL or char in {"]", "."}:
+        return "division"
+    if char.isalnum() or char in {"_", "$"}:
+        end = previous + 1
+        start = previous
+        while start >= 0 and (
+            context[start].isalnum() or context[start] in {"_", "$"}
+        ):
+            start -= 1
+        token = "".join(context[start + 1 : end])
+        return "regex" if token in _REGEX_PREFIX_WORDS else "division"
+    if char in "=([{,:;!?":
+        return "regex"
+    return "ambiguous"
+
+
+def _mask_typescript(
+    source: str,
+    lexical_issues: list[LexicalIssue] | None = None,
+) -> str:
+    """Blank comments, strings/templates, and conservative regex literals."""
+
     chars = list(source)
+    context = list(source)
     index = 0
     while index < len(chars):
         if source.startswith("//", index):
             end = source.find("\n", index + 2)
             end = len(source) if end < 0 else end
+            expression = False
         elif source.startswith("/*", index):
             found = source.find("*/", index + 2)
             end = len(source) if found < 0 else found + 2
+            expression = False
         elif source[index] in {"'", '"', "`"}:
             quote = source[index]
             end = index + 1
@@ -304,12 +400,51 @@ def _mask_typescript(source: str) -> str:
                 end += 1
                 if source[end - 1] == quote:
                     break
+            expression = True
+        elif source[index] == "/":
+            slash_kind = _slash_context(source, context, index)
+            regex_end = (
+                _regex_literal_end(source, index)
+                if slash_kind in {"regex", "ambiguous"}
+                else None
+            )
+            if (
+                slash_kind == "ambiguous"
+                and regex_end is not None
+                and lexical_issues is not None
+            ):
+                lexical_issues.append(
+                    LexicalIssue(
+                        index,
+                        regex_end or index + 1,
+                        "ambiguous_javascript_slash",
+                        "slash is ambiguous among regex, division, and JSX lexical contexts",
+                    )
+                )
+            if regex_end is None:
+                if slash_kind == "regex" and lexical_issues is not None:
+                    line_end = source.find("\n", index)
+                    lexical_issues.append(
+                        LexicalIssue(
+                            index,
+                            len(source) if line_end < 0 else line_end,
+                            "unterminated_regex_literal",
+                            "regex-literal start has no same-line closing slash",
+                        )
+                    )
+                index += 1
+                continue
+            end = regex_end
+            expression = True
         else:
             index += 1
             continue
         for position in range(index, min(end, len(chars))):
             if chars[position] != "\n":
                 chars[position] = " "
+                context[position] = " "
+        if expression and index < len(context):
+            context[index] = _EXPRESSION_SENTINEL
         index = end
     return "".join(chars)
 
@@ -599,15 +734,44 @@ def _imports(mask: str) -> set[str]:
     return names
 
 
+def _has_fetch_binding(mask: str, functions: Sequence[Function]) -> bool:
+    """Conservatively detect a file-local/module binding for bare ``fetch``."""
+
+    if "fetch" in _imports(mask):
+        return True
+    if any(
+        function.name == "fetch" or "fetch" in function.params
+        for function in functions
+    ):
+        return True
+    return bool(re.search(r"\b(?:const|let|var)\s+fetch\b", mask))
+
+
 def _frontend_file(
     root: Path, path: Path
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     relative = path.relative_to(root).as_posix()
     source = path.read_text(encoding="utf-8")
-    mask = _mask_typescript(source)
+    lexical_issues: list[LexicalIssue] = []
+    mask = _mask_typescript(source, lexical_issues)
     constants = _constants(source, mask)
     functions = _functions(mask)
     unresolved: list[dict[str, Any]] = []
+    for issue in lexical_issues:
+        _unknown(
+            unresolved,
+            "frontend",
+            issue.kind,
+            issue.reason,
+            relative,
+            _line(source, issue.start),
+            source[issue.start : issue.end],
+        )
+    fetch_shadowed = _has_fetch_binding(mask, functions)
+    fetch_definition_starts = {
+        function.name_start for function in functions if function.name == "fetch"
+    }
+    shadowed_operations: list[dict[str, Any]] = []
     calls: list[Transport] = []
     patterns = (
         ("fetch", re.compile(r"(?<![\w$.])fetch\s*")),
@@ -615,6 +779,8 @@ def _frontend_file(
     )
     for kind, pattern in patterns:
         for match in pattern.finditer(mask):
+            if kind == "fetch" and match.start() in fetch_definition_starts:
+                continue
             call = _call_at(mask, match.end())
             if not call:
                 continue
@@ -622,6 +788,31 @@ def _frontend_file(
             url_expression = source[slice(*spans[0])].strip() if spans else ""
             url = _resolve_url(url_expression, constants)
             function = _container(functions, match.start())
+            if kind == "fetch" and fetch_shadowed:
+                line = _line(source, match.start())
+                row = {
+                    "kind": "shadowed_fetch_call",
+                    "method": None,
+                    "path_shape": _positional(url, True) if url is not None else None,
+                    "query_keys": _query_keys(url),
+                    "source": _source(relative, line),
+                    "transport_id": None,
+                    "url_template": url,
+                }
+                if function:
+                    row["enclosing_function"] = function.name
+                shadowed_operations.append(row)
+                _unknown(
+                    unresolved,
+                    "frontend",
+                    "shadowed_fetch_call",
+                    "bare fetch call may resolve to a local or module binding",
+                    relative,
+                    line,
+                    source[match.start() : closing + 1],
+                    function.name if function else None,
+                )
+                continue
             bound = _bound_name(mask, match.start())
             observation_end = function.body_end if function else min(len(mask), closing + 400)
             method_reason = None
@@ -796,7 +987,7 @@ def _frontend_file(
             match.group(1),
         )
 
-    operations: list[dict[str, Any]] = []
+    operations: list[dict[str, Any]] = list(shadowed_operations)
     safe_starts = {call.start for call in safe.values()}
     for call in calls:
         if call.start not in safe_starts:
@@ -959,7 +1150,7 @@ def build_inventory(root: Path) -> dict[str, Any]:
                 ],
             },
             "frontend": {
-                "analysis": "conservative masked lexical scan with balanced call delimiters; TypeScript is not executed",
+                "analysis": "conservative masked lexical scan with balanced call delimiters and regex-literal handling; TypeScript is not executed",
                 "root": "web/src",
                 "extensions": [".ts", ".tsx"],
                 "excluded": [
@@ -976,6 +1167,7 @@ def build_inventory(root: Path) -> dict[str, Any]:
                     "reason": "JSX src/href/poster and CSS resource loads are outside executable call-expression schema v1",
                 },
                 "unresolved": [
+                    "ambiguous regex/division/JSX slashes and bare fetch calls under detected local/module bindings",
                     "dynamic URLs/methods; imported, aliased, transformed, multi-hop, or multi-transport wrappers",
                 ],
             },
@@ -986,7 +1178,7 @@ def build_inventory(root: Path) -> dict[str, Any]:
             },
             "non_2xx_observation": {
                 "states": ["observed", "not_observed", "unknown"],
-                "definition": "fetch is observed only when the same bound response has .ok read or .status compared in its enclosing function; catch/json alone do not count",
+                "definition": "fetch is observed only when the same bound response has .ok read or a direct .status-to-status-code comparison in its enclosing function; catch/json alone do not count",
                 "event_source": "not applicable; transport_error_observation separately records onerror/error-listener presence",
             },
             "implicit_flask_methods": "automatic HEAD and OPTIONS are excluded",
@@ -1007,6 +1199,35 @@ def _counts(inventory: dict[str, Any]) -> str:
     return " ".join(f"{key}={len(inventory[key])}" for key in keys)
 
 
+def _resolved_output(root: Path, requested: Path) -> Path:
+    output = (requested if requested.is_absolute() else root / requested).resolve()
+    try:
+        output.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("output must resolve inside root") from exc
+    return output
+
+
+def _atomic_write(output: Path, rendered: str) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.",
+        suffix=".tmp",
+        dir=output.parent,
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        temporary.write_text(rendered, encoding="utf-8")
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, output)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
@@ -1014,9 +1235,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--stdout", action="store_true")
     args = parser.parse_args(argv)
-    inventory = build_inventory(args.root)
+    root = args.root.resolve()
+    try:
+        output = _resolved_output(root, args.output)
+    except ValueError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+    inventory = build_inventory(root)
     rendered = render_inventory(inventory)
-    output = args.output if args.output.is_absolute() else args.root / args.output
     if args.stdout:
         sys.stdout.write(rendered)
         return 0
@@ -1029,11 +1255,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if current != rendered:
             print(f"STALE: regenerate {output}", file=sys.stderr)
             return 1
-        print(f"OK {output.relative_to(args.root)} {_counts(inventory)}")
+        print(f"OK {output.relative_to(root)} {_counts(inventory)}")
         return 0
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(rendered, encoding="utf-8")
-    print(f"WROTE {output.relative_to(args.root)} {_counts(inventory)}")
+    try:
+        _atomic_write(output, rendered)
+    except OSError as exc:
+        print(f"ERROR: could not atomically write {output}: {exc}", file=sys.stderr)
+        return 1
+    print(f"WROTE {output.relative_to(root)} {_counts(inventory)}")
     return 0
 
 

@@ -18,6 +18,7 @@ SPEC.loader.exec_module(inventory_module)
 
 
 def _repo(tmp_path: Path, backend: str = "app = Flask(__name__, static_folder=None)\n") -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "web_server.py").write_text(backend, encoding="utf-8")
     (tmp_path / "web" / "src").mkdir(parents=True)
     return tmp_path
@@ -209,6 +210,62 @@ export async function loadStatus(projectId: string, characterId: string) {
     }
 
 
+def test_regex_literals_preserve_later_fetch_and_division_comments(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "regex.ts",
+        r"""
+const quotes = /["']/; fetch('/api/live')
+const escaped = /[\/"'\\]+\s?/gim
+const ratio = total / count
+const adjusted = total /* /["']/ is only a comment */ / count
+// /["']/ and fetch('/api/comment') are only a comment
+""",
+    )
+
+    result = _build(root)
+
+    assert [row["url_template"] for row in result["frontend_transports"]] == [
+        "/api/live"
+    ]
+    assert "ambiguous_javascript_slash" not in {
+        row["kind"] for row in result["unresolved"]
+    }
+
+
+def test_ambiguous_regex_slash_is_explicit_without_hiding_later_fetch(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "ambiguous-regex.ts",
+        r"""
+export function scan(flag: boolean, value: string) {
+  if (flag) /["']/.test(value)
+  fetch('/api/live')
+}
+""",
+    )
+
+    result = _build(root)
+
+    assert [row["url_template"] for row in result["frontend_transports"]] == [
+        "/api/live"
+    ]
+    lexical = [
+        row
+        for row in result["unresolved"]
+        if row["kind"] == "ambiguous_javascript_slash"
+    ]
+    assert len(lexical) == 1
+    assert lexical[0]["domain"] == "frontend"
+    assert lexical[0]["source"]["path"] == "web/src/ambiguous-regex.ts"
+
+
 @pytest.mark.parametrize(
     ("observation_body", "expected"),
     [
@@ -374,6 +431,58 @@ export function run() {
     ) in unresolved
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "function fetch(url: string) { return url }\nfetch('/api/local')\n",
+        "const fetch = client\nfetch('/api/local')\n",
+        "let fetch = client\nfetch('/api/local')\n",
+        "var fetch = client\nfetch('/api/local')\n",
+        "import fetch from './client'\nfetch('/api/local')\n",
+        "function run(fetch: any) { fetch('/api/local') }\n",
+    ],
+)
+def test_shadowed_fetch_calls_are_unknown_not_transports(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "shadowed.ts", source)
+
+    result = _build(root)
+    shadowed = [
+        row
+        for row in result["frontend_operations"]
+        if row["kind"] == "shadowed_fetch_call"
+    ]
+
+    assert result["frontend_transports"] == []
+    assert len(shadowed) == 1
+    assert shadowed[0]["method"] is None
+    assert shadowed[0]["url_template"] == "/api/local"
+    assert shadowed[0]["route_match"] == "unknown"
+    assert {
+        (row["domain"], row["kind"])
+        for row in result["unresolved"]
+    } >= {("frontend", "shadowed_fetch_call")}
+
+
+def test_normal_global_fetch_remains_a_transport(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "global.ts", "fetch('/api/global')\n")
+
+    result = _build(root)
+
+    assert [row["url_template"] for row in result["frontend_transports"]] == [
+        "/api/global"
+    ]
+    assert not [
+        row
+        for row in result["unresolved"]
+        if row["kind"] == "shadowed_fetch_call"
+    ]
+
+
 def test_ids_are_line_independent_and_render_is_deterministic(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     source = """
@@ -418,6 +527,82 @@ def test_frontend_test_and_generated_directories_are_excluded(tmp_path: Path) ->
     result = _build(root)
 
     assert [row["url_template"] for row in result["frontend_transports"]] == ["/api/active"]
+
+
+def test_output_outside_resolved_root_is_rejected_without_creation(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    outside = tmp_path / "outside.json"
+
+    result = inventory_module.main(
+        ["--root", str(root), "--output", str(outside)]
+    )
+
+    assert result == 2
+    assert not outside.exists()
+
+
+@pytest.mark.parametrize("failure_site", ["write", "replace"])
+def test_atomic_generation_failure_preserves_prior_artifact_and_cleans_temp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_site: str,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    output = root / "docs" / "generated" / "inventory.json"
+    output.parent.mkdir(parents=True)
+    output.write_text("prior artifact\n", encoding="utf-8")
+    before = set(output.parent.iterdir())
+
+    if failure_site == "write":
+        original_write_text = Path.write_text
+
+        def bomb_temp_write(path: Path, *args, **kwargs):
+            if path.name.startswith(f".{output.name}."):
+                raise OSError("write bomb")
+            return original_write_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", bomb_temp_write)
+    else:
+        def bomb_replace(*_args, **_kwargs):
+            raise OSError("replace bomb")
+
+        monkeypatch.setattr(inventory_module.os, "replace", bomb_replace)
+
+    result = inventory_module.main(
+        ["--root", str(root), "--output", str(output)]
+    )
+
+    assert result == 1
+    assert output.read_text(encoding="utf-8") == "prior artifact\n"
+    assert set(output.parent.iterdir()) == before
+
+
+def test_check_mode_does_not_call_atomic_writer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path)
+    output = root / "inventory.json"
+    output.write_text(
+        inventory_module.render_inventory(_build(root)),
+        encoding="utf-8",
+    )
+
+    def forbidden_write(*_args, **_kwargs):
+        raise AssertionError("--check must remain read-only")
+
+    monkeypatch.setattr(
+        inventory_module,
+        "_atomic_write",
+        forbidden_write,
+        raising=False,
+    )
+
+    assert inventory_module.main(
+        ["--root", str(root), "--output", str(output), "--check"]
+    ) == 0
 
 
 def test_repository_artifact_is_current() -> None:
