@@ -57,6 +57,23 @@ if not hasattr(sys.modules["kling_native"], "KlingNativeAPI"):
     sys.modules["kling_native"].KlingNativeAPI = MagicMock  # type: ignore[attr-defined]
 
 
+_PRE_SORA_SUNSET = date(2026, 9, 23)
+
+
+def _kling_native_runtime() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"kling_access_key", "kling_secret_key"},
+        modules={"jwt"},
+    )
+
+
+def _veo_native_runtime() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"google_api_key"},
+        modules={"google.genai"},
+    )
+
+
 class TestPreSpendBudgetGate:
     """generate_motion_take refuses to spend when the estimated envelope exceeds budget."""
 
@@ -141,6 +158,14 @@ class TestPreSpendBudgetGate:
         with (
             patch("cinema.shots.controller.generate_ai_video", gen_vid),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
@@ -236,6 +261,14 @@ class TestPreSpendBudgetGate:
             patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
             patch("cinema.shots.controller._probe_duration", return_value=3.5),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_veo_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
@@ -264,6 +297,14 @@ class TestPreSpendBudgetGate:
         with (
             patch("cinema.shots.controller.generate_ai_video", return_value=clip),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 

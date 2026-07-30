@@ -866,6 +866,11 @@ class TestPortraitRoutingSafety:
             # probe returns no dims → _accept_or_reject fail-opens (the F1 condition).
             with patch("phase_c_ffmpeg.probe_final_media", return_value={"format": {}}):
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                )
                 result = phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
