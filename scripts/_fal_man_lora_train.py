@@ -18,6 +18,7 @@ from a photoreal canonical.
 Run: PYTHONPATH=. .venv/bin/python scripts/_fal_man_lora_train.py
 """
 import hashlib
+import json
 import os
 import sys
 import time
@@ -28,12 +29,10 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-for line in open(".env"):
-    if line.startswith("FAL_KEY="):
-        os.environ["FAL_KEY"] = line.split("=", 1)[1].strip()
-        break
-
-import fal_client  # noqa: E402
+from prep.lora_policy import (  # noqa: E402
+    LoraTrainingDormantError,
+    lora_training_dormant_error,
+)
 
 CANONICAL = "logs/p12_fresh_face_man.jpg"
 REF_DIR = "logs/man_lora_refs"
@@ -67,6 +66,16 @@ ANGLE_CONFIGS = [
 ]
 
 
+def _load_fal_client():
+    """Load credentials/client only after a dormant-policy guard."""
+    for line in open(".env"):
+        if line.startswith("FAL_KEY="):
+            os.environ["FAL_KEY"] = line.split("=", 1)[1].strip()
+            break
+    import fal_client
+    return fal_client
+
+
 def _record_kontext_cost(op):
     try:
         from cost_tracker import CostTracker
@@ -76,6 +85,11 @@ def _record_kontext_cost(op):
 
 
 def generate_refs():
+    raise LoraTrainingDormantError()
+
+    # Independently callable paid reference generation remains preserved but
+    # unreachable while dormant.
+    fal_client = _load_fal_client()
     os.makedirs(REF_DIR, exist_ok=True)
     refs = [CANONICAL]
     canonical_url = fal_client.upload_file(CANONICAL)
@@ -112,6 +126,11 @@ def generate_refs():
 
 
 def main():
+    print(json.dumps(lora_training_dormant_error(), sort_keys=True))
+    return 2
+
+    # Dormant paid producer retained for separately reviewed reactivation.
+    fal_client = _load_fal_client()
     if os.path.exists(OUT):
         # operator F1 (02:01:00Z): training is NOT idempotent — a re-run
         # re-spends the FAL fee and overwrites the validated artifact.

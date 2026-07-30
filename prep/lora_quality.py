@@ -48,8 +48,8 @@ def _next_lora_action(attempt: int, best_score: Optional[float], *,
                       threshold: float, baseline: float, budget: int) -> LoraAction:
     """Pure policy. `attempt` is the 0-based index of the train just validated;
     `budget` is the max number of trains. Implements decision D3 (spec section 3/6.3)."""
-    if best_score is None:                      # validation skipped -> register unvalidated
-        return LoraAction.ACCEPT
+    if best_score is None:                      # unavailable validation can never activate
+        return LoraAction.REJECT
     if best_score >= threshold:
         return LoraAction.ACCEPT
     if attempt + 1 >= budget:                   # retrain budget exhausted
@@ -307,9 +307,9 @@ def train_character_lora_gated(project_dir, character, *, config_overrides=None)
         if not train.get("success"):
             return train                                  # infra/train error -> surface, NO retrain
         result = validate_lora_quality(train["lora_path"], character)
-        if result.skipped:                                # no GPU/anchor -> register unvalidated
-            return _gated_result(train, score=None, strength=None, lora_path=train["lora_path"],
-                                 warning=False, rejected=False, skipped=True,
+        if result.skipped:                                # no GPU/anchor -> reject unvalidated
+            return _gated_result(train, score=None, strength=None, lora_path=None,
+                                 warning=True, rejected=True, skipped=True,
                                  skip_reason=result.skip_reason, attempts=attempt + 1)
         if best is None or result.best_score > best[0]:
             best = (result.best_score, result.best_strength, train["lora_path"])

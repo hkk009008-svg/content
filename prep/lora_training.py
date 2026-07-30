@@ -55,6 +55,8 @@ import time
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+from prep.lora_policy import LoraTrainingDormantError, lora_training_dormant_error
+
 
 def _safe_under(base: str, *parts: str) -> str:
     """Join `parts` to `base` and assert the result is inside `base`.
@@ -418,6 +420,9 @@ def _run_ai_toolkit(config_path: str, log_path: str) -> int:
     """Launch ai-toolkit subprocess. Returns the process exit code.
     Writes stdout+stderr to log_path so the UI can tail it.
     """
+    raise LoraTrainingDormantError()
+
+    # Dormant implementation preserved for a separately reviewed reactivation.
     # ai-toolkit's typical invocation. Use sys.executable rather than ambient
     # `python` so we hit the same interpreter the server is running under (avoids
     # confusion in venvs with multiple installed Pythons).
@@ -444,6 +449,10 @@ def train_character_lora(
 
     Returns: {success: bool, lora_path: str?, error: str?, status: full status dict}
     """
+    return lora_training_dormant_error()
+
+    # Dormant producer implementation preserved below. The policy return must
+    # remain ahead of status, dataset, trainer, subprocess, and artifact work.
     char_id = character["id"]
     log_path = os.path.join(_character_lora_dir(project_dir, char_id), "train.log")
     train_config = {**DEFAULT_TRAIN_CONFIG, **(config_overrides or {})}
@@ -552,7 +561,11 @@ def train_character_lora(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
+    print(json.dumps(lora_training_dormant_error(), sort_keys=True))
+    sys.exit(2)
+
+    # Dormant one-off loader retained for a future, separately reviewed
+    # reactivation. No project file is read while the policy is dormant.
     if len(sys.argv) < 3:
         print(f"Usage: python -m prep.lora_training <project_dir> <character_id>")
         sys.exit(1)

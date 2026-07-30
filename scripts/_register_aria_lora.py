@@ -13,7 +13,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from domain.project_manager import mutate_project, load_project
+from prep.lora_policy import (  # noqa: E402
+    PROTECTED_LORA_FIELDS,
+    lora_activation_dormant_error,
+)
 
 PROJECT_ID = "cfd3f0967eb3"
 CHAR_ID = "char_b9c8bcfe9af0"
@@ -23,6 +26,16 @@ TRIGGER = "TOKwoman"
 
 
 def main() -> int:
+    print(json.dumps(
+        lora_activation_dormant_error(PROTECTED_LORA_FIELDS),
+        sort_keys=True,
+    ))
+    return 2
+
+    # Dormant direct registry implementation retained below. Project loading
+    # and mutation must remain after the hard activation denial.
+    from domain.project_manager import mutate_project, load_project
+
     assert os.path.exists(LORA_PATH), f"missing artifact: {LORA_PATH}"
     project = load_project(PROJECT_ID)
     chars = [c.get("id") for c in project.get("characters", [])]

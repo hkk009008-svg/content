@@ -3226,3 +3226,36 @@ Evidence:
   `docs/superpowers/plans/2026-07-18-ws1-max-tier-retirement.md`;
   `docs/superpowers/specs/2026-07-18-google-first-overhaul-design.md`; ARCHITECTURE.md §8
   (production tier; §8.3 keeps the max-tier archaeology).
+
+## ADR-066 — Hard-contain dormant per-character LoRA until the full consumer contract exists
+
+- **Date:** 2026-07-30
+- **Status:** Accepted.
+- **Context.** ADR-065 preserved the per-character LoRA producer and threaded
+  `char_lora_*` arguments after retiring their production consumer. The remaining
+  training paths could still spend money or GPU time, and a structurally unavailable
+  validation pass could be treated as acceptance and registered for a consumer that
+  does not exist. Generic project updates and one-off scripts also remained registry
+  write paths.
+- **Decision.** Apply one hard-coded, non-overridable dormant policy at every
+  executable training and registry boundary. Training and activation fail closed with
+  stable machine-readable codes; skipped validation is a rejection, never an
+  acceptance. Preserve the dormant producer implementation, existing artifacts,
+  historical status payloads, and controller-to-generator arguments, but permit no
+  new training or activation while this decision is current. There is no environment,
+  request, project, pod, query, config, or CLI re-enable path.
+- **Consequences.**
+  - Paid/provider/subprocess work and registry mutation cannot start through the HTTP,
+    local trainer, FAL/manual, or direct registration entry points.
+  - Existing status and protected registry values remain readable; unchanged legacy
+    values may round-trip, while additions or changes are rejected atomically.
+  - The dormant implementation stays available for evidence-led reactivation rather
+    than being deleted or silently reconnected.
+- **Re-enable gates.** Reactivation requires all of:
+  1. working, non-skippable validation that rejects unavailable or unscored output;
+  2. a real production consumer for the trained artifact;
+  3. a pre-spend authorization and budget gate ahead of every paid path; and
+  4. a superseding ADR plus mutation-tested proof through the real executable call
+     paths.
+- **Cross-ref:** ADR-065; `docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md`
+  Slice 1; `docs/AUDIT-product-unification-2026-07-30.md` Task 1a.

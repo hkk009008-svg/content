@@ -60,7 +60,7 @@ from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
 from config.settings import settings as env_settings
-
+from prep import lora_policy
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # CORS allowlist comes from settings.web_cors_origins. Default is
 # localhost-only ("http://localhost:8080" + "http://localhost:5173" for
@@ -539,20 +539,20 @@ def api_update_project(pid):
         }), 400
 
     def _mutate_project(project: dict):
-        # P1-3 part 12 (Variant 1 simplified): inner validate for race
-        # protection — Project.model_validate(...) raises ValidationError
-        # UNCONDITIONALLY on shape mismatch (race protection requires
-        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
-        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
-        # caller.md §"Variant 1".
+        # Inner validation and protected-field comparison use the locked latest state.
         Project.model_validate(project)
+        if changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs):
+            raise lora_policy.LoraActivationDormantError(changed_lora_fields)
         if "name" in data:
             project["name"] = data["name"]
         if "global_settings" in data:
             project["global_settings"].update(data["global_settings"])
         return project
 
-    project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    try:
+        project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    except lora_policy.LoraActivationDormantError as exc:
+        return jsonify(exc.payload), 409
     if not project:
         return jsonify({"error": "Project not found"}), 404
     return jsonify(project)
@@ -785,9 +785,9 @@ _lora_training_lock = threading.Lock()
 @app.route("/api/projects/<pid>/characters/<cid>/train-lora", methods=["POST"])
 @_project_lock_guard
 def api_train_lora(pid, cid):
-    """Trigger LoRA training for a character. Runs in a background thread.
-    Body (JSON, optional): { config_overrides: {rank, alpha, steps, learning_rate, ...} }
-    """
+    """Deny dormant LoRA training before any operational dependency is read."""
+    return jsonify(lora_policy.lora_training_dormant_error()), 409
+    # Preserved producer/registration code stays below this unconditional guard.
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -902,7 +902,7 @@ def api_lora_status(pid, cid):
     except Exception as e:
         return jsonify({"error": f"prep.lora_training unavailable: {e}"}), 500
     project_dir = get_project_dir(pid)
-    return jsonify(get_lora_status(project_dir, cid))
+    return jsonify({**get_lora_status(project_dir, cid), **lora_policy.lora_dormant_status_fields()})
 
 
 @app.route("/api/projects/<pid>/shots/<sid>/upload-driving-video", methods=["POST"])

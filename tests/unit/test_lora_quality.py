@@ -7,7 +7,7 @@ THRESH, BASE, BUDGET = 0.6, 0.45, 3
 
 @pytest.mark.parametrize("attempt,score,expected", [
     (0, 0.72, LoraAction.ACCEPT),            # meets threshold on first train
-    (0, None, LoraAction.ACCEPT),            # validation skipped -> accept (register unvalidated)
+    (0, None, LoraAction.REJECT),            # validation unavailable -> never activate
     (0, 0.50, LoraAction.RETRY_MORE_STEPS),  # 1st low score -> escalate steps
     (1, 0.55, LoraAction.RETRY_HIGHER_RANK), # 2nd low score -> escalate rank
     (2, 0.50, LoraAction.ACCEPT),            # budget exhausted, best >= baseline -> keep best
@@ -192,7 +192,7 @@ def test_gated_rejects_when_net_negative(monkeypatch):
     assert out["rejected"] is True and out["quality_warning"] is True
 
 
-def test_gated_skip_registers_unvalidated(monkeypatch):
+def test_gated_skip_rejects_unvalidated(monkeypatch):
     trains = {"n": 0}
     monkeypatch.setattr(lq, "_train_character_lora",
                         lambda pd, ch, **k: (trains.__setitem__("n", trains["n"] + 1)
@@ -201,7 +201,13 @@ def test_gated_skip_registers_unvalidated(monkeypatch):
                         lambda lp, ch, **k: _qr(None, None, skipped=True, reason="comfyui_unreachable"))
     out = lq.train_character_lora_gated("/proj", {"id": "c1"})
     assert trains["n"] == 1                               # no retrain on skip
-    assert out["rejected"] is False and out["quality_score"] is None and out["skipped"] is True
+    assert out["rejected"] is True
+    assert out["quality_warning"] is True
+    assert out["quality_score"] is None
+    assert out["best_strength"] is None
+    assert out["lora_path"] is None
+    assert out["skipped"] is True
+    assert out["skip_reason"] == "comfyui_unreachable"
 
 
 def test_gated_train_failure_returns_immediately_no_retrain(monkeypatch):

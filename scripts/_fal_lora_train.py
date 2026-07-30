@@ -7,6 +7,7 @@ pipeline (download to pod) for the realism+identity test. trigger = "TOKwoman".
 """
 import glob
 import hashlib
+import json
 import os
 import sys
 import time
@@ -16,13 +17,7 @@ import requests
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Load FAL_KEY from .env (fal_client reads it from the environment).
-for line in open(".env"):
-    if line.startswith("FAL_KEY="):
-        os.environ["FAL_KEY"] = line.split("=", 1)[1].strip()
-        break
-
-import fal_client  # noqa: E402
+from prep.lora_policy import lora_training_dormant_error  # noqa: E402
 
 D = "domain/projects/cfd3f0967eb3/characters/char_b9c8bcfe9af0"
 TRIGGER = "TOKwoman"
@@ -32,6 +27,17 @@ OUT = "logs/char_lora_fal_v2.safetensors"  # v2: never overwrite the proven v1 a
 
 
 def main():
+    print(json.dumps(lora_training_dormant_error(), sort_keys=True))
+    return 2
+
+    # Dormant paid producer retained below. No env/file/provider operation may
+    # move above the hard policy return without a separately reviewed change.
+    for line in open(".env"):
+        if line.startswith("FAL_KEY="):
+            os.environ["FAL_KEY"] = line.split("=", 1)[1].strip()
+            break
+    import fal_client
+
     all_imgs = sorted(glob.glob(f"{D}/*.jpg") + glob.glob(f"{D}/*.png"))
     # v2: de-dup byte-identical refs (canonical.jpg == ref_0.png, same md5) so no
     # single pose is double-weighted in training. Keeps the first (alpha-sorted).
