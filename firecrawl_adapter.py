@@ -48,11 +48,33 @@ _client_api_key: str | None = None
 _client_lock = Lock()
 _MISSING = object()
 _URL_ERROR = "URL must be a valid HTTP(S) URL without credentials."
+# A rendered single-page scrape can legitimately take tens of seconds.  One
+# minute leaves practical headroom while still bounding every SDK HTTP request.
+_SDK_HTTP_TIMEOUT_SECONDS = 60.0
 _HOST_LABEL = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 )
 _LEGACY_IPV4_PART = re.compile(r"(?:0[xX][0-9A-Fa-f]+|[0-9]+)")
 _ASCII_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+# Deterministic non-public namespaces.  RFC 6761 reserves localhost, test,
+# invalid, and example; RFC 6762 reserves local for mDNS; RFC 8375 reserves
+# home.arpa; RFC 7686 reserves onion; and RFC 9476 reserves alt.  ICANN also
+# reserves internal for private-use applications.  ``localdomain`` is the
+# conventional resolver-local suffix and must not escape to a remote scraper.
+_NON_PUBLIC_DNS_SUFFIXES = frozenset(
+    {
+        "alt",
+        "example",
+        "home.arpa",
+        "internal",
+        "invalid",
+        "local",
+        "localdomain",
+        "localhost",
+        "onion",
+        "test",
+    }
+)
 
 
 def _raise_url_error() -> None:
@@ -86,6 +108,14 @@ def _looks_like_legacy_ipv4(hostname: str) -> bool:
     )
 
 
+def _is_non_public_dns_name(hostname: str) -> bool:
+    """Return whether a canonical DNS name is in a special/private namespace."""
+    return any(
+        hostname == suffix or hostname.endswith(f".{suffix}")
+        for suffix in _NON_PUBLIC_DNS_SUFFIXES
+    )
+
+
 def _validate_hostname(hostname: str) -> None:
     """Reject unsafe IP literals, numeric aliases, and malformed DNS names."""
     if ":" in hostname:
@@ -109,11 +139,6 @@ def _validate_hostname(hostname: str) -> None:
         _raise_url_error()
 
     canonical_hostname = canonical_hostname.lower()
-    if (
-        canonical_hostname == "localhost"
-        or canonical_hostname.endswith(".localhost")
-    ):
-        _raise_url_error()
 
     try:
         address = IPv4Address(canonical_hostname)
@@ -131,7 +156,11 @@ def _validate_hostname(hostname: str) -> None:
         _raise_url_error()
 
     ascii_labels = canonical_hostname.split(".")
-    if any(not label for label in ascii_labels):
+    if (
+        len(ascii_labels) < 2
+        or any(not label for label in ascii_labels)
+        or _is_non_public_dns_name(canonical_hostname)
+    ):
         _raise_url_error()
 
     for ascii_label in ascii_labels:
@@ -253,6 +282,7 @@ def _get_client(api_key: str):
         try:
             candidate = Firecrawl(
                 api_key=normalized_key,
+                timeout=_SDK_HTTP_TIMEOUT_SECONDS,
                 max_retries=0,
             )
         except Exception:

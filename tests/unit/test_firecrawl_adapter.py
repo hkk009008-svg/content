@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import builtins
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import requests
 import socket
 import sys
-from threading import Thread
 import types
 from types import SimpleNamespace
 
@@ -51,8 +50,8 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
-            constructed.append((api_key, max_retries))
+        def __init__(self, *, api_key, timeout, max_retries):
+            constructed.append((api_key, timeout, max_retries))
 
         def scrape(self, url, *, formats):
             scrape_calls.append((url, formats))
@@ -73,73 +72,54 @@ def test_client_is_lazy_cached_and_uses_only_current_scrape_contract(monkeypatch
         api_key="test-key",
     ) == "# Current contract"
 
-    assert constructed == [("test-key", 0)]
+    assert constructed == [("test-key", 60.0, 0)]
     assert scrape_calls == [
         ("https://example.com/one", ["markdown"]),
         ("https://example.com/two", ["markdown"]),
     ]
 
 
-def test_real_sdk_zero_retry_client_makes_one_502_post_without_backoff(
+def test_real_sdk_transport_gets_timeout_and_makes_one_post_without_backoff(
     monkeypatch,
 ):
-    import firecrawl
-    from firecrawl import Firecrawl as InstalledFirecrawl
     from firecrawl.v2.utils import http_client as sdk_http_client
 
     requests_seen = []
     sleeps = []
 
-    class GatewayHandler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            length = int(self.headers.get("Content-Length", "0"))
-            requests_seen.append((self.path, self.rfile.read(length)))
-            body = b'{"error":"offline bad gateway"}'
-            self.send_response(502)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+    def record_transport_send(_session, request, **kwargs):
+        requests_seen.append((request.method, request.path_url, kwargs))
+        response = requests.Response()
+        response.status_code = 502
+        response._content = b'{"error":"offline bad gateway"}'
+        response.headers["Content-Type"] = "application/json"
+        response.request = request
+        response.url = request.url
+        return response
 
-        def log_message(self, format, *args):
-            pass
-
-    server = HTTPServer(("127.0.0.1", 0), GatewayHandler)
-    server_url = f"http://127.0.0.1:{server.server_port}"
-    thread = Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-
-    class LoopbackFirecrawl(InstalledFirecrawl):
-        def __init__(self, **kwargs):
-            super().__init__(api_url=server_url, **kwargs)
-
-    monkeypatch.setattr(firecrawl, "Firecrawl", LoopbackFirecrawl)
+    # Observe the timeout at Requests' transport boundary after the real
+    # Firecrawl client has propagated its constructor setting.
+    monkeypatch.setattr(requests.sessions.Session, "send", record_transport_send)
     monkeypatch.setattr(
         sdk_http_client,
         "time",
         SimpleNamespace(sleep=lambda seconds: sleeps.append(seconds)),
     )
 
-    try:
-        with pytest.raises(
-            firecrawl_adapter.FirecrawlScrapeError,
-            match="scrape request failed",
-        ):
-            firecrawl_adapter.scrape_markdown(
-                "https://example.com",
-                api_key="test-key",
-            )
-
-        assert (
-            firecrawl_adapter._client._v2_client.http_client.max_retries
-            == 0
+    with pytest.raises(
+        firecrawl_adapter.FirecrawlScrapeError,
+        match="scrape request failed",
+    ):
+        firecrawl_adapter.scrape_markdown(
+            "https://example.com",
+            api_key="test-key",
         )
-        assert [path for path, _body in requests_seen] == ["/v2/scrape"]
-        assert sleeps == []
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+
+    assert len(requests_seen) == 1
+    method, path, transport_kwargs = requests_seen[0]
+    assert (method, path) == ("POST", "/v2/scrape")
+    assert transport_kwargs["timeout"] == 60.0
+    assert sleeps == []
 
 
 @pytest.mark.parametrize(
@@ -259,8 +239,8 @@ def test_invalid_url_fails_before_client_construction(monkeypatch, url):
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
-            constructed.append((api_key, max_retries))
+        def __init__(self, *, api_key, timeout, max_retries):
+            constructed.append((api_key, timeout, max_retries))
 
         def scrape(self, url, *, formats):
             scrape_calls.append((url, formats))
@@ -287,6 +267,56 @@ def test_invalid_url_fails_before_client_construction(monkeypatch, url):
     assert imported == []
     assert constructed == []
     assert scrape_calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        # Every unqualified name stays local to some resolver context.
+        "http://printer",
+        "http://PRINTER.",
+        "http://例え",
+        "http://例え。",
+        # Resolver-local/private namespaces, including IDNA dot folding.
+        "http://localdomain",
+        "http://api.localdomain.",
+        "http://device.local",
+        "http://device。LOCAL。",
+        "http://device.ｌｏｃａｌ",
+        "http://home.arpa",
+        "http://router.home.arpa.",
+        "http://router.ｈｏｍｅ。ａｒｐａ",
+        "http://service.internal",
+        "http://service。INTERNAL。",
+        "http://service.ｉｎｔｅｒｎａｌ",
+        # Standards-backed special-use namespaces.
+        "http://service.test",
+        "http://service.invalid.",
+        "http://demo.example",
+        "http://hidden.onion",
+        "http://resolver.alt.",
+    ],
+)
+def test_non_public_dns_names_fail_before_sdk_import(monkeypatch, url):
+    class MustNotConstruct:
+        def __init__(self, **_kwargs):
+            pytest.fail("non-public host must not construct the SDK client")
+
+    _install_fake_sdk(monkeypatch, MustNotConstruct)
+    imported = []
+    real_import = builtins.__import__
+
+    def recording_import(name, *args, **kwargs):
+        if name == "firecrawl":
+            imported.append(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", recording_import)
+
+    with pytest.raises(firecrawl_adapter.FirecrawlURLValidationError):
+        firecrawl_adapter.scrape_markdown(url, api_key="test-key")
+
+    assert imported == []
 
 
 @pytest.mark.parametrize(
@@ -319,8 +349,8 @@ def test_valid_http_hosts_reach_current_scrape_call(monkeypatch, url):
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
-            constructed.append((api_key, max_retries))
+        def __init__(self, *, api_key, timeout, max_retries):
+            constructed.append((api_key, timeout, max_retries))
 
         def scrape(self, requested_url, *, formats):
             scrape_calls.append((requested_url, formats))
@@ -332,7 +362,7 @@ def test_valid_http_hosts_reach_current_scrape_call(monkeypatch, url):
         url,
         api_key="test-key",
     ) == "# Valid host"
-    assert constructed == [("test-key", 0)]
+    assert constructed == [("test-key", 60.0, 0)]
     assert scrape_calls == [(url, ["markdown"])]
 
 
@@ -348,8 +378,9 @@ def test_valid_dns_host_is_not_resolved_before_current_scrape(monkeypatch):
         monkeypatch.setattr(socket, resolver_name, resolver_bomb)
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
             assert api_key == "test-key"
+            assert timeout == 60.0
             assert max_retries == 0
 
         def scrape(self, url, *, formats):
@@ -437,7 +468,8 @@ def test_sdk_import_failure_has_safe_initialization_error(monkeypatch):
 
 def test_initialization_failure_does_not_expose_exception_secret(monkeypatch):
     class BrokenFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
+            assert timeout == 60.0
             assert max_retries == 0
             raise RuntimeError(f"rejected credential {api_key}")
 
@@ -457,8 +489,9 @@ def test_initialization_failure_does_not_expose_exception_secret(monkeypatch):
 
 def test_legacy_only_sdk_is_rejected_without_fallback(monkeypatch):
     class LegacyOnlyFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
             self.api_key = api_key
+            assert timeout == 60.0
             assert max_retries == 0
 
         def scrape_url(self, *args, **kwargs):
@@ -478,8 +511,9 @@ def test_legacy_only_sdk_is_rejected_without_fallback(monkeypatch):
 
 def test_call_failure_does_not_expose_exception_secret(monkeypatch):
     class FailingFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
             self.api_key = api_key
+            assert timeout == 60.0
             assert max_retries == 0
 
         def scrape(self, url, *, formats):
@@ -516,8 +550,9 @@ def test_empty_or_malformed_markdown_fails_clearly(
     message,
 ):
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
             self.api_key = api_key
+            assert timeout == 60.0
             assert max_retries == 0
 
         def scrape(self, url, *, formats):
@@ -537,8 +572,9 @@ def test_empty_or_malformed_markdown_fails_clearly(
 
 def test_mapping_result_is_a_deliberate_response_compatibility_path(monkeypatch):
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
             self.api_key = api_key
+            assert timeout == 60.0
             assert max_retries == 0
 
         def scrape(self, url, *, formats):
@@ -560,7 +596,8 @@ def test_both_consumers_share_one_lazy_client_and_no_legacy_method(monkeypatch):
     scrape_calls = []
 
     class FakeFirecrawl:
-        def __init__(self, *, api_key, max_retries):
+        def __init__(self, *, api_key, timeout, max_retries):
+            assert timeout == 60.0
             assert max_retries == 0
             instances.append(self)
 
