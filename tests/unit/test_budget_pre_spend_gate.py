@@ -476,10 +476,14 @@ class TestPreSpendBudgetGate:
 
         assert result["success"] is True
         kwargs = generate.call_args.kwargs
-        assert generate.call_args.args[2] == "LTX"
-        assert kwargs["video_fallbacks"] == ["KLING_3_0", "SEEDANCE"]
-        assert kwargs["_policy_snapshot"] is snapshot
-        assert kwargs["_policy_allow_primary_fallback"] is True
+        assert generate.call_args.args[2] == "AUTO"
+        assert kwargs["video_fallbacks"] == [
+            "LTX",
+            "KLING_3_0",
+            "SEEDANCE",
+        ]
+        assert "_policy_snapshot" not in kwargs
+        assert "_policy_allow_primary_fallback" not in kwargs
         assert cost_tracker.would_exceed.call_args.args == ("LTX",)
         assert captured_take["cascade_metadata"]["policy_rejections"][0] == {
             "key": "GEMINI_OMNI",

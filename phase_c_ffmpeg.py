@@ -6,7 +6,7 @@ import sys
 import time
 import json
 import subprocess
-from datetime import date
+from datetime import date, datetime, timezone
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Optional
 from config.settings import settings
@@ -59,7 +59,6 @@ SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "me
 # Once-per-run structural flag: multiple admitted fallbacks use FAL, so a
 # missing client degrades the whole run, not one clip.
 _FAL_MISSING_WARNED = False
-_VIDEO_POLICY_GUARD_TOKEN = object()
 
 # Default engine cascade for generate_ai_video when the caller passes no
 # video_fallbacks — quality order. Module-level so tests pin the REAL list
@@ -121,6 +120,21 @@ def _runtime_module_probe(name: str) -> bool:
         return False
 
 
+def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
+    """Observe runtime eligibility for the mandatory public entry fence."""
+
+    return build_runtime_snapshot(
+        settings_obj=settings,
+        module_probe=_runtime_module_probe,
+    )
+
+
+def _video_policy_current_date() -> date:
+    """Return the UTC lifecycle-policy date through a patchable test seam."""
+
+    return datetime.now(timezone.utc).date()
+
+
 def _serialized_policy_rejections(
     result: VideoCandidateResult,
 ) -> list[dict[str, str]]:
@@ -171,7 +185,6 @@ def generate_ai_video(
     character_id: str = None,
     attempted_apis: list = None,
     multi_angle_refs: list = None,
-    _cascade_retries: int = 0,
     negative_prompt: str = None,
     shot_type: str = None,
     video_fallbacks: list = None,
@@ -181,11 +194,113 @@ def generate_ai_video(
     duration: str = "8s",
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
-    _policy_snapshot: RuntimeSnapshot | None = None,
-    _policy_date: date | None = None,
-    _policy_allow_primary_fallback: bool = False,
-    _policy_candidates: tuple[str, ...] | None = None,
-    _policy_guard_token: object | None = None,
+) -> str:
+    """Filter a complete dispatch seed before entering provider execution.
+
+    Every public call crosses this boundary.  No public argument can supply an
+    admission result, lifecycle date, runtime snapshot, or recursion token.
+    Recursive cascade and cooldown work stays in
+    :func:`_execute_admitted_video_chain` with the immutable tuple produced
+    here.
+    """
+    from cinema.aspect import DEFAULT_ASPECT_RATIO
+    from cinema.context import get_project_setting
+
+    aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+    requested_api = target_api if isinstance(target_api, str) else ""
+    requested_upper = requested_api.upper()
+    if requested_upper == "AUTO":
+        raw_fallbacks = (
+            list(video_fallbacks)
+            if video_fallbacks is not None
+            else list(DEFAULT_VIDEO_CASCADE)
+        )
+        policy_seed: list[object] = ["AUTO", *raw_fallbacks]
+    elif video_fallbacks is not None:
+        policy_seed = [requested_upper, *video_fallbacks]
+    else:
+        # A concrete target with no explicit chain is pinned.  Provider
+        # failure or policy rejection must not revive global defaults.
+        policy_seed = [requested_upper]
+
+    dispatch_policy = filter_dispatch_candidates(
+        policy_seed,
+        snapshot=_video_policy_runtime_snapshot(),
+        on_date=_video_policy_current_date(),
+        api_engines=get_project_setting(ctx, "api_engines", None),
+        aspect_ratio=aspect,
+    )
+    serialized_rejections = _serialized_policy_rejections(dispatch_policy)
+    if _cascade_out is not None:
+        existing_rejections = _cascade_out.setdefault("policy_rejections", [])
+        for rejection in serialized_rejections:
+            if rejection not in existing_rejections:
+                existing_rejections.append(rejection)
+
+    primary_rejected = any(
+        rejection.key == requested_upper
+        for rejection in dispatch_policy.rejections
+    )
+    if not dispatch_policy.candidates or (
+        requested_upper != "AUTO" and primary_rejected
+    ):
+        if _cascade_out is not None:
+            _cascade_out["policy_error"] = _dispatch_policy_error(
+                requested_api,
+                dispatch_policy,
+            )
+        return None
+
+    admitted_candidates = dispatch_policy.candidates
+    admitted_primary = (
+        admitted_candidates[0]
+        if requested_upper == "AUTO"
+        else requested_upper
+    )
+    return _execute_admitted_video_chain(
+        image_path,
+        camera_motion,
+        admitted_primary,
+        output_mp4,
+        pacing=pacing,
+        character_id=character_id,
+        attempted_apis=attempted_apis,
+        multi_angle_refs=multi_angle_refs,
+        _cascade_retries=0,
+        negative_prompt=negative_prompt,
+        shot_type=shot_type,
+        driving_video_path=driving_video_path,
+        has_dialogue=has_dialogue,
+        dialogue_native_audio=dialogue_native_audio,
+        duration=duration,
+        ctx=ctx,
+        _cascade_out=_cascade_out,
+        admitted_candidates=admitted_candidates,
+        aspect=aspect,
+    )
+
+
+def _execute_admitted_video_chain(
+    image_path: str,
+    camera_motion: str,
+    target_api: str,
+    output_mp4: str,
+    pacing: str = "moderate",
+    character_id: str = None,
+    attempted_apis: list = None,
+    multi_angle_refs: list = None,
+    _cascade_retries: int = 0,
+    negative_prompt: str = None,
+    shot_type: str = None,
+    driving_video_path: str = "",
+    has_dialogue: bool = False,
+    dialogue_native_audio: bool = False,
+    duration: str = "8s",
+    ctx: Optional["PipelineContext"] = None,
+    _cascade_out: Optional[dict] = None,
+    *,
+    admitted_candidates: tuple[str, ...],
+    aspect: str,
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -218,81 +333,9 @@ def generate_ai_video(
         engines must therefore carry an API_COST_USD entry (cost_tracker.py) or
         would_exceed() reads 0.0 and the gate silently admits them.
     """
-    from cinema.context import get_project_setting
-    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio
-    _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+    from cinema.aspect import fal_aspect_ratio, runway_ratio
 
-    # True entry fence: resolve the complete chain exactly once, before
-    # attempted_apis, routing logs, sleeps, provider imports/constructors,
-    # uploads/downloads, or billing callbacks.  Recursive cascade hops receive
-    # the immutable admitted tuple and never revisit raw/default seeds.
-    if _policy_guard_token is not _VIDEO_POLICY_GUARD_TOKEN:
-        requested_api = target_api if isinstance(target_api, str) else ""
-        requested_upper = requested_api.upper()
-        if requested_upper == "AUTO":
-            raw_fallbacks = (
-                list(video_fallbacks)
-                if video_fallbacks is not None
-                else list(DEFAULT_VIDEO_CASCADE)
-            )
-            policy_seed: list[object] = ["AUTO", *raw_fallbacks]
-        elif video_fallbacks is not None:
-            policy_seed = [requested_upper, *video_fallbacks]
-        else:
-            # A concrete target with no explicit chain is pinned.  Provider
-            # failure or policy rejection must not revive global defaults.
-            policy_seed = [requested_upper]
-
-        configured_engines = get_project_setting(ctx, "api_engines", None)
-        policy_snapshot = (
-            _policy_snapshot
-            if _policy_snapshot is not None
-            else build_runtime_snapshot(
-                settings_obj=settings,
-                module_probe=_runtime_module_probe,
-            )
-        )
-        dispatch_policy = filter_dispatch_candidates(
-            policy_seed,
-            snapshot=policy_snapshot,
-            on_date=_policy_date,
-            api_engines=configured_engines,
-            aspect_ratio=_aspect,
-        )
-        serialized_rejections = _serialized_policy_rejections(dispatch_policy)
-        if _cascade_out is not None:
-            existing_rejections = _cascade_out.setdefault(
-                "policy_rejections",
-                [],
-            )
-            for rejection in serialized_rejections:
-                if rejection not in existing_rejections:
-                    existing_rejections.append(rejection)
-
-        primary_rejected = any(
-            rejection.key == requested_upper
-            for rejection in dispatch_policy.rejections
-        )
-        may_use_safe_chain = (
-            requested_upper == "AUTO"
-            or _policy_allow_primary_fallback
-        )
-        if (
-            not dispatch_policy.candidates
-            or (primary_rejected and not may_use_safe_chain)
-        ):
-            if _cascade_out is not None:
-                _cascade_out["policy_error"] = _dispatch_policy_error(
-                    requested_api,
-                    dispatch_policy,
-                )
-            return None
-
-        _policy_candidates = dispatch_policy.candidates
-        if requested_upper == "AUTO" or primary_rejected:
-            target_api = _policy_candidates[0]
-        else:
-            target_api = requested_upper
+    _aspect = aspect
 
     if attempted_apis is None:
         attempted_apis = []
@@ -364,13 +407,13 @@ def generate_ai_video(
         # This tuple was filtered once at the true entry boundary.  Never read
         # raw fallbacks/defaults here: doing so could revive a retired,
         # disabled, unavailable, or aspect-incompatible engine.
-        for api in _policy_candidates or ():
+        for api in admitted_candidates:
             if api not in attempted_apis:
                 logger.info("Cascade routing to next engine", extra={"engine": api})
-                return generate_ai_video(
+                return _execute_admitted_video_chain(
                     image_path, camera_motion, api, output_mp4, pacing,
                     character_id, attempted_apis, multi_angle_refs,
-                    shot_type=shot_type, video_fallbacks=video_fallbacks,
+                    shot_type=shot_type,
                     has_dialogue=has_dialogue,
                     dialogue_native_audio=dialogue_native_audio,
                     duration=duration,
@@ -392,11 +435,8 @@ def generate_ai_video(
                     driving_video_path=driving_video_path,
                     negative_prompt=negative_prompt,
                     ctx=ctx, _cascade_out=_cascade_out,
-                    _policy_snapshot=_policy_snapshot,
-                    _policy_date=_policy_date,
-                    _policy_allow_primary_fallback=_policy_allow_primary_fallback,
-                    _policy_candidates=_policy_candidates,
-                    _policy_guard_token=_VIDEO_POLICY_GUARD_TOKEN,
+                    admitted_candidates=admitted_candidates,
+                    aspect=aspect,
                 )
 
         # All APIs failed — try the cascade once more after a quota cooldown.
@@ -421,11 +461,11 @@ def generate_ai_video(
         time.sleep(30)
         # Retry the already-admitted chain.  Raw/default seeds are never
         # reloaded after the cooldown.
-        first_api = (_policy_candidates or ())[0]
-        return generate_ai_video(
+        first_api = admitted_candidates[0]
+        return _execute_admitted_video_chain(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, [], multi_angle_refs, _cascade_retries=_cascade_retries + 1,
-            shot_type=shot_type, video_fallbacks=video_fallbacks,
+            shot_type=shot_type,
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
             duration=duration,
@@ -434,11 +474,8 @@ def generate_ai_video(
             driving_video_path=driving_video_path,
             negative_prompt=negative_prompt,
             ctx=ctx, _cascade_out=_cascade_out,
-            _policy_snapshot=_policy_snapshot,
-            _policy_date=_policy_date,
-            _policy_allow_primary_fallback=_policy_allow_primary_fallback,
-            _policy_candidates=_policy_candidates,
-            _policy_guard_token=_VIDEO_POLICY_GUARD_TOKEN,
+            admitted_candidates=admitted_candidates,
+            aspect=aspect,
         )
 
     # Provider imports are deliberately delayed until after the entry fence.

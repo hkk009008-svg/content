@@ -26,6 +26,28 @@ def _ctx(aspect: str):
     return PipelineContext(global_settings={"aspect_ratio": aspect})
 
 
+def _native_runtime(target_api: str) -> RuntimeSnapshot:
+    requirements = {
+        "KLING_NATIVE": RuntimeSnapshot(
+            credentials={"kling_access_key", "kling_secret_key"},
+            modules={"jwt"},
+        ),
+        "SORA_NATIVE": RuntimeSnapshot(
+            credentials={"openai_api_key"},
+            modules={"openai"},
+        ),
+        "VEO_NATIVE": RuntimeSnapshot(
+            credentials={"google_api_key"},
+            modules={"google.genai"},
+        ),
+        "LTX": RuntimeSnapshot(
+            credentials={"fal_key"},
+            modules={"fal_client"},
+        ),
+    }
+    return requirements[target_api]
+
+
 def _run_native(target_api: str, module_name: str, class_attr: str, aspect: str = "16:9"):
     """Drive a native branch whose generate_video returns a path, with the
     aspect backstop forced to REJECT; return _cascade_out.
@@ -50,6 +72,16 @@ def _run_native(target_api: str, module_name: str, class_attr: str, aspect: str 
             import phase_c_ffmpeg
             import time as _time_mod
             with patch("os.path.exists", return_value=True), \
+                 patch.object(
+                     phase_c_ffmpeg,
+                     "_video_policy_runtime_snapshot",
+                     return_value=_native_runtime(target_api),
+                 ), \
+                 patch.object(
+                     phase_c_ffmpeg,
+                     "_video_policy_current_date",
+                     return_value=date(2026, 9, 23),
+                 ), \
                  patch.object(phase_c_ffmpeg, "_accept_or_reject", lambda p, a: False), \
                  patch.object(_time_mod, "sleep", lambda *_: None):
                 phase_c_ffmpeg.generate_ai_video(
@@ -103,11 +135,6 @@ def test_known_broken_gemini_omni_is_denied_before_provider_or_billing() -> None
                 attempted_apis=attempted,
                 ctx=_ctx("16:9"),
                 _cascade_out=cascade,
-                _policy_snapshot=RuntimeSnapshot(
-                    credentials={"google_api_key"},
-                    modules={"google.genai"},
-                ),
-                _policy_date=date(2026, 9, 23),
             )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)

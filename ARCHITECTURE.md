@@ -422,6 +422,14 @@ when a budget cap is hit.
 | `apply_correction` | Dispatches by action: `regenerate_image`/`regenerate_video`/`face_swap`/`lip_sync`/`rife`/`upscale`/`color_grade`/`speed`. `voice_regen` is hard-error. | |
 | `generate_scene_preview` | Reuses cached `scene_clips` or rebuilds from `approved_final_take_id` → `stitch_modules` | |
 
+For an AUTO shot, the controller retains the first admitted engine for budget,
+progress, and take metadata, but calls the public dispatcher with
+`target_api="AUTO"` plus the ordered admitted chain
+([cinema/shots/controller.py:2110-2142](cinema/shots/controller.py:2110)).
+The dispatcher therefore performs its own mandatory observation and filtering;
+the controller cannot pass its snapshot, date, or admission result through the
+public signature.
+
 *`generate_motion_take` routing row verified: 2026-07-30. Remaining §5
 claims last verified: 2026-06-13.*
 
@@ -1021,8 +1029,8 @@ Status: **FIXED 2026-06-13 (`cf32ca3`, operator2 impl; director2 verifies)** —
 core seam (`classify_shot_type` → return `"wide"` when the landscape bucket matches a
 char-bearing shot) re-engages identity in both tiers, but **two downstream consumers branch
 on the `shot_type=="landscape"` string** and were re-keyed in `cf32ca3`: the
-LTX-4K branch ([`phase_c_ffmpeg.py:433`](phase_c_ffmpeg.py:433)) → `"4k" if shot_type in ("landscape","wide")`,
-and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:392`](phase_c_ffmpeg.py:392)) **guarded-broadened**
+LTX-4K branch ([`phase_c_ffmpeg.py:639-641`](phase_c_ffmpeg.py:639)) → `"4k" if shot_type in ("landscape","wide")`,
+and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:597-601`](phase_c_ffmpeg.py:597)) **guarded-broadened**
 (wide gets Veo ambient *unless* overlay-dialogue — `has_dialogue and not dialogue_native_audio` — so no
 double-voice on a genuine wide+overlay-dialogue shot; director2 Pair-B call). A seam-only fix would have
 re-introduced a 4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
@@ -1115,40 +1123,49 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:165-1254](phase_c_ffmpeg.py:165))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:179-280](phase_c_ffmpeg.py:179))
 
-The function has an independent true entry fence
-([phase_c_ffmpeg.py:225-291](phase_c_ffmpeg.py:225)): it filters the entire
-primary + caller-supplied fallback/AUTO-default seed once before
+The public function is an independent true entry fence
+([phase_c_ffmpeg.py:209-280](phase_c_ffmpeg.py:209)): it filters the entire
+primary + caller-supplied fallback/AUTO-default seed once at
+[phase_c_ffmpeg.py:226-232](phase_c_ffmpeg.py:226), before
 `attempted_apis` mutation, routing logs, sleeps, provider imports or
-constructors, uploads/downloads, and billed-attempt callbacks. The immutable
-admitted tuple is reused for every cascade hop and cooldown retry. Direct
-explicit targets without internally authorized AUTO/pre-resolved-chain
-semantics fail on primary rejection instead of silently invoking another
-engine. `_cascade_out` records ordered `policy_rejections` and a stable
-`policy_error` when dispatch is denied or the admitted chain is empty.
+constructors, uploads/downloads, and billed-attempt callbacks. Runtime and UTC
+date are observed only through private patchable seams
+([phase_c_ffmpeg.py:123-135](phase_c_ffmpeg.py:123)); the public signature
+accepts no snapshot, date, admitted-candidate tuple, recursion token, bypass
+flag, or retry state. The immutable admitted tuple crosses the private
+`_execute_admitted_video_chain` trust boundary
+([phase_c_ffmpeg.py:283-1291](phase_c_ffmpeg.py:283)) and is reused directly by
+every cascade hop and cooldown retry
+([phase_c_ffmpeg.py:406-479](phase_c_ffmpeg.py:406)). Direct explicit targets
+fail on primary rejection even when raw fallbacks were supplied; an accepted
+explicit primary may cascade only across the other admitted members. AUTO may
+select the first admitted member. `_cascade_out` records ordered
+`policy_rejections` and a stable `policy_error` when dispatch is denied or the
+admitted chain is empty.
 
 The table below inventories payload branches; policy-denied branches remain
 for compatibility archaeology but are unreachable through executable dispatch.
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :451 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :495 | `sora_native.SoraNativeAPI`; admitted only before its 2026-09-24 sunset | OPENAI_API_KEY |
-| `VEO_NATIVE` | :544 | `veo_native.VeoNativeAPI` | Vertex AI or GOOGLE_API_KEY |
-| `GEMINI_OMNI` | :1184 | legacy `gemini_omni_native.GeminiOmniAPI` payload; **unreachable (known-broken)** | GOOGLE_API_KEY or GEMINI_API_KEY |
-| `LTX` | :586 | `ltx_native.LTXVideoAPI`; rejected for `9:16` by current dispatch-wiring policy | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :635 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :696 | legacy inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")`; **unreachable (retired)** | FAL_KEY |
-| `VEO` | :754 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :843 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")`; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
-| `FAL_SVD` | :962 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any default/template cascade** |
-| `RUNWAY` | :1041 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :1083 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
+| `KLING_NATIVE` | :488 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :532 | `sora_native.SoraNativeAPI`; admitted only before its 2026-09-24 sunset | OPENAI_API_KEY |
+| `VEO_NATIVE` | :581 | `veo_native.VeoNativeAPI` | Vertex AI or GOOGLE_API_KEY |
+| `GEMINI_OMNI` | :1221 | legacy `gemini_omni_native.GeminiOmniAPI` payload; **unreachable (known-broken)** | GOOGLE_API_KEY or GEMINI_API_KEY |
+| `LTX` | :623 | `ltx_native.LTXVideoAPI`; rejected for `9:16` by current dispatch-wiring policy | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :672 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :733 | legacy inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")`; **unreachable (retired)** | FAL_KEY |
+| `VEO` | :791 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :880 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")`; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
+| `FAL_SVD` | :999 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any default/template cascade** |
+| `RUNWAY` | :1078 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :1120 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default AUTO order seed
 
-[phase_c_ffmpeg.py:64-73](phase_c_ffmpeg.py:64):
+[phase_c_ffmpeg.py:69-72](phase_c_ffmpeg.py:69):
 ```python
 DEFAULT_VIDEO_CASCADE = [
     "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
@@ -1183,16 +1200,18 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:33](phase_c_ffmpeg.py:33))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:34](phase_c_ffmpeg.py:34))
-- Check: `_veo_quota_blocked()` ([:76-82](phase_c_ffmpeg.py:76))
-- Set on 429/quota error ([:832](phase_c_ffmpeg.py:832))
+- Check: `_veo_quota_blocked()` ([:75-81](phase_c_ffmpeg.py:75))
+- Set on 429/quota error ([:866-874](phase_c_ffmpeg.py:866))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
 
-21 module-level functions (verified via
-`$ .venv/bin/python -c 'import ast; print(sum(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.parse(open("phase_c_ffmpeg.py").read()).body))'` → `21`).
+24 module-level functions (verified via
+`$ .venv/bin/python -c 'import ast; print(sum(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.parse(open("phase_c_ffmpeg.py").read()).body))'` → `24`).
 Core: `_veo_quota_blocked`, `_load_fal_client`,
-`_runtime_module_probe`, `_dispatch_policy_error`, `generate_ai_video`,
+`_runtime_module_probe`, `_video_policy_runtime_snapshot`,
+`_video_policy_current_date`, `_dispatch_policy_error`, `generate_ai_video`,
+`_execute_admitted_video_chain`,
 `stitch_modules` (ffmpeg concat demuxer), `split_video_into_segments`,
 `assess_motion_quality` (OpenCV Farneback flow →
 {smoothness, frozen_ratio, recommendation∈{accept,interpolate,regenerate}}),
@@ -1642,7 +1661,8 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `llm.negative_prompts`) appended based on first failing character's reason.
 
 **Wired by T6 (`10a0eb4`, 2026-06-06):** called from
-`cinema/shots/controller.py:2174` inside `diagnose_clip(deep=True)`.
+[`cinema/shots/controller.py:2724`](cinema/shots/controller.py:2724) inside
+`diagnose_clip(deep=True)`.
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose`
 with JSON body `{"deep": true}`.
 
@@ -1699,7 +1719,7 @@ Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
   `generate_keyframe_take` (defined at `cinema/shots/controller.py:700`; call at :982) and `diagnose_clip`
-  (`cinema/shots/controller.py:2578`; call at :2630); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
+  (`cinema/shots/controller.py:2586`; call at :2638); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
 

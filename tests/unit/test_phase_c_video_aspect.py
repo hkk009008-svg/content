@@ -27,6 +27,22 @@ def _ctx(aspect: str):
     return PipelineContext(global_settings={"aspect_ratio": aspect})
 
 
+def _observe_video_policy(
+    module,
+    *,
+    credentials=(),
+    modules=(),
+) -> None:
+    """Install the exact runtime represented by a mocked provider harness."""
+
+    snapshot = RuntimeSnapshot(
+        credentials=set(credentials),
+        modules=set(modules),
+    )
+    module._video_policy_runtime_snapshot = lambda: snapshot
+    module._video_policy_current_date = lambda: date(2026, 9, 23)
+
+
 # ---------------------------------------------------------------------------
 # TC-4 — VEO_NATIVE: generate_ai_video threads aspect_ratio into generate_video
 # ---------------------------------------------------------------------------
@@ -51,6 +67,11 @@ class TestVeoNativeAspect:
         try:
             with patch("os.path.exists", return_value=True):
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                )
                 phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -114,6 +135,11 @@ class TestVeoFalAspect:
                 phase_c_ffmpeg.fal_client = stub_fal
                 phase_c_ffmpeg.FAL_AVAILABLE = True
                 phase_c_ffmpeg.settings = stub_settings
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"fal_key"},
+                    modules={"fal_client"},
+                )
                 # The fal path downloads the subscribe-returned video URL via
                 # performance._net.safe_download (bound into phase_c_ffmpeg at import) —
                 # NOT urllib.urlretrieve. On a fake URL safe_download hits the network
@@ -185,11 +211,6 @@ class TestSora2FalAspect:
                     attempted_apis=attempted,
                     ctx=_ctx(aspect),
                     _cascade_out=cascade,
-                    _policy_snapshot=RuntimeSnapshot(
-                        credentials={"fal_key"},
-                        modules={"fal_client"},
-                    ),
-                    _policy_date=date(2026, 9, 23),
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
@@ -275,6 +296,11 @@ class TestRunwayGen4Model:
                  patch("time.sleep"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"runwayml_api_secret"},
+                    modules={"runwayml"},
+                )
                 # The RUNWAY_GEN4 branch downloads via performance._net.safe_download
                 # (bound into phase_c_ffmpeg at import) — NOT urllib.request.urlretrieve.
                 # On a fake URL safe_download returns None, which _download_video_or_cascade
@@ -398,6 +424,11 @@ class TestRunwayGen3aRatio:
                  patch("urllib.request.urlretrieve"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"runwayml_api_secret"},
+                    modules={"runwayml"},
+                )
                 # The gen3a route downloads completed_task.output[0] via
                 # performance._net.safe_download (requests) — NOT urllib.urlretrieve.
                 # On the fake cdn.runway.ml URL it hits the network then cascades to
@@ -579,6 +610,11 @@ class TestPortraitRoutingSafety:
             with patch("phase_c_ffmpeg.probe_final_media",
                        return_value={"format": {"width": 1080, "height": 1920}}):
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key", "openai_api_key"},
+                    modules={"google.genai", "openai"},
+                )
                 result = phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -653,6 +689,11 @@ class TestPortraitRoutingSafety:
         try:
             with patch("phase_c_ffmpeg.probe_final_media", side_effect=probe_side_effect):
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key", "openai_api_key"},
+                    modules={"google.genai", "openai"},
+                )
                 result = phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -709,6 +750,11 @@ class TestPortraitRoutingSafety:
             with patch("phase_c_ffmpeg.probe_final_media", return_value=landscape_probe), \
                  patch("time.sleep"):
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key", "openai_api_key"},
+                    modules={"google.genai", "openai"},
+                )
                 ctx = _ctx("9:16")
                 # Set cascade_retry_limit=0 to prevent indefinite retry loop
                 ctx.global_settings["cascade_retry_limit"] = 0
@@ -757,6 +803,11 @@ class TestPortraitRoutingSafety:
         try:
             with patch("phase_c_ffmpeg.probe_final_media") as mock_probe:
                 import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                )
                 result = phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -824,11 +875,6 @@ class TestPortraitRoutingSafety:
                     video_fallbacks=["LTX", "VEO_NATIVE"],
                     ctx=_ctx("9:16"),
                     _cascade_out=_cascade_out,
-                    _policy_snapshot=RuntimeSnapshot(
-                        credentials={"google_api_key", "fal_key"},
-                        modules={"google.genai", "fal_client"},
-                    ),
-                    _policy_date=date(2026, 9, 23),
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)

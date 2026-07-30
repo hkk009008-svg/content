@@ -2110,26 +2110,35 @@ class ShotController:
         _video_cascade: dict = {
             "policy_rejections": list(policy_rejections),
         }
+        # AUTO remains AUTO at the public dispatch boundary.  The controller
+        # retains ``target_api`` as the resolved primary for budget/progress/
+        # take metadata, while the public dispatcher independently re-filters
+        # this already ordered safe chain.  Explicit targets stay concrete and
+        # pinned; no caller-side flag or admission object can bypass that
+        # second fail-closed check.
+        dispatch_target_api = "AUTO" if raw_api == "AUTO" else target_api
+        dispatch_fallbacks = (
+            [target_api, *video_fallbacks]
+            if raw_api == "AUTO"
+            else None
+        )
         temp_vid = generate_ai_video(
             source_image,
             shot.get("camera", "zoom_in_slow"),
-            target_api,
+            dispatch_target_api,
             vid_path,
             pacing="calculated",
             character_id=cc.get("primary_character", ""),
             multi_angle_refs=cc.get("multi_angle_refs", []),
             negative_prompt=shot.get("negative_constraints", ""),
             shot_type=resolved_shot_type,
-            video_fallbacks=video_fallbacks,
+            video_fallbacks=dispatch_fallbacks,
             driving_video_path=driving_video_path,
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
             duration=_veo_duration,
             ctx=motion_ctx,
             _cascade_out=_video_cascade,
-            _policy_snapshot=policy_snapshot,
-            _policy_date=policy_date,
-            _policy_allow_primary_fallback=(raw_api == "AUTO"),
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):

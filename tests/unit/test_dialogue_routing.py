@@ -16,6 +16,7 @@ from __future__ import annotations
 import sys
 import os
 import types
+from contextlib import contextmanager
 from datetime import date
 from unittest.mock import MagicMock, patch, call
 
@@ -35,6 +36,47 @@ def _stub_module(name: str, **attrs):
         setattr(mod, k, v)
     sys.modules[name] = mod
     return mod
+
+
+def _ready_veo_snapshot() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"google_api_key"},
+        modules={"google.genai"},
+    )
+
+
+def _controller_routing_snapshot(project: dict) -> RuntimeSnapshot:
+    """Return the runtime represented by the mocked routing destination."""
+
+    shot = project["scenes"][0]["shots"][0]
+    suggested = (
+        (shot.get("optimizer_cache") or {})
+        .get("spec", {})
+        .get("suggested_video_api")
+    )
+    if suggested == "SORA_NATIVE":
+        return RuntimeSnapshot(
+            credentials={"openai_api_key"},
+            modules={"openai"},
+        )
+    return _ready_veo_snapshot()
+
+
+@contextmanager
+def _ready_veo_policy():
+    """Patch the mandatory dispatcher observations for a mocked Veo path."""
+
+    with (
+        patch(
+            "phase_c_ffmpeg._video_policy_runtime_snapshot",
+            return_value=_ready_veo_snapshot(),
+        ),
+        patch(
+            "phase_c_ffmpeg._video_policy_current_date",
+            return_value=date(2026, 9, 23),
+        ),
+    ):
+        yield
 
 
 # Stub heavy deps that are imported at module load in phase_c_ffmpeg / controller
@@ -138,6 +180,14 @@ class TestAutoRoutingDecisions:
             patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
             patch("cinema.shots.controller._probe_duration", return_value=3.5),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_controller_routing_snapshot(project),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
         ):
             ctrl.generate_motion_take("scene_1", "shot_1_0")
         return captured
@@ -178,10 +228,11 @@ class TestAutoRoutingDecisions:
             optimizer_cache={"spec": {"purpose": "action_motion", "suggested_video_api": "SORA_NATIVE"}},
         )
         kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
-        assert kwargs.get("target_api") == "SORA_NATIVE", (
-            f"valid cached suggestion for non-dialogue purpose should be honored; "
+        assert kwargs.get("target_api") == "AUTO", (
+            "AUTO authoring must remain AUTO at the mandatory public fence; "
             f"got {kwargs.get('target_api')!r}"
         )
+        assert kwargs.get("video_fallbacks", [None])[0] == "SORA_NATIVE"
 
     def test_no_optimizer_cache_uses_filtered_template_seed(self, tmp_path):
         """Without optimizer cache, typed policy filters the template seed.
@@ -204,8 +255,8 @@ class TestAutoRoutingDecisions:
             ),
         ):
             kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
-        assert kwargs.get("target_api") == "VEO_NATIVE"
-        assert kwargs.get("video_fallbacks") == []
+        assert kwargs.get("target_api") == "AUTO"
+        assert kwargs.get("video_fallbacks") == ["VEO_NATIVE"]
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +284,7 @@ class TestGenerateAudioForDialogue:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 result = generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",
@@ -259,7 +310,7 @@ class TestGenerateAudioForDialogue:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",
@@ -283,7 +334,7 @@ class TestGenerateAudioForDialogue:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",
@@ -407,7 +458,7 @@ class TestDialogueNativeAudioFlag:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",
@@ -433,7 +484,7 @@ class TestDialogueNativeAudioFlag:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",
@@ -458,7 +509,7 @@ class TestDialogueNativeAudioFlag:
         mock_veo_cls = MagicMock(return_value=mock_veo_instance)
 
         with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
-            with patch("os.path.exists", return_value=True):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
                 generate_ai_video(
                     image_path="/tmp/fake_frame.png",
                     camera_motion="zoom_in_slow",

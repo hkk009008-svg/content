@@ -8,6 +8,7 @@ effect.
 from __future__ import annotations
 
 import builtins
+import inspect
 import sys
 import types
 from datetime import date
@@ -66,6 +67,34 @@ def _provider_import_bomb(name, globals=None, locals=None, fromlist=(), level=0)
 _REAL_IMPORT = builtins.__import__
 
 
+@pytest.fixture(autouse=True)
+def _stable_policy_observation(monkeypatch):
+    """Every provider harness declares a deterministic eligible runtime."""
+
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _fal_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_current_date",
+        lambda: PRE_SUNSET,
+    )
+
+
+def test_public_signature_exposes_no_policy_bypass_arguments() -> None:
+    parameters = inspect.signature(phase_c_ffmpeg.generate_ai_video).parameters
+
+    assert "_policy_snapshot" not in parameters
+    assert "_policy_date" not in parameters
+    assert "_policy_allow_primary_fallback" not in parameters
+    assert "_policy_candidates" not in parameters
+    assert "_policy_guard_token" not in parameters
+    assert "_cascade_retries" not in parameters
+    assert not hasattr(phase_c_ffmpeg, "_VIDEO_POLICY_GUARD_TOKEN")
+
+
 @pytest.mark.parametrize(
     ("target_api", "snapshot", "on_date", "expected_reason"),
     [
@@ -79,6 +108,7 @@ _REAL_IMPORT = builtins.__import__
             SUNSET,
             "retired",
         ),
+        ("GEMINI_OMNI", _fal_snapshot(), PRE_SUNSET, "unsupported"),
         ("DOES_NOT_EXIST", RuntimeSnapshot(), PRE_SUNSET, "unknown"),
         ("RUNWAY_ACT_ONE", RuntimeSnapshot(), PRE_SUNSET, "non_video"),
         ("KLING_3_0", RuntimeSnapshot(), PRE_SUNSET, "runtime_unavailable"),
@@ -89,10 +119,21 @@ def test_explicit_rejection_has_no_dispatch_side_effects(
     snapshot,
     on_date,
     expected_reason,
+    monkeypatch,
 ) -> None:
     attempted: list[str] = []
     cascade: dict = {}
     bomb = MagicMock(side_effect=AssertionError("dispatch effect escaped fence"))
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        lambda: snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_current_date",
+        lambda: on_date,
+    )
 
     with (
         patch.object(phase_c_ffmpeg, "_load_fal_client", bomb),
@@ -108,8 +149,6 @@ def test_explicit_rejection_has_no_dispatch_side_effects(
             "out.mp4",
             attempted_apis=attempted,
             _cascade_out=cascade,
-            _policy_snapshot=snapshot,
-            _policy_date=on_date,
         )
 
     assert result is None
@@ -143,8 +182,6 @@ def test_explicit_rejected_primary_does_not_silently_use_supplied_fallback() -> 
             "out.mp4",
             video_fallbacks=["LTX"],
             _cascade_out=cascade,
-            _policy_snapshot=_fal_snapshot(),
-            _policy_date=PRE_SUNSET,
         )
 
     assert result is None
@@ -154,7 +191,7 @@ def test_explicit_rejected_primary_does_not_silently_use_supplied_fallback() -> 
     ]
 
 
-def test_pre_resolved_chain_may_skip_rejected_head_and_preserves_order(
+def test_auto_safe_chain_skips_rejected_head_and_preserves_order(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -170,14 +207,11 @@ def test_pre_resolved_chain_may_skip_rejected_head_and_preserves_order(
     result = phase_c_ffmpeg.generate_ai_video(
         "frame.png",
         "static",
-        "SORA_2",
+        "AUTO",
         output,
-        video_fallbacks=["LTX", "LTX"],
+        video_fallbacks=["SORA_2", "LTX", "LTX"],
         shot_type="wide",
         _cascade_out=cascade,
-        _policy_snapshot=_fal_snapshot(),
-        _policy_date=PRE_SUNSET,
-        _policy_allow_primary_fallback=True,
     )
 
     assert result == output
@@ -186,6 +220,7 @@ def test_pre_resolved_chain_may_skip_rejected_head_and_preserves_order(
         "attempts": ["LTX"],
     }
     assert cascade["policy_rejections"] == [
+        {"key": "AUTO", "reason": "auto_sentinel"},
         {"key": "SORA_2", "reason": "retired"},
     ]
     ltx_module.LTXVideoAPI.assert_called_once_with()
@@ -209,20 +244,28 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
     monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
     monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
 
     cascade: dict = {}
-    result = phase_c_ffmpeg.generate_ai_video(
-        "frame.png",
-        "static",
-        "VEO_NATIVE",
-        output,
-        video_fallbacks=["VEO_NATIVE", "SORA_2", "LTX", "LTX"],
-        shot_type="wide",
-        ctx=_ctx(),
-        _cascade_out=cascade,
-        _policy_snapshot=_veo_ltx_snapshot(),
-        _policy_date=PRE_SUNSET,
-    )
+    with patch.object(
+        phase_c_ffmpeg,
+        "filter_dispatch_candidates",
+        wraps=phase_c_ffmpeg.filter_dispatch_candidates,
+    ) as policy_filter:
+        result = phase_c_ffmpeg.generate_ai_video(
+            "frame.png",
+            "static",
+            "VEO_NATIVE",
+            output,
+            video_fallbacks=["VEO_NATIVE", "SORA_2", "LTX", "LTX"],
+            shot_type="wide",
+            ctx=_ctx(),
+            _cascade_out=cascade,
+        )
 
     assert result == output
     assert cascade["cascade_metadata"] == {
@@ -234,6 +277,7 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     ]
     veo_module.VeoNativeAPI.assert_called_once_with()
     ltx_module.LTXVideoAPI.assert_called_once_with()
+    policy_filter.assert_called_once()
 
 
 def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
@@ -251,26 +295,35 @@ def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
     ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
     monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
     monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
     sleep = MagicMock()
     monkeypatch.setattr(phase_c_ffmpeg.time, "sleep", sleep)
 
     cascade: dict = {}
-    result = phase_c_ffmpeg.generate_ai_video(
-        "frame.png",
-        "static",
-        "VEO_NATIVE",
-        "out.mp4",
-        video_fallbacks=["SORA_2", "LTX", "GEMINI_OMNI"],
-        ctx=_ctx(cascade_retry_limit=1),
-        _cascade_out=cascade,
-        _policy_snapshot=_veo_ltx_snapshot(),
-        _policy_date=PRE_SUNSET,
-    )
+    with patch.object(
+        phase_c_ffmpeg,
+        "filter_dispatch_candidates",
+        wraps=phase_c_ffmpeg.filter_dispatch_candidates,
+    ) as policy_filter:
+        result = phase_c_ffmpeg.generate_ai_video(
+            "frame.png",
+            "static",
+            "VEO_NATIVE",
+            "out.mp4",
+            video_fallbacks=["SORA_2", "LTX", "GEMINI_OMNI"],
+            ctx=_ctx(cascade_retry_limit=1),
+            _cascade_out=cascade,
+        )
 
     assert result is None
     sleep.assert_called_once_with(30)
     assert veo_module.VeoNativeAPI.call_count == 2
     assert ltx_module.LTXVideoAPI.call_count == 2
+    policy_filter.assert_called_once()
     assert cascade["policy_rejections"] == [
         {"key": "SORA_2", "reason": "retired"},
         {"key": "GEMINI_OMNI", "reason": "unsupported"},
@@ -304,8 +357,6 @@ def test_project_and_aspect_rejections_are_evidenced_before_provider(
             "out.mp4",
             ctx=ctx,
             _cascade_out=cascade,
-            _policy_snapshot=_fal_snapshot(),
-            _policy_date=PRE_SUNSET,
         )
 
     assert result is None
@@ -315,12 +366,19 @@ def test_project_and_aspect_rejections_are_evidenced_before_provider(
     ]
 
 
-def test_auto_without_runtime_cannot_revive_raw_unsafe_defaults() -> None:
+def test_auto_without_runtime_cannot_revive_raw_unsafe_defaults(
+    monkeypatch,
+) -> None:
     assert "GEMINI_OMNI" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
     assert "SORA_2" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
 
     attempted: list[str] = []
     cascade: dict = {}
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        RuntimeSnapshot,
+    )
     with (
         patch.object(
             builtins,
@@ -340,8 +398,6 @@ def test_auto_without_runtime_cannot_revive_raw_unsafe_defaults() -> None:
             "out.mp4",
             attempted_apis=attempted,
             _cascade_out=cascade,
-            _policy_snapshot=RuntimeSnapshot(),
-            _policy_date=PRE_SUNSET,
         )
 
     assert result is None
