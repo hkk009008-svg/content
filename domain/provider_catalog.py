@@ -1196,6 +1196,8 @@ def _legacy_effective_status(
 ) -> str:
     """Map typed policy into the legacy eligibility vocabulary, fail closed."""
 
+    if entry.key == "AUTO":
+        return "live"
     if policy.lifecycle is Lifecycle.RETIRED:
         return "retired"
     if not policy.dispatchable:

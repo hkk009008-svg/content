@@ -104,6 +104,23 @@ def test_legacy_projection_status_is_fail_closed_and_date_effective() -> None:
         assert before[key]["status"] != "live"
 
 
+def test_auto_is_the_only_non_dispatchable_live_legacy_sentinel() -> None:
+    projected = project_legacy_registry(API_REGISTRY, on_date=PRE_SUNSET)
+    auto = projected["AUTO"]
+    neighboring_denied_engine = projected["GEMINI_OMNI"]
+
+    assert auto["selectable"] is True
+    assert auto["dispatchable"] is False
+    assert auto["status"] == "live"
+    assert neighboring_denied_engine["dispatchable"] is False
+    assert neighboring_denied_engine["status"] == "disabled"
+    assert [
+        key
+        for key, row in projected.items()
+        if row["dispatchable"] is False and row["status"] == "live"
+    ] == ["AUTO"]
+
+
 def test_sora_fal_is_retired_and_cannot_be_enabled_mutation_pin() -> None:
     sora = get_entry("SORA_2")
 
