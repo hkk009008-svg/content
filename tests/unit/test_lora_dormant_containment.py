@@ -56,6 +56,23 @@ def test_policy_detects_only_new_or_changed_protected_fields():
     ) == []
 
 
+@pytest.mark.parametrize(
+    "non_finite",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+def test_policy_never_accepts_non_finite_protected_numbers(non_finite):
+    current = {"char_lora_strengths": {"c1": non_finite}}
+    incoming = {"char_lora_strengths": {"c1": non_finite}}
+
+    assert policy.changed_protected_lora_fields(current, incoming) == [
+        "char_lora_strengths"
+    ]
+
+
 @pytest.fixture()
 def persisted_project(tmp_path, monkeypatch):
     monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path))
@@ -95,6 +112,33 @@ def test_project_put_allows_unchanged_legacy_lora_round_trip(persisted_project):
     assert latest["global_settings"]["char_lora_paths"] == {
         "c1": "/legacy.safetensors"
     }
+
+
+def test_project_put_allows_equivalent_json_number_round_trip(
+    persisted_project,
+):
+    pid = persisted_project["id"]
+
+    def seed_float_strength(latest):
+        latest["global_settings"]["char_lora_strengths"] = {"c1": 1.0}
+
+    project_manager.mutate_project(pid, seed_float_strength)
+
+    with web_server.app.test_client() as client:
+        response = client.put(
+            f"/api/projects/{pid}",
+            json={
+                "global_settings": {
+                    "char_lora_strengths": {"c1": 1},
+                    "music_mood": "hopeful",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    latest = project_manager.load_project(pid)
+    assert latest["global_settings"]["char_lora_strengths"] == {"c1": 1.0}
+    assert latest["global_settings"]["music_mood"] == "hopeful"
 
 
 def test_project_put_without_global_settings_does_not_update_them(

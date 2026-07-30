@@ -7,6 +7,7 @@ Reactivation requires a separately reviewed code change and superseding ADR.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 
 
 LORA_POLICY = "dormant"
@@ -51,7 +52,17 @@ def lora_dormant_status_fields() -> dict[str, object]:
 
 
 def _json_values_equal_strict(current: object, incoming: object) -> bool:
-    """Recursively compare JSON values without Python's scalar coercions."""
+    """Recursively compare JSON values by their JSON type semantics."""
+    current_is_number = type(current) in (int, float)
+    incoming_is_number = type(incoming) in (int, float)
+    if current_is_number or incoming_is_number:
+        return (
+            current_is_number
+            and incoming_is_number
+            and (type(current) is not float or isfinite(current))
+            and (type(incoming) is not float or isfinite(incoming))
+            and current == incoming
+        )
     if type(current) is not type(incoming):
         return False
     if isinstance(current, Mapping):
