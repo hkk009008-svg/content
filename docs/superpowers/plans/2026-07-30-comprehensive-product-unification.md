@@ -130,19 +130,19 @@ Owned surface: `web_server.py`, a dependency-free LoRA deny policy,
 registration scripts, protected project-setting writes, the character panel,
 capability status/manifest, and their focused tests/docs.
 
-- [ ] Refuse training before importing or invoking the trainer; return a stable
+- [x] Refuse training before importing or invoking the trainer; return a stable
   machine-readable unavailable error.
-- [ ] Apply the same non-overridable deny policy before raw trainer subprocess,
+- [x] Apply the same non-overridable deny policy before raw trainer subprocess,
   direct FAL upload/subscription, manual reference generation, and registry
   scripts. No environment, request, project, pod, or CLI flag may bypass it.
-- [ ] Make the dormant LoRA registry fields read-only: unchanged legacy values
+- [x] Make the dormant LoRA registry fields read-only: unchanged legacy values
   may round-trip, but new/changed paths, strengths, or triggers fail atomically
   inside the latest project mutation.
-- [ ] Make skipped/unavailable validation non-accepting so an unvalidated LoRA
+- [x] Make skipped/unavailable validation non-accepting so an unvalidated LoRA
   cannot be activated or registered.
-- [ ] Remove the paid training affordance and all claims that the dormant
+- [x] Remove the paid training affordance and all claims that the dormant
   producer is an engaged production capability.
-- [ ] Preserve ADR-065 and the dormant implementation for a separately
+- [x] Preserve ADR-065 and the dormant implementation for a separately
   authorized future reactivation; keep historical status readable.
 
 Acceptance: endpoint, raw trainer, FAL scripts, and manual registry tests prove
@@ -158,16 +158,16 @@ validation, workflow rankings/cascade validation, `/api/config`, UI engine
 selectors, the provider decision ledger across every active modality, and
 catalog coherence tests.
 
-- [ ] Record a checked-at decision for video, image, LLM, TTS, music, lip-sync,
+- [x] Record a checked-at decision for video, image, LLM, TTS, music, lip-sync,
   performance, foley, upscale/post, and research providers: official endpoint
   and model ID, maturity, lifecycle, I/O constraints, runtime prerequisites,
   routing role, and disposition. Provider-advertised cost/quality stays labeled
   as such; product quality/cost rankings require committed R-MEASURE artifacts.
-- [ ] Define modality, maturity, lifecycle, product support, selectability,
+- [x] Define modality, maturity, lifecycle, product support, selectability,
   dispatchability, spendability, provider, native-audio support, accepted
   parameter constraints, optional sunset date, and separately computed runtime
   availability.
-- [ ] Keep the existing registry export as a read-only compatibility view while
+- [x] Keep the existing registry export as a read-only compatibility view while
   migrating consumers.
 - [ ] Limit selectable shot targets to `AUTO` or live, dispatchable video
   engines; reject planned, disabled, unknown, and non-video values at schema,
@@ -443,6 +443,16 @@ matching coverage-ledger row with:
 Each task ends with one clean commit. A nit fix is a separate focused commit and
 is re-reviewed over its own range. Main may author the plan/ledger and perform
 integration verification, but does not implement the production slices.
+
+### Live task ledger
+
+| Slice/task | Base and owned scope | Call/write evidence and dependency | Implement/review evidence | Disposition |
+|---|---|---|---|---|
+| `0.1` deterministic product-surface inventory | `871c10f2`; `scripts/product_surface_inventory.py`, its unit test, generated JSON | Static Flask decorators plus `web/src` transports; no application imports | `ea59894c`, artifact refreshes `4dd28474`/`dd68ec56`; spec review currently `FAIL` on three conservative-parser gaps | Fix in progress; not yet evidence authority |
+| `1a` dormant LoRA containment | `a0485546`; policy, trainer/quality boundaries, direct scripts, endpoint/write guards, focused tests/ADR | Training endpoint, raw trainer/subprocess/FAL/register entrypoints, locked `global_settings` mutation | `411146aa`, fixes `2e24346f`/`871c10f2`; independent spec `GO`; Lane V quality `GO`; 91 focused tests plus sibling/full verification | Landed and closed |
+| `1b` inactive/read-only LoRA product surface | `ea59894c`; character/identity/capability UI, scorecard/manifest/status, current docs/tests | Status GET only; scorecard projection; manifest renderer; zero remaining action/POST caller | `d686f2ca`, quality fix `7ac36338`; independent spec `GO`; Lane V quality `GO`; 60 frontend tests and production build | Landed and closed |
+| `2a` additive typed provider truth | `4dd28474`; `domain/provider_catalog.py` and its unit test only | Exact 40 legacy keys plus dispatch-only `FAL_SVD`; no production consumer import | `cf25eee3`, fixes `6319106c`/`960c044b`/`1e386c70`; independent spec `GO`; final Lane V re-review pending | Landed; consumption blocked pending quality GO |
+| `2b-A` video authoring/ranking policy | start after `2a` quality GO; new video-policy adapter, decomposer, optimizer, workflow resolver and focused tests | `make_shot(target_api=...)`, optimizer suggestion writes, purpose rankings, workflow template consumers; depends on typed catalog | Fresh worker; independent spec then different quality review; mutation pins for retired/broken/runtime-unavailable candidates | Prepared; dispatch withheld |
 
 ## Completion gate
 
