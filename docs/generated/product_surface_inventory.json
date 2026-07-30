@@ -370,7 +370,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 90,
+        "line": 202,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:72b68c98338c5fb5",
@@ -511,6 +511,21 @@
       },
       "transport_id": "frontend-transport:dd29d1f81f5cb77e",
       "url_template": "/api/projects/{1}/shots/{2}"
+    },
+    {
+      "backend_route_ids": [],
+      "id": "frontend-operation:65ba1797c08b792e",
+      "kind": "direct_transport",
+      "method": null,
+      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 97,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:1ecb087270fbef07",
+      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
     },
     {
       "backend_route_ids": [
@@ -796,7 +811,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 55,
+        "line": 167,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:9d7f69eb1915fde5",
@@ -831,7 +846,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 88,
+        "line": 200,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:d78d83c0b38eb521",
@@ -925,23 +940,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_lora_status:ecd3f8ddaa769ebd"
-      ],
-      "id": "frontend-operation:d16b6e6c4ccbb652",
-      "kind": "direct_transport",
-      "method": "GET",
-      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 29,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "transport_id": "frontend-transport:3f72d9bbb3f0cecc",
-      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
-    },
-    {
-      "backend_route_ids": [
         "route:api_remove_character:fbd1680d60d08895"
       ],
       "id": "frontend-operation:d3e9c100866f7b6a",
@@ -951,7 +949,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 64,
+        "line": 176,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:12c287d81f870250",
@@ -1224,7 +1222,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 64,
+        "line": 176,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/characters/${cid}`",
@@ -1269,6 +1267,24 @@
       },
       "url_expression": "`${API}/projects`",
       "url_template": "/api/projects"
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "loadHistoricalLoraStatus",
+      "id": "frontend-transport:1ecb087270fbef07",
+      "kind": "fetch",
+      "method": null,
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 97,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${projectId}/characters/${characterId}/lora-status`",
+      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
     },
     {
       "backend_route_ids": [
@@ -1429,26 +1445,6 @@
       },
       "url_expression": "`${API}/projects/${projectId}/shots/${shot.id}/performance`",
       "url_template": "/api/projects/{1}/shots/{2}/performance"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_lora_status:ecd3f8ddaa769ebd"
-      ],
-      "enclosing_function": "fetchAll",
-      "id": "frontend-transport:3f72d9bbb3f0cecc",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 29,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/characters/${c.id}/lora-status`",
-      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
     },
     {
       "backend_route_ids": [],
@@ -1662,7 +1658,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 90,
+        "line": 202,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
@@ -1822,7 +1818,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 55,
+        "line": 167,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/characters`",
@@ -2076,7 +2072,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 88,
+        "line": 200,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
@@ -3044,6 +3040,18 @@
     }
   },
   "unresolved": [
+    {
+      "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:79feef08b23784a6",
+      "kind": "dynamic_fetch_method",
+      "owner": "loadHistoricalLoraStatus",
+      "reason": "fetch options is not an inline object literal",
+      "source": {
+        "line": 97,
+        "path": "web/src/components/CharacterPanel.tsx"
+      }
+    },
     {
       "domain": "frontend",
       "expression": "path",
