@@ -77,6 +77,17 @@ def _make_take(
     }
 
 
+def _write_owned_video_candidate(*args, **kwargs):
+    output_path = (
+        args[3]
+        if len(args) > 3
+        else kwargs["output_mp4"]
+    )
+    with open(output_path, "wb") as handle:
+        handle.write(b"fake_veo")
+    return output_path
+
+
 # ---------------------------------------------------------------------------
 # (b/c/d) Auto-approve gate: blind-gate fix
 # ---------------------------------------------------------------------------
@@ -726,7 +737,10 @@ class TestGenerateMotionTakeOverlayWiring:
             }
         )
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
             patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
             patch("lip_sync.validate_lipsync_quality", return_value=0.91),
@@ -792,7 +806,10 @@ class TestGenerateMotionTakeOverlayWiring:
         ctrl._finalize_motion_take = MagicMock(side_effect=_fake_finalize)
 
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip) as mock_gen_vid,
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ) as mock_gen_vid,
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_ctrl,
             patch("lip_sync.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_lip,
             patch("lip_sync.validate_lipsync_quality", return_value=0.91) as mock_validate,
@@ -827,10 +844,13 @@ class TestGenerateMotionTakeOverlayWiring:
         ls_call = mock_gen_ls_ctrl.call_args or mock_gen_ls_lip.call_args
         assert ls_call is not None, "generate_lip_sync_video was never called"
         ls_kwargs = ls_call.kwargs
-        assert ls_kwargs.get("existing_video_path") == veo_clip, (
-            "F1b must overlay the per-shot TTS onto the Veo clip "
-            f"(expected existing_video_path={veo_clip!r}; got {ls_kwargs.get('existing_video_path')!r})"
+        accepted_motion_path = ls_kwargs.get("existing_video_path")
+        assert accepted_motion_path != mock_gen_vid.call_args.args[3], (
+            "F1b must consume the promoted canonical video, not the mutable "
+            "owned candidate path"
         )
+        with open(accepted_motion_path, "rb") as handle:
+            assert handle.read() == b"fake_veo"
         assert ls_kwargs.get("audio_path") == audio_file, (
             "F1b must use the per-shot TTS audio "
             f"(expected audio_path={audio_file!r}; got {ls_kwargs.get('audio_path')!r})"
@@ -877,7 +897,10 @@ class TestGenerateMotionTakeOverlayWiring:
         ctrl._finalize_motion_take = MagicMock(side_effect=_fake_finalize)
 
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=None),
             patch("lip_sync.generate_lip_sync_video", return_value=None),
             patch("lip_sync.validate_lipsync_quality", return_value=0.0),
@@ -939,7 +962,10 @@ class TestGenerateMotionTakeOverlayWiring:
         )
 
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip) as mock_gen_vid,
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ) as mock_gen_vid,
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_ctrl,
             patch("lip_sync.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_lip,
             patch("lip_sync.validate_lipsync_quality", return_value=0.91),
@@ -1045,7 +1071,10 @@ class TestGenerateMotionTakeOverlayWiring:
         )
 
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
             patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
             patch("lip_sync.validate_lipsync_quality", return_value=0.91),

@@ -170,7 +170,10 @@ class TestAutoRoutingDecisions:
             if args:
                 kwargs.setdefault("target_api", args[2] if len(args) > 2 else None)
             captured.update(kwargs)
-            return veo_clip
+            output_path = args[3]
+            with open(output_path, "wb") as handle:
+                handle.write(b"fake_veo")
+            return output_path
 
         with (
             patch("cinema.shots.controller.generate_ai_video", side_effect=_fake_gen_vid),

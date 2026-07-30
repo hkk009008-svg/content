@@ -75,6 +75,17 @@ def _veo_native_runtime() -> RuntimeSnapshot:
     )
 
 
+def _write_owned_video_candidate(*args, **kwargs):
+    output_path = (
+        args[3]
+        if len(args) > 3
+        else kwargs["output_mp4"]
+    )
+    with open(output_path, "wb") as handle:
+        handle.write(b"fake_generated_video")
+    return output_path
+
+
 class TestPreSpendBudgetGate:
     """generate_motion_take refuses to spend when the estimated envelope exceeds budget."""
 
@@ -287,8 +298,6 @@ class TestPreSpendBudgetGate:
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
         cost_tracker.would_exceed_cost.return_value = False
 
-        clip = str(tmp_path / "clip.mp4")
-        open(clip, "wb").write(b"fake_mp4")
         ctrl._finalize_motion_take = MagicMock(
             side_effect=lambda scene, shot, take, video_path, **kw: {
                 "success": True, "take": dict(take), "video": video_path,
@@ -296,7 +305,10 @@ class TestPreSpendBudgetGate:
             }
         )
         with (
-            patch("cinema.shots.controller.generate_ai_video", return_value=clip),
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
             patch(
                 "cinema.shots.controller._video_policy_runtime_snapshot",
@@ -403,6 +415,128 @@ class TestPreSpendBudgetGate:
         ]
         assert len(reject_calls) == 1
         assert reject_calls[0].args[0] == "KLING_NATIVE"
+        assert not any(
+            call.kwargs.get("operation") == "motion_generation"
+            for call in cost_tracker.record_api_call.call_args_list
+        )
+
+    @pytest.mark.parametrize("returned_path_kind", ["canonical", "external"])
+    def test_dispatcher_cannot_select_preexisting_or_external_return_path(
+        self,
+        tmp_path,
+        returned_path_kind,
+    ):
+        """Only the owned candidate is eligible for canonical promotion."""
+        project = self._make_project(target_api="KLING_NATIVE")
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        canonical = str(tmp_path / "canonical_take.mp4")
+        canonical_bytes = b"pre-existing-valid-take"
+        with open(canonical, "wb") as handle:
+            handle.write(canonical_bytes)
+        external = str(tmp_path / "external.mp4")
+        with open(external, "wb") as handle:
+            handle.write(b"unrelated-video")
+        ctrl._take_output_path = MagicMock(return_value=canonical)
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=AssertionError("unowned output reached finalize")
+        )
+        candidate_paths = []
+
+        def _return_unowned_path(*args, **kwargs):
+            candidate = args[3]
+            candidate_paths.append(candidate)
+            with open(candidate, "wb") as handle:
+                handle.write(b"owned-but-not-returned")
+            return canonical if returned_path_kind == "canonical" else external
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_return_unowned_path,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result == {"success": False, "error": "Video generation failed"}
+        ctrl._finalize_motion_take.assert_not_called()
+        assert candidate_paths and not os.path.exists(candidate_paths[0])
+        with open(canonical, "rb") as handle:
+            assert handle.read() == canonical_bytes
+        with open(external, "rb") as handle:
+            assert handle.read() == b"unrelated-video"
+        assert not any(
+            call.kwargs.get("operation") == "motion_generation"
+            for call in cost_tracker.record_api_call.call_args_list
+        )
+
+    @pytest.mark.parametrize("candidate_kind", ["empty", "symlink"])
+    def test_owned_candidate_must_be_nonempty_regular_file(
+        self,
+        tmp_path,
+        candidate_kind,
+    ):
+        project = self._make_project(target_api="KLING_NATIVE")
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        canonical = str(tmp_path / "canonical_take.mp4")
+        canonical_bytes = b"pre-existing-valid-take"
+        with open(canonical, "wb") as handle:
+            handle.write(canonical_bytes)
+        symlink_target = str(tmp_path / "symlink-target.mp4")
+        with open(symlink_target, "wb") as handle:
+            handle.write(b"unowned-symlink-target")
+        ctrl._take_output_path = MagicMock(return_value=canonical)
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=AssertionError("invalid candidate reached finalize")
+        )
+        candidate_paths = []
+
+        def _return_invalid_owned_candidate(*args, **kwargs):
+            candidate = args[3]
+            candidate_paths.append(candidate)
+            if candidate_kind == "symlink":
+                os.remove(candidate)
+                os.symlink(symlink_target, candidate)
+            return candidate
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_return_invalid_owned_candidate,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result == {"success": False, "error": "Video generation failed"}
+        ctrl._finalize_motion_take.assert_not_called()
+        assert candidate_paths and not os.path.lexists(candidate_paths[0])
+        with open(canonical, "rb") as handle:
+            assert handle.read() == canonical_bytes
+        with open(symlink_target, "rb") as handle:
+            assert handle.read() == b"unowned-symlink-target"
         assert not any(
             call.kwargs.get("operation") == "motion_generation"
             for call in cost_tracker.record_api_call.call_args_list
@@ -570,8 +704,6 @@ class TestPreSpendBudgetGate:
             }
         }
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
-        clip = str(tmp_path / "clip.mp4")
-        open(clip, "wb").write(b"fake_mp4")
         captured_take = {}
 
         def _finalize(scene, shot, take, video_path, **kwargs):
@@ -584,7 +716,7 @@ class TestPreSpendBudgetGate:
             }
 
         ctrl._finalize_motion_take = MagicMock(side_effect=_finalize)
-        generate = MagicMock(return_value=clip)
+        generate = MagicMock(side_effect=_write_owned_video_candidate)
         snapshot = RuntimeSnapshot(
             credentials={"fal_key"},
             modules={"fal_client"},

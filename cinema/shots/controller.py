@@ -81,6 +81,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import stat
 import tempfile
 import time
 from datetime import date, datetime, timezone
@@ -2126,9 +2127,10 @@ class ShotController:
         # Providers share one output path across the cascade.  Keep that
         # mutable candidate isolated from the canonical take destination:
         # aspect rejection may leave a non-empty file even though the
-        # dispatcher truthfully returns None.  Only a returned, existing
-        # candidate may replace ``vid_path``.  The unique tempfile is owned by
-        # this call, so rejection cleanup cannot delete a pre-existing take.
+        # dispatcher truthfully returns None.  Only the exact owned candidate,
+        # still a non-empty regular file, may replace ``vid_path``.  The unique
+        # tempfile is owned by this call, so rejection cleanup cannot delete a
+        # pre-existing take or trust an unrelated/canonical return path.
         candidate_fd, candidate_vid = tempfile.mkstemp(
             prefix=f".{os.path.basename(vid_path)}.",
             suffix=".candidate.mp4",
@@ -2154,14 +2156,31 @@ class ShotController:
                 ctx=motion_ctx,
                 _cascade_out=_video_cascade,
             )
-            final_vid = temp_vid
-            if (
-                final_vid
-                and os.path.exists(final_vid)
-                and os.path.abspath(final_vid) == os.path.abspath(candidate_vid)
-            ):
-                os.replace(candidate_vid, vid_path)
-                final_vid = vid_path
+            final_vid = None
+            try:
+                returned_path = os.fspath(temp_vid) if temp_vid else ""
+            except TypeError:
+                returned_path = ""
+            returned_owned_candidate = (
+                bool(returned_path)
+                and os.path.abspath(returned_path)
+                == os.path.abspath(candidate_vid)
+            )
+            if returned_owned_candidate:
+                try:
+                    candidate_stat = os.stat(
+                        candidate_vid,
+                        follow_symlinks=False,
+                    )
+                    candidate_is_valid = (
+                        stat.S_ISREG(candidate_stat.st_mode)
+                        and candidate_stat.st_size > 0
+                    )
+                except OSError:
+                    candidate_is_valid = False
+                if candidate_is_valid:
+                    os.replace(candidate_vid, vid_path)
+                    final_vid = vid_path
         finally:
             # On failure/rejection the owned candidate may contain a billed
             # provider output.  It must remain accounting evidence, not a
