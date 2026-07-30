@@ -115,9 +115,9 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 
 ## 3. Entry point — `web_server.py`
 
-**3119 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
-two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2623-2624](web_server.py:2623)).
-Verified 2026-07-30 via `wc -l web_server.py` → 3119 and an AST route probe →
+**3162 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
+two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2666-2667](web_server.py:2666)).
+Verified 2026-07-30 via `wc -l web_server.py` → 3162 and an AST route probe →
 66 route decorators / 65 route functions.
 
 ### 3.1 Route inventory (grouped)
@@ -143,13 +143,13 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:82](web_server.py:82) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:83](web_server.py:83) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:119-120](web_server.py:119) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:83](web_server.py:83) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:84](web_server.py:84) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:121](web_server.py:121) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
-spawned by `POST /generate` ([web_server.py:1964](web_server.py:1964)).
+spawned by `POST /generate` ([web_server.py:2005](web_server.py:2005)).
 **Cancellation is cooperative** — `pipeline.cancel()` flips a flag the worker
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
@@ -160,11 +160,11 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2002](web_server.py:2002)) does
+  `api_stream` ([web_server.py:2024](web_server.py:2024)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:1962](web_server.py:1962)) after success or error.
+  ([web_server.py:2003](web_server.py:2003)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -174,16 +174,21 @@ wind down.
 
 - **No auth.** No decorator across all 66 routes.
 - **CORS defaults to localhost.** `CORS(app, origins=list(env_settings.web_cors_origins))`
-  at [web_server.py:69](web_server.py:69). Default `web_cors_origins`
+  at [web_server.py:80](web_server.py:80). Default `web_cors_origins`
   is localhost-only (`http://localhost:8080` + Vite dev port `5173`). Opt into
   wide-open with `WEB_CORS_ORIGINS=*`. Banner warning emitted when wide-open.
+- **Project path boundary.** Every `<pid>` route and the project-aware config
+  query accepts one 1–128-character ASCII component matching
+  `[A-Za-z0-9][A-Za-z0-9_-]*`; rejection happens before endpoint storage work.
+  `GET /api/config?project_id=...` uses a no-create, no-lock, no-write snapshot
+  reader, so a valid missing ID returns 404 without leaving a directory or lock.
 
 ### 3.5 cinema/services.py usage (no-pipeline-spin path)
 
 Three endpoints avoid constructing `CinemaPipeline`:
-- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:1613](web_server.py:1613))
+- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2012](web_server.py:2012))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
-  live pipeline exists ([web_server.py:2067](web_server.py:2067)).
+  live pipeline exists ([web_server.py:2513](web_server.py:2513)).
 - `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
@@ -199,12 +204,12 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:272-279](web_server.py:272)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:273](web_server.py:273)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
 
-*Last verified: 2026-06-14*
+*Last verified: 2026-07-30*
 
 ---
 
@@ -519,7 +524,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.2 `project_manager.py` defaults
 
-`make_project()` ([domain/project_manager.py:329](domain/project_manager.py:329))
+`make_project()` ([domain/project_manager.py:341](domain/project_manager.py:341))
 seeds these `global_settings`:
 
 ```python
@@ -538,7 +543,7 @@ seeds these `global_settings`:
 "color_drift_sensitivity": 0.3,
 ```
 
-`normalize_project_schema()` ([domain/project_manager.py:567-574](domain/project_manager.py:567))
+`normalize_project_schema()` ([domain/project_manager.py:579](domain/project_manager.py:579))
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
@@ -649,7 +654,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1780](web_server.py:1780) — uses the
+`api_generate_dialogue` at [web_server.py:1802](web_server.py:1802) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1088,17 +1093,19 @@ target is a one-engine pin: rejection returns structured
 creation, or output-path work; it never silently becomes an AUTO cascade.
 
 The public authoring surface uses that same decision policy rather than a
-separate registry check. Project-scoped config reads require a canonical ASCII
-alphanumeric-leading `project_id` slug (with `_`/`-` thereafter) before any
-load; config rows reflect the latest project enablement and aspect ratio.
-Direct shot writes, nested scene shot
-writes, and the terminal generated-shot writer all evaluate against the
-latest lock-held project settings, UTC policy date, and runtime snapshot
-before mutation. Exact historical targets may round-trip only when both their
-scene and shot identifiers resolve uniquely; ambiguous legacy data fails
-closed. Generated/reviewed shot batches are re-evaluated at their terminal
-write boundary so an upstream policy pass cannot authorize a later-mutated
-target.
+separate registry check. Project-scoped config rows reflect the latest project
+enablement and aspect ratio without normalizing or writing the source file.
+Direct shot writes, nested scene shot writes, and the terminal generated-shot
+writer all evaluate against the latest lock-held project settings, UTC policy
+date, and runtime snapshot before mutation. Their stable 409 schema names the
+rejected value `target_api`, matching the dispatcher/controller contract.
+Nested scene replacement also strictly validates every declared `Shot` field
+before the lock/write path; malformed IDs, textual fields, nested take lists,
+or diagnostics fail atomically instead of being coerced by the compatibility
+model. Exact historical targets may round-trip only when both their scene and
+shot identifiers resolve uniquely; ambiguous legacy data fails closed.
+Generated/reviewed shot batches are re-evaluated at their terminal write
+boundary so an upstream policy pass cannot authorize a later-mutated target.
 
 Dialogue AUTO routing prepends the ranked native-audio seed before the
 template. Thus known-broken Gemini is retained as rejection evidence while a

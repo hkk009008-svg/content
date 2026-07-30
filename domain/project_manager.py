@@ -25,6 +25,7 @@ from domain.models import Project
 logger = logging.getLogger(__name__)
 
 PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+MAX_PROJECT_ID_LENGTH = 128
 
 
 class ProjectLockError(RuntimeError):
@@ -49,6 +50,8 @@ def _ensure_projects_dir():
 
 
 def _project_dir(project_id: str) -> str:
+    if not is_safe_project_id(project_id):
+        raise ValueError("Invalid project_id")
     return os.path.join(PROJECTS_DIR, project_id)
 
 
@@ -59,11 +62,16 @@ def is_safe_project_id(project_id: object) -> bool:
     boundaries historically accept missing slug-like IDs and return 404.  This
     preserves alphanumeric IDs with ``_``/``-`` after an alphanumeric head,
     while rejecting whitespace, controls, Unicode, separators, traversal,
-    absolute paths, and empties before any lock/load can mutate filesystem state.
+    absolute paths, empties, and IDs longer than
+    :data:`MAX_PROJECT_ID_LENGTH` before any lock/load can touch filesystem
+    state.  The 128-character ceiling leaves ample room above every checked-in
+    project/fixture ID while bounding path-component work well below common
+    filesystem limits.
     """
     return (
         isinstance(project_id, str)
         and bool(project_id)
+        and len(project_id) <= MAX_PROJECT_ID_LENGTH
         and project_id[0].isascii() and project_id[0].isalnum()
         and all(
             char.isascii() and (char.isalnum() or char in "_-")
@@ -81,8 +89,9 @@ def _project_lock_path(project_id: str) -> str:
 
 
 def _ensure_project_dir(project_id: str):
+    project_dir = _project_dir(project_id)
     _ensure_projects_dir()
-    os.makedirs(_project_dir(project_id), exist_ok=True)
+    os.makedirs(project_dir, exist_ok=True)
 
 
 @contextmanager
@@ -98,10 +107,13 @@ def _acquire_project_lock(project_id: str, timeout: float = 10):
 
 def _load_project_unlocked(project_id: str) -> Optional[dict]:
     path = _project_file(project_id)
-    if not os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # A missing project is normal, including deletion between path
+        # resolution and open.  Do not create a directory or lock artifact.
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _save_project_unlocked(project: dict) -> None:
@@ -724,6 +736,28 @@ def load_project(project_id: str, timeout: float = 10) -> Optional[dict]:
         return project
 
 
+def load_existing_project_readonly(project_id: str) -> Optional[dict]:
+    """Read an existing project without creating locks, directories, or writes.
+
+    Project files are committed with ``os.replace``, so opening the current
+    file directly gives a complete snapshot without taking the write lock.
+    In-memory normalization keeps consumers compatible with older documents
+    but is deliberately not persisted from this read-only boundary.
+    """
+
+    try:
+        project = _load_project_unlocked(project_id)
+    except FileNotFoundError:
+        # Also tolerate a test double or alternate filesystem implementation
+        # surfacing the disappearance race above the low-level helper.
+        return None
+    if project is None:
+        return None
+    normalize_project_schema(project)
+    _validate_project(project, "load_existing_project_readonly")
+    return project
+
+
 def mutate_project(
     project_id: str,
     mutator: Callable[[dict], Any],
@@ -789,6 +823,8 @@ def list_projects() -> List[dict]:
     _ensure_projects_dir()
     entries = []
     for pid in os.listdir(PROJECTS_DIR):
+        if not is_safe_project_id(pid):
+            continue
         project_dir = os.path.join(PROJECTS_DIR, pid)
         if not os.path.isdir(project_dir) or pid.startswith("."):
             continue

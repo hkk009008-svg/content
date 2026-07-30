@@ -42,7 +42,8 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from project_manager import (
     MutationResult, ProjectLockError, create_project, load_project, delete_project,
-    is_safe_project_id, list_projects, mutate_project,
+    is_safe_project_id, list_projects, load_existing_project_readonly,
+    mutate_project,
     add_character, remove_character, add_location, remove_location,
     add_object, remove_object, get_object,
     add_scene, remove_scene, reorder_scenes,
@@ -51,7 +52,7 @@ from project_manager import (
 from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
-from domain.models import DirectorialIntent, Project
+from domain.models import DirectorialIntent, Project, Shot
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -191,7 +192,7 @@ def _shot_target_policy_response(exc: VideoTargetPolicyError):
         "error": "Target video engine is unavailable",
         "error_kind": "target_api_policy",
         "code": "target_api_unavailable",
-        "target": exc.target,
+        "target_api": exc.target,
         "reason": exc.reason,
         "retryable": False,
         "shot_id": exc.shot_id,
@@ -373,6 +374,16 @@ def _project_lock_guard(fn):
     return wrapper
 
 
+@app.before_request
+def _reject_noncanonical_project_route_id():
+    """Fence every ``<pid>`` route before endpoint code can touch storage."""
+
+    pid = (request.view_args or {}).get("pid")
+    if pid is not None and not is_safe_project_id(pid):
+        return jsonify({"error": "Invalid project_id"}), 400
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Static Frontend
 # ---------------------------------------------------------------------------
@@ -546,7 +557,7 @@ def get_config():
     if project_id is not None:
         if not is_safe_project_id(project_id):
             return jsonify({"error": "Invalid project_id"}), 400
-        project = load_project(project_id, timeout=HTTP_PROJECT_TIMEOUT)
+        project = load_existing_project_readonly(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
 
@@ -1653,6 +1664,17 @@ def api_update_scene(pid, sid):
                     "error": (
                         f"shots[{index}].target_api must be a string"
                     ),
+                }), 400
+            try:
+                # The normal persistence validator is intentionally
+                # compatibility-permissive.  A public replacement payload is
+                # a different boundary: reject type coercion before entering
+                # the project lock so a malformed member cannot partially
+                # update the containing scene.
+                Shot.model_validate(shot, strict=True)
+            except ValueError:
+                return jsonify({
+                    "error": f"shots[{index}] does not match the shot schema",
                 }), 400
 
     def _mutate_project(latest_project: dict):

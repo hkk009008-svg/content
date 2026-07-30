@@ -206,6 +206,88 @@ class TestSaveAndLoadProject:
         assert loaded["name"] == "V2"
 
 
+class TestProjectIdBoundary:
+    @pytest.mark.parametrize(
+        "project_id",
+        [
+            "a",
+            "0bf9d0608eab",
+            "Project-2",
+            "proj_1",
+            "proj-iterate-during-screening",
+            "A" * project_manager.MAX_PROJECT_ID_LENGTH,
+        ],
+    )
+    def test_accepts_observed_ascii_shapes(self, project_id):
+        assert project_manager.is_safe_project_id(project_id) is True
+
+    @pytest.mark.parametrize(
+        "project_id",
+        [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "/tmp/outside",
+            "nested/outside",
+            r"nested\outside",
+            "project id",
+            "project\x00id",
+            "project\x1fid",
+            "prøject",
+            "A" * (project_manager.MAX_PROJECT_ID_LENGTH + 1),
+        ],
+    )
+    def test_rejects_noncanonical_or_overlong_shapes(self, project_id):
+        assert project_manager.is_safe_project_id(project_id) is False
+
+    def test_invalid_id_fails_before_projects_directory_creation(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        missing_root = tmp_path / "not-created"
+        monkeypatch.setattr(
+            "domain.project_manager.PROJECTS_DIR",
+            str(missing_root),
+        )
+
+        with pytest.raises(ValueError, match="Invalid project_id"):
+            project_manager.load_project(
+                "A" * (project_manager.MAX_PROJECT_ID_LENGTH + 1),
+            )
+
+        assert not missing_root.exists()
+
+    def test_readonly_missing_project_creates_no_artifacts(
+        self,
+        tmp_projects_dir,
+    ):
+        assert (
+            project_manager.load_existing_project_readonly("valid-missing")
+            is None
+        )
+        assert os.listdir(tmp_projects_dir) == []
+
+    def test_readonly_existing_project_never_persists_normalization(
+        self,
+        monkeypatch,
+    ):
+        import domain.project_manager as dpm
+        from unittest.mock import MagicMock
+
+        project = project_manager.create_project("Read only")
+        write_bomb = MagicMock(
+            side_effect=AssertionError("read-only load wrote project"),
+        )
+        monkeypatch.setattr(dpm, "_save_project_unlocked", write_bomb)
+
+        loaded = project_manager.load_existing_project_readonly(project["id"])
+
+        assert loaded["id"] == project["id"]
+        write_bomb.assert_not_called()
+
+
 class TestDeleteProject:
     def test_delete_existing(self, tmp_projects_dir):
         proj = project_manager.create_project("Doomed")

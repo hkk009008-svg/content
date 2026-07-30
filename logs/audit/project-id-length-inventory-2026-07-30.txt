@@ -1,0 +1,16 @@
+command=/Volumes/SSD/Content/.venv/bin/python /Volumes/SSD/Content/scripts/project_id_length_inventory.py --root /Volumes/SSD/Content --limit 128
+root=/Volumes/SSD/Content
+storage_roots=domain/projects,projects
+filesystem_name_max_bytes=255
+existing_project_dir_count=30
+existing_project_id_max_chars=21
+existing_project_id_max_bytes=21
+existing_project_id_noncanonical_count=0
+existing_project_id_over_limit_count=0
+generated_project_id_length=12
+generated_project_id_format=lowercase_hex
+chosen_project_id_limit=128
+filesystem_byte_headroom=127
+observed_char_headroom=107
+observed_byte_headroom=107
+generated_id_headroom=116

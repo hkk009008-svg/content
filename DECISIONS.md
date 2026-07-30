@@ -3375,3 +3375,60 @@ Evidence:
   subprocess bombs.
 - **Cross-ref:** ADR-067; `phase_c_ffmpeg.py`;
   `tests/unit/test_f2a_storyboard_primitives.py`.
+
+## ADR-070 — Bound project identifiers and keep project-aware discovery read-only
+
+- **Date:** 2026-07-30
+- **Status:** Accepted; supersedes ADR-068 where it left the canonical project
+  slug unbounded, used the normalizing lock-backed loader for config discovery,
+  and named the rejected HTTP value `target`.
+- **Context.** The canonical-character check still admitted arbitrarily long
+  project IDs, allowing filesystem-dependent `ENAMETOOLONG` failures instead of
+  a stable client response. The project-aware config GET acquired the normal
+  project lock, which created a directory and lock artifact for a valid missing
+  ID and could persist schema normalization during a nominally read-only
+  request. Its policy error field diverged from the runtime/controller
+  `target_api` contract. Nested scene replacement checked only that each member
+  was an object with a string `target_api`; Pydantic's compatibility model could
+  then coerce malformed shot IDs or textual fields during the lock-held update.
+- **Decision.**
+  - Accept project IDs only when they are 1–128 ASCII characters matching
+    `[A-Za-z0-9][A-Za-z0-9_-]*`. Enforce the same predicate at the shared
+    project-path constructor and in a Flask `before_request` fence for every
+    `<pid>` route, before endpoint filesystem, lock, read, or write work.
+  - Read project-aware config through a direct existing-file snapshot. Atomic
+    `os.replace` writers make that snapshot complete without a read lock;
+    disappearance returns 404, and compatibility normalization remains
+    in-memory only.
+  - Return `target_api` in the stable target-policy 409 body for direct,
+    nested, and generated HTTP paths.
+  - Validate every declared nested `Shot` field with strict Pydantic types
+    before entering the project mutation, while retaining the model's
+    extra-field compatibility for organic extensions.
+- **Measured bound.** The committed read-only instrument
+  `scripts/project_id_length_inventory.py` and
+  `logs/audit/project-id-length-inventory-2026-07-30.txt` report a filesystem
+  `NAME_MAX` of 255 bytes, 30 existing immediate project directories with a
+  21-character/byte maximum, no noncanonical or over-limit entries, and the
+  generated 12-character lowercase-hex contract. The 128-byte ASCII limit
+  therefore leaves 127 filesystem bytes, 107 observed bytes, and 116 generated
+  bytes of headroom. Reproduce with the exact command recorded in the log.
+- **Consequences.**
+  - Maximum-length canonical and ordinary missing IDs preserve 404 behavior;
+    maximum-plus-one, 255-, 256-, huge, traversal, absolute, whitespace,
+    control, NUL, and Unicode inputs fail with stable 400 responses before
+    storage.
+  - Config discovery cannot create a project or lock artifact and cannot
+    rewrite an existing project.
+  - UI and backend consumers now receive the same policy-error field name, and
+    malformed nested shot replacements fail atomically without silent
+    coercion.
+- **Evidence.** `tests/unit/test_web_server_video_targets.py` pins the HTTP
+  boundaries, no-load/create/lock/write bombs, disappearance race, exact three
+  policy-error mappings, lock-held policy state, duplicate-grandfather rules,
+  terminal generated writer, and strict nested-shot schema.
+  `tests/unit/test_project_manager.py` pins the shared path guard and read-only
+  loader.
+- **Cross-ref:** ADR-068; `domain/project_manager.py`; `web_server.py`;
+  `domain/models.py`; `scripts/project_id_length_inventory.py`;
+  `logs/audit/project-id-length-inventory-2026-07-30.txt`.

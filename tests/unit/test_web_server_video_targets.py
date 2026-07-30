@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from domain.project_manager import MAX_PROJECT_ID_LENGTH
 from domain.provider_catalog import CATALOG, Modality, RuntimeSnapshot
 
 
@@ -132,6 +133,7 @@ def test_project_config_returns_404_for_missing_project(
     monkeypatch,
 ):
     from domain import project_manager
+    import web_server
 
     monkeypatch.setattr(
         project_manager,
@@ -139,10 +141,73 @@ def test_project_config_returns_404_for_missing_project(
         str(tmp_path),
         raising=False,
     )
+    load_bomb = MagicMock(
+        side_effect=AssertionError("normalizing loader reached"),
+    )
+    create_bomb = MagicMock(
+        side_effect=AssertionError("project creator reached"),
+    )
+    lock_bomb = MagicMock(
+        side_effect=AssertionError("project lock reached"),
+    )
+    ensure_bomb = MagicMock(
+        side_effect=AssertionError("project directory creation reached"),
+    )
+    write_bomb = MagicMock(
+        side_effect=AssertionError("project write reached"),
+    )
+    monkeypatch.setattr(web_server, "load_project", load_bomb)
+    monkeypatch.setattr(web_server, "create_project", create_bomb)
+    monkeypatch.setattr(project_manager, "_acquire_project_lock", lock_bomb)
+    monkeypatch.setattr(project_manager, "_ensure_project_dir", ensure_bomb)
+    monkeypatch.setattr(project_manager, "_save_project_unlocked", write_bomb)
+
     response = client.get("/api/config?project_id=does-not-exist")
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "Project not found"}
+    assert list(tmp_path.iterdir()) == []
+    load_bomb.assert_not_called()
+    create_bomb.assert_not_called()
+    lock_bomb.assert_not_called()
+    ensure_bomb.assert_not_called()
+    write_bomb.assert_not_called()
+
+
+def test_project_config_missing_project_disappearance_race_stays_read_only(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        project_manager,
+        "_load_project_unlocked",
+        MagicMock(side_effect=FileNotFoundError("deleted during read")),
+    )
+    lock_bomb = MagicMock(
+        side_effect=AssertionError("disappearance retried through lock"),
+    )
+    write_bomb = MagicMock(
+        side_effect=AssertionError("disappearance triggered a write"),
+    )
+    monkeypatch.setattr(project_manager, "_acquire_project_lock", lock_bomb)
+    monkeypatch.setattr(project_manager, "_save_project_unlocked", write_bomb)
+
+    response = client.get("/api/config?project_id=race-project")
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Project not found"}
+    assert list(tmp_path.iterdir()) == []
+    lock_bomb.assert_not_called()
+    write_bomb.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -159,6 +224,7 @@ def test_project_config_returns_404_for_missing_project(
         "\t",
         "\n",
         "project id",
+        "project\x00id",
         "project\x1f",
         "-leading-hyphen",
         "_leading-underscore",
@@ -187,6 +253,94 @@ def test_project_config_rejects_uncontained_id_before_load(
     assert response.status_code == 400
     assert response.get_json() == {"error": "Invalid project_id"}
     load_bomb.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    [
+        "A" * (MAX_PROJECT_ID_LENGTH + 1),
+        "A" * 255,
+        "A" * 256,
+        "A" * 4096,
+    ],
+)
+def test_project_config_rejects_overlong_id_before_any_loader(
+    client,
+    monkeypatch,
+    project_id,
+):
+    """The explicit length bound prevents OS-dependent path errors."""
+    import web_server
+
+    read_bomb = MagicMock(
+        side_effect=AssertionError("overlong project_id reached storage"),
+    )
+    monkeypatch.setattr(
+        web_server,
+        "load_existing_project_readonly",
+        read_bomb,
+    )
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": project_id},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid project_id"}
+    read_bomb.assert_not_called()
+
+
+def test_project_config_accepts_maximum_project_id_without_artifacts(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    project_id = "A" + ("b" * (MAX_PROJECT_ID_LENGTH - 1))
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": project_id},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Project not found"}
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_project_route_rejects_overlong_id_before_endpoint_storage(
+    client,
+    monkeypatch,
+):
+    import web_server
+
+    project_id = "A" * (MAX_PROJECT_ID_LENGTH + 1)
+    load_bomb = MagicMock(
+        side_effect=AssertionError("route reached project load"),
+    )
+    mutate_bomb = MagicMock(
+        side_effect=AssertionError("route reached project mutation"),
+    )
+    monkeypatch.setattr(web_server, "load_project", load_bomb)
+    monkeypatch.setattr(web_server, "mutate_project", mutate_bomb)
+
+    response = client.put(
+        f"/api/projects/{project_id}/shots/shot_a",
+        json={"target_api": "AUTO"},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid project_id"}
+    load_bomb.assert_not_called()
+    mutate_bomb.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -489,7 +643,7 @@ def test_direct_shot_policy_rejection_has_stable_409_shape(
         "error": "Target video engine is unavailable",
         "error_kind": "target_api_policy",
         "code": "target_api_unavailable",
-        "target": "SORA_2",
+        "target_api": "SORA_2",
         "reason": "retired",
         "retryable": False,
         "shot_id": shot_id,
@@ -740,11 +894,76 @@ def test_nested_scene_target_rejection_is_atomic(
     )
 
     assert response.status_code == 409
-    assert response.get_json()["shot_id"] == shot_ids[1]
+    assert response.get_json() == {
+        "error": "Target video engine is unavailable",
+        "error_kind": "target_api_policy",
+        "code": "target_api_unavailable",
+        "target_api": "SORA_2",
+        "reason": "retired",
+        "retryable": False,
+        "shot_id": shot_ids[1],
+    }
     after = _load_project(pid)["scenes"][0]
     assert after["title"] == scene["title"]
     assert after["shots"][0]["prompt"] == scene["shots"][0]["prompt"]
     assert after["shots"][1]["target_api"] == "AUTO"
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("id", 7),
+        ("prompt", []),
+        ("camera", []),
+        ("visual_effect", []),
+        ("scene_foley", []),
+        ("characters_in_frame", "char_a"),
+        ("primary_character", []),
+        ("action_context", []),
+        ("generated_image", []),
+        ("generated_video", []),
+        ("plan_status", []),
+        ("plan_rejection_reason", []),
+        ("keyframe_takes", {}),
+        ("approved_keyframe_take_id", []),
+        ("motion_takes", {}),
+        ("approved_motion_take_id", []),
+        ("postprocess_variants", {}),
+        ("approved_final_take_id", []),
+        ("performance_takes", {}),
+        ("performance_take_id", []),
+        ("diagnostics", {}),
+        ("intent_notes", []),
+        ("negative_constraints", []),
+        ("continuity_constraints", []),
+    ],
+)
+def test_nested_scene_rejects_schema_invalid_shot_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+    field,
+    invalid_value,
+):
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0])
+    malformed = deepcopy(before["shots"][0])
+    malformed[field] = invalid_value
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": [malformed]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "shots[0] does not match the shot schema",
+    }
+    assert _load_project(pid)["scenes"][0] == before
 
 
 def test_nested_scene_round_trips_one_unique_historical_target(
@@ -1034,7 +1253,7 @@ def test_decompose_http_maps_post_reviewer_target_rejection_atomically(
         "error": "Target video engine is unavailable",
         "error_kind": "target_api_policy",
         "code": "target_api_unavailable",
-        "target": "SORA_2",
+        "target_api": "SORA_2",
         "reason": "retired",
         "retryable": False,
         "shot_id": "chief-modified-shot",
