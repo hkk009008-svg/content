@@ -3259,3 +3259,40 @@ Evidence:
      paths.
 - **Cross-ref:** ADR-065; `docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md`
   Slice 1; `docs/AUDIT-product-unification-2026-07-30.md` Task 1a.
+
+## ADR-067 — Storyboard segments are bounded, frame-validated owned artifacts
+
+- **Date:** 2026-07-30
+- **Status:** Accepted; supersedes ADR-017 only where it allowed keyframe drift
+  and an unbounded final segment.
+- **Context.** The storyboard provider payload and local splitter now share one
+  canonical duration allocation, but input-side `-ss` plus stream-copy cannot
+  honor non-keyframe boundaries. A real 10 fps, five-second-GOP source produced
+  cumulative segment durations and duplicate tail clips. A provider result
+  shorter than the allocated timeline could still yield multiple non-empty
+  files that the phase registered as distinct takes.
+- **Decision.** Before cutting, require a decodable video stream whose duration
+  covers the full allocated timeline. Cut every segment, including the last,
+  with output-side seek, an explicit duration, and re-encoding. Probe every cut
+  for a positive decoded-frame count and require its measured video duration to
+  match the allocation within two encoded frames, bounded to 50–250 ms. The
+  phase repeats this validation across all segments before its first take write.
+  Split outputs live in a unique invocation-owned directory and only its exact
+  deterministic names may be finalized or cleaned; a path merely returned by a
+  faulty splitter conveys no ownership. Any pre-finalize failure rejects the
+  whole batch and falls through to guarded per-shot generation.
+- **Consequences.**
+  - Non-keyframe boundaries and the last segment are bounded accurately; short
+    provider output cannot be duplicated into apparently valid takes.
+  - Splitting costs additional local encode time and one source plus per-output
+    ffprobe pass.
+  - ADR-017's billing rule is unchanged: the already-incurred storyboard batch
+    cost remains recorded when validation or splitting fails, and fallback
+    generations record their own real costs.
+- **Evidence.** `tests/unit/test_f2a_storyboard_primitives.py` executes real
+  FFmpeg regressions for `[5,5,4,1]`, `[5,5,2,1,1,1]`, the five-second-GOP
+  `[1,1,1,3]` case, and a three-second undersupply. Phase tests pin
+  pre-finalize validation, owned cleanup, arbitrary-path preservation, and
+  retained batch cost.
+- **Cross-ref:** ADR-017; `cinema/storyboard.py`;
+  `cinema/phases/motion_render.py`; `phase_c_ffmpeg.py`.

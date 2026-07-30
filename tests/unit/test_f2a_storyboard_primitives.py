@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import types
+from hashlib import md5
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -39,17 +40,26 @@ def _ffmpeg_available() -> bool:
         return False
 
 
-def _make_tiny_mp4(path: str, duration_s: float = 3.0) -> None:
+def _make_tiny_mp4(
+    path: str,
+    duration_s: float = 3.0,
+    *,
+    long_gop: bool = False,
+) -> None:
     """Create a minimal valid mp4 at *path* using ffmpeg lavfi (no input file)."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i",
+        f"testsrc2=size=64x48:duration={duration_s}:rate=10",
+        "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+        "-t", str(duration_s),
+        "-c:v", "libx264",
+    ]
+    if long_gop:
+        cmd += ["-g", "50", "-keyint_min", "50", "-sc_threshold", "0"]
+    cmd += ["-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", path]
     subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "lavfi", "-i", f"color=size=64x48:duration={duration_s}:rate=10",
-            "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-            "-t", str(duration_s),
-            "-c:v", "libx264", "-c:a", "aac", "-shortest",
-            path,
-        ],
+        cmd,
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -70,6 +80,36 @@ def _video_duration(path: str) -> float:
         check=True,
     )
     return float(result.stdout.strip())
+
+
+def _first_frame_md5(path: str) -> str:
+    """Return the decoded first frame hash for boundary-distinctness checks."""
+    result = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-i", path,
+            "-map", "0:v:0", "-frames:v", "1",
+            "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return md5(result.stdout).hexdigest()
+
+
+@pytest.fixture
+def mocked_storyboard_media():
+    """Keep command-shape unit tests focused on FFmpeg invocation."""
+    with (
+        patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            return_value=(60.0, 0.1),
+        ),
+        patch(
+            "phase_c_ffmpeg.validate_storyboard_segment",
+            return_value=1.0,
+        ),
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +141,9 @@ class TestSplitVideoIntoSegments:
         )
         assert result == []
 
-    def test_correct_number_of_ffmpeg_calls_mocked(self, tmp_path):
+    def test_correct_number_of_ffmpeg_calls_mocked(
+        self, tmp_path, mocked_storyboard_media,
+    ):
         """Mocked subprocess: N durations → N ffmpeg calls, N output paths returned."""
         from phase_c_ffmpeg import split_video_into_segments
 
@@ -128,8 +170,10 @@ class TestSplitVideoIntoSegments:
         assert len(result) == 3
         assert len(captured_calls) == 3
 
-    def test_ffmpeg_call_structure_for_non_last_segment(self, tmp_path):
-        """Non-last segment ffmpeg call includes -t (duration limit)."""
+    def test_ffmpeg_call_structure_for_every_segment(
+        self, tmp_path, mocked_storyboard_media,
+    ):
+        """Every segment is bounded and uses accurate output-side seek."""
         from phase_c_ffmpeg import split_video_into_segments
 
         src = tmp_path / "storyboard.mp4"
@@ -148,15 +192,19 @@ class TestSplitVideoIntoSegments:
                 output_dir=str(tmp_path / "segs"),
             )
 
-        # First call (non-last): must contain -t
+        # Every call, including the last, must have an explicit bound.
         first_call = captured_calls[0]
         assert "-t" in first_call
-
-        # Second call (last): must NOT contain -t
         last_call = captured_calls[1]
-        assert "-t" not in last_call
+        assert "-t" in last_call
+        for call_cmd in captured_calls:
+            assert call_cmd.index("-i") < call_cmd.index("-ss")
+            assert "-c" not in call_cmd
+            assert call_cmd[call_cmd.index("-c:v") + 1] == "libx264"
 
-    def test_output_filenames_are_zero_padded(self, tmp_path):
+    def test_output_filenames_are_zero_padded(
+        self, tmp_path, mocked_storyboard_media,
+    ):
         """Segment output paths use zero-padded indices: _000, _001, …"""
         from phase_c_ffmpeg import split_video_into_segments
 
@@ -174,7 +222,9 @@ class TestSplitVideoIntoSegments:
         names = [os.path.basename(p) for p in result]
         assert names == ["shot_000.mp4", "shot_001.mp4", "shot_002.mp4"]
 
-    def test_raises_runtime_error_on_ffmpeg_failure(self, tmp_path):
+    def test_raises_runtime_error_on_ffmpeg_failure(
+        self, tmp_path, mocked_storyboard_media,
+    ):
         """ffmpeg failure (non-zero exit) → RuntimeError with stderr text."""
         from phase_c_ffmpeg import split_video_into_segments
 
@@ -190,7 +240,9 @@ class TestSplitVideoIntoSegments:
                     output_dir=str(tmp_path / "segs"),
                 )
 
-    def test_start_offsets_accumulate_correctly(self, tmp_path):
+    def test_start_offsets_accumulate_correctly(
+        self, tmp_path, mocked_storyboard_media,
+    ):
         """The -ss flag for segment N equals the sum of all prior durations."""
         from phase_c_ffmpeg import split_video_into_segments
 
@@ -219,48 +271,154 @@ class TestSplitVideoIntoSegments:
                 f"Segment {i}: expected start {expected_starts[i]}, got {actual_start}"
             )
 
+    def test_short_source_is_rejected_before_any_ffmpeg_cut(self, tmp_path):
+        """Source coverage is a precondition, not an eventual tail failure."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                return_value=(3.0, 0.1),
+            ),
+            patch(
+                "subprocess.run",
+                side_effect=AssertionError("ffmpeg cut must not launch"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="does not cover"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[5.0, 5.0, 4.0, 1.0],
+                    output_dir=str(tmp_path / "segs"),
+                )
+
+        assert not (tmp_path / "segs").exists()
+
+    def test_validation_failure_cleans_only_deterministic_outputs(
+        self, tmp_path,
+    ):
+        """A post-cut probe rejection removes every named invocation output."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+
+        def write_partial_output(cmd, **kwargs):
+            del kwargs
+            with open(cmd[-1], "wb") as handle:
+                handle.write(b"partial")
+            return MagicMock(returncode=0)
+
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                return_value=(10.0, 0.1),
+            ),
+            patch("subprocess.run", side_effect=write_partial_output),
+            patch(
+                "phase_c_ffmpeg.validate_storyboard_segment",
+                side_effect=RuntimeError("invalid media"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="invalid media"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[2.0, 2.0],
+                    output_dir=str(out_dir),
+                )
+
+        assert out_dir.exists()
+        assert list(out_dir.iterdir()) == []
+
+    def test_probe_rejects_video_stream_without_decoded_frames(self, tmp_path):
+        """A declared video stream is insufficient when no frame decodes."""
+        from phase_c_ffmpeg import _probe_storyboard_video
+
+        src = tmp_path / "empty-stream.mp4"
+        src.write_bytes(b"fakevideo")
+        probe_result = MagicMock(
+            stdout=(
+                '{"streams":[{"codec_type":"video","duration":"5.0",'
+                '"avg_frame_rate":"24/1","nb_read_frames":"0"}],'
+                '"format":{"duration":"5.0"}}'
+            )
+        )
+
+        with patch("subprocess.run", return_value=probe_result):
+            with pytest.raises(RuntimeError, match="no decoded frames"):
+                _probe_storyboard_video(str(src))
+
+    @pytest.mark.parametrize(
+        "durations",
+        [
+            [5.0, 5.0, 4.0, 1.0],
+            [5.0, 5.0, 2.0, 1.0, 1.0, 1.0],
+        ],
+    )
     @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not available")
-    def test_real_split_produces_correct_segment_count(self, tmp_path):
-        """Integration: real ffmpeg split of a synthetic 6 s clip into 3 segments."""
+    def test_real_split_matches_canonical_fifteen_second_plan(
+        self, tmp_path, durations,
+    ):
+        """Real cuts match both canonical provider-capped allocations."""
         from phase_c_ffmpeg import split_video_into_segments
 
         src = tmp_path / "combined.mp4"
-        _make_tiny_mp4(str(src), duration_s=6.0)
+        _make_tiny_mp4(str(src), duration_s=15.0, long_gop=True)
 
-        durations = [2.0, 2.0, 2.0]
         result = split_video_into_segments(
             source_path=str(src),
             durations=durations,
             output_dir=str(tmp_path / "segs"),
         )
 
-        assert len(result) == 3
-        for seg_path in result:
+        assert len(result) == len(durations)
+        for expected_duration, seg_path in zip(durations, result):
             assert os.path.exists(seg_path), f"segment file missing: {seg_path}"
             seg_dur = _video_duration(seg_path)
-            # Stream-copy may drift by up to ~0.5 s at keyframe boundaries
-            assert seg_dur >= 1.0, f"segment too short: {seg_dur:.2f}s"
+            assert seg_dur == pytest.approx(expected_duration, abs=0.2)
 
     @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not available")
-    def test_real_split_last_segment_absorbs_remainder(self, tmp_path):
-        """Last segment runs to end of video even when durations don't sum exactly."""
+    def test_real_long_gop_split_has_bounded_distinct_segments(self, tmp_path):
+        """Regression: input-side seek/copy produced cumulative duplicate tails."""
         from phase_c_ffmpeg import split_video_into_segments
 
         src = tmp_path / "combined.mp4"
-        _make_tiny_mp4(str(src), duration_s=5.0)
+        _make_tiny_mp4(str(src), duration_s=6.0, long_gop=True)
 
-        # Ask for two segments whose durations sum to 4.5 (< 5.0)
-        durations = [2.0, 2.5]
+        durations = [1.0, 1.0, 1.0, 3.0]
         result = split_video_into_segments(
             source_path=str(src),
             durations=durations,
             output_dir=str(tmp_path / "segs"),
         )
 
-        assert len(result) == 2
-        last_dur = _video_duration(result[-1])
-        # Last segment must contain the remainder (≥ 2.5 s, likely ~3.0 s)
-        assert last_dur >= 2.0, f"last segment too short: {last_dur:.2f}s"
+        assert [_video_duration(path) for path in result] == pytest.approx(
+            durations,
+            abs=0.2,
+        )
+        assert len({_first_frame_md5(path) for path in result}) == len(result)
+
+    @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not available")
+    def test_short_source_fails_before_writing_any_segment(self, tmp_path):
+        """A three-second provider result cannot satisfy a 15-second plan."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "short.mp4"
+        _make_tiny_mp4(str(src), duration_s=3.0, long_gop=True)
+        out_dir = tmp_path / "segs"
+
+        with pytest.raises(RuntimeError, match="does not cover"):
+            split_video_into_segments(
+                source_path=str(src),
+                durations=[5.0, 5.0, 4.0, 1.0],
+                output_dir=str(out_dir),
+            )
+
+        assert not out_dir.exists()
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
+import stat
 import sys
 import time
 import json
@@ -1335,6 +1337,89 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
 # Storyboard split (F2a)
 # ---------------------------------------------------------------------------
 
+STORYBOARD_SEGMENT_MIN_TOLERANCE_S = 0.05
+STORYBOARD_SEGMENT_MAX_TOLERANCE_S = 0.25
+
+
+def _probe_storyboard_video(path: str) -> tuple:
+    """Return ``(video_duration_s, duration_tolerance_s)`` for *path*.
+
+    The tolerance is two encoded frames, bounded to 50–250 ms.  Two frames
+    accommodate MP4 timestamp rounding and encoder delay without accepting a
+    materially short or duplicated segment.
+    """
+    try:
+        stat_result = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(stat_result.st_mode) or stat_result.st_size <= 0:
+            raise ValueError("not a non-empty regular file")
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=codec_type,duration,avg_frame_rate,nb_read_frames:"
+                "format=duration",
+                "-of", "json",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+        data = json.loads(probe.stdout)
+        streams = data.get("streams") or []
+        if not streams or streams[0].get("codec_type") != "video":
+            raise ValueError("no video stream")
+        stream = streams[0]
+        raw_frame_count = stream.get("nb_read_frames")
+        if raw_frame_count in (None, "N/A") or int(raw_frame_count) <= 0:
+            raise ValueError("video stream has no decoded frames")
+        raw_duration = stream.get("duration")
+        if raw_duration in (None, "N/A"):
+            raw_duration = (data.get("format") or {}).get("duration")
+        duration_s = float(raw_duration)
+        if not math.isfinite(duration_s) or duration_s <= 0:
+            raise ValueError("video duration is not finite and positive")
+
+        frame_rate_s = str(stream.get("avg_frame_rate") or "0/0")
+        numerator_text, denominator_text = frame_rate_s.split("/", 1)
+        numerator = float(numerator_text)
+        denominator = float(denominator_text)
+        fps = numerator / denominator if denominator > 0 else 0.0
+        frame_tolerance = 2.0 / fps if fps > 0 else 0.1
+        tolerance_s = min(
+            STORYBOARD_SEGMENT_MAX_TOLERANCE_S,
+            max(STORYBOARD_SEGMENT_MIN_TOLERANCE_S, frame_tolerance),
+        )
+        return duration_s, tolerance_s
+    except Exception as exc:
+        raise RuntimeError(
+            f"storyboard video probe failed for {path}: {exc}"
+        ) from exc
+
+
+def validate_storyboard_segment(
+    path: str,
+    expected_duration_s: float,
+) -> float:
+    """Require a video stream whose duration matches the allocated segment.
+
+    Returns the measured video-stream duration.  A RuntimeError means the
+    caller must reject the entire split before registering any segment.
+    """
+    actual_duration_s, tolerance_s = _probe_storyboard_video(path)
+    if abs(actual_duration_s - expected_duration_s) > tolerance_s:
+        raise RuntimeError(
+            "storyboard segment duration mismatch for "
+            f"{path}: expected={expected_duration_s:.3f}s "
+            f"actual={actual_duration_s:.3f}s "
+            f"tolerance={tolerance_s:.3f}s"
+        )
+    return actual_duration_s
+
+
 def split_video_into_segments(
     source_path: str,
     durations: list,
@@ -1349,11 +1434,10 @@ def split_video_into_segments(
 
     Args:
         source_path: Path to the combined mp4 (e.g. storyboard output).
-        durations: Ordered list of floats, one per desired segment (seconds).
-            They need not sum exactly to the video length — any remainder is
-            absorbed into the final segment (clamped to end-of-video).
-        output_dir: Directory in which to write segment files.  Created if
-            absent.
+        durations: Ordered list of finite positive floats, one per desired
+            segment (seconds).  The source video must cover their full sum.
+        output_dir: Invocation-owned directory in which to write segment
+            files.  It is created if absent and must be empty at entry.
         stem: Filename prefix for segment files.  Final names are
             ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
 
@@ -1363,20 +1447,19 @@ def split_video_into_segments(
         ``durations`` is empty.
 
     Raises:
-        RuntimeError: If any ffmpeg subprocess exits with a non-zero code.
-            The message includes the captured stderr for diagnosis.
+        RuntimeError: If the source is too short, lacks a video stream, any
+            ffmpeg subprocess fails, or an output lacks the expected video
+            stream/duration.  Deterministic output paths are removed before
+            the exception escapes.
 
     Notes:
-        - Uses ``-c copy`` (stream-copy) for speed and lossless quality.
-          Stream-copy may drift slightly at non-keyframe boundaries; this is
-          acceptable for continuity validation which is score-based, not
-          frame-exact.
+        - Seeks after opening the input and re-encodes each segment.  This is
+          slower than stream-copy but makes non-keyframe boundaries accurate.
         - Segments shorter than 1 s are written as-is (the caller — i.e.,
           the storyboard API — already enforces 1 s minimum per shot during
           duration allocation).
-        - The last segment always runs to the end of the source video
-          (``-to`` is omitted for the final segment) so floating-point
-          accumulation errors do not drop the last few frames.
+        - Every segment, including the last, has an explicit ``-t`` duration;
+          provider tail frames outside the allocated timeline are ignored.
     """
     if not source_path or not os.path.exists(source_path):
         logger.warning("split_video_into_segments: source not found", extra={"source_path": source_path})
@@ -1385,44 +1468,104 @@ def split_video_into_segments(
         logger.warning("split_video_into_segments: empty durations list")
         return []
 
-    os.makedirs(output_dir, exist_ok=True)
+    normalized_durations = []
+    for idx, raw_duration in enumerate(durations):
+        try:
+            duration_s = float(raw_duration)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"split_video_into_segments: invalid duration at index {idx}"
+            ) from exc
+        if not math.isfinite(duration_s) or duration_s <= 0:
+            raise RuntimeError(
+                f"split_video_into_segments: invalid duration at index {idx}"
+            )
+        normalized_durations.append(duration_s)
 
-    segment_paths = []
+    source_duration_s, source_tolerance_s = _probe_storyboard_video(source_path)
+    allocated_duration_s = sum(normalized_durations)
+    if source_duration_s + source_tolerance_s < allocated_duration_s:
+        raise RuntimeError(
+            "split_video_into_segments: source does not cover allocated "
+            f"timeline (source={source_duration_s:.3f}s, "
+            f"allocated={allocated_duration_s:.3f}s, "
+            f"tolerance={source_tolerance_s:.3f}s)"
+        )
+
+    os.makedirs(output_dir, exist_ok=True)
+    if os.listdir(output_dir):
+        raise RuntimeError(
+            "split_video_into_segments: output_dir must be empty and "
+            "invocation-owned"
+        )
+
+    segment_paths = [
+        os.path.abspath(
+            os.path.join(output_dir, f"{stem}_{idx:03d}.mp4")
+        )
+        for idx in range(len(normalized_durations))
+    ]
     start = 0.0
 
-    for idx, dur in enumerate(durations):
-        out_path = os.path.join(output_dir, f"{stem}_{idx:03d}.mp4")
-        is_last = idx == len(durations) - 1
-
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", str(start),
-            "-i", source_path,
-        ]
-        if not is_last:
-            cmd += ["-t", str(dur)]
-        cmd += ["-c", "copy", "-avoid_negative_ts", "make_zero", out_path]
-
-        try:
-            result = subprocess.run(
+    try:
+        for idx, (dur, out_path) in enumerate(
+            zip(normalized_durations, segment_paths)
+        ):
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", source_path,
+                # Output-side seek decodes through the requested timestamp,
+                # avoiding the keyframe drift of input-side -ss + stream-copy.
+                "-ss", f"{start:.6f}",
+                "-t", f"{dur:.6f}",
+                "-map", "0:v:0",
+                "-map", "0:a?",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "18",
+                "-c:a", "aac",
+                "-movflags", "+faststart",
+                "-avoid_negative_ts", "make_zero",
+                out_path,
+            ]
+            subprocess.run(
                 cmd,
                 check=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
-        except subprocess.CalledProcessError as exc:
-            stderr_text = exc.stderr.decode(errors="replace")
-            raise RuntimeError(
-                f"split_video_into_segments: ffmpeg failed on segment {idx} "
-                f"(start={start:.3f}s, dur={dur:.3f}s): {stderr_text}"
-            ) from exc
-
-        segment_paths.append(os.path.abspath(out_path))
-        logger.debug(
-            "split_video_into_segments: segment written",
-            extra={"segment_idx": idx, "start_s": round(start, 3), "dur_s": round(dur, 3), "out_path": out_path},
+            validate_storyboard_segment(out_path, dur)
+            logger.debug(
+                "split_video_into_segments: segment written",
+                extra={"segment_idx": idx, "start_s": round(start, 3), "dur_s": round(dur, 3), "out_path": out_path},
+            )
+            start += dur
+    except subprocess.CalledProcessError as exc:
+        stderr_value = exc.stderr or b""
+        stderr_text = (
+            stderr_value.decode(errors="replace")
+            if isinstance(stderr_value, bytes)
+            else str(stderr_value)
         )
-        start += dur
+        raise RuntimeError(
+            f"split_video_into_segments: ffmpeg failed on segment {idx} "
+            f"(start={start:.3f}s, dur={dur:.3f}s): {stderr_text}"
+        ) from exc
+    finally:
+        if sys.exc_info()[0] is not None:
+            # These exact names are the only files this invocation is allowed
+            # to own.  Never follow or remove a path returned by another layer.
+            for out_path in segment_paths:
+                try:
+                    os.unlink(out_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning(
+                        "split_video_into_segments: failed to clean rejected output",
+                        extra={"path": out_path},
+                        exc_info=True,
+                    )
 
     return segment_paths
 

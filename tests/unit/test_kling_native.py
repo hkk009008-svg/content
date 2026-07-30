@@ -398,6 +398,28 @@ def test_storyboard_payload_stays_within_provider_cap_after_minimums(
     assert min(payload_durations) >= 1.0
 
 
+@pytest.mark.parametrize(
+    ("requested", "expected"),
+    [
+        (sys.float_info.max, [14.0, 1.0]),
+        (-sys.float_info.max, [1.0, 5.0]),
+    ],
+)
+def test_storyboard_allocator_clamps_finite_extremes_before_scaling(
+    requested,
+    expected,
+):
+    """Finite extremes must clamp, not overflow during tenths conversion."""
+    from cinema.storyboard import allocate_storyboard_durations
+
+    shots = [
+        {"prompt": "extreme", "duration": requested},
+        {"prompt": "normal", "duration": 5.0},
+    ]
+
+    assert allocate_storyboard_durations(shots) == expected
+
+
 # ---------------------------------------------------------------------------
 # poll_task — characterization (kling_native.py:170; backoff [3,5,8,12,15] at :190,226-229)
 #

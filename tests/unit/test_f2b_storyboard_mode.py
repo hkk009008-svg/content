@@ -16,6 +16,7 @@ All tests are fully offline — no real APIs, no GPU.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import types
 from datetime import date
@@ -87,6 +88,62 @@ def _write_nonempty(path: str) -> None:
         handle.write(b"offline-media-stub")
 
 
+def _write_owned_segments(
+    *,
+    source_path,
+    durations,
+    output_dir,
+    stem,
+    empty_indices=(),
+):
+    """Offline splitter double honoring the production ownership contract."""
+    del source_path
+    paths = []
+    for index, _duration in enumerate(durations):
+        path = os.path.abspath(
+            os.path.join(output_dir, f"{stem}_{index:03d}.mp4")
+        )
+        if index in empty_indices:
+            open(path, "wb").close()
+        else:
+            _write_nonempty(path)
+        paths.append(path)
+    return paths
+
+
+def _ffmpeg_available() -> bool:
+    try:
+        subprocess.run(
+            ["ffmpeg", "-version"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+def _make_tiny_mp4(path: str, duration_s: float) -> None:
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i",
+            f"testsrc2=size=64x48:duration={duration_s}:rate=10",
+            "-t", str(duration_s),
+            "-c:v", "libx264",
+            "-g", "50",
+            "-keyint_min", "50",
+            "-sc_threshold", "0",
+            "-pix_fmt", "yuv420p",
+            path,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def _make_shot(shot_id: str, kf_take_id: str = "kf_001", has_final: bool = False) -> dict:
     shot = {
         "id": shot_id,
@@ -146,7 +203,13 @@ def _make_gen_mock(
 
     # _shot_ctrl — needs _take_output_path and _finalize_motion_take
     shot_ctrl = MagicMock()
-    shot_ctrl._take_output_path.return_value = "/tmp/storyboard_scene_1.mp4"
+    output_root = os.path.dirname(
+        next(iter(kf_paths.values()), "/tmp/storyboard_scene_1.mp4")
+    )
+    shot_ctrl._take_output_path.return_value = os.path.join(
+        output_root,
+        "storyboard_scene_1.mp4",
+    )
     finalize_result = {"success": True, "take": {}, "video": "/tmp/seg.mp4", "identity_score": 0.0}
     shot_ctrl._finalize_motion_take.return_value = finalize_result
     gen._shot_ctrl = shot_ctrl
@@ -178,6 +241,13 @@ def _ready_storyboard_policy(monkeypatch):
     monkeypatch.setattr(
         "cinema.phases.motion_render._storyboard_policy_current_date",
         lambda: _POLICY_DATE,
+    )
+    # Mocked splitters write byte stubs, so keep these unit tests focused on
+    # phase orchestration.  Real ffprobe/ffmpeg validation is exercised in
+    # test_f2a_storyboard_primitives and the undersupply integration below.
+    monkeypatch.setattr(
+        "phase_c_ffmpeg.validate_storyboard_segment",
+        lambda path, duration: duration,
     )
 
 
@@ -407,7 +477,7 @@ class TestIneligibleScenes:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
                     _write_nonempty(p)
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 ctx = _make_lifecycle()
@@ -443,7 +513,7 @@ class TestIneligibleScenes:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(6)]
                 for p in seg_paths:
                     _write_nonempty(p)
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 ctx = _make_lifecycle()
@@ -495,7 +565,7 @@ class TestPortraitDisqualifiesStoryboard:
             seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
             for p in seg_paths:
                 _write_nonempty(p)
-            mock_split.return_value = seg_paths
+            mock_split.side_effect = _write_owned_segments
 
             phase = MotionRenderPhase(shot_generator=gen, project=project)
             result = phase.run(ctx)
@@ -532,7 +602,7 @@ class TestPortraitDisqualifiesStoryboard:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
                     _write_nonempty(p)
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 result = phase.run(ctx)
@@ -566,7 +636,7 @@ class TestPortraitDisqualifiesStoryboard:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
                     _write_nonempty(p)
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 result = phase.run(ctx)
@@ -612,7 +682,7 @@ class TestStoryboardPartialFinalizeFailure:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
                 for p in seg_paths:
                     _write_nonempty(p)
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 result = phase.run(_make_lifecycle())
@@ -656,7 +726,7 @@ class TestStoryboardHappyPath:
             mock_kling_cls.return_value = mock_kling
 
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 ctx = _make_lifecycle()
@@ -732,7 +802,7 @@ class TestStoryboardHappyPath:
             mock_kling_cls.return_value = mock_kling
 
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 phase.run(_make_lifecycle())
@@ -784,7 +854,7 @@ class TestStoryboardHappyPath:
             mock_kling_cls.return_value = mock_kling
 
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 phase.run(_make_lifecycle())
@@ -844,7 +914,7 @@ class TestStoryboardHappyPath:
             mock_kling_cls.return_value = mock_kling
 
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
-                mock_split.return_value = seg_paths
+                mock_split.side_effect = _write_owned_segments
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
                 result = phase.run(_make_lifecycle())
@@ -980,6 +1050,134 @@ class TestStoryboardFallback:
         assert gen.generate_motion_take.call_count == 2
         assert result.ok is True
 
+    def test_rejected_split_cleans_only_invocation_owned_paths(self, tmp_path):
+        """A splitter-returned arbitrary path is never finalized or deleted."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        storyboard_path = str(tmp_path / "combined.mp4")
+        _write_nonempty(storyboard_path)
+        arbitrary_path = str(tmp_path / "not-owned-return.mp4")
+        _write_nonempty(arbitrary_path)
+        expected_paths = []
+
+        def faulty_splitter(**kwargs):
+            owned_paths = _write_owned_segments(**kwargs)
+            expected_paths.extend(owned_paths)
+            return [owned_paths[0], arbitrary_path]
+
+        with (
+            patch("kling_native.KlingNativeAPI") as mock_kling_cls,
+            patch(
+                "phase_c_ffmpeg.split_video_into_segments",
+                side_effect=faulty_splitter,
+            ),
+        ):
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = storyboard_path
+            mock_kling_cls.return_value = mock_kling
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(_make_lifecycle())
+
+        assert os.path.isfile(arbitrary_path)
+        assert expected_paths
+        assert all(not os.path.lexists(path) for path in expected_paths)
+        assert not os.path.exists(os.path.dirname(expected_paths[0]))
+        gen._shot_ctrl._finalize_motion_take.assert_not_called()
+        assert gen.generate_motion_take.call_count == 2
+        assert result.ok is True
+
+    def test_duration_probe_failure_rejects_all_before_finalize(self, tmp_path):
+        """The phase independently validates every owned segment before writes."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot(f"s1_{index}") for index in range(3)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        storyboard_path = str(tmp_path / "combined.mp4")
+        _write_nonempty(storyboard_path)
+
+        with (
+            patch("kling_native.KlingNativeAPI") as mock_kling_cls,
+            patch(
+                "phase_c_ffmpeg.split_video_into_segments",
+                side_effect=_write_owned_segments,
+            ),
+            patch(
+                "phase_c_ffmpeg.validate_storyboard_segment",
+                side_effect=RuntimeError("duration mismatch"),
+            ) as validate_segment,
+        ):
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = storyboard_path
+            mock_kling_cls.return_value = mock_kling
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(_make_lifecycle())
+
+        assert validate_segment.call_count == 3
+        gen._shot_ctrl._finalize_motion_take.assert_not_called()
+        assert gen.generate_motion_take.call_count == 3
+        assert not list(tmp_path.glob(".storyboard_segments_*"))
+        assert result.ok is True
+
+    @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not available")
+    def test_short_real_storyboard_records_cost_then_falls_back(self, tmp_path):
+        """A paid three-second result cannot finalize a 15-second scene."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot(f"s1_{index}") for index in range(4)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        short_storyboard = str(tmp_path / "short-storyboard.mp4")
+        _make_tiny_mp4(short_storyboard, 3.0)
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = short_storyboard
+            mock_kling_cls.return_value = mock_kling
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(_make_lifecycle())
+
+        batch_cost_calls = [
+            cost_call
+            for cost_call in gen.cost_tracker.record_api_call.call_args_list
+            if cost_call.kwargs.get("operation") == "storyboard_generation"
+        ]
+        assert len(batch_cost_calls) == 1
+        gen._shot_ctrl._finalize_motion_take.assert_not_called()
+        assert gen.generate_motion_take.call_count == 4
+        assert not list(tmp_path.glob(".storyboard_segments_*"))
+        assert result.ok is True
+
     def test_empty_segment_rejects_whole_batch_before_any_finalize(self, tmp_path):
         """One zero-byte segment invalidates the batch before writes begin."""
         from cinema.phases.motion_render import MotionRenderPhase
@@ -998,14 +1196,6 @@ class TestStoryboardFallback:
         gen = _make_gen_mock(kf_paths=kf_paths)
         storyboard_path = str(tmp_path / "combined.mp4")
         _write_nonempty(storyboard_path)
-        segment_paths = [
-            str(tmp_path / f"seg_{index}.mp4")
-            for index in range(3)
-        ]
-        _write_nonempty(segment_paths[0])
-        open(segment_paths[1], "wb").close()
-        _write_nonempty(segment_paths[2])
-
         with (
             patch("kling_native.KlingNativeAPI") as mock_kling_cls,
             patch("phase_c_ffmpeg.split_video_into_segments") as mock_split,
@@ -1013,7 +1203,10 @@ class TestStoryboardFallback:
             mock_kling = MagicMock()
             mock_kling.generate_storyboard.return_value = storyboard_path
             mock_kling_cls.return_value = mock_kling
-            mock_split.return_value = segment_paths
+            mock_split.side_effect = lambda **kwargs: _write_owned_segments(
+                **kwargs,
+                empty_indices={1},
+            )
 
             phase = MotionRenderPhase(shot_generator=gen, project=project)
             result = phase.run(_make_lifecycle())

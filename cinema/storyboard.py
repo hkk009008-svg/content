@@ -63,10 +63,19 @@ def allocate_storyboard_durations(
         remaining_shots = shot_count - index - 1
         reserved_units = remaining_shots * _MIN_SHOT_UNITS
         max_current_units = remaining_units - reserved_units
-        requested_units = max(
-            _MIN_SHOT_UNITS,
-            int(round(requested * _TENTHS_PER_SECOND)),
-        )
+        # Clamp before scaling/converting.  A finite float can still overflow
+        # to infinity when multiplied (for example ``sys.float_info.max *
+        # 10``), and ``int(round(inf))`` raises OverflowError.  The provider
+        # cap makes values beyond this shot's available units equivalent.
+        max_current_duration = max_current_units / _TENTHS_PER_SECOND
+        if requested <= STORYBOARD_MIN_SHOT_DURATION_S:
+            requested_units = _MIN_SHOT_UNITS
+        elif requested >= max_current_duration:
+            requested_units = max_current_units
+        else:
+            requested_units = int(
+                round(requested * _TENTHS_PER_SECOND)
+            )
         allocated_units = min(requested_units, max_current_units)
         allocations.append(allocated_units / _TENTHS_PER_SECOND)
         remaining_units -= allocated_units

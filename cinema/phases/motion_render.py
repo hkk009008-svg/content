@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 import time
 from datetime import date, datetime, timezone
 from typing import Callable, Optional
@@ -159,7 +160,10 @@ class MotionRenderPhase:
 
         try:
             from kling_native import KlingNativeAPI
-            from phase_c_ffmpeg import split_video_into_segments
+            from phase_c_ffmpeg import (
+                split_video_into_segments,
+                validate_storyboard_segment,
+            )
             from domain.project_manager import make_take
         except ImportError as exc:
             logger.warning(
@@ -258,16 +262,79 @@ class MotionRenderPhase:
                 exc_info=True,
             )
 
-        # Split the combined output back into per-shot segments.
-        seg_output_dir = os.path.dirname(storyboard_output_path)
+        # Split the combined output back into per-shot segments.  Use a unique
+        # directory so ownership is exact: a rejected split can clean only
+        # files from this invocation without trusting arbitrary returned paths.
+        seg_output_root = os.path.abspath(
+            os.path.dirname(storyboard_output_path) or os.curdir
+        )
+        try:
+            seg_output_dir = tempfile.mkdtemp(
+                prefix=".storyboard_segments_",
+                dir=seg_output_root,
+            )
+        except OSError as exc:
+            logger.warning(
+                "storyboard batch: could not create owned segment directory "
+                "for scene=%s (%s); falling through to per-shot",
+                scene_id,
+                exc,
+            )
+            return ok_count, fail_count, False
+        segment_stem = "segment"
+        expected_segment_paths = [
+            os.path.abspath(
+                os.path.join(
+                    seg_output_dir,
+                    f"{segment_stem}_{index:03d}.mp4",
+                )
+            )
+            for index in range(num_shots)
+        ]
+
+        def reject_split() -> None:
+            # Unlink only the deterministic names this invocation owns.  A
+            # faulty or adversarial splitter may return some other path; that
+            # path must never become a cleanup target.
+            for expected_path in expected_segment_paths:
+                try:
+                    os.unlink(expected_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning(
+                        "storyboard batch: failed to clean rejected segment",
+                        extra={
+                            "scene_id": scene_id,
+                            "segment_path": expected_path,
+                        },
+                        exc_info=True,
+                    )
+            try:
+                os.rmdir(seg_output_dir)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                # Unexpected files are deliberately preserved rather than
+                # recursively deleted; they are not owned by this invocation.
+                logger.warning(
+                    "storyboard batch: owned segment directory retained "
+                    "because it contains non-owned entries",
+                    extra={
+                        "scene_id": scene_id,
+                        "segment_dir": seg_output_dir,
+                    },
+                )
+
         try:
             segment_paths = split_video_into_segments(
                 source_path=combined_path,
                 durations=durations,
                 output_dir=seg_output_dir,
-                stem=f"storyboard_{scene_id}_seg",
+                stem=segment_stem,
             )
         except Exception as exc:
+            reject_split()
             logger.warning(
                 "storyboard batch: split failed for scene=%s (%s); "
                 "falling through to per-shot",
@@ -275,30 +342,46 @@ class MotionRenderPhase:
             )
             return ok_count, fail_count, False
 
-        if not segment_paths or len(segment_paths) != num_shots:
+        try:
+            returned_segment_paths = [
+                os.path.abspath(os.fspath(path))
+                for path in segment_paths
+            ]
+        except Exception:
+            returned_segment_paths = []
+        if returned_segment_paths != expected_segment_paths:
+            reject_split()
             logger.warning(
-                "storyboard batch: split returned %d segments for %d shots "
-                "in scene=%s; falling through to per-shot",
-                len(segment_paths) if segment_paths else 0,
+                "storyboard batch: split returned non-owned paths or %d "
+                "segments for %d shots in scene=%s; falling through to "
+                "per-shot",
+                len(returned_segment_paths),
                 num_shots,
                 scene_id,
             )
             return ok_count, fail_count, False
         invalid_segments = []
-        for index, segment_path in enumerate(segment_paths):
+        for index, (segment_path, duration_s) in enumerate(
+            zip(expected_segment_paths, durations)
+        ):
             try:
                 is_nonempty_file = (
                     bool(segment_path)
                     and os.path.isfile(segment_path)
                     and os.path.getsize(segment_path) > 0
                 )
+                if is_nonempty_file:
+                    validate_storyboard_segment(segment_path, duration_s)
             except OSError:
+                is_nonempty_file = False
+            except RuntimeError:
                 is_nonempty_file = False
             if not is_nonempty_file:
                 invalid_segments.append(index)
         if invalid_segments:
+            reject_split()
             logger.warning(
-                "storyboard batch: empty or missing segments %s in scene=%s; "
+                "storyboard batch: invalid media segments %s in scene=%s; "
                 "falling through to per-shot",
                 invalid_segments,
                 scene_id,
@@ -313,7 +396,7 @@ class MotionRenderPhase:
         from workflow_selector import classify_shot_type
 
         for idx, (shot, kf_path) in enumerate(shot_kf_pairs):
-            seg_path = segment_paths[idx]
+            seg_path = expected_segment_paths[idx]
             shot_id = shot.get("id", "")
             kf_take_id = shot.get("approved_keyframe_take_id", "")
             # Classify per shot (not hardcoded "medium") so _finalize_motion_take's

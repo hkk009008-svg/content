@@ -1198,21 +1198,22 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 ### 9.6 VEO quota gate
 
 **TTL-based** (commit `feccf61`):
-- Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:33](phase_c_ffmpeg.py:33))
-- TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:34](phase_c_ffmpeg.py:34))
+- Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:35](phase_c_ffmpeg.py:35))
+- TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:36](phase_c_ffmpeg.py:36))
 - Check: `_veo_quota_blocked()` ([:75-81](phase_c_ffmpeg.py:75))
 - Set on 429/quota error ([:866-874](phase_c_ffmpeg.py:866))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
 
-24 module-level functions (verified via
-`$ .venv/bin/python -c 'import ast; print(sum(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.parse(open("phase_c_ffmpeg.py").read()).body))'` → `24`).
+26 module-level functions (verified via
+`$ .venv/bin/python -c 'import ast; print(sum(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) for n in ast.parse(open("phase_c_ffmpeg.py").read()).body))'` → `26`).
 Core: `_veo_quota_blocked`, `_load_fal_client`,
 `_runtime_module_probe`, `_video_policy_runtime_snapshot`,
 `_video_policy_current_date`, `_dispatch_policy_error`, `generate_ai_video`,
 `_execute_admitted_video_chain`,
-`stitch_modules` (ffmpeg concat demuxer), `split_video_into_segments`,
+`stitch_modules` (ffmpeg concat demuxer), `_probe_storyboard_video`,
+`validate_storyboard_segment`, `split_video_into_segments`,
 `assess_motion_quality` (OpenCV Farneback flow →
 {smoothness, frozen_ratio, recommendation∈{accept,interpolate,regenerate}}),
 `apply_color_grade` (8 named presets + optional LUT3D), `adjust_speed` (setpts
