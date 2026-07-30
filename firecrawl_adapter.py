@@ -32,7 +32,7 @@ class FirecrawlInitializationError(FirecrawlAdapterError):
 
 
 class FirecrawlURLValidationError(FirecrawlAdapterError):
-    """The requested URL is not an HTTP(S) URL."""
+    """The requested URL is not an allowed public HTTP(S) URL."""
 
 
 class FirecrawlScrapeError(FirecrawlAdapterError):
@@ -51,6 +51,7 @@ _URL_ERROR = "URL must be a valid HTTP(S) URL without credentials."
 _HOST_LABEL = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 )
+_LEGACY_IPV4_PART = re.compile(r"(?:0[xX][0-9A-Fa-f]+|[0-9]+)")
 _ASCII_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
@@ -58,20 +59,42 @@ def _raise_url_error() -> None:
     raise FirecrawlURLValidationError(_URL_ERROR)
 
 
+def _validate_public_ip(address: IPv4Address | IPv6Address) -> None:
+    """Allow only literal addresses that are globally routable unicast."""
+    if (
+        not address.is_global
+        or address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+        or (
+            isinstance(address, IPv6Address)
+            and (address.is_site_local or address.scope_id is not None)
+        )
+    ):
+        _raise_url_error()
+
+
+def _looks_like_legacy_ipv4(hostname: str) -> bool:
+    """Recognize browser-compatible non-canonical numeric IPv4 spellings."""
+    labels = hostname.split(".")
+    return (
+        1 <= len(labels) <= 4
+        and all(_LEGACY_IPV4_PART.fullmatch(label) for label in labels)
+    )
+
+
 def _validate_hostname(hostname: str) -> None:
-    """Reject malformed IP literals and DNS/IDNA host labels."""
+    """Reject unsafe IP literals, numeric aliases, and malformed DNS names."""
     if ":" in hostname:
         try:
-            IPv6Address(hostname)
+            address = IPv6Address(hostname)
         except ValueError:
             _raise_url_error()
+        _validate_public_ip(address)
         return
-
-    try:
-        IPv4Address(hostname)
-        return
-    except ValueError:
-        pass
 
     try:
         ascii_hostname = hostname.encode("idna").decode("ascii")
@@ -85,13 +108,29 @@ def _validate_hostname(hostname: str) -> None:
     if not canonical_hostname or canonical_hostname.endswith("."):
         _raise_url_error()
 
-    # Four decimal labels are interpreted as an IPv4 candidate, not a DNS
-    # fallback.  This keeps malformed dotted addresses deterministic.
-    ascii_labels = canonical_hostname.split(".")
-    if len(ascii_labels) == 4 and all(
-        label.isdecimal() for label in ascii_labels
+    canonical_hostname = canonical_hostname.lower()
+    if (
+        canonical_hostname == "localhost"
+        or canonical_hostname.endswith(".localhost")
     ):
         _raise_url_error()
+
+    try:
+        address = IPv4Address(canonical_hostname)
+    except ValueError:
+        address = None
+    if address is not None:
+        _validate_public_ip(address)
+        return
+
+    # Browsers and HTTP stacks may interpret one-to-four decimal, octal, or
+    # hexadecimal components as IPv4 even when ``ipaddress`` correctly refuses
+    # the non-canonical spelling.  Never let those ambiguous aliases fall
+    # through as DNS names.
+    if _looks_like_legacy_ipv4(canonical_hostname):
+        _raise_url_error()
+
+    ascii_labels = canonical_hostname.split(".")
     if any(not label for label in ascii_labels):
         _raise_url_error()
 
@@ -129,7 +168,7 @@ def _validate_percent_escapes(url: str) -> None:
 
 
 def _validate_url(url: str) -> str:
-    """Return the original HTTP(S) URL after deterministic local validation."""
+    """Return the original public HTTP(S) URL after deterministic validation."""
     if not isinstance(url, str) or not url or url != url.strip():
         _raise_url_error()
     if any(

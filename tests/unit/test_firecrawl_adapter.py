@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import socket
 import sys
 from threading import Thread
 import types
@@ -195,6 +196,61 @@ def test_real_sdk_zero_retry_client_makes_one_502_post_without_backoff(
         "https://xn--.example",
         f"https://{'a' * 64}.example",
         "https://999.999.999.999",
+        # Localhost names (case, subdomain, terminal-dot, and IDNA separator).
+        "http://localhost",
+        "http://LOCALHOST",
+        "http://localhost.",
+        "http://localhost。",
+        "http://api.localhost",
+        "http://api.localhost.",
+        "http://api。localhost",
+        # Canonical IPv4 non-public space.
+        "http://0.0.0.0",
+        "http://10.0.0.1",
+        "http://100.64.0.1",
+        "http://127.0.0.1",
+        "http://127.0.0.1.",
+        "http://127。0。0。1",
+        "http://169.254.169.254",
+        "http://172.16.0.1",
+        "http://192.168.1.1",
+        "http://192.0.2.1",
+        "http://198.18.0.1",
+        "http://198.51.100.1",
+        "http://203.0.113.1",
+        "http://224.0.0.1",
+        "http://240.0.0.1",
+        "http://255.255.255.255",
+        # Canonical IPv6 non-public space, including mapped and scoped forms.
+        "http://[::]",
+        "http://[::1]",
+        "http://[::1]:8080",
+        "http://[::ffff:127.0.0.1]",
+        "http://[2001:db8::1]",
+        "http://[fc00::1]",
+        "http://[fec0::1]",
+        "http://[fe80::1]",
+        "http://[ff02::1]",
+        "http://[2001:4860:4860::8888%25eth0]",
+        # Legacy numeric IPv4 aliases: short, integer, hex, octal, and mixed.
+        "http://127.1",
+        "http://127.1.",
+        "http://2130706433",
+        "http://0x7f000001",
+        "http://017700000001",
+        "http://0177.0.0.1",
+        "http://0x7f.0x0.0x0.0x1",
+        "http://127.0x0.0.1",
+        "http://127.00.00.01",
+        "http://0300.0250.0001.0001",
+        "http://3232235777",
+        # Reject ambiguous aliases even when their decoded address is public.
+        "http://134744072",
+        "http://0x08080808",
+        "http://8.8.2056",
+        # IDNA normalization must not revive Unicode numeric aliases.
+        "http://１２７。１",
+        "http://①②⑦.①",
         None,
     ],
 )
@@ -211,13 +267,24 @@ def test_invalid_url_fails_before_client_construction(monkeypatch, url):
             return _SDKDocument("must not be returned")
 
     _install_fake_sdk(monkeypatch, FakeFirecrawl)
+    imported = []
+    real_import = builtins.__import__
+
+    def recording_import(name, *args, **kwargs):
+        if name == "firecrawl":
+            imported.append(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", recording_import)
 
     with pytest.raises(
         firecrawl_adapter.FirecrawlURLValidationError,
         match=r"valid HTTP\(S\).*without credentials",
-    ):
+    ) as raised:
         firecrawl_adapter.scrape_markdown(url, api_key="test-key")
 
+    assert str(raised.value) == firecrawl_adapter._URL_ERROR
+    assert imported == []
     assert constructed == []
     assert scrape_calls == []
 
@@ -231,15 +298,19 @@ def test_invalid_url_fails_before_client_construction(monkeypatch, url):
         "https://example.com:443/path?q=value#fragment",
         "https://example.com/path%20with%20space?q=value%20encoded",
         "https://example.com/%00/%2f?q=%FF#%20",
-        "https://localhost:8443",
-        "http://127.0.0.1",
-        "http://[::1]:8080",
-        "https://[2001:db8::1]/reference",
+        "http://1.1.1.1",
+        "https://8.8.8.8:443/reference",
+        "https://9.9.9.9./reference",
+        "http://[2606:4700:4700::1111]",
+        "https://[2001:4860:4860::8888]:443/reference",
+        "https://[::ffff:8.8.8.8]/reference",
         "https://例え.テスト",
         "https://例え。テスト",
         "https://例え．テスト",
         "https://例え｡テスト",
         "https://例え。テスト。",
+        "https://例え．テスト．",
+        "https://例え｡テスト｡",
         "https://example.com.",
     ],
 )
@@ -263,6 +334,38 @@ def test_valid_http_hosts_reach_current_scrape_call(monkeypatch, url):
     ) == "# Valid host"
     assert constructed == [("test-key", 0)]
     assert scrape_calls == [(url, ["markdown"])]
+
+
+def test_valid_dns_host_is_not_resolved_before_current_scrape(monkeypatch):
+    resolver_calls = []
+    scrape_calls = []
+
+    def resolver_bomb(*args, **kwargs):
+        resolver_calls.append((args, kwargs))
+        raise AssertionError("URL validation must not resolve DNS")
+
+    for resolver_name in ("getaddrinfo", "gethostbyname", "gethostbyname_ex"):
+        monkeypatch.setattr(socket, resolver_name, resolver_bomb)
+
+    class FakeFirecrawl:
+        def __init__(self, *, api_key, max_retries):
+            assert api_key == "test-key"
+            assert max_retries == 0
+
+        def scrape(self, url, *, formats):
+            scrape_calls.append((url, formats))
+            return _SDKDocument("# No preflight")
+
+    _install_fake_sdk(monkeypatch, FakeFirecrawl)
+
+    assert firecrawl_adapter.scrape_markdown(
+        "https://public-research.example.com/path",
+        api_key="test-key",
+    ) == "# No preflight"
+    assert resolver_calls == []
+    assert scrape_calls == [
+        ("https://public-research.example.com/path", ["markdown"]),
+    ]
 
 
 def test_missing_key_fails_without_importing_sdk(monkeypatch):
