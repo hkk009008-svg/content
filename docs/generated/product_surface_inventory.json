@@ -2192,7 +2192,7 @@
       "path_shape": "/",
       "rule": "/",
       "source": {
-        "line": 311,
+        "line": 380,
         "path": "web_server.py"
       }
     },
@@ -2204,7 +2204,7 @@
       "path_shape": "/api/cleanup-all",
       "rule": "/api/cleanup-all",
       "source": {
-        "line": 2713,
+        "line": 3077,
         "path": "web_server.py"
       }
     },
@@ -2216,7 +2216,7 @@
       "path_shape": "/api/config",
       "rule": "/api/config",
       "source": {
-        "line": 328,
+        "line": 541,
         "path": "web_server.py"
       }
     },
@@ -2228,7 +2228,7 @@
       "path_shape": "/api/cost-estimate",
       "rule": "/api/cost-estimate",
       "source": {
-        "line": 475,
+        "line": 681,
         "path": "web_server.py"
       }
     },
@@ -2240,7 +2240,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 493,
+        "line": 699,
         "path": "web_server.py"
       }
     },
@@ -2252,7 +2252,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 498,
+        "line": 704,
         "path": "web_server.py"
       }
     },
@@ -2264,7 +2264,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 561,
+        "line": 767,
         "path": "web_server.py"
       }
     },
@@ -2276,7 +2276,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 506,
+        "line": 712,
         "path": "web_server.py"
       }
     },
@@ -2288,7 +2288,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 524,
+        "line": 730,
         "path": "web_server.py"
       }
     },
@@ -2300,7 +2300,7 @@
       "path_shape": "/api/projects/{1}/apply-language-defaults",
       "rule": "/api/projects/<pid>/apply-language-defaults",
       "source": {
-        "line": 411,
+        "line": 617,
         "path": "web_server.py"
       }
     },
@@ -2312,7 +2312,7 @@
       "path_shape": "/api/projects/{1}/assemble",
       "rule": "/api/projects/<pid>/assemble",
       "source": {
-        "line": 2280,
+        "line": 2644,
         "path": "web_server.py"
       }
     },
@@ -2324,7 +2324,7 @@
       "path_shape": "/api/projects/{1}/assemble/re-assemble",
       "rule": "/api/projects/<pid>/assemble/re-assemble",
       "source": {
-        "line": 2477,
+        "line": 2841,
         "path": "web_server.py"
       }
     },
@@ -2336,7 +2336,7 @@
       "path_shape": "/api/projects/{1}/assemble/screen",
       "rule": "/api/projects/<pid>/assemble/screen",
       "source": {
-        "line": 2302,
+        "line": 2666,
         "path": "web_server.py"
       }
     },
@@ -2348,7 +2348,7 @@
       "path_shape": "/api/projects/{1}/cancel",
       "rule": "/api/projects/<pid>/cancel",
       "source": {
-        "line": 1702,
+        "line": 2022,
         "path": "web_server.py"
       }
     },
@@ -2360,7 +2360,7 @@
       "path_shape": "/api/projects/{1}/capability-scorecard",
       "rule": "/api/projects/<pid>/capability-scorecard",
       "source": {
-        "line": 514,
+        "line": 720,
         "path": "web_server.py"
       }
     },
@@ -2372,7 +2372,7 @@
       "path_shape": "/api/projects/{1}/characters",
       "rule": "/api/projects/<pid>/characters",
       "source": {
-        "line": 577,
+        "line": 783,
         "path": "web_server.py"
       }
     },
@@ -2384,7 +2384,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 754,
+        "line": 960,
         "path": "web_server.py"
       }
     },
@@ -2396,7 +2396,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 628,
+        "line": 834,
         "path": "web_server.py"
       }
     },
@@ -2408,7 +2408,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
       "rule": "/api/projects/<pid>/characters/<cid>/lora-status",
       "source": {
-        "line": 897,
+        "line": 1103,
         "path": "web_server.py"
       }
     },
@@ -2420,7 +2420,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/train-lora",
       "rule": "/api/projects/<pid>/characters/<cid>/train-lora",
       "source": {
-        "line": 785,
+        "line": 991,
         "path": "web_server.py"
       }
     },
@@ -2432,7 +2432,7 @@
       "path_shape": "/api/projects/{1}/checkpoint",
       "rule": "/api/projects/<pid>/checkpoint",
       "source": {
-        "line": 1669,
+        "line": 1989,
         "path": "web_server.py"
       }
     },
@@ -2444,7 +2444,7 @@
       "path_shape": "/api/projects/{1}/cleanup",
       "rule": "/api/projects/<pid>/cleanup",
       "source": {
-        "line": 2665,
+        "line": 3029,
         "path": "web_server.py"
       }
     },
@@ -2456,7 +2456,7 @@
       "path_shape": "/api/projects/{1}/cost-live",
       "rule": "/api/projects/<pid>/cost-live",
       "source": {
-        "line": 2687,
+        "line": 3051,
         "path": "web_server.py"
       }
     },
@@ -2468,7 +2468,7 @@
       "path_shape": "/api/projects/{1}/disk-usage",
       "rule": "/api/projects/<pid>/disk-usage",
       "source": {
-        "line": 2680,
+        "line": 3044,
         "path": "web_server.py"
       }
     },
@@ -2480,7 +2480,7 @@
       "path_shape": "/api/projects/{1}/export",
       "rule": "/api/projects/<pid>/export",
       "source": {
-        "line": 2725,
+        "line": 3089,
         "path": "web_server.py"
       }
     },
@@ -2492,7 +2492,7 @@
       "path_shape": "/api/projects/{1}/file",
       "rule": "/api/projects/<pid>/file",
       "source": {
-        "line": 1715,
+        "line": 2035,
         "path": "web_server.py"
       }
     },
@@ -2504,7 +2504,7 @@
       "path_shape": "/api/projects/{1}/generate",
       "rule": "/api/projects/<pid>/generate",
       "source": {
-        "line": 1612,
+        "line": 1932,
         "path": "web_server.py"
       }
     },
@@ -2516,7 +2516,7 @@
       "path_shape": "/api/projects/{1}/locations",
       "rule": "/api/projects/<pid>/locations",
       "source": {
-        "line": 1248,
+        "line": 1454,
         "path": "web_server.py"
       }
     },
@@ -2528,7 +2528,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 1370,
+        "line": 1576,
         "path": "web_server.py"
       }
     },
@@ -2540,7 +2540,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 1295,
+        "line": 1501,
         "path": "web_server.py"
       }
     },
@@ -2552,7 +2552,7 @@
       "path_shape": "/api/projects/{1}/objects",
       "rule": "/api/projects/<pid>/objects",
       "source": {
-        "line": 1073,
+        "line": 1279,
         "path": "web_server.py"
       }
     },
@@ -2564,7 +2564,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 1228,
+        "line": 1434,
         "path": "web_server.py"
       }
     },
@@ -2576,7 +2576,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 1143,
+        "line": 1349,
         "path": "web_server.py"
       }
     },
@@ -2588,7 +2588,7 @@
       "path_shape": "/api/projects/{1}/pause",
       "rule": "/api/projects/<pid>/pause",
       "source": {
-        "line": 2106,
+        "line": 2470,
         "path": "web_server.py"
       }
     },
@@ -2600,7 +2600,7 @@
       "path_shape": "/api/projects/{1}/pipeline-state",
       "rule": "/api/projects/<pid>/pipeline-state",
       "source": {
-        "line": 2126,
+        "line": 2490,
         "path": "web_server.py"
       }
     },
@@ -2612,7 +2612,7 @@
       "path_shape": "/api/projects/{1}/preview/{2}",
       "rule": "/api/projects/<pid>/preview/<sid>",
       "source": {
-        "line": 2734,
+        "line": 3098,
         "path": "web_server.py"
       }
     },
@@ -2624,7 +2624,7 @@
       "path_shape": "/api/projects/{1}/proceed-assembly",
       "rule": "/api/projects/<pid>/proceed-assembly",
       "source": {
-        "line": 2281,
+        "line": 2645,
         "path": "web_server.py"
       }
     },
@@ -2636,7 +2636,7 @@
       "path_shape": "/api/projects/{1}/resume",
       "rule": "/api/projects/<pid>/resume",
       "source": {
-        "line": 2116,
+        "line": 2480,
         "path": "web_server.py"
       }
     },
@@ -2648,7 +2648,7 @@
       "path_shape": "/api/projects/{1}/scenes",
       "rule": "/api/projects/<pid>/scenes",
       "source": {
-        "line": 1389,
+        "line": 1595,
         "path": "web_server.py"
       }
     },
@@ -2660,7 +2660,7 @@
       "path_shape": "/api/projects/{1}/scenes/reorder",
       "rule": "/api/projects/<pid>/scenes/reorder",
       "source": {
-        "line": 1447,
+        "line": 1759,
         "path": "web_server.py"
       }
     },
@@ -2672,7 +2672,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 1432,
+        "line": 1744,
         "path": "web_server.py"
       }
     },
@@ -2684,7 +2684,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 1415,
+        "line": 1621,
         "path": "web_server.py"
       }
     },
@@ -2696,7 +2696,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
       "rule": "/api/projects/<pid>/scenes/<sid>/decompose",
       "source": {
-        "line": 1503,
+        "line": 1815,
         "path": "web_server.py"
       }
     },
@@ -2708,7 +2708,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
       "rule": "/api/projects/<pid>/scenes/<sid>/generate-dialogue",
       "source": {
-        "line": 1467,
+        "line": 1779,
         "path": "web_server.py"
       }
     },
@@ -2720,7 +2720,7 @@
       "path_shape": "/api/projects/{1}/screening/approve",
       "rule": "/api/projects/<pid>/screening/approve",
       "source": {
-        "line": 2388,
+        "line": 2752,
         "path": "web_server.py"
       }
     },
@@ -2732,7 +2732,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}",
       "rule": "/api/projects/<pid>/shots/<shot_id>",
       "source": {
-        "line": 2053,
+        "line": 2373,
         "path": "web_server.py"
       }
     },
@@ -2744,7 +2744,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/correct",
       "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
       "source": {
-        "line": 2247,
+        "line": 2611,
         "path": "web_server.py"
       }
     },
@@ -2756,7 +2756,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
       "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
       "source": {
-        "line": 2267,
+        "line": 2631,
         "path": "web_server.py"
       }
     },
@@ -2768,7 +2768,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
       "source": {
-        "line": 1830,
+        "line": 2150,
         "path": "web_server.py"
       }
     },
@@ -2780,7 +2780,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
       "source": {
-        "line": 1757,
+        "line": 2077,
         "path": "web_server.py"
       }
     },
@@ -2792,7 +2792,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
       "source": {
-        "line": 1782,
+        "line": 2102,
         "path": "web_server.py"
       }
     },
@@ -2804,7 +2804,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
       "source": {
-        "line": 1811,
+        "line": 2131,
         "path": "web_server.py"
       }
     },
@@ -2816,7 +2816,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance",
       "rule": "/api/projects/<pid>/shots/<sid>/performance",
       "source": {
-        "line": 978,
+        "line": 1184,
         "path": "web_server.py"
       }
     },
@@ -2828,7 +2828,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
       "source": {
-        "line": 1793,
+        "line": 2113,
         "path": "web_server.py"
       }
     },
@@ -2840,7 +2840,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
       "source": {
-        "line": 1732,
+        "line": 2052,
         "path": "web_server.py"
       }
     },
@@ -2852,7 +2852,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
       "source": {
-        "line": 1744,
+        "line": 2064,
         "path": "web_server.py"
       }
     },
@@ -2864,7 +2864,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/prompt",
       "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
       "source": {
-        "line": 2016,
+        "line": 2336,
         "path": "web_server.py"
       }
     },
@@ -2876,7 +2876,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
       "source": {
-        "line": 2188,
+        "line": 2552,
         "path": "web_server.py"
       }
     },
@@ -2888,7 +2888,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
       "source": {
-        "line": 1944,
+        "line": 2264,
         "path": "web_server.py"
       }
     },
@@ -2900,7 +2900,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/restart",
       "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
       "source": {
-        "line": 2140,
+        "line": 2504,
         "path": "web_server.py"
       }
     },
@@ -2912,7 +2912,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
       "source": {
-        "line": 1841,
+        "line": 2161,
         "path": "web_server.py"
       }
     },
@@ -2924,7 +2924,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
       "rule": "/api/projects/<pid>/shots/<sid>/upload-driving-video",
       "source": {
-        "line": 908,
+        "line": 1114,
         "path": "web_server.py"
       }
     },
@@ -2936,7 +2936,7 @@
       "path_shape": "/api/projects/{1}/stream",
       "rule": "/api/projects/<pid>/stream",
       "source": {
-        "line": 1681,
+        "line": 2001,
         "path": "web_server.py"
       }
     },
@@ -2948,7 +2948,7 @@
       "path_shape": "/api/projects/{1}/style-board",
       "rule": "/api/projects/<pid>/style-board",
       "source": {
-        "line": 1020,
+        "line": 1226,
         "path": "web_server.py"
       }
     },
@@ -2960,7 +2960,7 @@
       "path_shape": "/api/projects/{1}/style-rules",
       "rule": "/api/projects/<pid>/style-rules",
       "source": {
-        "line": 1552,
+        "line": 1872,
         "path": "web_server.py"
       }
     },
@@ -2972,7 +2972,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:path>",
       "source": {
-        "line": 316,
+        "line": 385,
         "path": "web_server.py"
       }
     },
@@ -2984,7 +2984,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:filename>",
       "source": {
-        "line": 64,
+        "line": 73,
         "path": "web_server.py"
       }
     }

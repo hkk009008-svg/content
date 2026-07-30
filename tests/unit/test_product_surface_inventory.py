@@ -828,6 +828,152 @@ third('/api/three')
     }
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+function get(url: string) { return fetch(url) }
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function choose(url: string, usePost: boolean) {
+  if (usePost) return post(url)
+  return get(url)
+}
+choose('/api/branch', true)
+""",
+        """
+function choose(url: string, usePost: boolean) {
+  if (!usePost) return get(url)
+  return post(url)
+}
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function get(url: string) { return fetch(url) }
+choose('/api/branch', true)
+""",
+        """
+function choose(url: string, usePost: boolean) {
+  if (usePost) return postMiddle(url)
+  return getMiddle(url)
+}
+function postMiddle(url: string) { return postTransport(url) }
+function getMiddle(url: string) { return getTransport(url) }
+function postTransport(url: string) {
+  return fetch(url, { method: 'POST' })
+}
+function getTransport(url: string) { return fetch(url) }
+choose('/api/branch', true)
+""",
+    ],
+)
+def test_branching_wrapper_transport_closure_is_order_independent_and_unknown(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Every reachable branch participates before method/link classification."""
+    root = _repo(tmp_path)
+    _frontend(root, "branch.ts", source)
+
+    result = _build(root)
+    operation = next(
+        row
+        for row in result["frontend_operations"]
+        if row.get("expanded_wrapper") == "choose"
+    )
+
+    assert {row["method"] for row in result["frontend_transports"]} == {
+        "GET",
+        "POST",
+    }
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] == "/api/branch"
+    assert operation["route_match"] == "unknown"
+    assert {
+        (row.get("owner"), row["reason"])
+        for row in result["unresolved"]
+        if row["kind"] == "unknown_wrapper_call"
+    } == {
+        (
+            "choose",
+            "wrapper reaches multiple transports through local wrapper "
+            "dependencies",
+        )
+    }
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function mixed(url: string, usePost: boolean) {
+  if (usePost) return post(url)
+  return fetch(url)
+}
+mixed('/api/mixed', true)
+""",
+        """
+function mixed(url: string, usePost: boolean) {
+  if (!usePost) return fetch(url)
+  return post(url)
+}
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+mixed('/api/mixed', true)
+""",
+    ],
+)
+def test_direct_and_indirect_reachable_transports_fail_closed(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """One direct transport cannot hide a second wrapper dependency."""
+    root = _repo(tmp_path)
+    _frontend(root, "mixed.ts", source)
+
+    result = _build(root)
+    operation = next(
+        row
+        for row in result["frontend_operations"]
+        if row.get("expanded_wrapper") == "mixed"
+    )
+
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] == "/api/mixed"
+    assert operation["route_match"] == "unknown"
+
+
+def test_branch_transport_removal_mutation_restores_single_transport_link(
+    tmp_path: Path,
+) -> None:
+    """Removing one reachable branch must flip null provenance back to GET."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "single-branch.ts",
+        """
+function get(url: string) { return fetch(url) }
+function choose(url: string, first: boolean) {
+  if (first) return get(url)
+  return get(url)
+}
+choose('/api/single', true)
+""",
+    )
+
+    result = _build(root)
+    operation = next(
+        row
+        for row in result["frontend_operations"]
+        if row.get("expanded_wrapper") == "choose"
+    )
+
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] == "GET"
+    assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+
+
 def test_wrapper_cycle_terminates_without_inventing_transport_truth(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _frontend(

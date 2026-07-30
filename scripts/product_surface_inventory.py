@@ -60,6 +60,7 @@ UNRESOLVED_REASONS = {
         "wrapper URL parameter is transformed",
         "wrapper URL parameter shape is unsupported",
         "wrapper contains multiple direct transports",
+        "wrapper reaches multiple transports through local wrapper dependencies",
         "wrapper reaches transport through another local wrapper",
         "wrapper is an alias of another local wrapper",
         "imported wrapper call",

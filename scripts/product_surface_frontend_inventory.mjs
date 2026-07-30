@@ -476,7 +476,7 @@ function analyzeFile(root, file, checker) {
     list.push(transport);
     direct.set(transport.container, list);
   }
-  const wrappers = new Map();
+  const directWrappers = new Map();
   for (const info of functions.candidates) {
     const found = direct.get(info) || [];
     if (found.length === 1) {
@@ -497,7 +497,7 @@ function analyzeFile(root, file, checker) {
         ts.forEachChild(node, inspect);
       }
       if (transport.urlNode) inspect(transport.urlNode);
-      if (exactParameter) wrappers.set(info.symbol, {
+      if (exactParameter) directWrappers.set(info.symbol, {
         info,
         safe: exactParameter.supported && transport.row.method !== null,
         reason: !exactParameter.supported
@@ -508,16 +508,28 @@ function analyzeFile(root, file, checker) {
         transport,
         urlParameterIndex: exactParameter.supported ? exactParameter.index : undefined,
         urlParameterSymbol: exactParameter.symbol,
+        _ambiguousTransport: false,
+        _reachableTransports: new Set([transport]),
+        _urlParameterIndices: new Set(
+          exactParameter.supported ? [exactParameter.index] : [],
+        ),
+        dependsOnLocalWrapper: false,
       });
       else if (transport.row.url_template === null && usedParameters.size) {
         const [parameter] = usedParameters.size === 1 ? usedParameters : [];
-        wrappers.set(info.symbol, {
+        directWrappers.set(info.symbol, {
           info,
           safe: false,
           reason: "wrapper URL parameter is transformed",
           transport,
           urlParameterIndex: parameter?.supported ? parameter.index : undefined,
           urlParameterSymbol: parameter?.symbol,
+          _ambiguousTransport: false,
+          _reachableTransports: new Set([transport]),
+          _urlParameterIndices: new Set(
+            parameter?.supported ? [parameter.index] : [],
+          ),
+          dependsOnLocalWrapper: false,
         });
       }
     } else if (found.length > 1) {
@@ -531,13 +543,19 @@ function analyzeFile(root, file, checker) {
         if (parameter) parameters.add(parameter);
       }
       const [parameter] = parameters.size === 1 ? parameters : [];
-      wrappers.set(info.symbol, {
+      directWrappers.set(info.symbol, {
         info,
         safe: false,
         reason: "wrapper contains multiple direct transports",
         transport: null,
         urlParameterIndex: parameter?.supported ? parameter.index : undefined,
         urlParameterSymbol: parameter?.symbol,
+        _ambiguousTransport: true,
+        _reachableTransports: new Set(found),
+        _urlParameterIndices: new Set(
+          parameter?.supported ? [parameter.index] : [],
+        ),
+        dependsOnLocalWrapper: false,
       });
     }
   }
@@ -549,39 +567,77 @@ function analyzeFile(root, file, checker) {
     }
     visit(node);
   }
-  // Each pass can discover one more dependency layer; the candidate count
-  // bounds convergence and leaves transport-free cycles unresolved.
+  // Resolve from a complete previous-pass snapshot.  Each pass can discover
+  // one more dependency layer; classifying only after unioning every reachable
+  // transport keeps branching wrappers independent of declaration/call order.
+  // The candidate count bounds convergence and leaves transport-free cycles
+  // unresolved.
+  let wrappers = new Map(directWrappers);
   for (let pass = 0; pass < functions.candidates.length; pass += 1) {
-    let changed = false;
+    const previous = wrappers;
+    const next = new Map();
     for (const info of functions.candidates) {
-      if (wrappers.has(info.symbol)) continue;
-      let reached;
+      const base = directWrappers.get(info.symbol);
+      const reachableTransports = new Set(
+        base?._reachableTransports || [],
+      );
+      const urlParameterIndices = new Set(
+        base?._urlParameterIndices || [],
+      );
+      let ambiguousTransport = base?._ambiguousTransport || false;
+      let dependsOnLocalWrapper = false;
       walkOwn(info.node, (node) => {
-        if (reached || !ts.isCallExpression(node)) return;
-        const target = wrappers.get(symbol(checker, node.expression));
-        const argument = target?.urlParameterIndex === undefined
-          ? undefined
-          : unwrap(node.arguments[target.urlParameterIndex]);
-        const parameter = argument && ts.isIdentifier(argument)
-          ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
-          : undefined;
-        if (
-          target && argument && ts.isIdentifier(argument) && parameter
-        ) reached = { target, parameter };
+        if (!ts.isCallExpression(node)) return;
+        const target = previous.get(symbol(checker, node.expression));
+        if (!target?._urlParameterIndices?.size) return;
+        const mappedParameters = new Set();
+        for (const targetIndex of target._urlParameterIndices) {
+          const argument = unwrap(node.arguments[targetIndex]);
+          const parameter = argument && ts.isIdentifier(argument)
+            ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
+            : undefined;
+          if (parameter) mappedParameters.add(parameter);
+        }
+        if (!mappedParameters.size) return;
+        dependsOnLocalWrapper = true;
+        ambiguousTransport ||= target._ambiguousTransport;
+        for (const transport of target._reachableTransports) {
+          reachableTransports.add(transport);
+        }
+        for (const parameter of mappedParameters) {
+          if (parameter.supported) urlParameterIndices.add(parameter.index);
+        }
       });
-      if (reached) {
-        wrappers.set(info.symbol, {
-          info,
-          safe: false,
-          reason: "wrapper reaches transport through another local wrapper",
-          transport: reached.target.transport,
-          urlParameterIndex: reached.parameter.supported ? reached.parameter.index : undefined,
-          urlParameterSymbol: reached.parameter.symbol,
-        });
-        changed = true;
-      }
+      if (!base && !dependsOnLocalWrapper) continue;
+
+      ambiguousTransport ||= reachableTransports.size > 1;
+      const [urlParameterIndex] = urlParameterIndices.size === 1
+        ? urlParameterIndices
+        : [];
+      const urlParameter = urlParameterIndex === undefined
+        ? undefined
+        : info.parameters.find((parameter) => parameter.index === urlParameterIndex);
+      const transport = !ambiguousTransport && reachableTransports.size === 1
+        ? reachableTransports.values().next().value
+        : null;
+      next.set(info.symbol, {
+        info,
+        safe: dependsOnLocalWrapper ? false : base.safe,
+        reason: dependsOnLocalWrapper
+          ? ambiguousTransport
+            ? "wrapper reaches multiple transports through local wrapper dependencies"
+            : "wrapper reaches transport through another local wrapper"
+          : base.reason,
+        transport,
+        urlParameterIndex,
+        urlParameterSymbol: urlParameter?.symbol,
+        _ambiguousTransport: ambiguousTransport,
+        _reachableTransports: reachableTransports,
+        _urlParameterIndices: urlParameterIndices,
+        dependsOnLocalWrapper,
+      });
     }
-    if (!changed) break;
+    wrappers = next;
   }
   function collectWrapperAliases(node) {
     if (
@@ -598,6 +654,10 @@ function analyzeFile(root, file, checker) {
           transport: target.transport,
           urlParameterIndex: target.urlParameterIndex,
           urlParameterSymbol: target.urlParameterSymbol,
+          _ambiguousTransport: target._ambiguousTransport,
+          _reachableTransports: new Set(target._reachableTransports),
+          _urlParameterIndices: new Set(target._urlParameterIndices),
+          dependsOnLocalWrapper: target.dependsOnLocalWrapper,
         });
         unresolved.push(unknown(
           root, file, node, "aliased_wrapper", "same-file wrapper aliases are not expanded",
@@ -629,7 +689,7 @@ function analyzeFile(root, file, checker) {
       if (wrapper) {
         const container = nearestFunction(node, functions);
         const containerWrapper = container ? wrappers.get(container.symbol) : undefined;
-        if (containerWrapper?.reason !== "wrapper reaches transport through another local wrapper") {
+        if (!containerWrapper?.dependsOnLocalWrapper) {
           const urlNode = wrapper.urlParameterIndex === undefined
             ? undefined
             : node.arguments[wrapper.urlParameterIndex];
