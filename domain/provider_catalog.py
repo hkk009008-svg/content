@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from enum import StrEnum
 from importlib.util import find_spec
+from math import isfinite
+from numbers import Real
 from types import MappingProxyType
 from typing import Callable, Mapping
 from urllib.parse import urlparse
@@ -91,6 +93,17 @@ class RuntimeAvailabilityState(StrEnum):
     NOT_DISPATCHABLE = "not_dispatchable"
 
 
+def _is_finite_real(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return False
+    if isinstance(value, int):
+        return True
+    try:
+        return isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 @dataclass(frozen=True)
 class ParameterConstraint:
     name: str
@@ -104,6 +117,21 @@ class ParameterConstraint:
         object.__setattr__(self, "allowed_values", tuple(self.allowed_values))
         if not self.name:
             raise ValueError("parameter constraint name must not be empty")
+        for bound_name, bound in (
+            ("minimum", self.minimum),
+            ("maximum", self.maximum),
+        ):
+            if bound is not None and not _is_finite_real(bound):
+                raise ValueError(
+                    f"{self.name}: {bound_name} must be a finite real number"
+                )
+        for value in self.allowed_values:
+            if isinstance(value, bool) or isinstance(value, str):
+                continue
+            if not _is_finite_real(value):
+                raise ValueError(
+                    f"{self.name}: numeric allowed_values must be finite"
+                )
         if len(set(self.allowed_values)) != len(self.allowed_values):
             raise ValueError(f"{self.name}: allowed_values must be unique")
         if (
@@ -112,8 +140,34 @@ class ParameterConstraint:
             and self.minimum > self.maximum
         ):
             raise ValueError(f"{self.name}: minimum must not exceed maximum")
-        if self.max_items is not None and self.max_items < 0:
-            raise ValueError(f"{self.name}: max_items must be non-negative")
+        if self.max_items is not None:
+            if isinstance(self.max_items, bool) or not isinstance(
+                self.max_items,
+                int,
+            ):
+                raise ValueError(
+                    f"{self.name}: max_items must be a non-negative integer"
+                )
+            if self.max_items < 0:
+                raise ValueError(
+                    f"{self.name}: max_items must be a non-negative integer"
+                )
+        if self.allowed_values and (
+            self.minimum is not None or self.maximum is not None
+        ):
+            for value in self.allowed_values:
+                if isinstance(value, bool) or not isinstance(value, Real):
+                    raise ValueError(
+                        f"{self.name}: numeric bounds require numeric allowed_values"
+                    )
+                if self.minimum is not None and value < self.minimum:
+                    raise ValueError(
+                        f"{self.name}: allowed value is below minimum"
+                    )
+                if self.maximum is not None and value > self.maximum:
+                    raise ValueError(
+                        f"{self.name}: allowed value is above maximum"
+                    )
 
 
 @dataclass(frozen=True)
@@ -1075,8 +1129,13 @@ def effective_policy(
 
     entry = get_entry(key)
     effective_date = on_date if on_date is not None else _utc_calendar_date()
-    if not isinstance(effective_date, date):
-        raise TypeError("on_date must be a datetime.date")
+    if isinstance(effective_date, datetime) or not isinstance(
+        effective_date,
+        date,
+    ):
+        raise TypeError(
+            "on_date must be a datetime.date; datetime values are not accepted"
+        )
 
     if entry.sunset_on is not None and effective_date >= entry.sunset_on:
         return EffectivePolicy(

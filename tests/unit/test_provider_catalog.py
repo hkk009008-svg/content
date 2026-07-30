@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import fields, replace
-from datetime import date
+from datetime import date, datetime, timezone
 from types import MappingProxyType, SimpleNamespace
+from typing import get_type_hints
 
 import pytest
 
@@ -14,10 +15,12 @@ from domain.provider_catalog import (
     Lifecycle,
     Maturity,
     Modality,
+    ParameterConstraint,
     ProductSupport,
     Provider,
     RequirementKind,
     RuntimeAvailabilityState,
+    RuntimeRequirement,
     RuntimeSnapshot,
     SourceCheck,
     SourceKind,
@@ -164,6 +167,30 @@ def test_sora_native_sunset_uses_greater_than_or_equal_boundary_mutation_pin() -
     assert at_sunset.spendable is False
 
 
+@pytest.mark.parametrize(
+    "datetime_value",
+    (
+        datetime(2026, 9, 23, 12, 0, 0),
+        datetime(2026, 9, 23, 12, 0, 0, tzinfo=timezone.utc),
+    ),
+)
+def test_on_date_apis_reject_datetime_subclasses(
+    datetime_value: datetime,
+) -> None:
+    expected = "datetime values are not accepted"
+
+    with pytest.raises(TypeError, match=expected):
+        effective_policy("SORA_NATIVE", on_date=datetime_value)
+    with pytest.raises(TypeError, match=expected):
+        runtime_availability(
+            "SORA_NATIVE",
+            RuntimeSnapshot(),
+            on_date=datetime_value,
+        )
+    with pytest.raises(TypeError, match=expected):
+        project_legacy_registry(API_REGISTRY, on_date=datetime_value)
+
+
 def test_selectable_entries_are_eligible_video_targets() -> None:
     allowed_support = {ProductSupport.SUPPORTED, ProductSupport.LIMITED}
 
@@ -229,6 +256,79 @@ def test_parameter_names_and_shapes_are_coherent() -> None:
                 or constraint.max_items is not None
                 or constraint.note
             ), f"{key}.{constraint.name} has no bounded fact"
+
+
+@pytest.mark.parametrize(
+    ("bound_name", "invalid_value"),
+    (
+        ("minimum", float("nan")),
+        ("minimum", float("inf")),
+        ("minimum", float("-inf")),
+        ("minimum", True),
+        ("minimum", "0"),
+        ("maximum", float("nan")),
+        ("maximum", float("inf")),
+        ("maximum", False),
+        ("maximum", "1"),
+    ),
+)
+def test_parameter_constraint_rejects_nonfinite_or_nonreal_bounds(
+    bound_name: str,
+    invalid_value: object,
+) -> None:
+    with pytest.raises(ValueError, match="finite real number"):
+        ParameterConstraint("bounded", **{bound_name: invalid_value})
+
+
+@pytest.mark.parametrize(
+    "invalid_max_items",
+    (-1, True, False, 1.5, "2"),
+)
+def test_parameter_constraint_requires_nonnegative_integer_max_items(
+    invalid_max_items: object,
+) -> None:
+    with pytest.raises(ValueError, match="non-negative integer"):
+        ParameterConstraint("items", max_items=invalid_max_items)
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    (float("nan"), float("inf"), float("-inf")),
+)
+def test_parameter_constraint_rejects_nonfinite_numeric_allowed_values(
+    invalid_value: float,
+) -> None:
+    with pytest.raises(ValueError, match="must be finite"):
+        ParameterConstraint("choice", allowed_values=(invalid_value,))
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"allowed_values": (3,), "minimum": 4},
+        {"allowed_values": (6,), "maximum": 5},
+        {"allowed_values": ("5",), "minimum": 0},
+        {"allowed_values": (True,), "maximum": 1},
+    ),
+)
+def test_parameter_constraint_rejects_contradictory_bounded_choices(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        ParameterConstraint("choice", **kwargs)
+
+
+def test_parameter_constraint_accepts_finite_coherent_shapes() -> None:
+    bounded = ParameterConstraint(
+        "choice",
+        allowed_values=(1, 2),
+        minimum=1,
+        maximum=2,
+    )
+    boolean = ParameterConstraint("enabled", allowed_values=(False, True))
+
+    assert bounded.allowed_values == (1, 2)
+    assert boolean.allowed_values == (False, True)
 
 
 def test_known_parameter_contracts_are_pinned() -> None:
@@ -500,6 +600,25 @@ def test_unverified_sources_reject_claimed_urls() -> None:
 
 
 def test_catalog_entry_field_boundary_is_exactly_typed() -> None:
+    expected_types = {
+        "key": str,
+        "label": str,
+        "modality": Modality,
+        "maturity": Maturity,
+        "lifecycle": Lifecycle,
+        "product_support": ProductSupport,
+        "provider": Provider,
+        "selectable": bool,
+        "dispatchable": bool,
+        "spendable": bool,
+        "native_audio": bool,
+        "parameters": tuple[ParameterConstraint, ...],
+        "runtime_options": tuple[tuple[RuntimeRequirement, ...], ...],
+        "source": SourceCheck,
+        "sunset_on": date | None,
+        "legacy_visible": bool,
+    }
+
     assert {field.name for field in fields(CatalogEntry)} == {
         "key",
         "label",
@@ -518,3 +637,4 @@ def test_catalog_entry_field_boundary_is_exactly_typed() -> None:
         "sunset_on",
         "legacy_visible",
     }
+    assert get_type_hints(CatalogEntry) == expected_types
