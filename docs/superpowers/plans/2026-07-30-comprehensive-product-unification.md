@@ -167,7 +167,7 @@ catalog coherence tests.
   dispatchability, spendability, provider, native-audio support, accepted
   parameter constraints, optional sunset date, and separately computed runtime
   availability.
-- [x] Keep the existing registry export as a read-only compatibility view while
+- [ ] Keep the existing registry export as a read-only compatibility view while
   migrating consumers.
 - [ ] Limit selectable shot targets to `AUTO` or live, dispatchable video
   engines; reject planned, disabled, unknown, and non-video values at schema,
@@ -451,7 +451,7 @@ integration verification, but does not implement the production slices.
 | `0.1` deterministic product-surface inventory | `871c10f2`; `scripts/product_surface_inventory.py`, its unit test, generated JSON | Static Flask decorators plus `web/src` transports; no application imports | `ea59894c`, artifact refreshes `4dd28474`/`dd68ec56`; spec review currently `FAIL` on three conservative-parser gaps | Fix in progress; not yet evidence authority |
 | `1a` dormant LoRA containment | `a0485546`; policy, trainer/quality boundaries, direct scripts, endpoint/write guards, focused tests/ADR | Training endpoint, raw trainer/subprocess/FAL/register entrypoints, locked `global_settings` mutation | `411146aa`, fixes `2e24346f`/`871c10f2`; independent spec `GO`; Lane V quality `GO`; 91 focused tests plus sibling/full verification | Landed and closed |
 | `1b` inactive/read-only LoRA product surface | `ea59894c`; character/identity/capability UI, scorecard/manifest/status, current docs/tests | Status GET only; scorecard projection; manifest renderer; zero remaining action/POST caller | `d686f2ca`, quality fix `7ac36338`; independent spec `GO`; Lane V quality `GO`; 60 frontend tests and production build | Landed and closed |
-| `2a` additive typed provider truth | `4dd28474`; `domain/provider_catalog.py` and its unit test only | Exact 40 legacy keys plus dispatch-only `FAL_SVD`; no production consumer import | `cf25eee3`, fixes `6319106c`/`960c044b`/`1e386c70`; independent spec `GO`; final Lane V re-review pending | Landed; consumption blocked pending quality GO |
+| `2a` additive typed provider truth | `4dd28474`; `domain/provider_catalog.py` and its unit test only | Exact 40 legacy keys plus dispatch-only `FAL_SVD`; no production consumer import | `cf25eee3`, fixes `6319106c`/`960c044b`/`1e386c70`; independent spec `GO`; Lane V quality `GO`; 60 focused tests plus coherence verification | Landed and closed; consumer work prepared |
 | `2b-A` video authoring/ranking policy | start after `2a` quality GO; new video-policy adapter, decomposer, optimizer, workflow resolver and focused tests | `make_shot(target_api=...)`, optimizer suggestion writes, purpose rankings, workflow template consumers; depends on typed catalog | Fresh worker; independent spec then different quality review; mutation pins for retired/broken/runtime-unavailable candidates | Prepared; dispatch withheld |
 
 ## Completion gate
