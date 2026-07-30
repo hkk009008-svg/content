@@ -126,7 +126,19 @@ def test_legacy_config_surface_is_unchanged_without_project(client):
     assert "video_engines" not in body
 
 
-def test_project_config_returns_404_for_missing_project(client):
+def test_project_config_returns_404_for_missing_project(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
     response = client.get("/api/config?project_id=does-not-exist")
 
     assert response.status_code == 404
@@ -143,6 +155,15 @@ def test_project_config_returns_404_for_missing_project(client):
         "nested/outside",
         r"nested\outside",
         "/tmp/outside",
+        " ",
+        "\t",
+        "\n",
+        "project id",
+        "project\x1f",
+        "-leading-hyphen",
+        "_leading-underscore",
+        "project.name",
+        "prøject",
     ],
 )
 def test_project_config_rejects_uncontained_id_before_load(
@@ -166,6 +187,65 @@ def test_project_config_rejects_uncontained_id_before_load(
     assert response.status_code == 400
     assert response.get_json() == {"error": "Invalid project_id"}
     load_bomb.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    [" ", "\t", "\n", "project\x00id", "project\x1fid"],
+)
+def test_project_config_noncanonical_id_creates_no_lock_artifact(
+    client,
+    tmp_path,
+    monkeypatch,
+    project_id,
+):
+    """Rejected whitespace/control IDs never reach the lock-backed loader."""
+    from domain import project_manager
+
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": project_id},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid project_id"}
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    ["a", "0bf9d0608eab", "does-not-exist", "proj_1", "Project-2"],
+)
+def test_project_config_valid_slug_reaches_missing_project_404(
+    client,
+    tmp_path,
+    monkeypatch,
+    project_id,
+):
+    """Existing ID shapes remain valid even when the project is absent."""
+    from domain import project_manager
+
+    monkeypatch.setattr(
+        project_manager,
+        "PROJECTS_DIR",
+        str(tmp_path),
+        raising=False,
+    )
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": project_id},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Project not found"}
 
 
 def test_project_config_external_path_preserves_outside_sentinel(

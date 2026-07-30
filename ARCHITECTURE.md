@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:90](web_server.py:90) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:82](web_server.py:82) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:120-121](web_server.py:120) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:82](web_server.py:82) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:83](web_server.py:83) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:119-120](web_server.py:119) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -1088,9 +1088,10 @@ target is a one-engine pin: rejection returns structured
 creation, or output-path work; it never silently becomes an AUTO cascade.
 
 The public authoring surface uses that same decision policy rather than a
-separate registry check. Project-scoped config reads reject unsafe
-`project_id` components before any load; config rows reflect the latest
-project enablement and aspect ratio. Direct shot writes, nested scene shot
+separate registry check. Project-scoped config reads require a canonical ASCII
+alphanumeric-leading `project_id` slug (with `_`/`-` thereafter) before any
+load; config rows reflect the latest project enablement and aspect ratio.
+Direct shot writes, nested scene shot
 writes, and the terminal generated-shot writer all evaluate against the
 latest lock-held project settings, UTC policy date, and runtime snapshot
 before mutation. Exact historical targets may round-trip only when both their

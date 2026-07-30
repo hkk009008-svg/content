@@ -3323,8 +3323,9 @@ Evidence:
   performs mutation. Re-evaluate every generated/reviewed target at the
   terminal writer and reject the batch atomically with the same stable policy
   error as public writes. Grandfather an unchanged historical target only when
-  the route scene and exact shot each resolve uniquely. Reject unsafe
-  project-ID path components before config loading.
+  the route scene and exact shot each resolve uniquely. Before config loading,
+  require project IDs to match the canonical ASCII slug form
+  `[A-Za-z0-9][A-Za-z0-9_-]*`.
 - **Consequences.**
   - Config visibility, direct and nested authoring, and terminal generation
     share one policy vocabulary and the latest project state.
@@ -3333,8 +3334,9 @@ Evidence:
   - Ambiguous legacy duplicate identifiers can no longer authorize a write;
     they must be repaired before an unavailable historical target can round-trip.
   - Valid slug-like missing project IDs retain the established 404 behavior,
-    while traversal, absolute, separator-bearing, empty, and malformed IDs fail
-    with 400 before any read.
+    while traversal, absolute, separator-bearing, whitespace/control, Unicode,
+    empty, and other noncanonical IDs fail with 400 before any read or lock
+    artifact.
 - **Cross-ref:** `domain/video_engine_policy.py`;
   `domain/scene_decomposer.py`; `domain/project_manager.py`; `web_server.py`;
   `tests/unit/test_web_server_video_targets.py`.

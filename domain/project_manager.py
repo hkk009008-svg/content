@@ -53,22 +53,22 @@ def _project_dir(project_id: str) -> str:
 
 
 def is_safe_project_id(project_id: object) -> bool:
-    """Return whether *project_id* is one contained directory component.
+    """Return whether *project_id* is one canonical ASCII slug component.
 
     Persisted IDs are generated as 12 lowercase hex characters, but read
-    boundaries historically also accept missing slug-like IDs and return 404.
-    This predicate preserves that behavior while rejecting absolute paths,
-    traversal components, separators on either platform, NULs, and empties
-    before any lock/load operation can create or normalize external state.
+    boundaries historically accept missing slug-like IDs and return 404.  This
+    preserves alphanumeric IDs with ``_``/``-`` after an alphanumeric head,
+    while rejecting whitespace, controls, Unicode, separators, traversal,
+    absolute paths, and empties before any lock/load can mutate filesystem state.
     """
     return (
         isinstance(project_id, str)
         and bool(project_id)
-        and project_id not in {".", ".."}
-        and "\x00" not in project_id
-        and "/" not in project_id
-        and "\\" not in project_id
-        and not os.path.isabs(project_id)
+        and project_id[0].isascii() and project_id[0].isalnum()
+        and all(
+            char.isascii() and (char.isalnum() or char in "_-")
+            for char in project_id
+        )
     )
 
 
