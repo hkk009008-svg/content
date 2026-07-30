@@ -18,9 +18,11 @@ from __future__ import annotations
 import os
 import sys
 import types
+from datetime import date
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+from domain.provider_catalog import RuntimeSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +61,9 @@ _ensure_kling_native_patchable()
 def _make_lifecycle(cancelled: bool = False) -> MagicMock:
     lc = MagicMock()
     lc.is_cancelled.return_value = cancelled
-    return MagicMock(lifecycle=lc)
+    ctx = MagicMock(lifecycle=lc)
+    ctx.get.side_effect = lambda k, d=None: ({} if k == "global_settings" else d)
+    return ctx
 
 
 def _make_ctx(aspect: str | None = None, cancelled: bool = False) -> MagicMock:
@@ -148,6 +152,30 @@ def _make_gen_mock(
     return gen
 
 
+_POLICY_DATE = date(2026, 9, 23)
+
+
+def _ready_kling_runtime() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"kling_access_key", "kling_secret_key"},
+        modules={"jwt"},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _ready_storyboard_policy(monkeypatch):
+    """Keep positive storyboard tests independent of the host environment."""
+
+    monkeypatch.setattr(
+        "cinema.phases.motion_render._storyboard_policy_runtime_snapshot",
+        _ready_kling_runtime,
+    )
+    monkeypatch.setattr(
+        "cinema.phases.motion_render._storyboard_policy_current_date",
+        lambda: _POLICY_DATE,
+    )
+
+
 # ---------------------------------------------------------------------------
 # (f) _get_storyboard_mode unit test
 # ---------------------------------------------------------------------------
@@ -180,6 +208,93 @@ class TestGetStoryboardMode:
         from cinema.phases.motion_render import _get_storyboard_mode
         project = _make_project([], storyboard_mode=False)
         assert _get_storyboard_mode(project) is False
+
+
+# ---------------------------------------------------------------------------
+# Typed pre-dispatch admission for the direct KLING_NATIVE batch path
+# ---------------------------------------------------------------------------
+
+class TestStoryboardDispatchPolicy:
+    def _run_rejected_batch(self, tmp_path, monkeypatch, *, project, snapshot):
+        from cinema.phases import motion_render
+
+        shots = project["scenes"][0]["shots"]
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for path in kf_paths.values():
+            open(path, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        monkeypatch.setattr(
+            motion_render,
+            "_storyboard_policy_runtime_snapshot",
+            lambda: snapshot,
+        )
+
+        provider_bomb = AssertionError(
+            "typed admission was bypassed before KlingNativeAPI construction"
+        )
+        with (
+            patch.object(
+                motion_render,
+                "filter_dispatch_candidates",
+                wraps=motion_render.filter_dispatch_candidates,
+            ) as policy_filter,
+            patch(
+                "kling_native.KlingNativeAPI",
+                side_effect=provider_bomb,
+            ) as kling_cls,
+        ):
+            phase = motion_render.MotionRenderPhase(
+                shot_generator=gen,
+                project=project,
+            )
+            result = phase.run(_make_ctx(aspect="16:9"))
+
+        policy_filter.assert_called_once_with(
+            ["KLING_NATIVE"],
+            snapshot=snapshot,
+            on_date=_POLICY_DATE,
+            api_engines=project["global_settings"]["api_engines"],
+            aspect_ratio="16:9",
+        )
+        kling_cls.assert_not_called()
+        gen.cost_tracker.would_exceed.assert_not_called()
+        gen.cost_tracker.record_api_call.assert_not_called()
+        assert gen.generate_motion_take.call_count == len(shots)
+        assert result.ok is True
+
+    def test_explicitly_disabled_batch_falls_through_before_spend(
+        self, tmp_path, monkeypatch,
+    ):
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        project = _make_project(
+            [_make_scene("scene_1", shots)],
+            storyboard_mode=True,
+        )
+        project["global_settings"]["api_engines"]["KLING_NATIVE"]["enabled"] = False
+
+        self._run_rejected_batch(
+            tmp_path,
+            monkeypatch,
+            project=project,
+            snapshot=_ready_kling_runtime(),
+        )
+
+    def test_unavailable_runtime_falls_through_before_spend(
+        self, tmp_path, monkeypatch,
+    ):
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        project = _make_project(
+            [_make_scene("scene_1", shots)],
+            storyboard_mode=True,
+        )
+
+        self._run_rejected_batch(
+            tmp_path,
+            monkeypatch,
+            project=project,
+            snapshot=RuntimeSnapshot(),
+        )
 
 
 # ---------------------------------------------------------------------------

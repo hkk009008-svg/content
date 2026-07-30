@@ -35,11 +35,29 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import date, datetime, timezone
 from typing import Callable, Optional
 
 from cinema.phases.base import PhaseResult
+from domain.provider_catalog import RuntimeSnapshot
+from domain.video_engine_policy import (
+    build_runtime_snapshot,
+    filter_dispatch_candidates,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _storyboard_policy_runtime_snapshot() -> RuntimeSnapshot:
+    """Observe current symbolic runtime eligibility for storyboard dispatch."""
+
+    return build_runtime_snapshot()
+
+
+def _storyboard_policy_current_date() -> date:
+    """Return the UTC lifecycle-policy date through a patchable test seam."""
+
+    return datetime.now(timezone.utc).date()
 
 
 def _get_storyboard_mode(project: dict) -> bool:
@@ -352,20 +370,34 @@ class MotionRenderPhase:
                 elapsed_s=0.0,
             )
 
-        # M-1 (Rule #13 / operator Lane V on the pre-T10 stack): the storyboard
-        # batch path (_run_storyboard_scene → KlingNativeAPI.generate_storyboard)
-        # bypasses generate_ai_video's portrait-capability guard AND the
-        # _accept_or_reject orientation backstops — and generate_storyboard takes
-        # no aspect param. At a portrait project it would emit a landscape
-        # storyboard with no orientation fence. Disqualify the batch path at
-        # portrait so the scene falls through to the GUARDED per-shot
-        # generate_motion_take → generate_ai_video path. Read aspect via the SAME
-        # get_project_setting(ctx, "aspect_ratio") the F1 guard uses
-        # (phase_c_ffmpeg.py:99) so orientation is determined identically.
+        # This direct batch dispatch bypasses generate_ai_video's mandatory
+        # policy fence, so reproduce that typed admission before importing or
+        # constructing KlingNativeAPI, generating, or spending. Keep the user
+        # toggle separate from eligibility: rejection falls through to the
+        # guarded per-shot generate_motion_take path.
         from cinema.aspect import is_portrait, DEFAULT_ASPECT_RATIO
         from cinema.context import get_project_setting
         _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
-        storyboard_mode = _get_storyboard_mode(self._project) and not is_portrait(_aspect)
+        storyboard_mode = _get_storyboard_mode(self._project)
+        storyboard_batch_admitted = False
+        if storyboard_mode:
+            settings = self._project.get("global_settings", {}) or {}
+            api_engines = settings.get("api_engines", {}) or {}
+            dispatch_policy = filter_dispatch_candidates(
+                ["KLING_NATIVE"],
+                snapshot=_storyboard_policy_runtime_snapshot(),
+                on_date=_storyboard_policy_current_date(),
+                api_engines=api_engines,
+                aspect_ratio=_aspect,
+            )
+            # KLING_NATIVE's regular per-shot branch is portrait-capable, but
+            # generate_storyboard itself accepts no aspect and has no
+            # orientation backstop. Retain this batch-specific exclusion even
+            # though the shared engine policy admits KLING_NATIVE at portrait.
+            storyboard_batch_admitted = (
+                dispatch_policy.candidates == ("KLING_NATIVE",)
+                and not is_portrait(_aspect)
+            )
 
         ok_count = 0
         skip_count = 0
@@ -394,7 +426,7 @@ class MotionRenderPhase:
             # keyframes).  Falls through to per-shot loop on any failure.
             # -----------------------------------------------------------------
             batch_handled = False
-            if storyboard_mode and 2 <= len(unapproved) <= 6:
+            if storyboard_batch_admitted and 2 <= len(unapproved) <= 6:
                 if ctx.lifecycle.is_cancelled():
                     return PhaseResult(
                         ok=False,

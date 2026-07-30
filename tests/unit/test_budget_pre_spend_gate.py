@@ -624,7 +624,17 @@ class TestBudgetPhaseAbort:
         phase = MotionRenderPhase(
             shot_generator=gen, project=self._make_project(storyboard_mode=True),
         )
-        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+        with (
+            patch(
+                "cinema.phases.motion_render._storyboard_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.phases.motion_render._storyboard_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch("kling_native.KlingNativeAPI") as mock_kling_cls,
+        ):
             result = phase.run(self._make_ctx())
             mock_kling_cls.assert_not_called()
 
