@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -221,6 +222,8 @@ def test_regex_literals_preserve_later_fetch_and_division_comments(
 const quotes = /["']/; fetch('/api/live')
 const escaped = /[\/"'\\]+\s?/gim
 const ratio = total / count
+const of = 10
+const contextual = of / count
 const adjusted = total /* /["']/ is only a comment */ / count
 // /["']/ and fetch('/api/comment') are only a comment
 """,
@@ -236,7 +239,7 @@ const adjusted = total /* /["']/ is only a comment */ / count
     }
 
 
-def test_ambiguous_regex_slash_is_explicit_without_hiding_later_fetch(
+def test_compiler_ast_handles_contextual_regex_without_lexical_noise(
     tmp_path: Path,
 ) -> None:
     root = _repo(tmp_path)
@@ -256,14 +259,35 @@ export function scan(flag: boolean, value: string) {
     assert [row["url_template"] for row in result["frontend_transports"]] == [
         "/api/live"
     ]
-    lexical = [
+    assert "ambiguous_javascript_slash" not in {
+        row["kind"] for row in result["unresolved"]
+    }
+
+
+def test_template_interpolation_and_jsx_text_do_not_hide_fetch(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "syntax.tsx",
+        """
+const rendered = `${fetch('/api/interpolated')}`
+export const Ratio = () => <span>x / 100</span>
+fetch('/api/after-jsx')
+""",
+    )
+
+    result = _build(root)
+
+    assert {
+        row["url_template"] for row in result["frontend_transports"]
+    } == {"/api/after-jsx", "/api/interpolated"}
+    assert not [
         row
         for row in result["unresolved"]
-        if row["kind"] == "ambiguous_javascript_slash"
+        if "slash" in row["kind"]
     ]
-    assert len(lexical) == 1
-    assert lexical[0]["domain"] == "frontend"
-    assert lexical[0]["source"]["path"] == "web/src/ambiguous-regex.ts"
 
 
 @pytest.mark.parametrize(
@@ -440,6 +464,16 @@ export function run() {
         "var fetch = client\nfetch('/api/local')\n",
         "import fetch from './client'\nfetch('/api/local')\n",
         "function run(fetch: any) { fetch('/api/local') }\n",
+        "const run = (fetch: any) => fetch('/api/local')\n",
+        "try { throw 1 } catch (fetch) { fetch('/api/local') }\n",
+        (
+            "class Client { fetch(url: string) { return url } }\n"
+            "new Client().fetch('/api/local')\n"
+        ),
+        (
+            "const client = { fetch(url: string) { return url } }\n"
+            "client.fetch('/api/local')\n"
+        ),
     ],
 )
 def test_shadowed_fetch_calls_are_unknown_not_transports(
@@ -465,6 +499,78 @@ def test_shadowed_fetch_calls_are_unknown_not_transports(
         (row["domain"], row["kind"])
         for row in result["unresolved"]
     } >= {("frontend", "shadowed_fetch_call")}
+
+
+def test_fetch_shadowing_is_lexically_scoped(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "scoped.ts",
+        """
+function local(fetch: any) {
+  fetch('/api/local')
+}
+function remote() {
+  fetch('/api/global')
+}
+""",
+    )
+
+    result = _build(root)
+
+    assert [row["url_template"] for row in result["frontend_transports"]] == [
+        "/api/global"
+    ]
+    assert [
+        row["url_template"]
+        for row in result["frontend_operations"]
+        if row["kind"] == "shadowed_fetch_call"
+    ] == ["/api/local"]
+
+
+def test_shadowed_eventsource_is_unknown_not_transport(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "shadowed-event.ts",
+        """
+function subscribe(EventSource: any) {
+  return new EventSource('/api/local-stream')
+}
+""",
+    )
+
+    result = _build(root)
+
+    assert result["frontend_transports"] == []
+    assert [
+        row["kind"] for row in result["frontend_operations"]
+    ] == ["shadowed_event_source_call"]
+    assert {
+        row["kind"] for row in result["unresolved"]
+    } == {"shadowed_event_source_call"}
+
+
+def test_eventsource_alias_is_explicit_unknown(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "aliased-event.ts",
+        """
+const LocalEventSource = EventSource
+new LocalEventSource('/api/local-stream')
+""",
+    )
+
+    result = _build(root)
+
+    assert result["frontend_transports"] == []
+    assert [
+        row["kind"] for row in result["frontend_operations"]
+    ] == ["unknown_wrapper_call"]
+    assert {
+        row["kind"] for row in result["unresolved"]
+    } == {"aliased_transport", "unknown_wrapper_call"}
 
 
 def test_normal_global_fetch_remains_a_transport(tmp_path: Path) -> None:
@@ -529,11 +635,142 @@ def test_frontend_test_and_generated_directories_are_excluded(tmp_path: Path) ->
     assert [row["url_template"] for row in result["frontend_transports"]] == ["/api/active"]
 
 
+def test_multi_transport_wrapper_call_is_explicit_unknown(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "multi-wrapper.ts",
+        """
+function both(url: string) {
+  fetch(url)
+  fetch(url)
+}
+both('/api/multi')
+""",
+    )
+
+    result = _build(root)
+
+    wrapper_call = next(
+        row
+        for row in result["frontend_operations"]
+        if row["kind"] == "unknown_wrapper_call"
+    )
+    assert wrapper_call["method"] is None
+    assert wrapper_call["url_template"] == "/api/multi"
+    assert {
+        row["reason"]
+        for row in result["unresolved"]
+        if row["kind"] == "unknown_wrapper_call"
+    } == {"wrapper contains multiple direct transports"}
+
+
+def test_frontend_sources_are_parsed_without_application_execution(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "must-not-run.ts",
+        """
+fetch('/api/static-analysis')
+throw new Error('application module was executed')
+""",
+    )
+
+    result = _build(root)
+
+    assert [row["url_template"] for row in result["frontend_transports"]] == [
+        "/api/static-analysis"
+    ]
+
+
+@pytest.mark.parametrize("failure_mode", ["unavailable", "nonzero", "invalid_json"])
+def test_frontend_compiler_failures_preserve_prior_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    output = root / "inventory.json"
+    output.write_text("prior artifact\n", encoding="utf-8")
+
+    def failed_run(*_args, **_kwargs):
+        if failure_mode == "unavailable":
+            raise FileNotFoundError("node missing")
+        if failure_mode == "nonzero":
+            return subprocess.CompletedProcess(
+                args=["node"],
+                returncode=2,
+                stdout="",
+                stderr="TypeScript compiler unavailable",
+            )
+        return subprocess.CompletedProcess(
+            args=["node"],
+            returncode=0,
+            stdout="{not-json",
+            stderr="",
+        )
+
+    monkeypatch.setattr(inventory_module.subprocess, "run", failed_run)
+
+    result = inventory_module.main(
+        ["--root", str(root), "--output", str(output)]
+    )
+
+    assert result == 1
+    assert output.read_text(encoding="utf-8") == "prior artifact\n"
+
+
+def test_frontend_helper_uses_argument_list_without_shell(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path)
+
+    def inspect_run(command, **kwargs):
+        assert isinstance(command, list)
+        assert command == [
+            "node",
+            str(inventory_module.FRONTEND_HELPER),
+            "--root",
+            str(root.resolve()),
+        ]
+        assert "shell" not in kwargs
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "parser": "TypeScript compiler API",
+                    "typescript_version": "test-version",
+                    "files": [],
+                    "transports": [],
+                    "operations": [],
+                    "unresolved": [],
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(inventory_module.subprocess, "run", inspect_run)
+
+    payload = inventory_module._frontend_payload(root)
+
+    assert payload["typescript_version"] == "test-version"
+
+
 def test_output_outside_resolved_root_is_rejected_without_creation(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _repo(tmp_path / "repo")
     outside = tmp_path / "outside.json"
+
+    def forbidden_subprocess(*_args, **_kwargs):
+        raise AssertionError("outside-root validation must precede frontend parsing")
+
+    monkeypatch.setattr(inventory_module.subprocess, "run", forbidden_subprocess)
 
     result = inventory_module.main(
         ["--root", str(root), "--output", str(outside)]

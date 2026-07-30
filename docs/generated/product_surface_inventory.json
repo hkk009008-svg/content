@@ -3004,7 +3004,7 @@
       ]
     },
     "frontend": {
-      "analysis": "conservative masked lexical scan with balanced call delimiters and regex-literal handling; TypeScript is not executed",
+      "analysis": "TypeScript compiler API Program and TypeChecker; application modules are parsed and never imported or executed",
       "declarative_resource_urls": {
         "reason": "JSX src/href/poster and CSS resource loads are outside executable call-expression schema v1",
         "status": "excluded"
@@ -3022,9 +3022,10 @@
         "module literal API bases, literal/template URLs, inline literal methods",
         "same-file one-hop wrappers with one transport and an unmodified URL parameter"
       ],
+      "parser_version": "5.9.3",
       "root": "web/src",
       "unresolved": [
-        "ambiguous regex/division/JSX slashes and bare fetch calls under detected local/module bindings",
+        "calls through local, imported, parameter, method, object, or aliased transport bindings",
         "dynamic URLs/methods; imported, aliased, transformed, multi-hop, or multi-transport wrappers"
       ]
     },
@@ -3045,39 +3046,6 @@
     }
   },
   "unresolved": [
-    {
-      "domain": "frontend",
-      "expression": "/ {template.steps} steps</s",
-      "id": "unresolved:9c7636c48e90d176",
-      "kind": "ambiguous_javascript_slash",
-      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
-      "source": {
-        "line": 380,
-        "path": "web/src/components/ScenePanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "/100</s",
-      "id": "unresolved:bb53f1fb20eb412c",
-      "kind": "ambiguous_javascript_slash",
-      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
-      "source": {
-        "line": 399,
-        "path": "web/src/components/console/CapabilityConsole.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "/ {d.bar.toFixed(2)}</s",
-      "id": "unresolved:ec75d5bb31ed908e",
-      "kind": "ambiguous_javascript_slash",
-      "reason": "slash is ambiguous among regex, division, and JSX lexical contexts",
-      "source": {
-        "line": 49,
-        "path": "web/src/components/console/CapabilityConsole.tsx"
-      }
-    },
     {
       "domain": "frontend",
       "expression": "path",
