@@ -222,9 +222,30 @@ def test_nonvideo_purpose_rows_preserve_legacy_membership_order_and_status():
         assert with_fal_runtime == without_runtime
         assert all(info["status"] == "live" for _key, info in without_runtime)
         assert all(
-            info is sd._LEGACY_API_REGISTRY_SEED[key]
+            info == sd._LEGACY_API_REGISTRY_SEED[key]
+            and info is not sd._LEGACY_API_REGISTRY_SEED[key]
+            and info["best_for"] is not sd._LEGACY_API_REGISTRY_SEED[key]["best_for"]
             for key, info in without_runtime
         )
+
+
+def test_nonvideo_ranking_results_are_deeply_isolated_from_legacy_seed():
+    seed_row = sd._LEGACY_API_REGISTRY_SEED["OPENAI_AUDIO"]
+    original_label = seed_row["label"]
+    original_best_for = list(seed_row["best_for"])
+
+    first_row = dict(sd.rank_apis_for_purpose("narration"))["OPENAI_AUDIO"]
+    first_row["label"] = "mutated caller label"
+    first_row["best_for"].append("mutated_caller_purpose")
+
+    assert seed_row["label"] == original_label
+    assert seed_row["best_for"] == original_best_for
+
+    subsequent_row = dict(sd.rank_apis_for_purpose("narration"))["OPENAI_AUDIO"]
+    assert subsequent_row["label"] == original_label
+    assert subsequent_row["best_for"] == original_best_for
+    assert subsequent_row is not first_row
+    assert subsequent_row["best_for"] is not first_row["best_for"]
 
 
 def test_nonvideo_rankings_preserve_representative_legacy_fields():

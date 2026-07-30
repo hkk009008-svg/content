@@ -4,12 +4,12 @@ Replaces the monolithic 20-prompt auto-generation (phase_a_generator.py) with
 per-scene decomposition. Takes user-defined scenes and converts them into
 technically precise image generation prompts via GPT-4o.
 """
+import copy
+import json
+import os
+import re
 from datetime import date
 from typing import Any, Optional, List
-
-import os
-import json
-import re
 from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.provider_catalog import RuntimeSnapshot, project_legacy_registry
@@ -368,7 +368,7 @@ def rank_apis_for_purpose(
         cost = info.get("per_shot_cost", 0.0)
         if max_per_shot_cost is not None and cost > max_per_shot_cost:
             continue
-        out.append((key, info))
+        out.append((key, copy.deepcopy(info) if eligible_video_keys is None else info))
     return out
 
 # Music moods
