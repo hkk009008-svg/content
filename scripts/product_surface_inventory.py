@@ -12,6 +12,8 @@ import re
 import subprocess
 import sys
 import tempfile
+from bisect import bisect_right
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 from urllib.parse import urlsplit
@@ -56,6 +58,7 @@ UNRESOLVED_REASONS = {
         "fetch method is not a static HTTP method",
         "wrapper transport method is not statically resolved",
         "wrapper URL parameter is transformed",
+        "wrapper URL parameter shape is unsupported",
         "wrapper contains multiple direct transports",
         "wrapper reaches transport through another local wrapper",
         "wrapper is an alias of another local wrapper",
@@ -65,6 +68,23 @@ UNRESOLVED_REASONS = {
 
 class FrontendInventoryError(RuntimeError):
     """The TypeScript helper could not produce a complete trusted fact set."""
+
+
+@dataclass(frozen=True)
+class _TypeScriptSourceFacts:
+    utf16_length: int
+    line_starts: tuple[int, ...]
+    code_point_boundaries: frozenset[int]
+
+    def reference_line(self, offset: int, label: str) -> int:
+        if (
+            not self.utf16_length
+            or offset not in self.code_point_boundaries
+            or offset >= self.utf16_length
+        ):
+            _schema_error(f"{label} offset is outside the TypeScript source")
+        return bisect_right(self.line_starts, offset)
+
 
 def _source(path: str, line: int) -> dict[str, Any]:
     return {"path": path, "line": line}
@@ -329,17 +349,72 @@ def _name(value: Any, label: str) -> str:
     return value
 
 
+def _typescript_source_facts(text: str) -> _TypeScriptSourceFacts:
+    line_starts = [0]
+    boundaries = {0}
+    position = 0
+    index = 0
+    while index < len(text):
+        character = text[index]
+        position += 2 if ord(character) > 0xFFFF else 1
+        boundaries.add(position)
+        if character == "\r":
+            if index + 1 < len(text) and text[index + 1] == "\n":
+                index += 1
+                position += 1
+                boundaries.add(position)
+            line_starts.append(position)
+        elif character in {"\n", "\u2028", "\u2029"}:
+            line_starts.append(position)
+        index += 1
+    return _TypeScriptSourceFacts(
+        utf16_length=position,
+        line_starts=tuple(line_starts),
+        code_point_boundaries=frozenset(boundaries),
+    )
+
+
+def _frontend_source_facts(
+    root: Path,
+    source_paths: Sequence[str],
+) -> dict[str, _TypeScriptSourceFacts]:
+    resolved_root = root.resolve(strict=True)
+    facts: dict[str, _TypeScriptSourceFacts] = {}
+    identities: set[tuple[int, int]] = set()
+    for source_path in source_paths:
+        candidate = resolved_root.joinpath(*source_path.split("/"))
+        try:
+            resolved = candidate.resolve(strict=True)
+            stat = candidate.stat()
+        except (OSError, RuntimeError) as exc:
+            raise FrontendInventoryError(
+                f"invalid TypeScript frontend schema: source file is unavailable: {source_path}"
+            ) from exc
+        identity = (stat.st_dev, stat.st_ino)
+        if resolved != candidate or identity in identities:
+            _schema_error(f"payload.files contains a source path alias: {source_path}")
+        identities.add(identity)
+        try:
+            text = candidate.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise FrontendInventoryError(
+                f"invalid TypeScript frontend schema: source file is unreadable: {source_path}"
+            ) from exc
+        facts[source_path] = _typescript_source_facts(text)
+    return facts
+
+
 def _source_fact(
     value: Any,
-    allowed_sources: set[str],
+    sources: dict[str, _TypeScriptSourceFacts],
     label: str,
-) -> None:
+) -> dict[str, Any]:
     source = _exact_keys(value, {"path", "line"}, set(), f"{label}.source")
     source_path = source["path"]
     if (
         type(source_path) is not str
         or not source_path
-        or source_path not in allowed_sources
+        or source_path not in sources
         or source_path.startswith("/")
         or "\\" in source_path
         or any(part in {"", ".", ".."} for part in source_path.split("/"))
@@ -347,6 +422,9 @@ def _source_fact(
         _schema_error(f"{label}.source.path is invalid")
     if type(source["line"]) is not int or source["line"] <= 0:
         _schema_error(f"{label}.source.line must be a positive integer")
+    if source["line"] > len(sources[source_path].line_starts):
+        _schema_error(f"{label}.source.line is outside the TypeScript source")
+    return source
 
 
 def _url(value: Any, label: str) -> None:
@@ -356,7 +434,7 @@ def _url(value: Any, label: str) -> None:
 
 def _reference(
     value: Any,
-    allowed_sources: set[str],
+    sources: dict[str, _TypeScriptSourceFacts],
     label: str,
     *,
     nullable: bool,
@@ -368,10 +446,15 @@ def _reference(
     ref_path, separator, offset = value.rpartition(":")
     if (
         not separator
-        or ref_path not in allowed_sources
+        or ref_path not in sources
         or not re.fullmatch(r"(?:0|[1-9][0-9]*)", offset)
     ):
         _schema_error(f"{label} has invalid transport-reference shape")
+    try:
+        numeric_offset = int(offset)
+    except ValueError:
+        _schema_error(f"{label} has invalid transport-reference shape")
+    sources[ref_path].reference_line(numeric_offset, label)
     return value
 
 
@@ -385,7 +468,7 @@ def _method(value: Any, label: str, *, nullable: bool) -> str | None:
 
 def _validate_transport(
     row: Any,
-    allowed_sources: set[str],
+    sources: dict[str, _TypeScriptSourceFacts],
     index: int,
 ) -> str:
     label = f"transports[{index}]"
@@ -406,11 +489,16 @@ def _validate_transport(
         required.add("transport_error_observation")
     _exact_keys(row, required, {"enclosing_function"}, label)
     ref = _reference(
-        row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+        row["_transport_ref"], sources, f"{label}._transport_ref", nullable=False
     )
-    _source_fact(row["source"], allowed_sources, label)
+    source = _source_fact(row["source"], sources, label)
     if ref.rpartition(":")[0] != row["source"]["path"]:
         _schema_error(f"{label} reference/source paths disagree")
+    ref_path, _, offset = ref.rpartition(":")
+    if sources[ref_path].reference_line(
+        int(offset), f"{label}._transport_ref"
+    ) != source["line"]:
+        _schema_error(f"{label} reference/source lines disagree")
     _normalized_text(row["url_expression"], f"{label}.url_expression", allow_empty=True)
     _url(row["url_template"], f"{label}.url_template")
     if "enclosing_function" in row:
@@ -436,8 +524,8 @@ def _validate_transport(
 
 def _validate_operation(
     row: Any,
-    allowed_sources: set[str],
-    transport_refs: dict[str, str],
+    sources: dict[str, _TypeScriptSourceFacts],
+    transport_refs: dict[str, dict[str, Any]],
     index: int,
 ) -> None:
     label = f"operations[{index}]"
@@ -451,7 +539,7 @@ def _validate_operation(
     if kind in {"shadowed_fetch_call", "shadowed_event_source_call"}:
         optional.add("enclosing_function")
     _exact_keys(row, required, optional, label)
-    _source_fact(row["source"], allowed_sources, label)
+    _source_fact(row["source"], sources, label)
     _url(row["url_template"], f"{label}.url_template")
     if "expanded_wrapper" in row:
         _name(row["expanded_wrapper"], f"{label}.expanded_wrapper")
@@ -460,19 +548,20 @@ def _validate_operation(
     if kind == "direct_transport":
         _method(row["method"], f"{label}.method", nullable=True)
         ref = _reference(
-            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+            row["_transport_ref"], sources, f"{label}._transport_ref", nullable=False
         )
     elif kind == "one_hop_wrapper_call":
         _method(row["method"], f"{label}.method", nullable=False)
         ref = _reference(
-            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
+            row["_transport_ref"], sources, f"{label}._transport_ref", nullable=False
         )
     elif kind == "unknown_wrapper_call":
-        if row["method"] is not None:
-            _schema_error(f"{label}.method must be null")
+        _method(row["method"], f"{label}.method", nullable=True)
         ref = _reference(
-            row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=True
+            row["_transport_ref"], sources, f"{label}._transport_ref", nullable=True
         )
+        if ref is None and row["method"] is not None:
+            _schema_error(f"{label}.method requires a transport reference")
     else:
         if row["method"] is not None or row["_transport_ref"] is not None:
             _schema_error(f"{label} must not claim a method or transport reference")
@@ -480,13 +569,16 @@ def _validate_operation(
     if ref is not None:
         if ref not in transport_refs:
             _schema_error(f"{label} has a dangling transport reference")
-        if transport_refs[ref] != row["source"]["path"]:
+        transport = transport_refs[ref]
+        if transport["path"] != row["source"]["path"]:
             _schema_error(f"{label} crosses frontend source files")
+        if row["method"] != transport["method"]:
+            _schema_error(f"{label}.method contradicts its transport reference")
 
 
 def _validate_unresolved(
     row: Any,
-    allowed_sources: set[str],
+    sources: dict[str, _TypeScriptSourceFacts],
     index: int,
 ) -> None:
     label = f"unresolved[{index}]"
@@ -505,7 +597,7 @@ def _validate_unresolved(
     if type(reason) is not str or reason not in UNRESOLVED_REASONS[kind]:
         _schema_error(f"{label}.reason is invalid")
     _normalized_text(unresolved["expression"], f"{label}.expression", allow_empty=True)
-    _source_fact(unresolved["source"], allowed_sources, label)
+    _source_fact(unresolved["source"], sources, label)
     if "owner" in unresolved:
         _name(unresolved["owner"], f"{label}.owner")
     if kind in {
@@ -544,17 +636,20 @@ def _validate_frontend_payload(payload: Any, root: Path) -> dict[str, Any]:
     for key in ("transports", "operations", "unresolved"):
         if type(top[key]) is not list:
             _schema_error(f"payload.{key} must be a list")
-    allowed_sources = set(expected_files)
-    transport_refs: dict[str, str] = {}
+    sources = _frontend_source_facts(root, expected_files)
+    transport_refs: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(top["transports"]):
-        ref = _validate_transport(row, allowed_sources, index)
+        ref = _validate_transport(row, sources, index)
         if ref in transport_refs:
             _schema_error("transport references must be unique")
-        transport_refs[ref] = row["source"]["path"]
+        transport_refs[ref] = {
+            "method": row["method"],
+            "path": row["source"]["path"],
+        }
     for index, row in enumerate(top["operations"]):
-        _validate_operation(row, allowed_sources, transport_refs, index)
+        _validate_operation(row, sources, transport_refs, index)
     for index, row in enumerate(top["unresolved"]):
-        _validate_unresolved(row, allowed_sources, index)
+        _validate_unresolved(row, sources, index)
     return top
 
 

@@ -78,6 +78,87 @@ def _valid_helper_payload() -> dict:
     }
 
 
+def _utf16_offset(source: str, marker: str) -> int:
+    return len(source[: source.index(marker)].encode("utf-16-le")) // 2
+
+
+def _payload_for_fetch_source(source: str) -> dict:
+    payload = _valid_helper_payload()
+    offset = _utf16_offset(source, "fetch")
+    line = source[: source.index("fetch")].count("\n") + 1
+    reference = f"web/src/fact.ts:{offset}"
+    payload["transports"][0]["_transport_ref"] = reference
+    payload["transports"][0]["source"]["line"] = line
+    payload["operations"][0]["_transport_ref"] = reference
+    payload["operations"][0]["source"]["line"] = line
+    payload["unresolved"][0]["source"]["line"] = 1
+    return payload
+
+
+TRUST_BOUNDARY_CORRUPTIONS = (
+    "empty_source_reference",
+    "transport_line",
+    "operation_line",
+    "unresolved_line",
+    "offset_out_of_bounds",
+    "offset_too_many_digits",
+    "reference_path_alias",
+    "source_path_alias",
+    "method_mismatch",
+    "unicode_code_point_offset",
+    "unicode_surrogate_half_offset",
+)
+
+
+def _trust_boundary_failure(root: Path, corruption: str) -> dict:
+    source = "fetch('/api/value')\n"
+    if corruption == "empty_source_reference":
+        source = ""
+    elif corruption == "unicode_code_point_offset":
+        source = "const marker = '😀'\nfetch('/api/value')\n"
+    elif corruption == "unicode_surrogate_half_offset":
+        source = "/*😀*/fetch('/api/value')\n"
+    _frontend(root, "fact.ts", source)
+    payload = _valid_helper_payload() if not source else _payload_for_fetch_source(source)
+    transport = payload["transports"][0]
+    operation = payload["operations"][0]
+    unresolved = payload["unresolved"][0]
+
+    if corruption == "empty_source_reference":
+        pass
+    elif corruption == "transport_line":
+        transport["source"]["line"] = 999
+    elif corruption == "operation_line":
+        operation["source"]["line"] = 999
+    elif corruption == "unresolved_line":
+        unresolved["source"]["line"] = 999
+    elif corruption == "offset_out_of_bounds":
+        transport["_transport_ref"] = "web/src/fact.ts:999999"
+        operation["_transport_ref"] = transport["_transport_ref"]
+    elif corruption == "offset_too_many_digits":
+        transport["_transport_ref"] = f"web/src/fact.ts:{'9' * 5000}"
+        operation["_transport_ref"] = transport["_transport_ref"]
+    elif corruption == "reference_path_alias":
+        transport["_transport_ref"] = "web/src/./fact.ts:0"
+        operation["_transport_ref"] = transport["_transport_ref"]
+    elif corruption == "source_path_alias":
+        transport["source"]["path"] = "web/src/./fact.ts"
+    elif corruption == "method_mismatch":
+        operation["method"] = "POST"
+    elif corruption == "unicode_code_point_offset":
+        code_point_offset = source.index("fetch")
+        assert code_point_offset != _utf16_offset(source, "fetch")
+        transport["_transport_ref"] = f"web/src/fact.ts:{code_point_offset}"
+        operation["_transport_ref"] = transport["_transport_ref"]
+    elif corruption == "unicode_surrogate_half_offset":
+        astral_start = _utf16_offset(source, "😀")
+        transport["_transport_ref"] = f"web/src/fact.ts:{astral_start + 1}"
+        operation["_transport_ref"] = transport["_transport_ref"]
+    else:
+        raise AssertionError(f"unhandled corruption {corruption}")
+    return payload
+
+
 def _mock_helper_payload(
     monkeypatch: pytest.MonkeyPatch,
     payload: dict,
@@ -445,6 +526,197 @@ export function run(id: string) {
     assert "imported wrapper call" in reasons
 
 
+def test_wrapper_url_parameter_position_is_preserved_and_routes_match(
+    tmp_path: Path,
+) -> None:
+    root = _repo(
+        tmp_path,
+        """
+from flask import Flask
+app = Flask(__name__, static_folder=None)
+
+@app.route("/api/first")
+def first():
+    pass
+
+@app.route("/api/middle")
+def middle():
+    pass
+
+@app.route("/api/last")
+def last():
+    pass
+""",
+    )
+    _frontend(
+        root,
+        "parameter-position.ts",
+        """
+function getFirst(url: string, tag: string) {
+  return fetch(url)
+}
+function getWithTag(tag: string, url: string) {
+  return fetch(url)
+}
+function getLast(tag: string, trace: string, url: string) {
+  return fetch(url)
+}
+
+getFirst('/api/first', 'audit')
+getWithTag('audit', '/api/middle')
+getLast('audit', 'trace', '/api/last')
+""",
+    )
+
+    result = _build(root)
+    operations = {
+        row["expanded_wrapper"]: row
+        for row in result["frontend_operations"]
+        if row["kind"] == "one_hop_wrapper_call"
+    }
+
+    assert {
+        name: (row["url_template"], row["route_match"])
+        for name, row in operations.items()
+    } == {
+        "getFirst": ("/api/first", "matched"),
+        "getLast": ("/api/last", "matched"),
+        "getWithTag": ("/api/middle", "matched"),
+    }
+
+
+def test_missing_wrapper_url_argument_never_falls_back_to_another_argument(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "missing-argument.ts",
+        """
+function getWithTag(tag: string, url: string) {
+  return fetch(url)
+}
+getWithTag('/api/not-the-url')
+""",
+    )
+
+    result = _build(root)
+    operation = next(
+        row
+        for row in result["frontend_operations"]
+        if row["kind"] == "one_hop_wrapper_call"
+    )
+
+    assert operation["expanded_wrapper"] == "getWithTag"
+    assert operation["url_template"] is None
+    assert operation["route_match"] == "unknown"
+    assert {
+        (row["kind"], row.get("owner"), row["reason"])
+        for row in result["unresolved"]
+    } >= {
+        (
+            "dynamic_wrapper_call_url",
+            "getWithTag",
+            "safe wrapper call URL is not statically resolvable",
+        )
+    }
+
+
+def test_unsupported_wrapper_parameter_shapes_fail_conservatively(
+    tmp_path: Path,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "unsupported-parameters.ts",
+        """
+function defaulted(tag: string, url: string = '/api/default') {
+  return fetch(url)
+}
+function rested(tag: string, ...url: string[]) {
+  return fetch(url as unknown as string)
+}
+function destructured(tag: string, { url }: { url: string }) {
+  return fetch(url)
+}
+function optional(tag: string, url?: string) {
+  return fetch(url as string)
+}
+function withThis(this: void, url: string) {
+  return fetch(url)
+}
+
+defaulted('/api/not-the-url')
+rested('/api/not-the-url', '/api/rest')
+destructured('/api/not-the-url', { url: '/api/destructured' })
+optional('/api/not-the-url', '/api/optional')
+withThis('/api/this')
+""",
+    )
+
+    result = _build(root)
+    operations = [
+        row
+        for row in result["frontend_operations"]
+        if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in operations} == {
+        "defaulted",
+        "destructured",
+        "optional",
+        "rested",
+        "withThis",
+    }
+    assert all(row["method"] == "GET" for row in operations)
+    assert all(row["url_template"] is None for row in operations)
+    assert all(row["route_match"] == "unknown" for row in operations)
+    assert "/api/not-the-url" not in {
+        row["url_template"] for row in result["frontend_operations"]
+    }
+    assert {
+        (row.get("owner"), row["reason"])
+        for row in result["unresolved"]
+        if row["kind"] == "unknown_wrapper_call"
+    } == {
+        (name, "wrapper URL parameter shape is unsupported")
+        for name in {"defaulted", "destructured", "optional", "rested", "withThis"}
+    }
+
+
+def test_nonzero_url_parameter_remains_one_hop_only(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "second-hop-position.ts",
+        """
+function getWithTag(tag: string, url: string) {
+  return fetch(url)
+}
+function secondHop(tag: string, url: string) {
+  return getWithTag(tag, url)
+}
+secondHop('audit', '/api/two-hop')
+""",
+    )
+
+    result = _build(root)
+    operation = next(
+        row
+        for row in result["frontend_operations"]
+        if row.get("expanded_wrapper") == "secondHop"
+    )
+
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["url_template"] is None
+    assert operation["method"] == "GET"
+    assert {
+        (row.get("owner"), row["reason"])
+        for row in result["unresolved"]
+        if row["kind"] == "unknown_wrapper_call"
+    } == {("secondHop", "wrapper reaches transport through another local wrapper")}
+
+
 def test_dynamic_method_wrapper_calls_are_explicit_unknowns_with_transport_link(
     tmp_path: Path,
 ) -> None:
@@ -743,6 +1015,137 @@ throw new Error('application module was executed')
     ]
 
 
+def test_trust_boundary_accepts_utf16_reference_and_distinct_wrapper_call_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path)
+    source = (
+        "const marker = '😀'\n"
+        "function getWithTag(tag: string, url: string) { return fetch(url) }\n"
+        "getWithTag('audit', '/api/value')\n"
+    )
+    _frontend(root, "fact.ts", source)
+    payload = _payload_for_fetch_source(source)
+    reference = f"web/src/fact.ts:{_utf16_offset(source, 'fetch')}"
+    payload["transports"][0]["_transport_ref"] = reference
+    payload["transports"][0]["source"]["line"] = 2
+    payload["operations"][0].update(
+        {
+            "_transport_ref": reference,
+            "expanded_wrapper": "getWithTag",
+            "kind": "one_hop_wrapper_call",
+            "source": {"path": "web/src/fact.ts", "line": 3},
+        }
+    )
+    payload["unresolved"] = []
+    _mock_helper_payload(monkeypatch, payload)
+
+    transports, operations, _unresolved, _version = inventory_module._frontend(root)
+
+    assert _utf16_offset(source, "fetch") != source.index("fetch")
+    assert operations[0]["source"]["line"] != transports[0]["source"]["line"]
+    assert operations[0]["transport_id"] == transports[0]["id"]
+
+
+@pytest.mark.parametrize(
+    ("source", "unresolved_line"),
+    [
+        ("", 1),
+        ("fetch('/api/value')\n", 2),
+    ],
+)
+def test_source_line_range_handles_empty_and_final_newline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+    unresolved_line: int,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "fact.ts", source)
+    payload = (
+        _valid_helper_payload()
+        if not source
+        else _payload_for_fetch_source(source)
+    )
+    if not source:
+        payload["transports"] = []
+        payload["operations"] = []
+    payload["unresolved"][0]["source"]["line"] = unresolved_line
+    _mock_helper_payload(monkeypatch, payload)
+
+    inventory_module._frontend(root)
+
+
+def test_symlinked_frontend_source_alias_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
+    (root / "web" / "src" / "alias.ts").symlink_to("fact.ts")
+    payload = _payload_for_fetch_source("fetch('/api/value')\n")
+    payload["files"] = ["web/src/alias.ts", "web/src/fact.ts"]
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_ids(*_args, **_kwargs):
+        raise AssertionError("source alias validation must precede ID construction")
+
+    monkeypatch.setattr(inventory_module, "_assign_ids", forbidden_ids)
+
+    with pytest.raises(inventory_module.FrontendInventoryError):
+        inventory_module._frontend(root)
+
+
+@pytest.mark.parametrize("corruption", TRUST_BOUNDARY_CORRUPTIONS)
+def test_source_trust_boundary_failures_precede_id_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corruption: str,
+) -> None:
+    root = _repo(tmp_path)
+    payload = _trust_boundary_failure(root, corruption)
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_ids(*_args, **_kwargs):
+        raise AssertionError("source trust validation must precede ID construction")
+
+    monkeypatch.setattr(inventory_module, "_assign_ids", forbidden_ids)
+
+    with pytest.raises(inventory_module.FrontendInventoryError):
+        inventory_module._frontend(root)
+
+
+@pytest.mark.parametrize("mode", ["write", "check"])
+@pytest.mark.parametrize("corruption", TRUST_BOUNDARY_CORRUPTIONS)
+def test_source_trust_boundary_failures_preserve_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    corruption: str,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    payload = _trust_boundary_failure(root, corruption)
+    output = root / "inventory.json"
+    output.write_text("prior artifact\n", encoding="utf-8")
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_ids(*_args, **_kwargs):
+        raise AssertionError("source trust validation must precede ID construction")
+
+    def forbidden_write(*_args, **_kwargs):
+        raise AssertionError("source trust failure must never reach the writer")
+
+    monkeypatch.setattr(inventory_module, "_assign_ids", forbidden_ids)
+    monkeypatch.setattr(inventory_module, "_atomic_write", forbidden_write)
+    arguments = ["--root", str(root), "--output", str(output)]
+    if mode == "check":
+        arguments.append("--check")
+
+    assert inventory_module.main(arguments) == 1
+    assert output.read_text(encoding="utf-8") == "prior artifact\n"
+
+
 @pytest.mark.parametrize(
     "corruption",
     [
@@ -772,7 +1175,7 @@ def test_compiler_helper_schema_corruption_fails_before_id_construction(
     corruption: str,
 ) -> None:
     root = _repo(tmp_path)
-    _frontend(root, "fact.ts", "")
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
     payload = copy.deepcopy(_valid_helper_payload())
     transport = payload["transports"][0]
     operation = payload["operations"][0]
@@ -839,8 +1242,8 @@ def test_cross_file_reference_contradictions_fail_before_id_construction(
     contradiction: str,
 ) -> None:
     root = _repo(tmp_path)
-    _frontend(root, "fact.ts", "")
-    _frontend(root, "other.ts", "")
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
+    _frontend(root, "other.ts", "fetch('/api/other')\n")
     payload = _valid_helper_payload()
     payload["files"] = ["web/src/fact.ts", "web/src/other.ts"]
     if contradiction == "transport_reference_path":
@@ -864,7 +1267,7 @@ def test_same_file_wrapper_reference_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = _repo(tmp_path)
-    _frontend(root, "fact.ts", "")
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
     payload = _valid_helper_payload()
     payload["operations"][0].update(
         {
@@ -888,8 +1291,8 @@ def test_cross_file_reference_failure_does_not_mutate_output(
     mode: str,
 ) -> None:
     root = _repo(tmp_path / "repo")
-    _frontend(root, "fact.ts", "")
-    _frontend(root, "other.ts", "")
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
+    _frontend(root, "other.ts", "fetch('/api/other')\n")
     output = root / "inventory.json"
     output.write_text("prior artifact\n", encoding="utf-8")
     payload = _valid_helper_payload()
@@ -955,7 +1358,7 @@ def test_schema_and_timeout_failures_do_not_mutate_output(
     failure_mode: str,
 ) -> None:
     root = _repo(tmp_path / "repo")
-    _frontend(root, "fact.ts", "")
+    _frontend(root, "fact.ts", "fetch('/api/value')\n")
     output = root / "inventory.json"
     output.write_text("prior artifact\n", encoding="utf-8")
 

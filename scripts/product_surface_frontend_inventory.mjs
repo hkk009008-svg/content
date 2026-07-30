@@ -166,11 +166,36 @@ function functionFacts(checker, file) {
   const candidates = [];
   function add(node, name, nameNode, candidate) {
     if (byNode.has(node)) return;
-    const parameters = node.parameters
-      .filter((parameter) => ts.isIdentifier(parameter.name))
-      .map((parameter) => checker.getSymbolAtLocation(parameter.name))
-      .filter(Boolean);
-    const info = { node, name, parameters, candidate,
+    const hasThisParameter = node.parameters.some(
+      (parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === "this",
+    );
+    const parameters = node.parameters.map((parameter, index) => {
+      const symbols = new Set();
+      function collectSymbols(child) {
+        if (ts.isIdentifier(child)) {
+          const found = checker.getSymbolAtLocation(child);
+          if (found) symbols.add(found);
+        }
+        ts.forEachChild(child, collectSymbols);
+      }
+      collectSymbols(parameter.name);
+      return {
+        index,
+        node: parameter,
+        supported: !hasThisParameter && ts.isIdentifier(parameter.name) &&
+          parameter.name.text !== "this" && !parameter.dotDotDotToken &&
+          !parameter.initializer && !parameter.questionToken,
+        symbol: ts.isIdentifier(parameter.name)
+          ? checker.getSymbolAtLocation(parameter.name)
+          : undefined,
+        symbols,
+      };
+    });
+    const parameterBySymbol = new Map();
+    for (const parameter of parameters) {
+      for (const found of parameter.symbols) parameterBySymbol.set(found, parameter);
+    }
+    const info = { node, name, parameters, parameterBySymbol, candidate,
       symbol: nameNode ? checker.getSymbolAtLocation(nameNode) : undefined };
     byNode.set(node, info);
     if (candidate && name && info.symbol) candidates.push(info);
@@ -457,30 +482,64 @@ function analyzeFile(root, file, checker) {
     if (found.length === 1) {
       const transport = found[0];
       const urlValue = unwrap(transport.urlNode);
-      const exact = urlValue && ts.isIdentifier(urlValue) &&
-        info.parameters.includes(checker.getSymbolAtLocation(urlValue));
-      let usesParameter = false;
+      const urlSymbol = urlValue && ts.isIdentifier(urlValue)
+        ? checker.getSymbolAtLocation(urlValue)
+        : undefined;
+      const exactParameter = urlSymbol
+        ? info.parameterBySymbol.get(urlSymbol)
+        : undefined;
+      const usedParameters = new Set();
       function inspect(node) {
-        if (ts.isIdentifier(node) && info.parameters.includes(checker.getSymbolAtLocation(node))) {
-          usesParameter = true;
+        if (ts.isIdentifier(node)) {
+          const parameter = info.parameterBySymbol.get(checker.getSymbolAtLocation(node));
+          if (parameter) usedParameters.add(parameter);
         }
         ts.forEachChild(node, inspect);
       }
       if (transport.urlNode) inspect(transport.urlNode);
-      if (exact) wrappers.set(info.symbol, {
+      if (exactParameter) wrappers.set(info.symbol, {
         info,
-        safe: transport.row.method !== null,
-        reason: transport.row.method === null
+        safe: exactParameter.supported && transport.row.method !== null,
+        reason: !exactParameter.supported
+          ? "wrapper URL parameter shape is unsupported"
+          : transport.row.method === null
           ? transport.methodReason || "wrapper transport method is not statically resolved"
           : null,
         transport,
+        urlParameterIndex: exactParameter.supported ? exactParameter.index : undefined,
+        urlParameterSymbol: exactParameter.symbol,
       });
-      else if (transport.row.url_template === null && usesParameter) wrappers.set(info.symbol, {
-        info, safe: false, reason: "wrapper URL parameter is transformed", transport,
+      else if (transport.row.url_template === null && usedParameters.size) {
+        const [parameter] = usedParameters.size === 1 ? usedParameters : [];
+        wrappers.set(info.symbol, {
+          info,
+          safe: false,
+          reason: "wrapper URL parameter is transformed",
+          transport,
+          urlParameterIndex: parameter?.supported ? parameter.index : undefined,
+          urlParameterSymbol: parameter?.symbol,
+        });
+      }
+    } else if (found.length > 1) {
+      const parameters = new Set();
+      for (const transport of found) {
+        const urlValue = unwrap(transport.urlNode);
+        const urlSymbol = urlValue && ts.isIdentifier(urlValue)
+          ? checker.getSymbolAtLocation(urlValue)
+          : undefined;
+        const parameter = urlSymbol ? info.parameterBySymbol.get(urlSymbol) : undefined;
+        if (parameter) parameters.add(parameter);
+      }
+      const [parameter] = parameters.size === 1 ? parameters : [];
+      wrappers.set(info.symbol, {
+        info,
+        safe: false,
+        reason: "wrapper contains multiple direct transports",
+        transport: null,
+        urlParameterIndex: parameter?.supported ? parameter.index : undefined,
+        urlParameterSymbol: parameter?.symbol,
       });
-    } else if (found.length > 1) wrappers.set(info.symbol, {
-      info, safe: false, reason: "wrapper contains multiple direct transports", transport: null,
-    });
+    }
   }
   function walkOwn(node, callback) {
     function visit(child) {
@@ -494,19 +553,25 @@ function analyzeFile(root, file, checker) {
     if (wrappers.has(info.symbol)) continue;
     let reached;
     walkOwn(info.node, (node) => {
-      if (reached || !ts.isCallExpression(node) || node.arguments.length === 0) return;
+      if (reached || !ts.isCallExpression(node)) return;
       const target = wrappers.get(symbol(checker, node.expression));
-      const argument = unwrap(node.arguments[0]);
+      const argument = target?.urlParameterIndex === undefined
+        ? undefined
+        : unwrap(node.arguments[target.urlParameterIndex]);
+      const parameter = argument && ts.isIdentifier(argument)
+        ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
+        : undefined;
       if (
-        target && argument && ts.isIdentifier(argument) &&
-        info.parameters.includes(checker.getSymbolAtLocation(argument))
-      ) reached = target;
+        target && argument && ts.isIdentifier(argument) && parameter
+      ) reached = { target, parameter };
     });
     if (reached) wrappers.set(info.symbol, {
       info,
       safe: false,
       reason: "wrapper reaches transport through another local wrapper",
-      transport: reached.transport,
+      transport: reached.target.transport,
+      urlParameterIndex: reached.parameter.supported ? reached.parameter.index : undefined,
+      urlParameterSymbol: reached.parameter.symbol,
     });
   }
   function collectWrapperAliases(node) {
@@ -522,6 +587,8 @@ function analyzeFile(root, file, checker) {
           safe: false,
           reason: "wrapper is an alias of another local wrapper",
           transport: target.transport,
+          urlParameterIndex: target.urlParameterIndex,
+          urlParameterSymbol: target.urlParameterSymbol,
         });
         unresolved.push(unknown(
           root, file, node, "aliased_wrapper", "same-file wrapper aliases are not expanded",
@@ -554,12 +621,18 @@ function analyzeFile(root, file, checker) {
         const container = nearestFunction(node, functions);
         const containerWrapper = container ? wrappers.get(container.symbol) : undefined;
         if (containerWrapper?.reason !== "wrapper reaches transport through another local wrapper") {
-          const urlNode = node.arguments[0];
-          const urlTemplate = resolveUrl(checker, constants, urlNode);
+          const urlNode = wrapper.urlParameterIndex === undefined
+            ? undefined
+            : node.arguments[wrapper.urlParameterIndex];
+          const resolvedUrl = resolveUrl(checker, constants, urlNode);
+          const operationMethod = wrapper.transport?.row.method ?? null;
+          const urlTemplate = wrapper.safe || operationMethod === null
+            ? resolvedUrl
+            : null;
           operations.push({
             expanded_wrapper: wrapper.info.name,
             kind: wrapper.safe ? "one_hop_wrapper_call" : "unknown_wrapper_call",
-            method: wrapper.safe ? wrapper.transport.row.method : null,
+            method: operationMethod,
             source: source(root, file, node),
             _transport_ref: wrapper.transport?.row._transport_ref || null,
             url_template: urlTemplate,
