@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Project, AppConfig, LoraStatus } from '../types/project'
 
 const API = '/api'
@@ -9,6 +9,102 @@ interface Props {
   onRefresh: () => void
 }
 
+const HISTORICAL_LORA_STATUSES = new Set([
+  'idle',
+  'preparing',
+  'training',
+  'validating',
+  'done',
+  'failed',
+])
+
+interface HistoricalLoraSummary {
+  status: LoraStatus['status']
+  qualityScore: number | null
+  verdict: 'rejected' | 'warning' | 'recorded' | null
+  artifactRecorded: boolean
+  containsError: boolean
+}
+
+type HistoricalLoraLoad =
+  | { kind: 'loading' }
+  | { kind: 'ready'; summary: HistoricalLoraSummary }
+  | { kind: 'error' }
+
+const LOADING_LORA_STATUS: HistoricalLoraLoad = { kind: 'loading' }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Validate the status fields this operator surface consumes, then discard
+ * server-local path/error contents in favor of sanitized presence flags. */
+function parseHistoricalLoraStatus(
+  value: unknown,
+  expectedCharacterId: string,
+): HistoricalLoraSummary | null {
+  if (!isRecord(value)) return null
+  if (value.char_id !== expectedCharacterId) return null
+  if (
+    typeof value.status !== 'string'
+    || !HISTORICAL_LORA_STATUSES.has(value.status)
+  ) return null
+
+  const loraPath = value.lora_path
+  if (loraPath !== undefined && loraPath !== null && typeof loraPath !== 'string') {
+    return null
+  }
+  const qualityScore = value.quality_score
+  if (
+    qualityScore !== undefined
+    && qualityScore !== null
+    && (typeof qualityScore !== 'number' || !Number.isFinite(qualityScore))
+  ) return null
+  const rejected = value.rejected
+  if (rejected !== undefined && typeof rejected !== 'boolean') return null
+  const qualityWarning = value.quality_warning
+  if (qualityWarning !== undefined && typeof qualityWarning !== 'boolean') return null
+  const error = value.error
+  if (error !== undefined && error !== null && typeof error !== 'string') return null
+
+  const normalizedScore = typeof qualityScore === 'number' ? qualityScore : null
+  const verdict = rejected === true
+    ? 'rejected'
+    : qualityWarning === true
+      ? 'warning'
+      : normalizedScore !== null
+        ? 'recorded'
+        : null
+
+  return {
+    status: value.status,
+    qualityScore: normalizedScore,
+    verdict,
+    artifactRecorded: typeof loraPath === 'string' && loraPath.trim().length > 0,
+    containsError: typeof error === 'string' && error.trim().length > 0,
+  }
+}
+
+function loraStatusRequestKey(projectId: string, characterId: string): string {
+  return `${projectId}\u0000${characterId}`
+}
+
+async function loadHistoricalLoraStatus(
+  projectId: string,
+  characterId: string,
+): Promise<HistoricalLoraLoad> {
+  try {
+    const response = await fetch(
+      `${API}/projects/${projectId}/characters/${characterId}/lora-status`,
+    )
+    if (!response.ok) return { kind: 'error' }
+    const parsed = parseHistoricalLoraStatus(await response.json(), characterId)
+    return parsed ? { kind: 'ready', summary: parsed } : { kind: 'error' }
+  } catch {
+    return { kind: 'error' }
+  }
+}
+
 export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -16,26 +112,42 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [form, setForm] = useState({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
   const [files, setFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [loraStatuses, setLoraStatuses] = useState<Record<string, LoraStatus>>({})
+  const [loraLoads, setLoraLoads] = useState<Record<string, HistoricalLoraLoad>>({})
+  const loraRequests = useRef(new Map<string, Promise<HistoricalLoraLoad>>())
   const characterStatusKey = JSON.stringify(project.characters.map((c) => c.id))
 
   // One diagnostic GET per character. Even a legacy "training" state is
   // historical: dormant-policy fields can never restore an action or polling.
   useEffect(() => {
     let cancelled = false
-    const fetchAll = async () => {
-      const entries = await Promise.all(project.characters.map(async (c) => {
-        try {
-          const r = await fetch(`${API}/projects/${project.id}/characters/${c.id}/lora-status`)
-          if (r.ok) return [c.id, await r.json() as LoraStatus] as const
-        } catch { /* ignore */ }
-        return null
-      }))
-      if (!cancelled) {
-        setLoraStatuses(Object.fromEntries(entries.filter((entry) => entry !== null)))
-      }
+    const requests = project.characters.map((character) => ({
+      characterId: character.id,
+      key: loraStatusRequestKey(project.id, character.id),
+    }))
+
+    if (requests.length > 0) {
+      setLoraLoads((previous) => {
+        const next = { ...previous }
+        for (const { key } of requests) {
+          if (!(key in next)) next[key] = LOADING_LORA_STATUS
+        }
+        return next
+      })
     }
-    void fetchAll()
+
+    for (const { characterId, key } of requests) {
+      let request = loraRequests.current.get(key)
+      if (!request) {
+        request = loadHistoricalLoraStatus(project.id, characterId)
+        loraRequests.current.set(key, request)
+      }
+      void request.then((result) => {
+        if (!cancelled) {
+          setLoraLoads((previous) => ({ ...previous, [key]: result }))
+        }
+      })
+    }
+
     return () => { cancelled = true }
   }, [project.id, characterStatusKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -237,18 +349,14 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
 
                 {/* Historical LoRA status — diagnostic and read-only. */}
                 {editingId !== c.id && (() => {
-                  const status = loraStatuses[c.id]
-                  const historicalVerdict = status?.rejected
-                    ? 'rejected'
-                    : status?.quality_warning
-                      ? 'warning'
-                      : status?.quality_score !== null && status?.quality_score !== undefined
-                        ? 'recorded'
-                        : null
+                  const load = loraLoads[
+                    loraStatusRequestKey(project.id, c.id)
+                  ] ?? LOADING_LORA_STATUS
+                  const summary = load.kind === 'ready' ? load.summary : null
                   return (
                     <div
                       className="mt-2 space-y-1 border-t border-line pt-2 text-eyebrow"
-                      data-policy={status?.policy ?? 'dormant'}
+                      data-policy="dormant"
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono uppercase text-mut">LoRA</span>
@@ -259,27 +367,39 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                       <p className="text-eyebrow-sm leading-relaxed text-mut">
                         Training, registration, and production use are unavailable. Historical records are read-only.
                       </p>
-                      <p className="text-eyebrow-sm text-mut">
-                        Historical status: {status?.status ?? 'unavailable'}
-                      </p>
-                      {status?.lora_path && (
-                        <p className="break-all text-eyebrow-sm text-dim">
-                          Historical path: {status.lora_path}
+                      {load.kind === 'loading' && (
+                        <p className="text-eyebrow-sm text-mut" role="status">
+                          Historical status: loading…
                         </p>
                       )}
-                      {status?.quality_score !== null && status?.quality_score !== undefined && (
+                      {load.kind === 'error' && (
+                        <p className="text-eyebrow-sm text-fail" role="alert">
+                          Historical status could not be loaded · see diagnostics
+                        </p>
+                      )}
+                      {summary && (
                         <p className="text-eyebrow-sm text-mut">
-                          Quality {status.quality_score.toFixed(2)} · not used by production
+                          Historical status: {summary.status}
                         </p>
                       )}
-                      {historicalVerdict && (
+                      {summary?.artifactRecorded && (
+                        <p className="text-eyebrow-sm text-dim">
+                          Historical artifact recorded · not used by production
+                        </p>
+                      )}
+                      {summary?.qualityScore !== null && summary?.qualityScore !== undefined && (
                         <p className="text-eyebrow-sm text-mut">
-                          Historical verdict: {historicalVerdict}
+                          Quality {summary.qualityScore.toFixed(2)} · not used by production
                         </p>
                       )}
-                      {status?.error && (
-                        <p className="line-clamp-2 text-eyebrow-sm text-fail" title={status.error}>
-                          Historical error: {status.error}
+                      {summary?.verdict && (
+                        <p className="text-eyebrow-sm text-mut">
+                          Historical verdict: {summary.verdict}
+                        </p>
+                      )}
+                      {summary?.containsError && (
+                        <p className="text-eyebrow-sm text-fail">
+                          Historical record contains an error · see diagnostics
                         </p>
                       )}
                     </div>
