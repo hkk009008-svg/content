@@ -328,9 +328,10 @@ class TestRenderManifest:
         assert "generate_storyboard" in combined
 
     def test_status_grouping_order(self):
-        """Components grouped in order: live, wired, stubbed, parked, dead."""
+        """Components group active-to-retired, with inactive before dead."""
         components = [
             self._make_component("d", "Dead", "dead", "f.py:d", True, 1),
+            self._make_component("i", "Inactive", "inactive", "f.py:i", True, 6),
             self._make_component("s", "Stubbed", "stubbed", "f.py:s", True, 2),
             self._make_component("l", "Live", "live", "f.py:l", True, 3),
             self._make_component("w", "Wired", "wired", "f.py:w", True, 4),
@@ -339,15 +340,19 @@ class TestRenderManifest:
         lines = render_manifest(components)
         combined = "\n".join(lines)
         # All should be present
-        for status in ("live", "wired", "stubbed", "parked", "dead"):
+        for status in ("live", "wired", "stubbed", "parked", "inactive", "dead"):
             assert status in combined
-        # live appears before wired, wired before stubbed, stubbed before parked, parked before dead
+        # Canonical status vocabulary order.
         pos_live = combined.index("live")
         pos_wired = combined.index("wired")
         pos_stubbed = combined.index("stubbed")
         pos_parked = combined.index("parked")
+        pos_inactive = combined.index("inactive")
         pos_dead = combined.index("dead")
-        assert pos_live < pos_wired < pos_stubbed < pos_parked < pos_dead
+        assert (
+            pos_live < pos_wired < pos_stubbed < pos_parked
+            < pos_inactive < pos_dead
+        )
 
     def test_section_header_present(self):
         """Output includes the section header and source attribution."""

@@ -102,7 +102,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Story prep | [domain/](domain/) — `scene_decomposer.py`, `dialogue_writer.py`, `continuity_engine.py`, `character_manager.py`, `location_manager.py`, `project_manager.py`, `language_defaults.py`, `shot_types.py`, `performance.py` | Filelock-guarded JSON CRUD (10s). LLM persona "CineDecompose v1.0" with 5 HardConstraints + 4 Tripwires. |
 | LLM | [llm/](llm/) — `ensemble.py`, `chief_director.py`, `style_director.py`, `prompt_optimizer.py`, `negative_prompts.py` | Parallel quorum (not fallback), then a judge picks. Anthropic + OpenAI + **Gemini opt-in**. |
 | Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
-| Image gen | [phase_c_assembly.py](phase_c_assembly.py), [pulid.json](pulid.json) | Production = RunPodComfyUI + PuLID, single tier. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
+| Image gen | [phase_c_assembly.py](phase_c_assembly.py), [gemini_image_native.py](gemini_image_native.py), [pulid.json](pulid.json) | Single production tier: Gemini multi-reference is the default primary; RunPodComfyUI + PuLID is the first reference-conditioned fallback. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
 | Video gen | [workflow_selector.py](workflow_selector.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 shot-type templates × 11-engine dispatch. Runway + Seedance dispatched inline (no adapter file). |
 | Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
 | Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (2 cloud engines). SyncNet quality gate. |
@@ -130,7 +130,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | Static frontend | 2 | `GET /`, `GET /<path>` |
 | Global config / cost / cleanup | 3 | `GET /api/config`, `POST /api/cost-estimate`, `POST /api/cleanup-all` |
 | Project CRUD | 5 | `POST/GET /api/projects`, `GET/PUT/DELETE /api/projects/<pid>` |
-| Characters + LoRA + style-board | 6 | `POST .../characters`, `PUT/DELETE .../characters/<cid>`, `.../lora-status`, `POST .../train-lora`, `.../style-board` |
+| Characters + LoRA history + style-board | 6 | `POST .../characters`, `PUT/DELETE .../characters/<cid>`, read-only `GET .../lora-status`, policy-denied `POST .../train-lora` (always 409), `.../style-board` |
 | Objects | 3 | `POST/PUT/DELETE /api/projects/<pid>/objects` |
 | Locations | 3 | same shape |
 | Scenes + dialogue + style-rules + language | 8 | `POST .../scenes/<sid>/decompose`, `.../generate-dialogue`, `.../scenes/reorder`, `.../style-rules`, `.../apply-language-defaults` |
@@ -146,7 +146,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:81](web_server.py:81) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:73](web_server.py:73) |
 | `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:111-112](web_server.py:111) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:782-783](web_server.py:782) |
+| `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1606](web_server.py:1606)).
@@ -184,7 +184,7 @@ Three endpoints avoid constructing `CinemaPipeline`:
 - `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:1613](web_server.py:1613))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
   live pipeline exists ([web_server.py:2067](web_server.py:2067)).
-- `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + LoRA + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
+- `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
 `ContinuityEngine + ChiefDirector + LLMEnsemble + CostTracker`, which is heavy
@@ -261,7 +261,9 @@ Dataclass + dict API. Fields:
 - **Audio:** `audio_path`, `voice_id`, `music_vibe`, `video_pacing`, `story_tension`.
 - **Output:** `final_video_path`, `final_thumbnail_path`, `metadata_path`.
 - **Workspace:** `downloaded_vids: list`.
-- **Max-quality:** `prev_shot_latent`, `char_lora_paths`, `style_reference_paths`.
+- **Retired/reserved:** `prev_shot_latent`, `style_reference_paths`.
+- **Legacy read-only LoRA snapshots:** `char_lora_paths`,
+  `char_lora_strengths`; neither has a current writer or production consumer.
 
 Dict API methods at [cinema/context.py:118-150](cinema/context.py:118):
 `__getitem__`, `__setitem__`, `__contains__`, `__iter__`, `get`, `update`,
@@ -820,7 +822,8 @@ end-to-end. Resolve alongside Part 2 / the api-engine toggle wiring.
 ### 8.1 Branching
 
 `generate_ai_broll` ([phase_c_assembly.py](phase_c_assembly.py)) has a single
-tier — production (`pulid.json`/ComfyUI + FAL fallback chain, §8.2). The
+tier — production (Gemini multi-reference primary, then `pulid.json`/ComfyUI
+and the FAL fallback chain, §8.2). The
 former `quality_tier == "max"` fork (`try: return generate_ai_broll_max(...)`)
 was retired across three WS1 steps: Task 1 removed the dispatch branch itself
 from `generate_ai_broll`; Task 2 removed its config
@@ -838,9 +841,9 @@ heuristic. §8.3 (below) covers what the max tier did, for archaeology.
 Four-priority cascade inside `generate_ai_broll` (PRIORITY 0 added WS3,
 Google-first overhaul):
 0. **Gemini 2.5 Flash Image** (Nano Banana, `gemini_image_native.GeminiImageAPI`) —
-   only engages when a project opts in via `identity_backend='gemini_multiref'`
-   (`get_project_setting`, default stays `'pod'` — every existing project is
-   unaffected) AND a character reference is present. On success the image must
+   is the default when a character reference is present
+   (`identity_backend='gemini_multiref'`); a project explicitly sets
+   `identity_backend='pod'` to opt out. On success the image must
    also pass the shared identity validator
    (`phase_c_vision._get_shared_validator().validate_image`); a failing score
    logs one JSONL line to `logs/gemini_image_arc_comparison.jsonl` (shot
@@ -942,30 +945,19 @@ injection passes, the technique-parameter table) is not reproduced here — it
 described a file that no longer exists; consult git history at or before the
 WS1 Task 4 commit if it's ever needed.
 
-**LoRA quality gate** ([prep/lora_quality.py](prep/lora_quality.py)) — the
-train→validate→retrain orchestration (`train_character_lora_gated`,
-`validate_lora_quality`) still exists and is still called from
-`web_server.py`'s train-lora endpoint, but its ComfyUI generation step
-(`_generate_with_lora`) was a thin wrapper over `quality_max.py`'s
-injection functions; those wrappers now raise a typed `_QualityMaxRemoved`
-exception on every call (WS1 Task 4 VERIFY fast-follow: previously a live
-`from quality_max import ...` dangling reference raising bare
-`ModuleNotFoundError`) — caught by a broad `except Exception`, so the
-endpoint still returns `skipped=True` /
-`skip_reason="generation_or_scoring_unavailable"` for every request, now
-logged at WARNING (structural, once per call) rather than a per-call ERROR
-traceback (this predates Task 4: `get_max_quality_params` was already gone
-from `workflow_selector.py` since WS1 Task 2, so the path was already
-failing, just via a different exception). Whether to repoint these wrappers
-at the production `pulid.json`/ComfyUI path or explicitly retire
-`validate_lora_quality`/`train_character_lora_gated` is still an open
-product decision, not yet made — this fast-follow only removed the dangling
-import and made the permanent-skip condition legible; it did not restore
-the gate's real function. `prep/lora_training.py::train_character_lora` (the
-actual training subprocess wrapper) is unaffected and still functions; the
-LoRA it produces registers into `char_lora_paths`/`char_lora_strengths` for a
-future consumer that doesn't exist yet (`phase_c_assembly.py`'s
-`char_lora_path`/`char_lora_strength` kwargs are reserved but dormant).
+**Current LoRA policy** ([prep/lora_policy.py](prep/lora_policy.py)) —
+per-character LoRA training, registration, and production consumption are
+deliberately dormant. `POST .../train-lora` returns the stable 409 denial
+before loading project/trainer state; project updates reject changes to
+`char_lora_paths`, `char_lora_strengths`, or `char_lora_triggers`. The status
+GET remains read-only: it merges historical sidecar fields with exactly
+`training_available=false`, `registration_available=false`,
+`consumer_available=false`, and `policy="dormant"`. The capability scorecard
+keeps historical rows separately from the same top-level availability
+projection. Trainer/validator implementations remain for archaeology and
+read-only compatibility, but no current product path reaches them. Active
+identity binding is reference-based: Gemini multi-reference is primary and
+the ComfyUI fallback uses PuLID.
 
 ### 8.4 Identity-validator integration
 

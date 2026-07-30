@@ -1,8 +1,9 @@
 """Build the capability scorecard (Part 4 / U1+U2+U8) from a project dict.
 
 Pure aggregation: reads the already-persisted project + per-character LoRA
-status; computes per-dimension measured-vs-bar, gate rollup, cascade routing,
-and component-wiring status. No mutation, no Flask.
+status; projects the hard dormant LoRA availability policy; computes
+per-dimension measured-vs-bar, gate rollup, cascade routing, and
+component-wiring status. No mutation, no Flask.
 """
 from __future__ import annotations
 import logging
@@ -14,6 +15,7 @@ from typing import Optional
 
 from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
 from cinema.context import _finite_or
+from prep.lora_policy import lora_dormant_status_fields
 
 # U3 — Final-media conformance constants.
 # LUFS pass = abs(value - target) <= tolerance (streaming-platform window,
@@ -184,6 +186,7 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         "dimensions": dimensions,
         "routing": {"first_try": routing["first_try"], "fallback": routing["fallback"], "silent_fallback": routing["silent_fallback"]},
         "gates": _gate_rollup(shots),
+        "lora_availability": lora_dormant_status_fields(),
         "lora": _lora_summary(project, project_dir),
         "components": _components(),
         "per_shot": per_shot,

@@ -13,7 +13,7 @@ import type { AppConfig } from '../types/project'
 const POD_PROVIDER = 'RUNPOD_GPU'
 
 /** Non-engine features that also require the pod (not represented in api_registry). */
-export const POD_FEATURES = ['lora_training', 'comfyui_keyframe'] as const
+export const POD_FEATURES = ['comfyui_keyframe'] as const
 export type PodFeature = (typeof POD_FEATURES)[number]
 
 export function isPodGated(engineKey: string, config: AppConfig | null): boolean {

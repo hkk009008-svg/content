@@ -41,6 +41,35 @@ class TestScorecardBuilder:
         identity = next(d for d in sc["dimensions"] if d["key"] == "identity")
         assert identity["value"] == 0.74 and identity["bar"] is not None
 
+    def test_lora_availability_is_exact_and_historical_rows_remain(self):
+        from unittest.mock import patch
+
+        historical = {
+            "status": "done",
+            "quality_score": 0.72,
+            "best_strength": 0.55,
+            "rejected": False,
+            "quality_warning": True,
+        }
+        with patch(
+            "prep.lora_training.get_lora_status", return_value=historical
+        ):
+            sc = build_capability_scorecard(
+                _make_project(), project_dir="/tmp/nonexistent"
+            )
+        assert sc["lora_availability"] == {
+            "training_available": False,
+            "registration_available": False,
+            "consumer_available": False,
+            "policy": "dormant",
+        }
+        assert sc["lora"] == [{
+            "char_id": "char_alex",
+            "strength": 0.55,
+            "score": 0.72,
+            "verdict": "warning",
+        }]
+
     def test_coherence_falls_back_to_diagnostics(self):
         sc = build_capability_scorecard(_make_project(), project_dir="/tmp/nonexistent")
         coh = next(d for d in sc["dimensions"] if d["key"] == "coherence")

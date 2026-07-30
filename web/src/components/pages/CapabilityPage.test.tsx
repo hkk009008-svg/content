@@ -30,6 +30,12 @@ const emptyScorecard: CapabilityScorecard = {
     motion: { approved: 0, vetoed: 0, top_vetoes: [] },
     final: { approved: 0, vetoed: 0, top_vetoes: [] },
   },
+  lora_availability: {
+    training_available: false,
+    registration_available: false,
+    consumer_available: false,
+    policy: 'dormant',
+  },
   lora: [],
   components: [],
   per_shot: [],
@@ -55,10 +61,17 @@ const readyScorecard: CapabilityScorecard = {
     motion: { approved: 3, vetoed: 0, top_vetoes: [] },
     final: { approved: 3, vetoed: 0, top_vetoes: [] },
   },
+  lora_availability: {
+    training_available: false,
+    registration_available: false,
+    consumer_available: false,
+    policy: 'dormant',
+  },
   lora: [{ char_id: 'char_1', strength: 0.55, score: 0.87, verdict: 'ok' }],
   components: [
     { id: 'final_assembly', title: 'Final video assembly', status: 'live', note: '' },
     { id: 'batch_scene_optimize', title: 'Cross-shot batched prompt optimization', status: 'stubbed', note: 'zero callers' },
+    { id: 'lora_validation', title: 'Historical LoRA validation records', status: 'inactive', note: 'read-only' },
   ],
   per_shot: [
     { shot_id: 'sc1_sh1', identity: 0.82, coherence: 0.7, motion: 0.55, lipsync: null, engine: 'KLING_NATIVE' },
@@ -95,5 +108,20 @@ describe('CapabilityPage', () => {
     await waitFor(() => {
       expect(container.querySelectorAll('[data-testid="dimension-meter"]')).toHaveLength(readyScorecard.dimensions.length)
     })
+  })
+
+  it('renders LoRA records as inactive history and never advertises a second-character action', async () => {
+    mockFetchOnce(readyScorecard)
+    render(<CapabilityPage project={project} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Historical LoRA records')).toBeInTheDocument()
+    })
+    expect(screen.getByText(
+      'Training, registration, and production use are unavailable. Historical records are read-only.',
+    )).toBeInTheDocument()
+    expect(screen.queryByText(['Second-character', 'LoRA'].join(' '))).toBeNull()
+    expect(screen.getByText('1 of 3 systems engaged')).toBeInTheDocument()
+    expect(screen.getAllByText('inactive')).toHaveLength(1)
   })
 })

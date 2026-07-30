@@ -1,19 +1,17 @@
 import { Section, Badge } from '../../ui'
-import type { Project } from '../../../types/project'
 import { RangeRow, ToggleRow } from './controls'
 
 interface Props {
   s: any
-  project: Project
   update: (key: string, value: any) => void | Promise<void>
 }
 
 /**
  * Identity section — face-lock strictness, retry, adaptive PuLID, guidance,
- * coherence, plus a read-only surface of the pod-gated per-character LoRA
- * training flag (the actual LoRA path/upload UI lives in CharacterPanel).
+ * coherence, active reference-based identity guidance, and the explicit
+ * inactive/read-only LoRA policy.
  */
-export function IdentitySection({ s, project, update }: Props) {
+export function IdentitySection({ s, update }: Props) {
   return (
     <Section title="Identity">
       <div className="space-y-3">
@@ -67,30 +65,19 @@ export function IdentitySection({ s, project, update }: Props) {
           hint="Min scene coherence score to accept. Below → mutation retry."
         />
 
-        {/* Per-character LoRA training — pod-gated flag + pointer to CharacterPanel. */}
+        {/* LoRA is policy-inactive; reference conditioning is the active path. */}
         <div className="space-y-1.5 border-t border-line pt-3">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-tx">Per-character LoRA training</span>
-            <Badge variant="pod">Pod</Badge>
+            <span className="text-[11px] text-tx">Per-character LoRA</span>
+            <Badge variant="neutral">Inactive</Badge>
           </div>
           <p className="text-[10px] leading-tight text-mut">
-            Trained per character on the RunPod GPU. Assign a LoRA in the Character panel — it binds a
-            secondary character PuLID alone can&apos;t hold.
+            Training, registration, and production use are unavailable. Historical records are read-only.
           </p>
-          {project.characters.length === 0 ? (
-            <p className="text-[10px] italic text-dim">No characters yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {project.characters.map((c) => (
-                <span
-                  key={c.id}
-                  className="rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] text-mut"
-                >
-                  {c.name}
-                </span>
-              ))}
-            </div>
-          )}
+          <p className="text-[10px] leading-tight text-dim">
+            Use clear reference images for the active identity path: Gemini multi-reference first,
+            with PuLID reference conditioning on the ComfyUI fallback.
+          </p>
         </div>
       </div>
     </Section>

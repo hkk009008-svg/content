@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Project, AppConfig } from '../types/project'
+import type { Project, AppConfig, LoraStatus } from '../types/project'
 
 const API = '/api'
 
@@ -9,21 +9,6 @@ interface Props {
   onRefresh: () => void
 }
 
-interface LoraStatus {
-  char_id: string
-  status: string
-  progress_percent: number
-  lora_path?: string | null
-  quality_score?: number | null
-  image_count?: number
-  error?: string | null
-  finished_at?: string | null
-  log_tail?: string | null
-}
-
-const MIN_LORA_IMAGES = 15
-const IDEAL_LORA_IMAGES = 25
-
 export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -32,48 +17,27 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [files, setFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [loraStatuses, setLoraStatuses] = useState<Record<string, LoraStatus>>({})
-  const [trainingIds, setTrainingIds] = useState<Set<string>>(new Set())
+  const characterStatusKey = JSON.stringify(project.characters.map((c) => c.id))
 
-  // Poll LoRA statuses per character — every 5s while any training is active
+  // One diagnostic GET per character. Even a legacy "training" state is
+  // historical: dormant-policy fields can never restore an action or polling.
   useEffect(() => {
     let cancelled = false
     const fetchAll = async () => {
-      const updates: Record<string, LoraStatus> = {}
-      for (const c of project.characters) {
+      const entries = await Promise.all(project.characters.map(async (c) => {
         try {
           const r = await fetch(`${API}/projects/${project.id}/characters/${c.id}/lora-status`)
-          if (r.ok) updates[c.id] = await r.json()
+          if (r.ok) return [c.id, await r.json() as LoraStatus] as const
         } catch { /* ignore */ }
-      }
-      if (!cancelled) setLoraStatuses(prev => ({ ...prev, ...updates }))
-    }
-    fetchAll()
-    const anyActive = Object.values(loraStatuses).some(s => s && (s.status === 'training' || s.status === 'preparing' || s.status === 'validating'))
-    if (anyActive || trainingIds.size > 0) {
-      const interval = setInterval(fetchAll, 5000)
-      return () => { cancelled = true; clearInterval(interval) }
-    }
-    return () => { cancelled = true }
-  }, [project.id, project.characters.length, trainingIds.size])
-
-  const triggerLoraTraining = async (cid: string) => {
-    const r = await fetch(`${API}/projects/${project.id}/characters/${cid}/train-lora`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    })
-    if (r.ok) {
-      setTrainingIds(prev => new Set(prev).add(cid))
-      // Optimistically mark status
-      setLoraStatuses(prev => ({
-        ...prev,
-        [cid]: { char_id: cid, status: 'preparing', progress_percent: 0 },
+        return null
       }))
-    } else {
-      const err = await r.json().catch(() => ({ error: 'Training failed to start' }))
-      alert(`Training failed to start: ${err.error || 'unknown error'}\n${err.have !== undefined ? `Have ${err.have} images, need ${err.needed}` : ''}`)
+      if (!cancelled) {
+        setLoraStatuses(Object.fromEntries(entries.filter((entry) => entry !== null)))
+      }
     }
-  }
+    void fetchAll()
+    return () => { cancelled = true }
+  }, [project.id, characterStatusKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAdd = async () => {
     if (!form.name.trim()) return
@@ -271,59 +235,51 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                   </div>
                 )}
 
-                {/* LoRA training status / trigger — only in display mode */}
+                {/* Historical LoRA status — diagnostic and read-only. */}
                 {editingId !== c.id && (() => {
-                  const refCount = c.reference_images?.length || 0
                   const status = loraStatuses[c.id]
-                  const isActive = status && ['preparing', 'training', 'validating'].includes(status.status)
-                  const isDone = status && status.status === 'done' && status.lora_path
-                  const isFailed = status && status.status === 'failed'
-                  const enoughImages = refCount >= MIN_LORA_IMAGES
+                  const historicalVerdict = status?.rejected
+                    ? 'rejected'
+                    : status?.quality_warning
+                      ? 'warning'
+                      : status?.quality_score !== null && status?.quality_score !== undefined
+                        ? 'recorded'
+                        : null
                   return (
-                    <div className="mt-2 pt-2 border-t border-line">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 flex-wrap text-eyebrow">
-                          <span className="text-mut font-mono uppercase">LoRA:</span>
-                          {isDone && (
-                            <span className="text-ok font-bold">✓ trained</span>
-                          )}
-                          {isActive && (
-                            <span className="text-acc animate-pulse">{status.status}…</span>
-                          )}
-                          {isFailed && (
-                            <span className="text-fail" title={status.error || 'unknown'}>✗ failed</span>
-                          )}
-                          {!status || status.status === 'idle' ? (
-                            <span className="text-mut">
-                              {enoughImages ? 'ready to train' : `${refCount}/${MIN_LORA_IMAGES} images`}
-                            </span>
-                          ) : null}
-                          {isDone && status.quality_score !== null && status.quality_score !== undefined && status.quality_score >= 0 && (
-                            <span className="text-mut">Q={status.quality_score.toFixed(2)}</span>
-                          )}
-                        </div>
-                        {!isActive && (
-                          <button
-                            onClick={() => triggerLoraTraining(c.id)}
-                            disabled={!enoughImages}
-                            title={!enoughImages
-                              ? `Need at least ${MIN_LORA_IMAGES} reference images (have ${refCount}). Recommend ${IDEAL_LORA_IMAGES}+ varied angles + lighting.`
-                              : isDone ? 'Re-train (overwrites existing LoRA)' : 'Train per-character LoRA (~30 min on RTX 4090)'}
-                            className={`text-eyebrow px-2 py-0.5 rounded border ${
-                              enoughImages
-                                ? 'border-acc/40 text-acc hover:bg-acc/10'
-                                : 'border-line text-mut opacity-50 cursor-not-allowed'
-                            }`}>
-                            {isDone ? 'Re-train' : isFailed ? 'Retry' : 'Train LoRA'}
-                          </button>
-                        )}
+                    <div
+                      className="mt-2 space-y-1 border-t border-line pt-2 text-eyebrow"
+                      data-policy={status?.policy ?? 'dormant'}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono uppercase text-mut">LoRA</span>
+                        <span className="rounded border border-line bg-panel px-1.5 py-0.5 text-mut">
+                          Inactive
+                        </span>
                       </div>
-                      {isFailed && status.error && (
-                        <p className="text-eyebrow-sm text-fail mt-1 line-clamp-2" title={status.error}>{status.error}</p>
+                      <p className="text-eyebrow-sm leading-relaxed text-mut">
+                        Training, registration, and production use are unavailable. Historical records are read-only.
+                      </p>
+                      <p className="text-eyebrow-sm text-mut">
+                        Historical status: {status?.status ?? 'unavailable'}
+                      </p>
+                      {status?.lora_path && (
+                        <p className="break-all text-eyebrow-sm text-dim">
+                          Historical path: {status.lora_path}
+                        </p>
                       )}
-                      {isActive && status.image_count !== undefined && status.image_count > 0 && (
-                        <p className="text-eyebrow-sm text-mut mt-1">
-                          Training on {status.image_count} images. ~30 min on RTX 4090.
+                      {status?.quality_score !== null && status?.quality_score !== undefined && (
+                        <p className="text-eyebrow-sm text-mut">
+                          Quality {status.quality_score.toFixed(2)} · not used by production
+                        </p>
+                      )}
+                      {historicalVerdict && (
+                        <p className="text-eyebrow-sm text-mut">
+                          Historical verdict: {historicalVerdict}
+                        </p>
+                      )}
+                      {status?.error && (
+                        <p className="line-clamp-2 text-eyebrow-sm text-fail" title={status.error}>
+                          Historical error: {status.error}
                         </p>
                       )}
                     </div>

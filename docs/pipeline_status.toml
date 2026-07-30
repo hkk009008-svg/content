@@ -16,6 +16,8 @@
 #   stubbed — code exists but is never effectively reached (dead toggle, no-op
 #             return, zero callers) — a candidate to wire
 #   parked  — implemented but blocked on external state (e.g. GPU pod / node install)
+#   inactive — deliberately unavailable by policy; code/data may remain only
+#              for historical and read-only compatibility
 #   dead    — confirmed dead; removal candidate
 #
 # Adding an entry: pick a stable `def`/`class`/module-const SYMBOL as the anchor
@@ -45,10 +47,10 @@ note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyb
 
 [[component]]
 id = "lora_validation"
-title = "LoRA training quality gate"
-status = "wired"
-anchor = "prep/lora_quality.py:validate_lora_quality"
-note = "§10 F-A.2: real ArcFace oracle — strength sweep + score vs. reference. WIRED end-to-end (T1 tasks 1-7): web api_train_lora -> train_character_lora_gated -> validate_lora_quality -> persists char_lora_paths + char_lora_strengths; controller threads char_lora_strength -> _inject_identity (overrides node-700 strength). Runs when ComfyUI/GPU is reachable; gracefully skips (registers unvalidated) otherwise. Live CALIBRATION of threshold/baseline/strength-sweep still needs a GPU pod (Phase-B) — wiring + graceful-skip work now."
+title = "Historical LoRA validation records"
+status = "inactive"
+anchor = "prep/lora_policy.py:LORA_POLICY"
+note = "Dormant policy boundary. Trainer/validator code, prior status sidecars, and legacy registry snapshots are retained only for historical/read-only compatibility; current product paths cannot start work, mutate the registry, or consume the artifacts."
 
 [[component]]
 id = "batch_scene_optimize"

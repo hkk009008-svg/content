@@ -133,7 +133,7 @@ def latest_adr(text: str) -> Optional[tuple[int, str]]:
 # render
 # ---------------------------------------------------------------------------
 
-_STATUS_ORDER = ["live", "wired", "stubbed", "parked", "dead"]
+_STATUS_ORDER = ["live", "wired", "stubbed", "parked", "inactive", "dead"]
 # scripts/ is on sys.path when status.py runs (own dir as a script, or inserted
 # by the importing sibling/test); protocol_mailbox imports only pathlib.
 import protocol_mailbox  # noqa: E402

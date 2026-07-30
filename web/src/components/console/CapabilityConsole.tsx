@@ -14,15 +14,10 @@ function scoreClass(value: number | null, bar: number | null): string {
   return value >= bar ? 'text-ok' : 'text-fail'
 }
 
-function verdictVariant(verdict: 'ok' | 'warning' | 'rejected'): BadgeVariant {
-  if (verdict === 'ok') return 'ok'
-  if (verdict === 'warning') return 'warn'
-  return 'fail'
-}
-
 function componentDot(status: string): Status {
   if (status === 'live' || status === 'wired') return 'ok'
   if (status === 'stubbed' || status === 'parked') return 'warn'
+  if (status === 'inactive') return 'idle'
   if (status === 'dead') return 'fail'
   return 'idle'
 }
@@ -30,6 +25,7 @@ function componentDot(status: string): Status {
 function componentBadge(status: string): BadgeVariant {
   if (status === 'live' || status === 'wired') return 'ok'
   if (status === 'stubbed' || status === 'parked') return 'warn'
+  if (status === 'inactive') return 'neutral'
   if (status === 'dead') return 'fail'
   return 'neutral'
 }
@@ -260,27 +256,39 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
   )
 }
 
-// ── Section: LoRA summary (Task 7) ───────────────────────────────────────────
+// ── Section: historical LoRA records ─────────────────────────────────────────
 
 function LoraSummary({ sc }: { sc: CapabilityScorecard }) {
-  if (sc.lora.length === 0) {
-    return <div className="text-[11px] italic text-dim">No character LoRAs</div>
-  }
+  const availability = sc.lora_availability
+  const diagnostic = [
+    `policy=${availability.policy}`,
+    `training_available=${availability.training_available}`,
+    `registration_available=${availability.registration_available}`,
+    `consumer_available=${availability.consumer_available}`,
+  ].join(' · ')
 
   return (
-    <div className="space-y-1 text-[11px]">
-      {sc.lora.map((row) => (
-        <div key={row.char_id} className="flex items-baseline gap-2">
-          <span className="text-dim">{row.char_id}</span>
-          {row.strength !== null && <span className="text-mut">str {row.strength.toFixed(2)}</span>}
-          {row.score !== null && (
-            <span className={row.verdict === 'ok' ? 'text-ok' : row.verdict === 'warning' ? 'text-warn' : 'text-fail'}>
-              {row.score.toFixed(2)}
-            </span>
-          )}
-          <Badge variant={verdictVariant(row.verdict)}>{row.verdict}</Badge>
+    <div className="space-y-2 text-[11px]" data-policy={availability.policy}>
+      <div className="space-y-1" title={diagnostic}>
+        <Badge variant="neutral">Inactive</Badge>
+        <p className="text-mut">
+          Training, registration, and production use are unavailable. Historical records are read-only.
+        </p>
+      </div>
+      {sc.lora.length === 0 ? (
+        <div className="italic text-dim">No historical character LoRA records</div>
+      ) : (
+        <div className="space-y-1">
+          {sc.lora.map((row) => (
+            <div key={row.char_id} className="flex items-baseline gap-2">
+              <span className="text-dim">{row.char_id}</span>
+              {row.strength !== null && <span className="text-mut">historical str {row.strength.toFixed(2)}</span>}
+              {row.score !== null && <span className="text-mut">{row.score.toFixed(2)}</span>}
+              <Badge variant="neutral">{row.verdict}</Badge>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   )
 }
@@ -309,23 +317,13 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
 
 // ── Section: Available — not engaged (Task 11) ───────────────────────────────
 
-/** Curated capability inventory (ComfyUI max keyframe, second-character LoRA
- *  — per the redesign spec §"Page 4 — Capability") plus any component the
- *  manifest marks `stubbed`/`parked` (code exists but isn't reached / is
- *  blocked on external state, e.g. the pod). Second-char LoRA is hidden once
- *  the project actually has ≥2 characters with a LoRA row (sourced from
- *  `sc.lora`, not fabricated). Foley is deliberately excluded: it's a live,
- *  unconditional step in every scene (`cinema_pipeline.py:_ensure_scene_foley`),
- *  not a dormant/available-only capability — listing it here would misrepresent
- *  real pipeline state. */
+/** Curated capability inventory plus manifest entries marked
+ *  `stubbed`/`parked`. Policy-inactive LoRA is deliberately absent: retained
+ *  history is not an available capability. Foley is also excluded because it
+ *  is a live, unconditional scene step. */
 function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
-  const secondCharLoraEngaged = sc.lora.length >= 2
-
   const curated: { id: string; label: string; note: string; pod: boolean }[] = [
     { id: 'comfy_max_keyframe', label: 'ComfyUI max keyframe', note: 'FLUX + PuLID keyframe fallback — needs the RunPod pod running.', pod: true },
-    ...(secondCharLoraEngaged
-      ? []
-      : [{ id: 'second_char_lora', label: 'Second-character LoRA', note: 'Per-character LoRA training for a secondary cast member — trains on the pod.', pod: true }]),
   ]
 
   const stubbedComponents = sc.components.filter((c) => c.status === 'stubbed' || c.status === 'parked')
@@ -445,7 +443,7 @@ export default function CapabilityConsole({ project }: Props) {
             <GateAudit sc={sc} />
           </Section>
 
-          <Section title="LoRA quality">
+          <Section title="Historical LoRA records">
             <LoraSummary sc={sc} />
           </Section>
 

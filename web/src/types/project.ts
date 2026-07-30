@@ -162,6 +162,13 @@ export interface GlobalSettings {
   scene_transitions?: boolean
   transition_duration?: number
 
+  // Legacy LoRA registry snapshots. These fields are read-only historical
+  // state: the product cannot train, register, or consume per-character LoRAs.
+  // They remain typed only so old project JSON can round-trip unchanged.
+  char_lora_paths?: Record<string, string>
+  char_lora_strengths?: Record<string, number>
+  char_lora_triggers?: Record<string, string>
+
   // -----------------------------------------------------------------
   // RETIRED MAX-QUALITY TIER — the selector + inspector UI were removed in the
   // Setup redesign (Task 8). These keys are kept ONLY as type mirrors of
@@ -176,7 +183,6 @@ export interface GlobalSettings {
   max_regenerate_floor_arc?: number         // 0.5-1.0, default 0.82
   max_halt_rule?: HaltRule                  // composite_only (Option 2, current default), conjunctive, budget_only
   max_quality_parallel_workers?: number     // 1-4, default 1 — per-batch candidate parallelism
-  char_lora_paths?: Record<string, string>  // character_id -> LoRA .safetensors path
   style_reference_paths?: string[]          // FLUX Redux style board references
 
   // -----------------------------------------------------------------
@@ -490,7 +496,6 @@ export interface AppConfig {
   quality_judge_options?: { value: string; label: string }[]
   // Max-tier configuration surface (read from MAX_QUALITY_TEMPLATES on the server)
   max_workflow_templates?: Record<string, MaxQualityTemplate>
-  available_loras?: { id: string; path: string; label: string }[]   // LoRA registry (server-side scan)
   available_style_refs?: { path: string; label: string }[]          // style board references on disk
   // Purpose-based API routing (from PURPOSE_API_RANKING)
   purpose_tags?: PurposeTag[]
@@ -531,12 +536,40 @@ export interface ScorecardMedia {
   measured_at: string | null;
 }
 
+/** Diagnostic-only policy projection. These fields describe the current
+ * dormant boundary and must never be interpreted as UI reactivation flags. */
+export interface LoraAvailability {
+  training_available: false;
+  registration_available: false;
+  consumer_available: false;
+  policy: 'dormant';
+}
+
+/** Read-only historical LoRA sidecar returned by the character status GET. */
+export interface LoraStatus extends LoraAvailability {
+  char_id: string;
+  status: string;
+  progress_percent: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  lora_path?: string | null;
+  quality_score?: number | null;
+  image_count?: number;
+  config?: Record<string, unknown> | null;
+  error?: string | null;
+  log_tail?: string | null;
+  rejected?: boolean;
+  quality_warning?: boolean;
+  best_strength?: number | null;
+}
+
 export interface CapabilityScorecard {
   project_id: string; tier: string;
   summary: { shots_total: number; shots_clearing_all_bars: number };
   dimensions: CapabilityDimension[];
   routing: { first_try: number; fallback: number; silent_fallback: number };
   gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; top_vetoes: [string, number][] }>;
+  lora_availability: LoraAvailability;
   lora: { char_id: string; strength: number | null; score: number | null; verdict: 'ok'|'warning'|'rejected' }[];
   components: { id: string; title: string; status: string; note: string }[];
   per_shot: { shot_id: string; identity: number|null; coherence: number|null; motion: number|null; lipsync: number|null; engine: string }[];

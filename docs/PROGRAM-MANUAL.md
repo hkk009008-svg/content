@@ -377,7 +377,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `RunState` | `cinema/runstate.py:60` | Dataclass: all per-run mutable state (`shot_results`, `scene_clips`, `scene_audio`, `shot_audio`, `scene_foley`, `foley_audio_paths`, `failed_shots`, `current_stage`, `headless`, `completed_scene_indices`). One instance, shared by all controllers. |
 | `ThreadedLifecycle` | `cinema/lifecycle.py:110` | Event-backed pause/cancel/gate-wait. `wait_for_gate(name, predicate, poll=0.5)`, `signal_gate(name)` for early wake, `check_pause()`. |
 | `NullLifecycle` | `cinema/lifecycle.py:70` | No-op lifecycle whose `wait_for_gate` returns `True` unconditionally. **NOT used by `CinemaPipeline`** — was the deleted CLI's lifecycle. See §3.13 gotcha. |
-| `PipelineContext` | `cinema/context.py:51` | Typed shared state passed INTO phase `.run()` calls (`global_settings`, `lifecycle`, audio paths, `char_lora_paths`, …). Dict-compat layer (`__getitem__`/`.get()`) keeps legacy dict-style phases working. |
+| `PipelineContext` | `cinema/context.py:51` | Typed shared state passed INTO phase `.run()` calls (`global_settings`, `lifecycle`, audio paths, legacy read-only `char_lora_*` snapshots, …). Dict-compat layer (`__getitem__`/`.get()`) keeps legacy dict-style phases working. |
 | `get_project_setting(ctx, key, default)` | `cinema/context.py:157` | **Canonical** read path for per-project UI knobs (reads `ctx.global_settings`). Must be used instead of `config.settings.Settings` for any user-tunable setting. |
 | `cinema.pipeline.CinemaPipeline` | `cinema/pipeline.py:80` | Generic `run()` over a `list[Phase]`; short-circuits on `ok=False`. NOT the orchestrator. |
 
@@ -559,7 +559,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `apply_workflow_params` | `workflow_selector.py:297` | Write params into the `pulid.json` node map. |
 | `get_adaptive_pulid_weight` | `workflow_selector.py:336` | Rolling-stats adaptive PuLID weight. |
 
-> **Max tier retired (WS1 Task 4, `267af0cd`).** The `generate_ai_broll_max` driver (`quality_max.py`) and its `pulid_max.json` graph — N=8 adaptive best-of, node probe/prune, the five `_inject_*` axes, and the ControlNet / Redux / FaceDetailer / SUPIR post-passes — were deleted; production (`pulid.json` + FAL) is the sole ComfyUI/pod image tier (WS3 later layered Nano Banana in front as the image **primary** — see the §3.9 role). `ARCHITECTURE.md` §8.3 keeps the mechanism archaeology; ADR-024 records why (the max graph over-cooks structurally, so `production`/`pulid.json` is the validated survivor). Of the scoring primitives above, `score_candidate` survives as the LoRA-quality oracle (`prep/lora_quality.py:203`); `should_halt` / `needs_regenerate` are now dormant (no live caller).
+> **Max tier retired (WS1 Task 4, `267af0cd`).** The `generate_ai_broll_max` driver (`quality_max.py`) and its `pulid_max.json` graph — N=8 adaptive best-of, node probe/prune, the five `_inject_*` axes, and the ControlNet / Redux / FaceDetailer / SUPIR post-passes — were deleted; production (`pulid.json` + FAL) is the sole ComfyUI/pod image tier (WS3 later layered Nano Banana in front as the image **primary** — see the §3.9 role). `ARCHITECTURE.md` §8.3 keeps the mechanism archaeology; ADR-024 records why (the max graph over-cooks structurally, so `production`/`pulid.json` is the validated survivor). Of the scoring primitives above, `score_candidate` remains in the retained, policy-inactive LoRA validator code; it has no live product caller. `should_halt` / `needs_regenerate` are likewise dormant.
 | `generate_keyframe_take` | `cinema/shots/controller.py:636` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence
@@ -611,9 +611,9 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 ### 3.12 Post-processing / Assembly / Audio
 
-**Role:** everything after video generation — face-swap, lip-sync (overlay or full talking-head), RIFE interpolation, SeedVR2/Topaz upscale, per-character LoRA training, and the ffmpeg assembly that grades, stitches, mixes 3-track audio, and normalizes to EBU R128. The audio side generates dialogue TTS, BGM, foley, forced alignment, and voice DSP.
+**Role:** everything after video generation — face-swap, lip-sync (overlay or full talking-head), RIFE interpolation, SeedVR2/Topaz upscale, and the ffmpeg assembly that grades, stitches, mixes 3-track audio, and normalizes to EBU R128. Historical LoRA status/trainer modules remain in this area, but the product policy makes training, registration, and production use inactive and read-only. The audio side generates dialogue TTS, BGM, foley, forced alignment, and voice DSP.
 
-**Canonical modules:** `phase_c_ffmpeg.py` (assembly utilities — §3.8), `phase_c_vision.py` (427 LOC, face-swap + vision QC), `lip_sync.py` (875 LOC), `prep/lora_training.py` (566 LOC), `prep/topaz_upscale.py` (151 LOC), and the `audio/` package (`dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `voiceover.py`, `_client.py`).
+**Canonical modules:** `phase_c_ffmpeg.py` (assembly utilities — §3.8), `phase_c_vision.py` (427 LOC, face-swap + vision QC), `lip_sync.py` (875 LOC), `prep/lora_policy.py` (the dormant boundary), retained `prep/lora_training.py` history/status code, `prep/topaz_upscale.py` (151 LOC), and the `audio/` package (`dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `voiceover.py`, `_client.py`).
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -630,8 +630,8 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `generate_lip_sync_video` | `lip_sync.py:1001` | Smart router (`mode="auto"`); SyncNet quality gate via `_sync_gate_settings` at `:730`. |
 | `generate_rife_interpolation` | `lip_sync.py:1117` | Cloud RIFE (FPS multiplier). |
 | `upscale_video_seedvr2` | `lip_sync.py:1197` | Cloud SeedVR2 upscale (1080p/2160p). |
-| `train_character_lora` | `prep/lora_training.py:434` | ai-toolkit subprocess FLUX LoRA training (rank-32 default). (`validate_lora_quality` has moved to `prep/lora_quality.py:213` and is now a real ArcFace scoring oracle — strength × prompt sweep vs the character's `canonical_reference` — not the old stub.) |
-| `prepare_character_lora_dataset` | `prep/lora_training.py:164` | Builds the LoRA training dataset from the character's reference images. |
+| `train_character_lora` | `prep/lora_training.py:434` | Retained ai-toolkit FLUX LoRA producer implementation; its entry path is unconditionally denied by `prep.lora_policy` and is not operational product capability. |
+| `prepare_character_lora_dataset` | `prep/lora_training.py:164` | Retained dataset-preparation implementation behind the same inactive policy; historical/status compatibility only. |
 | `upscale_with_topaz` | `prep/topaz_upscale.py:75` | Local Topaz CLI wrapper (no-op if CLI absent → caller falls back to SeedVR2). |
 | `generate_dialogue_voiceover` | `audio/dialogue.py:513` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 2 for Korean; optional `.alignment.json` sidecar. |
 | `generate_fal_bgm` | `audio/music.py:288` | FAL Stable Audio BGM (25+ vibes). |
@@ -686,7 +686,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | Single SSE consumer | `web_server.py:1577` | A second `/stream` tab drains the shared queue; both miss events. |
 | `_running_cores` not invalidated on settings edit | `web_server.py:110` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2371`, `cinema_pipeline.py:783` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
-| Single-mode / zero-caller features | `cinema/auto_approve.py:775`, `face_validator_gate.py` | `should_halt` / `needs_regenerate` in `face_validator_gate.py` were the max-tier best-of gate; with the max tier retired (WS1 Task 4) they have no live caller (`score_candidate` survives — it backs the LoRA-quality oracle, `prep/lora_quality.py:203`). `summarize_audit` is defined but no web endpoint calls it. (`validate_lora_quality` is a real ArcFace oracle at `prep/lora_quality.py:213` — see §3.12.) |
+| Single-mode / zero-caller features | `cinema/auto_approve.py:775`, `face_validator_gate.py` | `should_halt` / `needs_regenerate` in `face_validator_gate.py` were the max-tier best-of gate; with the max tier retired (WS1 Task 4) they have no live caller. `score_candidate` and `validate_lora_quality` remain in policy-inactive historical LoRA code, not a live product path. `summarize_audit` is defined but no web endpoint calls it. |
 | `reporter.py` + dialogue helpers removed | — | The legacy `reporter.py` diagnostic orphan has been **deleted** outright; the dead dialogue helpers `format_dialogue_for_voiceover` / `dialogue_to_narration_text` were also removed (audio uses raw `generate_dialogue` output). |
 
 ---
@@ -799,7 +799,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 ### Stage 2 — Keyframe / image render
 
-**INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (sampler knobs, LoRA/style paths, identity strictness), and the production ComfyUI workflow graph (`pulid.json`).
+**INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (sampler knobs, identity backend/strictness, style paths, plus legacy read-only LoRA snapshots that have no production consumer), and the production ComfyUI workflow graph (`pulid.json`).
 
 **PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:636`):
 1. Skip shots already carrying `approved_keyframe_take_id`.
@@ -1122,11 +1122,11 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 | `identity_threshold` | 0.55 | 0.4–0.8 | Per-shot face-similarity threshold | `global_settings` |
 | `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:538`, `workflow_selector.py:337` |
 | `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:285` |
-| `char_lora_paths` | {} | dict | Per-character trained LoRA `.safetensors` — the single biggest identity lever | `global_settings` |
+| `char_lora_paths` | {} | dict | Legacy read-only LoRA registry snapshot; cannot be changed or consumed by current product paths | `global_settings` |
 
 Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:96`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
 
-**LoRA training** (the highest-quality identity path): `POST .../characters/<cid>/train-lora` (`web_server.py:707`) runs a background ai-toolkit job (FLUX rank-32 fp16, 3000 steps; `prep/lora_training.py:105`). Upload **25–50 varied reference images** first. Poll `GET .../characters/<cid>/lora-status` (`web_server.py:813`). On completion the path lands in `char_lora_paths` (and `char_lora_strengths` in lockstep — `web_server.py:857`), and the controller reads them and threads `char_lora_strength` through the identity strategy into `generate_ai_broll` (`cinema/shots/controller.py:344`). **Registration is live; consumption is dormant.** The former consumer was the max-tier LoRA loader (`quality_max._inject_identity`), retired in WS1 Task 4 — so the `char_lora_*` kwargs are now *reserved but not yet wired* to a production consumer (`prep/lora_training.py:10`), pending a possible future FLUX.2 A/B rework (a separate, deferred track — WS3 shipped Nano Banana / `gemini_multiref` instead).
+**LoRA availability is inactive by policy.** `POST .../characters/<cid>/train-lora` returns a stable 409 before it can load trainer/project dependencies, and project updates reject changes to the legacy `char_lora_paths`, `char_lora_strengths`, and `char_lora_triggers` snapshots. `GET .../characters/<cid>/lora-status` remains only to read historical sidecars; it reports `training_available=false`, `registration_available=false`, `consumer_available=false`, and `policy="dormant"`. Those fields are diagnostics, never reactivation flags. The active identity path is reference-based: upload clear multi-angle reference images for Gemini multi-reference (the default primary), with PuLID reference conditioning on the ComfyUI fallback.
 
 **Face swap** (post-hoc identity correction): `POST .../shots/<sid>/correct` with `action="face_swap"` (`web_server.py:2139` → `controller.apply_correction`). Cascade: fal.ai PixVerse → FaceFusion CLI (`phase_c_vision.py:53`). Note FaceFusion runs CPU-only by default.
 
@@ -1202,10 +1202,10 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2139`) or auto-reco
 ### 5.4 "To Maximize X, Do Y" Recipes
 
 **To maximize identity lock in portraits / close-ups:**
-1. Ensure the ComfyUI/RunPod pod is live so keyframes render on the production PuLID path (`pulid.json`) rather than dropping to the FAL fallback. (There is no longer a `quality_tier="max"` switch — it was retired in WS1 Task 4.)
-2. Upload many real front-facing reference photos per character; let the 5-angle FLUX generation run.
-3. **Train a LoRA** (`POST .../characters/<cid>/train-lora`, 25–50 images) and confirm `char_lora_paths` populated.
-4. `identity_strictness=0.70`, `ip_adapter_weight≈0.90`, keep `adaptive_pulid=true`.
+1. Use the default `identity_backend="gemini_multiref"` so Gemini binds identity from the character's reference set; keep the ComfyUI/RunPod PuLID path available as its reference-conditioned fallback. (There is no longer a `quality_tier="max"` switch — it was retired in WS1 Task 4.)
+2. Upload many clear real reference photos per character, with front, three-quarter, and profile coverage; let the multi-angle reference expansion run.
+3. Confirm every in-frame character has a canonical reference and useful multi-angle references. Per-character LoRA is policy-inactive and is not part of this recipe.
+4. `identity_strictness=0.70`, `ip_adapter_weight≈0.90` for the PuLID fallback, and keep `adaptive_pulid=true`.
 5. Keep `img2img_denoise` low (0.2–0.3) for consecutive same-scene shots so the prior approved keyframe anchors identity.
 
 **To get a clean, controlled background (no smear, no stray figures):**
@@ -1663,7 +1663,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `identity/types.py` | 126 | `FailureReason`, `SHOT_TYPE_THRESHOLDS`, `get_threshold_for_shot` |
 | `identity/__init__.py` | 100 | `make_validator()` factory, `get_shared_validator()` singleton |
 | `coherence_analyzer.py` | 277 | Pixel-level color/lighting/composition coherence (`assess_coherence`) |
-| `face_validator_gate.py` | 341 | `score_candidate` composite scorer (backs the LoRA-quality oracle); `should_halt`/`needs_regenerate` were the max-tier best-of gate, dormant since WS1 Task 4 |
+| `face_validator_gate.py` | 341 | `score_candidate` composite scorer retained by the policy-inactive historical LoRA oracle; `should_halt`/`needs_regenerate` were the max-tier best-of gate, dormant since WS1 Task 4 |
 | `domain/character_manager.py` | 527 | Character creation, multi-angle FLUX refs, voice assignment |
 | `domain/location_manager.py` | 214 | Location creation, prompt fragments, deterministic seeds |
 | `performance/identity_gate.py` | 119 | Performance-take single-frame ArcFace check |
@@ -1679,7 +1679,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `audio/foley.py` | 193 | Environmental foley via Stability AI Stable Audio 2.0 |
 | `audio/effects.py` | 284 | Pedalboard chain + macOS AU host + 13 FFmpeg voice-FX presets |
 | `audio/alignment.py` | 288 | Forced alignment (WhisperX → Whisper word timestamps) |
-| `prep/lora_training.py` | 566 | Per-character LoRA dataset prep + ai-toolkit subprocess trainer |
+| `prep/lora_training.py` | 566 | Retained per-character LoRA status/dataset/trainer implementation behind the unconditional dormant policy; no operational product caller |
 | `prep/topaz_upscale.py` | 151 | Topaz Video AI local CLI wrapper |
 
 #### Cross-cutting services & config
@@ -1832,7 +1832,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | `adaptive_pulid` | `True` | Rolling-stats PuLID self-calibration | keep `True` |
 | `ip_adapter_weight` | `0.85` | PuLID face-lock strength (per-char & per-object) | `0.85–0.95` |
 | `prompt_optimizer_enabled` | `True`¹ | LLM rewrites prompt pre-gen, cached on `optimizer_cache` | `True` |
-| `char_lora_paths` | `{}` | Per-character LoRA `.safetensors` | train on 25–50 refs (biggest identity lever) |
+| `char_lora_paths` | `{}` | Legacy read-only LoRA registry snapshot | preserve old values unchanged; current identity uses Gemini multi-reference / PuLID references |
 | `style_reference_paths` | `[]` | Style-board images (fed FLUX Redux in the retired max tier; now threaded but dormant) | provide a style board |
 | `coherence_check_enabled` | `True` | Per-shot coherence comparison | keep `True` |
 | `color_drift_sensitivity` | `0.3` | Color-grade recommendation threshold | lower to `0.2` for tight grading |
@@ -1897,7 +1897,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | **Cascade** | The fault-tolerant ordered fallback across video engines in `generate_ai_video`. On engine failure, `try_next_api` advances; total exhaustion sleeps 30 s and retries up to `cascade_retry_limit` |
 | **Cascade metadata** | `{engine, attempts[]}` written by `_record_video_cascade` on success → persisted to the take for provenance/audit |
 | **PuLID** | Identity-locking ComfyUI node that binds a character's face to generation from a reference image. Weight is shot-type-dependent and adaptively tuned. Both production and max now use `ApplyPulidFlux` (FLUX-native; production fixed 2026-06-13, ADR-025 — see D-image-3 for the historical class divergence) |
-| **Composite score** | `0.6·arc_score + 0.4·aesthetic_score`; missing component substitutes neutral 0.5 (`face_validator_gate.py`'s `score_candidate` — was the max-tier candidate metric; now used by the LoRA-quality oracle) |
+| **Composite score** | `0.6·arc_score + 0.4·aesthetic_score`; missing component substitutes neutral 0.5 (`face_validator_gate.py`'s `score_candidate` — was the max-tier candidate metric and remains only in policy-inactive historical LoRA validation code) |
 | **ArcFace / GhostFaceNet** | Face-embedding models for identity cosine-similarity. `IdentityValidator` uses GhostFaceNet via DeepFace; mapped to [0,1] as `(1+cos)/2` |
 | **Coherence score** | Pixel-level cross-shot consistency: `(1−color_drift)·0.4 + lighting·0.3 + composition·0.3`. Result may be invalid (image read failed) — check `result.valid` |
 | **Identity drift** | Character face changing across shots — the core problem the continuity + PuLID + identity-validation stack exists to prevent |
@@ -1920,7 +1920,7 @@ Each entry: **symptom → diagnose → fix**, with the source location that gove
 #### Identity drift (character face changes across shots)
 
 - **Diagnose:** Check `take["metadata"]["identity_score"]` + `identity_failure_reason`. Run `IdentityValidator.get_rolling_stats(char_id)` — `common_failure` tells you the class (`FACE_ANGLE_EXTREME`, `SMALL_FACE_REGION`, `WRONG_PERSON`, `LOW_CONFIDENCE_DETECTION`).
-- **Fix:** Upload more real front-facing references (not synthetic); let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`; train a per-character LoRA (single biggest lever). Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:369`).
+- **Fix:** Upload more real front-facing and multi-angle references (not synthetic); use Gemini multi-reference as the primary identity backend and keep PuLID reference conditioning available as fallback; let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`. Per-character LoRA is policy-inactive. Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:369`).
 
 #### Color shift / temporal discontinuity between shots
 
@@ -2019,7 +2019,7 @@ Confusingly similar, different things: `pipeline_context.py` (15 LOC) loads the 
 |---|---|---|
 | `evaluate_generation_quality` | Active post-gen evaluator | **Wired by T6** (`10a0eb4`, 2026-06-06) — definition at `chief_director.py:406`; called by `cinema/shots/controller.py:1961` in `diagnose_clip(deep=True)`. 2×2 mutation matrix + negative-prompt enrichment are now reachable via the opt-in deep diagnosis path. **Vision-grounded** (`d974c15`+`a4cb076`, 2026-06-07): attaches the generated take + canonical reference images, grounding `diagnosis` in what the model sees (dogfood: text-only restated "0.504 < 0.65"; vision identified a male figure vs the female reference and ruled out a detection false negative). |
 | `reporter.py` | Diagnostic reporter | **Orphan** — the only `generate_report()` caller is its own `if __name__ == "__main__"` block (line 52). Globs from CWD, not project dirs; hardcoded 21/20/20 counts are legacy. Removal candidate |
-| `validate_lora_quality` | LoRA ArcFace gate | **Now implemented** — moved to `prep/lora_quality.py:213` as a real ArcFace scoring oracle (strength × prompt sweep vs `canonical_reference`); the old `prep/lora_training.py` stub is gone (`lora_training.py:40` documents the move) |
+| `validate_lora_quality` | Historical LoRA ArcFace gate | Implementation retained in `prep/lora_quality.py`, but `prep/lora_policy.LORA_POLICY="dormant"` makes training, registry writes, and consumption unreachable from current product paths; only read-only historical status remains |
 | `format_dialogue_for_voiceover`, `dialogue_to_narration_text` | Dialogue helpers | **Removed entirely** — both functions are gone repo-wide; the pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly |
 | `TemporalConsistencyManager.record_shot_generated` / `reset_scene` | Temporal chaining | **Uncalled in production** — chaining relies on `approved_anchor_image` passed explicitly; the in-memory `last_generated_image` path is functionally dead |
 | `LTX _fal_transition` / `_native_transition` | Keyframe interpolation | **Unreachable from the cascade** — `generate_ai_video` never calls them; only direct `LTXVideoAPI` use reaches them |

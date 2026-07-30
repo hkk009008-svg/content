@@ -32,7 +32,7 @@ describe('isPodGated', () => {
     expect(isPodGated('FLUX_DEV', {} as AppConfig)).toBe(false)
   })
 
-  it('exposes the two non-engine pod feature gates', () => {
-    expect(POD_FEATURES).toEqual(['lora_training', 'comfyui_keyframe'])
+  it('exposes only the active non-engine pod feature gate', () => {
+    expect(POD_FEATURES).toEqual(['comfyui_keyframe'])
   })
 })
