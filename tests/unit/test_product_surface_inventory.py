@@ -740,11 +740,111 @@ secondHop('audit', '/api/two-hop')
     assert operation["kind"] == "unknown_wrapper_call"
     assert operation["url_template"] is None
     assert operation["method"] == "GET"
+    assert operation["route_match"] == "unknown"
+    assert operation["transport_id"] == result["frontend_transports"][0]["id"]
     assert {
         (row.get("owner"), row["reason"])
         for row in result["unresolved"]
         if row["kind"] == "unknown_wrapper_call"
     } == {("secondHop", "wrapper reaches transport through another local wrapper")}
+
+
+def test_multi_hop_wrapper_resolution_is_declaration_order_independent(
+    tmp_path: Path,
+) -> None:
+    backend = """
+from flask import Flask
+app = Flask(__name__, static_folder=None)
+
+@app.route("/api/three")
+def three():
+    pass
+"""
+    forward_root = _repo(tmp_path / "forward", backend)
+    reverse_root = _repo(tmp_path / "reverse", backend)
+    _frontend(
+        forward_root,
+        "chain.ts",
+        """
+function first(url: string) { return fetch(url) }
+function second(url: string) { return first(url) }
+function third(url: string) { return second(url) }
+third('/api/three')
+""",
+    )
+    _frontend(
+        reverse_root,
+        "chain.ts",
+        """
+function third(url: string) { return second(url) }
+function second(url: string) { return first(url) }
+function first(url: string) { return fetch(url) }
+third('/api/three')
+""",
+    )
+
+    results = [_build(forward_root), _build(reverse_root)]
+    semantic_operations = []
+    for result in results:
+        assert len(result["frontend_operations"]) == 1
+        operation = result["frontend_operations"][0]
+        transport = result["frontend_transports"][0]
+        assert operation["source"]["line"] == 5
+        assert operation["transport_id"] == transport["id"]
+        unresolved = [
+            row
+            for row in result["unresolved"]
+            if row["kind"] == "unknown_wrapper_call"
+        ]
+        assert len(unresolved) == 1
+        assert unresolved[0]["expression"] == "'/api/three'"
+        assert unresolved[0]["source"]["line"] == 5
+        semantic_operations.append(
+            {
+                key: operation[key]
+                for key in (
+                    "expanded_wrapper",
+                    "kind",
+                    "method",
+                    "path_shape",
+                    "route_match",
+                    "url_template",
+                )
+            }
+        )
+        assert {
+            (row.get("owner"), row["reason"])
+            for row in result["unresolved"]
+            if row["kind"] == "unknown_wrapper_call"
+        } == {("third", "wrapper reaches transport through another local wrapper")}
+
+    assert semantic_operations[0] == semantic_operations[1] == {
+        "expanded_wrapper": "third",
+        "kind": "unknown_wrapper_call",
+        "method": "GET",
+        "path_shape": None,
+        "route_match": "unknown",
+        "url_template": None,
+    }
+
+
+def test_wrapper_cycle_terminates_without_inventing_transport_truth(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "cycle.ts",
+        """
+function first(url: string) { return second(url) }
+function second(url: string) { return first(url) }
+first('/api/cycle')
+""",
+    )
+
+    result = _build(root)
+
+    assert result["frontend_transports"] == []
+    assert result["frontend_operations"] == []
+    assert result["unresolved"] == []
 
 
 def test_dynamic_method_wrapper_calls_are_explicit_unknowns_with_transport_link(

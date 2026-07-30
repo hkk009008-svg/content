@@ -549,30 +549,39 @@ function analyzeFile(root, file, checker) {
     }
     visit(node);
   }
-  for (const info of functions.candidates) {
-    if (wrappers.has(info.symbol)) continue;
-    let reached;
-    walkOwn(info.node, (node) => {
-      if (reached || !ts.isCallExpression(node)) return;
-      const target = wrappers.get(symbol(checker, node.expression));
-      const argument = target?.urlParameterIndex === undefined
-        ? undefined
-        : unwrap(node.arguments[target.urlParameterIndex]);
-      const parameter = argument && ts.isIdentifier(argument)
-        ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
-        : undefined;
-      if (
-        target && argument && ts.isIdentifier(argument) && parameter
-      ) reached = { target, parameter };
-    });
-    if (reached) wrappers.set(info.symbol, {
-      info,
-      safe: false,
-      reason: "wrapper reaches transport through another local wrapper",
-      transport: reached.target.transport,
-      urlParameterIndex: reached.parameter.supported ? reached.parameter.index : undefined,
-      urlParameterSymbol: reached.parameter.symbol,
-    });
+  // Each pass can discover one more dependency layer; the candidate count
+  // bounds convergence and leaves transport-free cycles unresolved.
+  for (let pass = 0; pass < functions.candidates.length; pass += 1) {
+    let changed = false;
+    for (const info of functions.candidates) {
+      if (wrappers.has(info.symbol)) continue;
+      let reached;
+      walkOwn(info.node, (node) => {
+        if (reached || !ts.isCallExpression(node)) return;
+        const target = wrappers.get(symbol(checker, node.expression));
+        const argument = target?.urlParameterIndex === undefined
+          ? undefined
+          : unwrap(node.arguments[target.urlParameterIndex]);
+        const parameter = argument && ts.isIdentifier(argument)
+          ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
+          : undefined;
+        if (
+          target && argument && ts.isIdentifier(argument) && parameter
+        ) reached = { target, parameter };
+      });
+      if (reached) {
+        wrappers.set(info.symbol, {
+          info,
+          safe: false,
+          reason: "wrapper reaches transport through another local wrapper",
+          transport: reached.target.transport,
+          urlParameterIndex: reached.parameter.supported ? reached.parameter.index : undefined,
+          urlParameterSymbol: reached.parameter.symbol,
+        });
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
   function collectWrapperAliases(node) {
     if (
