@@ -1,0 +1,3060 @@
+{
+  "frontend_operations": [
+    {
+      "backend_route_ids": [
+        "route:api_capability_scorecard:954484d2a3d45586"
+      ],
+      "id": "frontend-operation:0436eaf3e2b7ca0e",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/capability-scorecard",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 372,
+        "path": "web/src/components/console/CapabilityConsole.tsx"
+      },
+      "transport_id": "frontend-transport:5d01cd9266676fbd",
+      "url_template": "/api/projects/{1}/capability-scorecard"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_diagnose_shot:52eedf96237f2859"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:058d3afbff58ab41",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 206,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/diagnose"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cancel:3ec4c1004cf6ceeb"
+      ],
+      "id": "frontend-operation:062cd119e6147936",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/cancel",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 74,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": "frontend-transport:b7908258403a5ebe",
+      "url_template": "/api/projects/{1}/cancel"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_location:4c4e5e22465a2b60"
+      ],
+      "id": "frontend-operation:0642785109c3f665",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 56,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "transport_id": "frontend-transport:117011303ba31daa",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_location:40b9ec102bd29fe5"
+      ],
+      "id": "frontend-operation:0bca0b01a976757d",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "transport_id": "frontend-transport:5bce946c5a869ddc",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:0be6f7a89888d5e8",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 58,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": "frontend-transport:3ad536ad08dd6d5f",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_restart_shot:479db05ce2dadfe4"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:0e7bca670982bef9",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/restart",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 176,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/restart"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_final_take:ba0ab0b0f1e34a72"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:0ee66577031517b4",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 196,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/final/{3}/approve"
+    },
+    {
+      "backend_route_ids": [],
+      "id": "frontend-operation:1342b6dc318b333b",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "{1}/projects/{2}/shots/{3}/reject-auto-approve",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 60,
+        "path": "web/src/components/console/RejectAutoApproveModal.tsx"
+      },
+      "transport_id": "frontend-transport:ad9b8cf5110bd5d9",
+      "url_template": "{1}/projects/{2}/shots/{3}/reject-auto-approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_assemble_screen:d86fff4fbd563fc1"
+      ],
+      "id": "frontend-operation:14445f8afea96286",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble/screen",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 404,
+        "path": "web/src/components/pipeline/ScreeningStage.tsx"
+      },
+      "transport_id": "frontend-transport:0e332764253c4e17",
+      "url_template": "/api/projects/{1}/assemble/screen"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:1ae9d7e4e6c0bc25",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 41,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": "frontend-transport:5ec9c917c21dfd7f",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "id": "frontend-operation:1bceb7baade62743",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 342,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:88f35f0ee5a3fd0d",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "id": "frontend-operation:2d68a2614ed5e375",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:9de4123e538bdee5",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [],
+      "id": "frontend-operation:314029e29cd78efc",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "{1}/projects/{2}/characters/{3}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 123,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": "frontend-transport:bd1019193b060528",
+      "url_template": "{1}/projects/{2}/characters/{3}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_iterate_take:6e4f2103391bdce5"
+      ],
+      "id": "frontend-operation:3510e947b2a79972",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 248,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:6730f319788be67c",
+      "url_template": "/api/projects/{1}/shots/{2}/takes/{3}/iterate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_motion:e33ce408c66615c2"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:3975414da0245344",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 191,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/motion/generate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_stream:4e26548ad72b65b2"
+      ],
+      "id": "frontend-operation:39e0489d68929db7",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/stream",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 84,
+        "path": "web/src/hooks/useSSE.ts"
+      },
+      "transport_id": "frontend-transport:0511367c62cfbadf",
+      "url_template": "/api/projects/{1}/stream"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
+      ],
+      "id": "frontend-operation:3a84580411ba8920",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      },
+      "transport_id": "frontend-transport:5f1c44406ad30a78",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_regenerate_shot:ae30ef4f457b584d"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:3a9285053f499947",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 150,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/regenerate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_keyframe:ccfc0fb03f450e57"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:3faeac1cc762d7bb",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 168,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/keyframes/generate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_project:4de0aade993f8606"
+      ],
+      "id": "frontend-operation:4a0d0660412d06e5",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      },
+      "transport_id": "frontend-transport:8c862baef67de0dc",
+      "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_character:f63c1dfe4fa9002d"
+      ],
+      "id": "frontend-operation:4c459e386e6b78c7",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 90,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:72b68c98338c5fb5",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [],
+      "id": "frontend-operation:4fabc0baf0cfdd9c",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "{1}/projects/{2}/shots/{3}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 92,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": "frontend-transport:11590d09f53dafed",
+      "url_template": "{1}/projects/{2}/shots/{3}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cost_live:453d429ef0008533"
+      ],
+      "id": "frontend-operation:50bbadf6e85e9f98",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/cost-live",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 33,
+        "path": "web/src/components/console/Telemetry.tsx"
+      },
+      "transport_id": "frontend-transport:167e0ce23f6c23d9",
+      "url_template": "/api/projects/{1}/cost-live"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate:6b91ac9b453dfc46"
+      ],
+      "id": "frontend-operation:584a371a6b5af032",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/generate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 68,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": "frontend-transport:b8037d3236d9c0c4",
+      "url_template": "/api/projects/{1}/generate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_clear_performance:5d17aa48651c9161"
+      ],
+      "id": "frontend-operation:591af480d05e28a5",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 572,
+        "path": "web/src/components/pipeline/ReviewStage.tsx"
+      },
+      "transport_id": "frontend-transport:3c63c3207ae0ad5e",
+      "url_template": "/api/projects/{1}/shots/{2}/performance"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:5ae65cad4fd492eb",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 160,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_proceed_assembly:c53146735ec0f336"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:5d63332291fb116f",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 211,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/assemble"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_object:2720ef76155f563a"
+      ],
+      "id": "frontend-operation:5e3bd68bb1a9e606",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 94,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "transport_id": "frontend-transport:fbe349059c52fa50",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_shot:60b130964b1fd219"
+      ],
+      "id": "frontend-operation:632802fbf1441f7f",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/shots/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 67,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": "frontend-transport:dd29d1f81f5cb77e",
+      "url_template": "/api/projects/{1}/shots/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_shot_plan:ea420a69c80424a2"
+      ],
+      "id": "frontend-operation:67c5c76a95efd9af",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 21,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      },
+      "transport_id": "frontend-transport:9d484910b711a2ff",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_location:4522f1083c852069"
+      ],
+      "id": "frontend-operation:7020366ba4c69a1b",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/locations",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "transport_id": "frontend-transport:8778dd542941a523",
+      "url_template": "/api/projects/{1}/locations"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_reorder_scenes:b8ff80cfcf90cdda"
+      ],
+      "id": "frontend-operation:72d9bd7266aed937",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/reorder",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 112,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:2d89c53d8127f23c",
+      "url_template": "/api/projects/{1}/scenes/reorder"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_clear_performance:5d17aa48651c9161"
+      ],
+      "id": "frontend-operation:73ad6bbca91c2c98",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 417,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:cec43b24fd29092c",
+      "url_template": "/api/projects/{1}/shots/{2}/performance"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_object:ddc8fd9d84190a80"
+      ],
+      "id": "frontend-operation:76fb06ff61c059c8",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 68,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "transport_id": "frontend-transport:da70dd29556ad738",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_shot_plan:ea420a69c80424a2"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:8044a17fda05828c",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 155,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_location:4c4e5e22465a2b60"
+      ],
+      "id": "frontend-operation:898d3f9b7e781bee",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 54,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "transport_id": "frontend-transport:94737f01c946c037",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_object:2720ef76155f563a"
+      ],
+      "id": "frontend-operation:8a05df71b0c4948d",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 96,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "transport_id": "frontend-transport:df693d9bb9dfa9a8",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_create_project:bd55971731373044"
+      ],
+      "id": "frontend-operation:8d3da9ddec0b4f3e",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 52,
+        "path": "web/src/components/ProjectSelector.tsx"
+      },
+      "transport_id": "frontend-transport:6675a9e426994a51",
+      "url_template": "/api/projects"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cost_estimate:0b28a387a0a62a25"
+      ],
+      "id": "frontend-operation:a40e51b474ae385b",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/cost-estimate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 26,
+        "path": "web/src/components/settings/CostEstimatorSection.tsx"
+      },
+      "transport_id": "frontend-transport:762c39ae3109f0e4",
+      "url_template": "/api/cost-estimate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_scene:752d4e2e3442a2ca"
+      ],
+      "id": "frontend-operation:ad7c66c5798f0018",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 26,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:425514cbd72c2a53",
+      "url_template": "/api/projects/{1}/scenes"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_decompose_scene:da34d08053c7b17c"
+      ],
+      "id": "frontend-operation:af8f6a5f6640b5db",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 81,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:cd13ee0f8a6b7e9b",
+      "url_template": "/api/projects/{1}/scenes/{2}/decompose"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:b0cb32da9dcc18ad",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": "frontend-transport:37484d3c8bee35c8",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_assemble_reassemble:d842ab3e789607e7"
+      ],
+      "id": "frontend-operation:b3a2ba5c79ca1c02",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble/re-assemble",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 285,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:1ffb7550b1b55d48",
+      "url_template": "/api/projects/{1}/assemble/re-assemble"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_get_project:8a94a524be403d69"
+      ],
+      "id": "frontend-operation:b5d00e5ebf7c2371",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 45,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": "frontend-transport:66e55f0bf775368e",
+      "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "id": "frontend-operation:b6636143fc740d80",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 357,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:cb0ab228faa986ca",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_character:46bcb34585739e28"
+      ],
+      "id": "frontend-operation:b6e2630716a1ae48",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/characters",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 55,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:9d7f69eb1915fde5",
+      "url_template": "/api/projects/{1}/characters"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_performance_take:b3a30ccdbdace785"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:bd55421e10f18047",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 186,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/performance/{3}/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_character:f63c1dfe4fa9002d"
+      ],
+      "id": "frontend-operation:bdeded298f4eeea3",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 88,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:d78d83c0b38eb521",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_screening_approve:0d6bea47da8aa8e7"
+      ],
+      "id": "frontend-operation:be5e1fe595520e5f",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/screening/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 264,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:a4d268f35367f819",
+      "url_template": "/api/projects/{1}/screening/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_scene:4ce7dac9b6971bab"
+      ],
+      "id": "frontend-operation:c0867968d5d0461e",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 46,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:0b66216fb9f21a98",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_resume:d10d681a881accc6"
+      ],
+      "id": "frontend-operation:c6307fc67e3d09c5",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/resume",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 132,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:37cc22c82bc200ac",
+      "url_template": "/api/projects/{1}/resume"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_upload_driving_video:b6345fd3bcc0aa51"
+      ],
+      "id": "frontend-operation:cc19aff46d4aa198",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 440,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:e715b122db4102a3",
+      "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_correct_shot:d9f2bc6e2b66cdf5"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:cd681b32a08d756d",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/correct",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 201,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/correct"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_lora_status:ecd3f8ddaa769ebd"
+      ],
+      "id": "frontend-operation:d16b6e6c4ccbb652",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 29,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:3f72d9bbb3f0cecc",
+      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_character:fbd1680d60d08895"
+      ],
+      "id": "frontend-operation:d3e9c100866f7b6a",
+      "kind": "direct_transport",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": "frontend-transport:12c287d81f870250",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_upload_driving_video:b6345fd3bcc0aa51"
+      ],
+      "id": "frontend-operation:d936564f17535f9b",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 553,
+        "path": "web/src/components/pipeline/ReviewStage.tsx"
+      },
+      "transport_id": "frontend-transport:29ca3739434cd18d",
+      "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_dialogue:3104c83ecc6e0279"
+      ],
+      "id": "frontend-operation:d9a44ecfbdeb32bd",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": "frontend-transport:ba7ba60843d5e0a4",
+      "url_template": "/api/projects/{1}/scenes/{2}/generate-dialogue"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_style_rules:90cfb97f206104fb"
+      ],
+      "id": "frontend-operation:db6921d8ab0a817b",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/style-rules",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 78,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      },
+      "transport_id": "frontend-transport:cfee29dfc302c06e",
+      "url_template": "/api/projects/{1}/style-rules"
+    },
+    {
+      "backend_route_ids": [],
+      "id": "frontend-operation:dfbc38e6343db8dd",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "{1}/projects/{2}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 112,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": "frontend-transport:417699d068e80726",
+      "url_template": "{1}/projects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_pause:8c962297a6515f7b"
+      ],
+      "id": "frontend-operation:e829b14ae1258960",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/pause",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 126,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:9d7c8fd84a1b706d",
+      "url_template": "/api/projects/{1}/pause"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_object:71dcf96c26e1c758"
+      ],
+      "id": "frontend-operation:ef6fc4432b9ef1a8",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/objects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 58,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "transport_id": "frontend-transport:3bd97e5ecea49be8",
+      "url_template": "/api/projects/{1}/objects"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_keyframe_take:dafbed73f936b983"
+      ],
+      "expanded_wrapper": "postJson",
+      "id": "frontend-operation:f3d71dc7f96584a8",
+      "kind": "one_hop_wrapper_call",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 181,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": "frontend-transport:aaaec1e51b89b676",
+      "url_template": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_shot:60b130964b1fd219"
+      ],
+      "id": "frontend-operation:f6198d9a687b2ce5",
+      "kind": "direct_transport",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/shots/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 43,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": "frontend-transport:70f7e53e4fb41635",
+      "url_template": "/api/projects/{1}/shots/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_list_projects:bfa304ff09694c73"
+      ],
+      "id": "frontend-operation:f6b86b17c45b7fa4",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/projects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 25,
+        "path": "web/src/components/ProjectSelector.tsx"
+      },
+      "transport_id": "frontend-transport:1bc3fdf0fdfe8792",
+      "url_template": "/api/projects"
+    }
+  ],
+  "frontend_transports": [
+    {
+      "backend_route_ids": [
+        "route:api_stream:4e26548ad72b65b2"
+      ],
+      "enclosing_function": "connect",
+      "id": "frontend-transport:0511367c62cfbadf",
+      "kind": "event_source",
+      "method": "GET",
+      "non_2xx_observation": null,
+      "non_2xx_observation_applicability": "not_applicable",
+      "path_shape": "/api/projects/{1}/stream",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 84,
+        "path": "web/src/hooks/useSSE.ts"
+      },
+      "transport_error_observation": "observed",
+      "url_expression": "`/api/projects/${projectId}/stream`",
+      "url_template": "/api/projects/{1}/stream"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_scene:4ce7dac9b6971bab"
+      ],
+      "enclosing_function": "handleDelete",
+      "id": "frontend-transport:0b66216fb9f21a98",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 46,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${sid}`",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_assemble_screen:d86fff4fbd563fc1"
+      ],
+      "enclosing_function": "fetchManifest",
+      "id": "frontend-transport:0e332764253c4e17",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/assemble/screen",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 404,
+        "path": "web/src/components/pipeline/ScreeningStage.tsx"
+      },
+      "url_expression": "`/api/projects/${project.id}/assemble/screen`",
+      "url_template": "/api/projects/{1}/assemble/screen"
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "persistShot",
+      "id": "frontend-transport:11590d09f53dafed",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "{1}/projects/{2}/shots/{3}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 92,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "url_expression": "`${base}/projects/${project.id}/shots/${shot.id}`",
+      "url_template": "{1}/projects/{2}/shots/{3}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_location:4c4e5e22465a2b60"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:117011303ba31daa",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 56,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/locations/${editingId}`",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_character:fbd1680d60d08895"
+      ],
+      "enclosing_function": "handleDelete",
+      "id": "frontend-transport:12c287d81f870250",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/characters/${cid}`",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cost_live:453d429ef0008533"
+      ],
+      "enclosing_function": "tick",
+      "id": "frontend-transport:167e0ce23f6c23d9",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/cost-live",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 33,
+        "path": "web/src/components/console/Telemetry.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/cost-live`",
+      "url_template": "/api/projects/{1}/cost-live"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_list_projects:bfa304ff09694c73"
+      ],
+      "enclosing_function": "ProjectSelector",
+      "id": "frontend-transport:1bc3fdf0fdfe8792",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 25,
+        "path": "web/src/components/ProjectSelector.tsx"
+      },
+      "url_expression": "`${API}/projects`",
+      "url_template": "/api/projects"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_assemble_reassemble:d842ab3e789607e7"
+      ],
+      "enclosing_function": "reassembleProject",
+      "id": "frontend-transport:1ffb7550b1b55d48",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/assemble/re-assemble",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 285,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "`/api/projects/${projectId}/assemble/re-assemble`",
+      "url_template": "/api/projects/{1}/assemble/re-assemble"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_upload_driving_video:b6345fd3bcc0aa51"
+      ],
+      "enclosing_function": "ClipCard",
+      "id": "frontend-transport:29ca3739434cd18d",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 553,
+        "path": "web/src/components/pipeline/ReviewStage.tsx"
+      },
+      "url_expression": "`${API}/projects/${projectId}/shots/${shot.id}/upload-driving-video`",
+      "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_reorder_scenes:b8ff80cfcf90cdda"
+      ],
+      "enclosing_function": "handleDrop",
+      "id": "frontend-transport:2d89c53d8127f23c",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/reorder",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 112,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/reorder`",
+      "url_template": "/api/projects/{1}/scenes/reorder"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "PromptEditor",
+      "id": "frontend-transport:37484d3c8bee35c8",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "url_expression": "'/api/config'",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_resume:d10d681a881accc6"
+      ],
+      "enclosing_function": "resume",
+      "id": "frontend-transport:37cc22c82bc200ac",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/resume",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 132,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "`/api/projects/${projectId}/resume`",
+      "url_template": "/api/projects/{1}/resume"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "ShotRow",
+      "id": "frontend-transport:3ad536ad08dd6d5f",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 58,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "url_expression": "'/api/config'",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_object:71dcf96c26e1c758"
+      ],
+      "enclosing_function": "handleAdd",
+      "id": "frontend-transport:3bd97e5ecea49be8",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/objects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 58,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/objects`",
+      "url_template": "/api/projects/{1}/objects"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_clear_performance:5d17aa48651c9161"
+      ],
+      "enclosing_function": "ClipCard",
+      "id": "frontend-transport:3c63c3207ae0ad5e",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 572,
+        "path": "web/src/components/pipeline/ReviewStage.tsx"
+      },
+      "url_expression": "`${API}/projects/${projectId}/shots/${shot.id}/performance`",
+      "url_template": "/api/projects/{1}/shots/{2}/performance"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_lora_status:ecd3f8ddaa769ebd"
+      ],
+      "enclosing_function": "fetchAll",
+      "id": "frontend-transport:3f72d9bbb3f0cecc",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 29,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/characters/${c.id}/lora-status`",
+      "url_template": "/api/projects/{1}/characters/{2}/lora-status"
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "updateGlobalSetting",
+      "id": "frontend-transport:417699d068e80726",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "{1}/projects/{2}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 112,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "url_expression": "`${base}/projects/${project.id}`",
+      "url_template": "{1}/projects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_scene:752d4e2e3442a2ca"
+      ],
+      "enclosing_function": "handleAdd",
+      "id": "frontend-transport:425514cbd72c2a53",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 26,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes`",
+      "url_template": "/api/projects/{1}/scenes"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_location:40b9ec102bd29fe5"
+      ],
+      "enclosing_function": "handleDelete",
+      "id": "frontend-transport:5bce946c5a869ddc",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/locations/${lid}`",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_capability_scorecard:954484d2a3d45586"
+      ],
+      "enclosing_function": "load",
+      "id": "frontend-transport:5d01cd9266676fbd",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/capability-scorecard",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 372,
+        "path": "web/src/components/console/CapabilityConsole.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/capability-scorecard`",
+      "url_template": "/api/projects/{1}/capability-scorecard"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "AppInner",
+      "id": "frontend-transport:5ec9c917c21dfd7f",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 41,
+        "path": "web/src/App.tsx"
+      },
+      "url_expression": "`${API}/config`",
+      "url_template": "/api/config"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
+      ],
+      "enclosing_function": "handleReject",
+      "id": "frontend-transport:5f1c44406ad30a78",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/plan/reject`",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_create_project:bd55971731373044"
+      ],
+      "enclosing_function": "handleCreate",
+      "id": "frontend-transport:6675a9e426994a51",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 52,
+        "path": "web/src/components/ProjectSelector.tsx"
+      },
+      "url_expression": "`${API}/projects`",
+      "url_template": "/api/projects"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_get_project:8a94a524be403d69"
+      ],
+      "enclosing_function": "loadProject",
+      "id": "frontend-transport:66e55f0bf775368e",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 45,
+        "path": "web/src/App.tsx"
+      },
+      "url_expression": "`${API}/projects/${id}`",
+      "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_iterate_take:6e4f2103391bdce5"
+      ],
+      "enclosing_function": "iterateTake",
+      "id": "frontend-transport:6730f319788be67c",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "not_observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 248,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`",
+      "url_template": "/api/projects/{1}/shots/{2}/takes/{3}/iterate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_shot:60b130964b1fd219"
+      ],
+      "enclosing_function": "handleSave",
+      "id": "frontend-transport:70f7e53e4fb41635",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 43,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/shots/${shotId}`",
+      "url_template": "/api/projects/{1}/shots/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_character:f63c1dfe4fa9002d"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:72b68c98338c5fb5",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 90,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cost_estimate:0b28a387a0a62a25"
+      ],
+      "enclosing_function": "CostEstimatorSection",
+      "id": "frontend-transport:762c39ae3109f0e4",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/cost-estimate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 26,
+        "path": "web/src/components/settings/CostEstimatorSection.tsx"
+      },
+      "url_expression": "`${API}/cost-estimate`",
+      "url_template": "/api/cost-estimate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_location:4522f1083c852069"
+      ],
+      "enclosing_function": "handleAdd",
+      "id": "frontend-transport:8778dd542941a523",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/locations",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/locations`",
+      "url_template": "/api/projects/{1}/locations"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "enclosing_function": "updateShotApi",
+      "id": "frontend-transport:88f35f0ee5a3fd0d",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 342,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${scene.id}`",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_project:4de0aade993f8606"
+      ],
+      "enclosing_function": "update",
+      "id": "frontend-transport:8c862baef67de0dc",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}`",
+      "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_location:4c4e5e22465a2b60"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:94737f01c946c037",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 54,
+        "path": "web/src/components/LocationPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/locations/${editingId}`",
+      "url_template": "/api/projects/{1}/locations/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_approve_shot_plan:ea420a69c80424a2"
+      ],
+      "enclosing_function": "handleApprove",
+      "id": "frontend-transport:9d484910b711a2ff",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 21,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/plan/approve`",
+      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_pause:8c962297a6515f7b"
+      ],
+      "enclosing_function": "pause",
+      "id": "frontend-transport:9d7c8fd84a1b706d",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/pause",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 126,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "`/api/projects/${projectId}/pause`",
+      "url_template": "/api/projects/{1}/pause"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_add_character:46bcb34585739e28"
+      ],
+      "enclosing_function": "handleAdd",
+      "id": "frontend-transport:9d7f69eb1915fde5",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 55,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/characters`",
+      "url_template": "/api/projects/{1}/characters"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "enclosing_function": "handleUpdate",
+      "id": "frontend-transport:9de4123e538bdee5",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 37,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${sid}`",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_screening_approve:0d6bea47da8aa8e7"
+      ],
+      "enclosing_function": "approveScreening",
+      "id": "frontend-transport:a4d268f35367f819",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "not_observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/screening/approve",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 264,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "`/api/projects/${projectId}/screening/approve`",
+      "url_template": "/api/projects/{1}/screening/approve"
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "postJson",
+      "id": "frontend-transport:aaaec1e51b89b676",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "not_observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 137,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "url_expression": "path",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "handleSubmit",
+      "id": "frontend-transport:ad9b8cf5110bd5d9",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "{1}/projects/{2}/shots/{3}/reject-auto-approve",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 60,
+        "path": "web/src/components/console/RejectAutoApproveModal.tsx"
+      },
+      "url_expression": "`${apiBase}/projects/${projectId}/shots/${shotId}/reject-auto-approve`",
+      "url_template": "{1}/projects/{2}/shots/{3}/reject-auto-approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cancel:3ec4c1004cf6ceeb"
+      ],
+      "enclosing_function": "handleCancel",
+      "id": "frontend-transport:b7908258403a5ebe",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/cancel",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 74,
+        "path": "web/src/App.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/cancel`",
+      "url_template": "/api/projects/{1}/cancel"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate:6b91ac9b453dfc46"
+      ],
+      "enclosing_function": "handleGenerate",
+      "id": "frontend-transport:b8037d3236d9c0c4",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/generate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 68,
+        "path": "web/src/App.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/generate`",
+      "url_template": "/api/projects/{1}/generate"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_dialogue:3104c83ecc6e0279"
+      ],
+      "enclosing_function": "handleGenerateDialogue",
+      "id": "frontend-transport:ba7ba60843d5e0a4",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${sid}/generate-dialogue`",
+      "url_template": "/api/projects/{1}/scenes/{2}/generate-dialogue"
+    },
+    {
+      "backend_route_ids": [],
+      "enclosing_function": "setVoice",
+      "id": "frontend-transport:bd1019193b060528",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "{1}/projects/{2}/characters/{3}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 123,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "url_expression": "`${base}/projects/${project.id}/characters/${primaryCharacter.id}`",
+      "url_template": "{1}/projects/{2}/characters/{3}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_scene:717f20841c7eadb0"
+      ],
+      "enclosing_function": "toggleObjectInFrame",
+      "id": "frontend-transport:cb0ab228faa986ca",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 357,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${scene.id}`",
+      "url_template": "/api/projects/{1}/scenes/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_decompose_scene:da34d08053c7b17c"
+      ],
+      "enclosing_function": "handleDecompose",
+      "id": "frontend-transport:cd13ee0f8a6b7e9b",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 81,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/scenes/${sid}/decompose`",
+      "url_template": "/api/projects/{1}/scenes/{2}/decompose"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_clear_performance:5d17aa48651c9161"
+      ],
+      "enclosing_function": "ScenePanel",
+      "id": "frontend-transport:cec43b24fd29092c",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 417,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/shots/${shot.id}/performance`",
+      "url_template": "/api/projects/{1}/shots/{2}/performance"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_generate_style_rules:90cfb97f206104fb"
+      ],
+      "enclosing_function": "generateStyleRules",
+      "id": "frontend-transport:cfee29dfc302c06e",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/style-rules",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 78,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/style-rules`",
+      "url_template": "/api/projects/{1}/style-rules"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_character:f63c1dfe4fa9002d"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:d78d83c0b38eb521",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 88,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
+      "url_template": "/api/projects/{1}/characters/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_remove_object:ddc8fd9d84190a80"
+      ],
+      "enclosing_function": "handleDelete",
+      "id": "frontend-transport:da70dd29556ad738",
+      "kind": "fetch",
+      "method": "DELETE",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 68,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/objects/${oid}`",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_shot:60b130964b1fd219"
+      ],
+      "enclosing_function": "updateShotApi",
+      "id": "frontend-transport:dd29d1f81f5cb77e",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 67,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "url_expression": "`/api/projects/${projectId}/shots/${shot.id}`",
+      "url_template": "/api/projects/{1}/shots/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_object:2720ef76155f563a"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:df693d9bb9dfa9a8",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 96,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/objects/${editingId}`",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_upload_driving_video:b6345fd3bcc0aa51"
+      ],
+      "enclosing_function": "ScenePanel",
+      "id": "frontend-transport:e715b122db4102a3",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "observed",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 440,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/shots/${shot.id}/upload-driving-video`",
+      "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_update_object:2720ef76155f563a"
+      ],
+      "enclosing_function": "handleSaveEdit",
+      "id": "frontend-transport:fbe349059c52fa50",
+      "kind": "fetch",
+      "method": "PUT",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 94,
+        "path": "web/src/components/ObjectPanel.tsx"
+      },
+      "url_expression": "`${API}/projects/${project.id}/objects/${editingId}`",
+      "url_template": "/api/projects/{1}/objects/{2}"
+    }
+  ],
+  "routes": [
+    {
+      "handler": "serve_frontend",
+      "id": "route:serve_frontend:930147580f68e7f9",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/",
+      "rule": "/",
+      "source": {
+        "line": 311,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_cleanup_all",
+      "id": "route:api_cleanup_all:1ef93ca62aaf47a7",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/cleanup-all",
+      "rule": "/api/cleanup-all",
+      "source": {
+        "line": 2710,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "get_config",
+      "id": "route:get_config:f8c39cee070cf94b",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "rule": "/api/config",
+      "source": {
+        "line": 328,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_cost_estimate",
+      "id": "route:api_cost_estimate:0b28a387a0a62a25",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/cost-estimate",
+      "rule": "/api/cost-estimate",
+      "source": {
+        "line": 475,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_list_projects",
+      "id": "route:api_list_projects:bfa304ff09694c73",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects",
+      "rule": "/api/projects",
+      "source": {
+        "line": 493,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_create_project",
+      "id": "route:api_create_project:bd55971731373044",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects",
+      "rule": "/api/projects",
+      "source": {
+        "line": 498,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_delete_project",
+      "id": "route:api_delete_project:43e4da9d7f399346",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}",
+      "rule": "/api/projects/<pid>",
+      "source": {
+        "line": 561,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_get_project",
+      "id": "route:api_get_project:8a94a524be403d69",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}",
+      "rule": "/api/projects/<pid>",
+      "source": {
+        "line": 506,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_project",
+      "id": "route:api_update_project:4de0aade993f8606",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}",
+      "rule": "/api/projects/<pid>",
+      "source": {
+        "line": 524,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_apply_language_defaults",
+      "id": "route:api_apply_language_defaults:16900a3d1a956d47",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/apply-language-defaults",
+      "rule": "/api/projects/<pid>/apply-language-defaults",
+      "source": {
+        "line": 411,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_proceed_assembly",
+      "id": "route:api_proceed_assembly:c53146735ec0f336",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble",
+      "rule": "/api/projects/<pid>/assemble",
+      "source": {
+        "line": 2277,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_assemble_reassemble",
+      "id": "route:api_assemble_reassemble:d842ab3e789607e7",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble/re-assemble",
+      "rule": "/api/projects/<pid>/assemble/re-assemble",
+      "source": {
+        "line": 2474,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_assemble_screen",
+      "id": "route:api_assemble_screen:d86fff4fbd563fc1",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/assemble/screen",
+      "rule": "/api/projects/<pid>/assemble/screen",
+      "source": {
+        "line": 2299,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_cancel",
+      "id": "route:api_cancel:3ec4c1004cf6ceeb",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/cancel",
+      "rule": "/api/projects/<pid>/cancel",
+      "source": {
+        "line": 1699,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_capability_scorecard",
+      "id": "route:api_capability_scorecard:954484d2a3d45586",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/capability-scorecard",
+      "rule": "/api/projects/<pid>/capability-scorecard",
+      "source": {
+        "line": 514,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_add_character",
+      "id": "route:api_add_character:46bcb34585739e28",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/characters",
+      "rule": "/api/projects/<pid>/characters",
+      "source": {
+        "line": 577,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_remove_character",
+      "id": "route:api_remove_character:fbd1680d60d08895",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "rule": "/api/projects/<pid>/characters/<cid>",
+      "source": {
+        "line": 754,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_character",
+      "id": "route:api_update_character:f63c1dfe4fa9002d",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "rule": "/api/projects/<pid>/characters/<cid>",
+      "source": {
+        "line": 628,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_lora_status",
+      "id": "route:api_lora_status:ecd3f8ddaa769ebd",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
+      "rule": "/api/projects/<pid>/characters/<cid>/lora-status",
+      "source": {
+        "line": 894,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_train_lora",
+      "id": "route:api_train_lora:5a3a66687fb39479",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/characters/{2}/train-lora",
+      "rule": "/api/projects/<pid>/characters/<cid>/train-lora",
+      "source": {
+        "line": 782,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_checkpoint",
+      "id": "route:api_checkpoint:4fa1b7f1394135c1",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/checkpoint",
+      "rule": "/api/projects/<pid>/checkpoint",
+      "source": {
+        "line": 1666,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_cleanup",
+      "id": "route:api_cleanup:67d0a52129941620",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/cleanup",
+      "rule": "/api/projects/<pid>/cleanup",
+      "source": {
+        "line": 2662,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_cost_live",
+      "id": "route:api_cost_live:453d429ef0008533",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/cost-live",
+      "rule": "/api/projects/<pid>/cost-live",
+      "source": {
+        "line": 2684,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_disk_usage",
+      "id": "route:api_disk_usage:ac8f2e76c7cbab08",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/disk-usage",
+      "rule": "/api/projects/<pid>/disk-usage",
+      "source": {
+        "line": 2677,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_export",
+      "id": "route:api_export:e0a849e611b470aa",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/export",
+      "rule": "/api/projects/<pid>/export",
+      "source": {
+        "line": 2722,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_serve_file",
+      "id": "route:api_serve_file:a718647516125175",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/file",
+      "rule": "/api/projects/<pid>/file",
+      "source": {
+        "line": 1712,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_generate",
+      "id": "route:api_generate:6b91ac9b453dfc46",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/generate",
+      "rule": "/api/projects/<pid>/generate",
+      "source": {
+        "line": 1609,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_add_location",
+      "id": "route:api_add_location:4522f1083c852069",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/locations",
+      "rule": "/api/projects/<pid>/locations",
+      "source": {
+        "line": 1245,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_remove_location",
+      "id": "route:api_remove_location:40b9ec102bd29fe5",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "rule": "/api/projects/<pid>/locations/<lid>",
+      "source": {
+        "line": 1367,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_location",
+      "id": "route:api_update_location:4c4e5e22465a2b60",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/locations/{2}",
+      "rule": "/api/projects/<pid>/locations/<lid>",
+      "source": {
+        "line": 1292,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_add_object",
+      "id": "route:api_add_object:71dcf96c26e1c758",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/objects",
+      "rule": "/api/projects/<pid>/objects",
+      "source": {
+        "line": 1070,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_remove_object",
+      "id": "route:api_remove_object:ddc8fd9d84190a80",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "rule": "/api/projects/<pid>/objects/<oid>",
+      "source": {
+        "line": 1225,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_object",
+      "id": "route:api_update_object:2720ef76155f563a",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/objects/{2}",
+      "rule": "/api/projects/<pid>/objects/<oid>",
+      "source": {
+        "line": 1140,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_pause",
+      "id": "route:api_pause:8c962297a6515f7b",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/pause",
+      "rule": "/api/projects/<pid>/pause",
+      "source": {
+        "line": 2103,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_pipeline_state",
+      "id": "route:api_pipeline_state:540e691d4f4b0ced",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/pipeline-state",
+      "rule": "/api/projects/<pid>/pipeline-state",
+      "source": {
+        "line": 2123,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_preview_scene",
+      "id": "route:api_preview_scene:953bc108f7092f88",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/preview/{2}",
+      "rule": "/api/projects/<pid>/preview/<sid>",
+      "source": {
+        "line": 2731,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_proceed_assembly",
+      "id": "route:api_proceed_assembly:24dfbd9125874629",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/proceed-assembly",
+      "rule": "/api/projects/<pid>/proceed-assembly",
+      "source": {
+        "line": 2278,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_resume",
+      "id": "route:api_resume:d10d681a881accc6",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/resume",
+      "rule": "/api/projects/<pid>/resume",
+      "source": {
+        "line": 2113,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_add_scene",
+      "id": "route:api_add_scene:752d4e2e3442a2ca",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes",
+      "rule": "/api/projects/<pid>/scenes",
+      "source": {
+        "line": 1386,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_reorder_scenes",
+      "id": "route:api_reorder_scenes:b8ff80cfcf90cdda",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/reorder",
+      "rule": "/api/projects/<pid>/scenes/reorder",
+      "source": {
+        "line": 1444,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_remove_scene",
+      "id": "route:api_remove_scene:4ce7dac9b6971bab",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "rule": "/api/projects/<pid>/scenes/<sid>",
+      "source": {
+        "line": 1429,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_scene",
+      "id": "route:api_update_scene:717f20841c7eadb0",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/scenes/{2}",
+      "rule": "/api/projects/<pid>/scenes/<sid>",
+      "source": {
+        "line": 1412,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_decompose_scene",
+      "id": "route:api_decompose_scene:da34d08053c7b17c",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
+      "rule": "/api/projects/<pid>/scenes/<sid>/decompose",
+      "source": {
+        "line": 1500,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_generate_dialogue",
+      "id": "route:api_generate_dialogue:3104c83ecc6e0279",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
+      "rule": "/api/projects/<pid>/scenes/<sid>/generate-dialogue",
+      "source": {
+        "line": 1464,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_screening_approve",
+      "id": "route:api_screening_approve:0d6bea47da8aa8e7",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/screening/approve",
+      "rule": "/api/projects/<pid>/screening/approve",
+      "source": {
+        "line": 2385,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_shot",
+      "id": "route:api_update_shot:60b130964b1fd219",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/shots/{2}",
+      "rule": "/api/projects/<pid>/shots/<shot_id>",
+      "source": {
+        "line": 2050,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_correct_shot",
+      "id": "route:api_correct_shot:d9f2bc6e2b66cdf5",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/correct",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
+      "source": {
+        "line": 2244,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_diagnose_shot",
+      "id": "route:api_diagnose_shot:52eedf96237f2859",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
+      "source": {
+        "line": 2264,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_approve_final_take",
+      "id": "route:api_approve_final_take:ba0ab0b0f1e34a72",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
+      "source": {
+        "line": 1827,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_generate_keyframe",
+      "id": "route:api_generate_keyframe:ccfc0fb03f450e57",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
+      "source": {
+        "line": 1754,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_approve_keyframe_take",
+      "id": "route:api_approve_keyframe_take:dafbed73f936b983",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
+      "source": {
+        "line": 1779,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_generate_motion",
+      "id": "route:api_generate_motion:e33ce408c66615c2",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
+      "source": {
+        "line": 1808,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_clear_performance",
+      "id": "route:api_clear_performance:5d17aa48651c9161",
+      "kind": "flask_route",
+      "method": "DELETE",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance",
+      "rule": "/api/projects/<pid>/shots/<sid>/performance",
+      "source": {
+        "line": 975,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_approve_performance_take",
+      "id": "route:api_approve_performance_take:b3a30ccdbdace785",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
+      "source": {
+        "line": 1790,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_approve_shot_plan",
+      "id": "route:api_approve_shot_plan:ea420a69c80424a2",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
+      "source": {
+        "line": 1729,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_reject_shot_plan",
+      "id": "route:api_reject_shot_plan:5baec6f4d6cc0b75",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
+      "source": {
+        "line": 1741,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_update_shot_prompt",
+      "id": "route:api_update_shot_prompt:73d989027426d9a9",
+      "kind": "flask_route",
+      "method": "PUT",
+      "path_shape": "/api/projects/{1}/shots/{2}/prompt",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
+      "source": {
+        "line": 2013,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_regenerate_shot",
+      "id": "route:api_regenerate_shot:ae30ef4f457b584d",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
+      "source": {
+        "line": 2185,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_reject_auto_approve",
+      "id": "route:api_reject_auto_approve:b26c6f4a5d39d2ad",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
+      "source": {
+        "line": 1941,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_restart_shot",
+      "id": "route:api_restart_shot:479db05ce2dadfe4",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/restart",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
+      "source": {
+        "line": 2137,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_iterate_take",
+      "id": "route:api_iterate_take:6e4f2103391bdce5",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
+      "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
+      "source": {
+        "line": 1838,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_upload_driving_video",
+      "id": "route:api_upload_driving_video:b6345fd3bcc0aa51",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
+      "rule": "/api/projects/<pid>/shots/<sid>/upload-driving-video",
+      "source": {
+        "line": 905,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_stream",
+      "id": "route:api_stream:4e26548ad72b65b2",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/api/projects/{1}/stream",
+      "rule": "/api/projects/<pid>/stream",
+      "source": {
+        "line": 1678,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_upload_style_board",
+      "id": "route:api_upload_style_board:c3742378fa8b012c",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/style-board",
+      "rule": "/api/projects/<pid>/style-board",
+      "source": {
+        "line": 1017,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_generate_style_rules",
+      "id": "route:api_generate_style_rules:90cfb97f206104fb",
+      "kind": "flask_route",
+      "method": "POST",
+      "path_shape": "/api/projects/{1}/style-rules",
+      "rule": "/api/projects/<pid>/style-rules",
+      "source": {
+        "line": 1549,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "serve_static",
+      "id": "route:serve_static:bc154422e78aee79",
+      "kind": "flask_route",
+      "method": "GET",
+      "path_shape": "/{1}",
+      "rule": "/<path:path>",
+      "source": {
+        "line": 316,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "static",
+      "id": "route:static:0647b313fd5a1823",
+      "kind": "flask_static_constructor",
+      "method": "GET",
+      "path_shape": "/{1}",
+      "rule": "/<path:filename>",
+      "source": {
+        "line": 64,
+        "path": "web_server.py"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "scope": {
+    "backend": {
+      "analysis": "Python AST; web_server.py is parsed and never imported",
+      "entrypoint": "web_server.py",
+      "included": [
+        "literal @app.route rules and literal methods (default GET)",
+        "Flask constructor static endpoint synthesized from literal arguments"
+      ],
+      "unresolved": [
+        "dynamic rules/methods/static configuration",
+        "add_url_rule, register_blueprint, and app shorthand decorators"
+      ]
+    },
+    "frontend": {
+      "analysis": "conservative masked lexical scan with balanced call delimiters; TypeScript is not executed",
+      "declarative_resource_urls": {
+        "reason": "JSX src/href/poster and CSS resource loads are outside executable call-expression schema v1",
+        "status": "excluded"
+      },
+      "excluded": [
+        "**/*.{test,spec}.{ts,tsx}",
+        "**/{__tests__,test,tests,dist,node_modules}/**"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx"
+      ],
+      "included": [
+        "direct global fetch and new EventSource calls",
+        "module literal API bases, literal/template URLs, inline literal methods",
+        "same-file one-hop wrappers with one transport and an unmodified URL parameter"
+      ],
+      "root": "web/src",
+      "unresolved": [
+        "dynamic URLs/methods; imported, aliased, transformed, multi-hop, or multi-transport wrappers"
+      ]
+    },
+    "implicit_flask_methods": "automatic HEAD and OPTIONS are excluded",
+    "matching": {
+      "definition": "HTTP method plus positional path shape; query is stripped before matching",
+      "placeholders": "backend <converter:name> and frontend interpolation normalize to {1}, {2}, ...",
+      "query_keys": "static query keys are retained separately"
+    },
+    "non_2xx_observation": {
+      "definition": "fetch is observed only when the same bound response has .ok read or .status compared in its enclosing function; catch/json alone do not count",
+      "event_source": "not applicable; transport_error_observation separately records onerror/error-listener presence",
+      "states": [
+        "observed",
+        "not_observed",
+        "unknown"
+      ]
+    }
+  },
+  "unresolved": [
+    {
+      "domain": "frontend",
+      "expression": "path",
+      "id": "unresolved:f91c3db5f298fde3",
+      "kind": "dynamic_transport_url",
+      "owner": "postJson",
+      "reason": "transport URL is not a string, template, or module literal constant",
+      "source": {
+        "line": 137,
+        "path": "web/src/hooks/usePipelineState.ts"
+      }
+    }
+  ]
+}
