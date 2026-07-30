@@ -96,6 +96,8 @@ def _payload_for_fetch_source(source: str) -> dict:
 
 
 TRUST_BOUNDARY_CORRUPTIONS = (
+    "direct_source_line_mismatch",
+    "direct_url_mismatch",
     "empty_source_reference",
     "transport_line",
     "operation_line",
@@ -112,7 +114,9 @@ TRUST_BOUNDARY_CORRUPTIONS = (
 
 def _trust_boundary_failure(root: Path, corruption: str) -> dict:
     source = "fetch('/api/value')\n"
-    if corruption == "empty_source_reference":
+    if corruption == "direct_source_line_mismatch":
+        source = "const marker = true\nfetch('/api/value')\n"
+    elif corruption == "empty_source_reference":
         source = ""
     elif corruption == "unicode_code_point_offset":
         source = "const marker = '😀'\nfetch('/api/value')\n"
@@ -124,7 +128,33 @@ def _trust_boundary_failure(root: Path, corruption: str) -> dict:
     operation = payload["operations"][0]
     unresolved = payload["unresolved"][0]
 
-    if corruption == "empty_source_reference":
+    if corruption == "direct_source_line_mismatch":
+        assert operation["source"]["line"] == 2
+        operation["source"]["line"] = 1
+    elif corruption == "direct_url_mismatch":
+        (root / "web_server.py").write_text(
+            """
+from flask import Flask
+app = Flask(__name__, static_folder=None)
+
+@app.route("/api/value")
+def value():
+    pass
+
+@app.route("/api/other")
+def other():
+    pass
+""",
+            encoding="utf-8",
+        )
+        routes, unresolved_routes = inventory_module._backend(root)
+        assert unresolved_routes == []
+        assert {(row["method"], row["rule"]) for row in routes} == {
+            ("GET", "/api/other"),
+            ("GET", "/api/value"),
+        }
+        operation["url_template"] = "/api/other"
+    elif corruption == "empty_source_reference":
         pass
     elif corruption == "transport_line":
         transport["source"]["line"] = 999
@@ -1015,9 +1045,14 @@ throw new Error('application module was executed')
     ]
 
 
-def test_trust_boundary_accepts_utf16_reference_and_distinct_wrapper_call_line(
+@pytest.mark.parametrize(
+    "operation_kind",
+    ["one_hop_wrapper_call", "unknown_wrapper_call"],
+)
+def test_trust_boundary_accepts_distinct_wrapper_line_and_resolved_url(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    operation_kind: str,
 ) -> None:
     root = _repo(tmp_path)
     source = (
@@ -1034,8 +1069,9 @@ def test_trust_boundary_accepts_utf16_reference_and_distinct_wrapper_call_line(
         {
             "_transport_ref": reference,
             "expanded_wrapper": "getWithTag",
-            "kind": "one_hop_wrapper_call",
+            "kind": operation_kind,
             "source": {"path": "web/src/fact.ts", "line": 3},
+            "url_template": "/api/resolved",
         }
     )
     payload["unresolved"] = []
@@ -1044,7 +1080,9 @@ def test_trust_boundary_accepts_utf16_reference_and_distinct_wrapper_call_line(
     transports, operations, _unresolved, _version = inventory_module._frontend(root)
 
     assert _utf16_offset(source, "fetch") != source.index("fetch")
+    assert operations[0]["kind"] == operation_kind
     assert operations[0]["source"]["line"] != transports[0]["source"]["line"]
+    assert operations[0]["url_template"] != transports[0]["url_template"]
     assert operations[0]["transport_id"] == transports[0]["id"]
 
 

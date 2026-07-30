@@ -539,7 +539,7 @@ def _validate_operation(
     if kind in {"shadowed_fetch_call", "shadowed_event_source_call"}:
         optional.add("enclosing_function")
     _exact_keys(row, required, optional, label)
-    _source_fact(row["source"], sources, label)
+    source = _source_fact(row["source"], sources, label)
     _url(row["url_template"], f"{label}.url_template")
     if "expanded_wrapper" in row:
         _name(row["expanded_wrapper"], f"{label}.expanded_wrapper")
@@ -574,6 +574,15 @@ def _validate_operation(
             _schema_error(f"{label} crosses frontend source files")
         if row["method"] != transport["method"]:
             _schema_error(f"{label}.method contradicts its transport reference")
+        if kind == "direct_transport":
+            if source["line"] != transport["line"]:
+                _schema_error(
+                    f"{label}.source.line contradicts its direct transport reference"
+                )
+            if row["url_template"] != transport["url_template"]:
+                _schema_error(
+                    f"{label}.url_template contradicts its direct transport reference"
+                )
 
 
 def _validate_unresolved(
@@ -643,8 +652,10 @@ def _validate_frontend_payload(payload: Any, root: Path) -> dict[str, Any]:
         if ref in transport_refs:
             _schema_error("transport references must be unique")
         transport_refs[ref] = {
+            "line": row["source"]["line"],
             "method": row["method"],
             "path": row["source"]["path"],
+            "url_template": row["url_template"],
         }
     for index, row in enumerate(top["operations"]):
         _validate_operation(row, sources, transport_refs, index)
