@@ -476,85 +476,101 @@ function analyzeFile(root, file, checker) {
     list.push(transport);
     direct.set(transport.container, list);
   }
+  function directUrlSource(info, transport) {
+    const urlValue = unwrap(transport.urlNode);
+    const urlSymbol = urlValue && ts.isIdentifier(urlValue)
+      ? checker.getSymbolAtLocation(urlValue)
+      : undefined;
+    const exactParameter = urlSymbol
+      ? info.parameterBySymbol.get(urlSymbol)
+      : undefined;
+    if (exactParameter) {
+      return exactParameter.supported
+        ? { kind: "parameter", index: exactParameter.index }
+        : {
+            kind: "unknown",
+            reason: "wrapper URL parameter shape is unsupported",
+          };
+    }
+    const usedParameters = new Set();
+    function inspect(node) {
+      if (ts.isIdentifier(node)) {
+        const parameter = info.parameterBySymbol.get(checker.getSymbolAtLocation(node));
+        if (parameter) usedParameters.add(parameter);
+      }
+      ts.forEachChild(node, inspect);
+    }
+    if (transport.urlNode) inspect(transport.urlNode);
+    if (transport.row.url_template === null && usedParameters.size) {
+      return {
+        kind: "unknown",
+        reason: "wrapper URL parameter is transformed",
+      };
+    }
+    return undefined;
+  }
+  function mergeUrlSources(sources) {
+    let merged;
+    for (const candidate of sources) {
+      if (!merged) {
+        merged = { ...candidate };
+        continue;
+      }
+      if (
+        merged.kind === "unknown" || candidate.kind === "unknown" ||
+        merged.kind !== candidate.kind ||
+        (merged.kind === "parameter" && merged.index !== candidate.index) ||
+        (merged.kind === "fixed" && merged.value !== candidate.value)
+      ) {
+        merged = { kind: "unknown" };
+      }
+    }
+    return merged || { kind: "unknown" };
+  }
+  function parameterForUrlSource(info, urlSource) {
+    return urlSource.kind === "parameter"
+      ? info.parameters.find((parameter) => parameter.index === urlSource.index)
+      : undefined;
+  }
   const directWrappers = new Map();
   for (const info of functions.candidates) {
     const found = direct.get(info) || [];
     if (found.length === 1) {
       const transport = found[0];
-      const urlValue = unwrap(transport.urlNode);
-      const urlSymbol = urlValue && ts.isIdentifier(urlValue)
-        ? checker.getSymbolAtLocation(urlValue)
-        : undefined;
-      const exactParameter = urlSymbol
-        ? info.parameterBySymbol.get(urlSymbol)
-        : undefined;
-      const usedParameters = new Set();
-      function inspect(node) {
-        if (ts.isIdentifier(node)) {
-          const parameter = info.parameterBySymbol.get(checker.getSymbolAtLocation(node));
-          if (parameter) usedParameters.add(parameter);
-        }
-        ts.forEachChild(node, inspect);
-      }
-      if (transport.urlNode) inspect(transport.urlNode);
-      if (exactParameter) directWrappers.set(info.symbol, {
+      const urlSource = directUrlSource(info, transport);
+      if (!urlSource) continue;
+      const urlParameter = parameterForUrlSource(info, urlSource);
+      directWrappers.set(info.symbol, {
         info,
-        safe: exactParameter.supported && transport.row.method !== null,
-        reason: !exactParameter.supported
-          ? "wrapper URL parameter shape is unsupported"
+        safe: urlSource.kind !== "unknown" && transport.row.method !== null,
+        reason: urlSource.kind === "unknown"
+          ? urlSource.reason
           : transport.row.method === null
           ? transport.methodReason || "wrapper transport method is not statically resolved"
           : null,
         transport,
-        urlParameterIndex: exactParameter.supported ? exactParameter.index : undefined,
-        urlParameterSymbol: exactParameter.symbol,
+        urlParameterIndex: urlParameter?.index,
         _ambiguousTransport: false,
         _reachableTransports: new Set([transport]),
-        _urlParameterIndices: new Set(
-          exactParameter.supported ? [exactParameter.index] : [],
-        ),
+        _urlSource: urlSource,
         dependsOnLocalWrapper: false,
       });
-      else if (transport.row.url_template === null && usedParameters.size) {
-        const [parameter] = usedParameters.size === 1 ? usedParameters : [];
-        directWrappers.set(info.symbol, {
-          info,
-          safe: false,
-          reason: "wrapper URL parameter is transformed",
-          transport,
-          urlParameterIndex: parameter?.supported ? parameter.index : undefined,
-          urlParameterSymbol: parameter?.symbol,
-          _ambiguousTransport: false,
-          _reachableTransports: new Set([transport]),
-          _urlParameterIndices: new Set(
-            parameter?.supported ? [parameter.index] : [],
-          ),
-          dependsOnLocalWrapper: false,
-        });
-      }
     } else if (found.length > 1) {
-      const parameters = new Set();
-      for (const transport of found) {
-        const urlValue = unwrap(transport.urlNode);
-        const urlSymbol = urlValue && ts.isIdentifier(urlValue)
-          ? checker.getSymbolAtLocation(urlValue)
-          : undefined;
-        const parameter = urlSymbol ? info.parameterBySymbol.get(urlSymbol) : undefined;
-        if (parameter) parameters.add(parameter);
-      }
-      const [parameter] = parameters.size === 1 ? parameters : [];
+      const urlSource = mergeUrlSources(
+        found.map(
+          (transport) => directUrlSource(info, transport) || { kind: "unknown" },
+        ),
+      );
+      const parameter = parameterForUrlSource(info, urlSource);
       directWrappers.set(info.symbol, {
         info,
         safe: false,
         reason: "wrapper contains multiple direct transports",
         transport: null,
         urlParameterIndex: parameter?.supported ? parameter.index : undefined,
-        urlParameterSymbol: parameter?.symbol,
         _ambiguousTransport: true,
         _reachableTransports: new Set(found),
-        _urlParameterIndices: new Set(
-          parameter?.supported ? [parameter.index] : [],
-        ),
+        _urlSource: urlSource,
         dependsOnLocalWrapper: false,
       });
     }
@@ -566,6 +582,25 @@ function analyzeFile(root, file, checker) {
       ts.forEachChild(child, visit);
     }
     visit(node);
+  }
+  function dependencyUrlSource(target, call, info) {
+    if (target._urlSource?.kind === "fixed") {
+      return { ...target._urlSource };
+    }
+    if (target._urlSource?.kind !== "parameter") {
+      return { kind: "unknown" };
+    }
+    const argument = unwrap(call.arguments[target._urlSource.index]);
+    const parameter = argument && ts.isIdentifier(argument)
+      ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
+      : undefined;
+    if (parameter?.supported) {
+      return { kind: "parameter", index: parameter.index };
+    }
+    const fixed = literal(checker, constants, argument);
+    return fixed === undefined
+      ? { kind: "unknown" }
+      : { kind: "fixed", value: fixed };
   }
   // Resolve from a complete previous-pass snapshot.  Each pass can discover
   // one more dependency layer; classifying only after unioning every reachable
@@ -581,42 +616,26 @@ function analyzeFile(root, file, checker) {
       const reachableTransports = new Set(
         base?._reachableTransports || [],
       );
-      const urlParameterIndices = new Set(
-        base?._urlParameterIndices || [],
-      );
+      const urlSources = base ? [{ ...base._urlSource }] : [];
       let ambiguousTransport = base?._ambiguousTransport || false;
       let dependsOnLocalWrapper = false;
       walkOwn(info.node, (node) => {
         if (!ts.isCallExpression(node)) return;
         const target = previous.get(symbol(checker, node.expression));
-        if (!target?._urlParameterIndices?.size) return;
-        const mappedParameters = new Set();
-        for (const targetIndex of target._urlParameterIndices) {
-          const argument = unwrap(node.arguments[targetIndex]);
-          const parameter = argument && ts.isIdentifier(argument)
-            ? info.parameterBySymbol.get(checker.getSymbolAtLocation(argument))
-            : undefined;
-          if (parameter) mappedParameters.add(parameter);
-        }
-        if (!mappedParameters.size) return;
+        if (!target) return;
         dependsOnLocalWrapper = true;
         ambiguousTransport ||= target._ambiguousTransport;
         for (const transport of target._reachableTransports) {
           reachableTransports.add(transport);
         }
-        for (const parameter of mappedParameters) {
-          if (parameter.supported) urlParameterIndices.add(parameter.index);
-        }
+        urlSources.push(dependencyUrlSource(target, node, info));
       });
       if (!base && !dependsOnLocalWrapper) continue;
 
       ambiguousTransport ||= reachableTransports.size > 1;
-      const [urlParameterIndex] = urlParameterIndices.size === 1
-        ? urlParameterIndices
-        : [];
-      const urlParameter = urlParameterIndex === undefined
-        ? undefined
-        : info.parameters.find((parameter) => parameter.index === urlParameterIndex);
+      const urlSource = mergeUrlSources(urlSources);
+      const urlParameter = parameterForUrlSource(info, urlSource);
+      const urlParameterIndex = urlParameter?.index;
       const transport = !ambiguousTransport && reachableTransports.size === 1
         ? reachableTransports.values().next().value
         : null;
@@ -630,10 +649,9 @@ function analyzeFile(root, file, checker) {
           : base.reason,
         transport,
         urlParameterIndex,
-        urlParameterSymbol: urlParameter?.symbol,
         _ambiguousTransport: ambiguousTransport,
         _reachableTransports: reachableTransports,
-        _urlParameterIndices: urlParameterIndices,
+        _urlSource: urlSource,
         dependsOnLocalWrapper,
       });
     }
@@ -653,10 +671,9 @@ function analyzeFile(root, file, checker) {
           reason: "wrapper is an alias of another local wrapper",
           transport: target.transport,
           urlParameterIndex: target.urlParameterIndex,
-          urlParameterSymbol: target.urlParameterSymbol,
           _ambiguousTransport: target._ambiguousTransport,
           _reachableTransports: new Set(target._reachableTransports),
-          _urlParameterIndices: new Set(target._urlParameterIndices),
+          _urlSource: { ...target._urlSource },
           dependsOnLocalWrapper: target.dependsOnLocalWrapper,
         });
         unresolved.push(unknown(
@@ -668,12 +685,32 @@ function analyzeFile(root, file, checker) {
     ts.forEachChild(node, collectWrapperAliases);
   }
   collectWrapperAliases(file);
-  const safeDefinitions = new Set(
-    [...wrappers.values()].filter((item) => item.safe)
-      .map((item) => item.transport?.node.getStart(file)),
-  );
+  const calledWrapperSymbols = new Set();
+  function collectCalledWrappers(node) {
+    if (ts.isCallExpression(node)) {
+      const callSymbol = symbol(checker, node.expression);
+      if (wrappers.has(callSymbol)) calledWrapperSymbols.add(callSymbol);
+    }
+    ts.forEachChild(node, collectCalledWrappers);
+  }
+  collectCalledWrappers(file);
+  const representedDefinitions = new Set();
   for (const transport of transports) {
-    if (!safeDefinitions.has(transport.node.getStart(file))) operations.push({
+    const wrapper = transport.container?.symbol
+      ? wrappers.get(transport.container.symbol)
+      : undefined;
+    if (
+      wrapper?.safe ||
+      (
+        wrapper?.dependsOnLocalWrapper &&
+        calledWrapperSymbols.has(transport.container.symbol)
+      )
+    ) {
+      representedDefinitions.add(transport.node.getStart(file));
+    }
+  }
+  for (const transport of transports) {
+    if (!representedDefinitions.has(transport.node.getStart(file))) operations.push({
       kind: "direct_transport",
       method: transport.row.method,
       source: { ...transport.row.source },
@@ -689,11 +726,17 @@ function analyzeFile(root, file, checker) {
       if (wrapper) {
         const container = nearestFunction(node, functions);
         const containerWrapper = container ? wrappers.get(container.symbol) : undefined;
-        if (!containerWrapper?.dependsOnLocalWrapper) {
-          const urlNode = wrapper.urlParameterIndex === undefined
+        const containerIsRepresented = (
+          containerWrapper?.dependsOnLocalWrapper &&
+          calledWrapperSymbols.has(container.symbol)
+        );
+        if (!containerIsRepresented) {
+          const urlNode = wrapper._urlSource?.kind !== "parameter"
             ? undefined
             : node.arguments[wrapper.urlParameterIndex];
-          const resolvedUrl = resolveUrl(checker, constants, urlNode);
+          const resolvedUrl = wrapper._urlSource?.kind === "fixed"
+            ? wrapper._urlSource.value
+            : resolveUrl(checker, constants, urlNode);
           const operationMethod = wrapper.transport?.row.method ?? null;
           const urlTemplate = wrapper.safe || operationMethod === null
             ? resolvedUrl

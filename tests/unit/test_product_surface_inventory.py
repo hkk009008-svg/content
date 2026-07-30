@@ -944,6 +944,262 @@ def test_direct_and_indirect_reachable_transports_fail_closed(
     assert operation["route_match"] == "unknown"
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+function get(url: string) { return fetch(url) }
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function choose(url: string, usePost: boolean) {
+  if (usePost) return post('/api/fixed')
+  return get(url)
+}
+choose('/api/top', true)
+""",
+        """
+function choose(url: string, usePost: boolean) {
+  if (!usePost) return get(url)
+  return post('/api/fixed')
+}
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function get(url: string) { return fetch(url) }
+choose('/api/top', true)
+""",
+        """
+function get(url: string) { return fetch(url) }
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function choose(url: string, usePost: boolean) {
+  if (usePost) return post(`${url}/fixed`)
+  return get(url)
+}
+choose('/api/top', true)
+""",
+        """
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function get(url: string) { return fetch(url) }
+function choose(url: string, usePost: boolean) {
+  if (!usePost) return get(url)
+  return post()
+}
+choose('/api/top', true)
+""",
+    ],
+)
+def test_unmapped_nested_wrapper_edges_fail_closed_without_double_counting(
+    tmp_path: Path,
+    source: str,
+) -> None:
+    """Dropping an unmapped edge must not fabricate unique GET provenance."""
+    root = _repo(tmp_path)
+    _frontend(root, "unmapped-branch.ts", source)
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert {row["method"] for row in result["frontend_transports"]} == {
+        "GET",
+        "POST",
+    }
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["path_shape"] is None
+    assert operation["route_match"] == "unknown"
+    assert {
+        (row.get("owner"), row["reason"])
+        for row in result["unresolved"]
+        if row["kind"] == "unknown_wrapper_call"
+    } == {
+        (
+            "choose",
+            "wrapper reaches multiple transports through local wrapper "
+            "dependencies",
+        )
+    }
+
+
+def test_direct_and_unmapped_indirect_transport_emit_one_conservative_operation(
+    tmp_path: Path,
+) -> None:
+    """A direct GET cannot hide or double-count an indirect fixed POST."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "direct-unmapped.ts",
+        """
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function mixed(url: string, usePost: boolean) {
+  if (usePost) post('/api/fixed')
+  return fetch(url)
+}
+mixed('/api/top', true)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "mixed"
+    assert operation["kind"] == "unknown_wrapper_call"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["route_match"] == "unknown"
+
+
+def test_same_method_different_transport_refs_remain_ambiguous(
+    tmp_path: Path,
+) -> None:
+    """A shared HTTP method does not identify one of two transport sites."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "same-method.ts",
+        """
+function getA(url: string) { return fetch(url) }
+function getB(url: string) { return fetch(url) }
+function choose(url: string, first: boolean) {
+  if (first) return getA(url)
+  return getB(url)
+}
+choose('/api/top', true)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert {row["method"] for row in result["frontend_transports"]} == {"GET"}
+    assert len({row["id"] for row in result["frontend_transports"]}) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] == "/api/top"
+    assert operation["route_match"] == "unknown"
+
+
+def test_zero_argument_intermediate_wrapper_contributes_literal_dependency(
+    tmp_path: Path,
+) -> None:
+    """A valid zero-argument wrapper still carries its fixed POST edge."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "zero-argument.ts",
+        """
+function get(url: string) { return fetch(url) }
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function fixedPost() { return post('/api/fixed') }
+function choose(url: string, usePost: boolean) {
+  if (usePost) return fixedPost()
+  return get(url)
+}
+choose('/api/top', true)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert {row["method"] for row in result["frontend_transports"]} == {
+        "GET",
+        "POST",
+    }
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "choose"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["route_match"] == "unknown"
+
+
+def test_transport_bearing_wrapper_cycle_reaches_every_branch(
+    tmp_path: Path,
+) -> None:
+    """Cycle convergence retains GET plus an unmapped POST edge."""
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "transport-cycle.ts",
+        """
+function get(url: string) { return fetch(url) }
+function post(url: string) { return fetch(url, { method: 'POST' }) }
+function first(url: string, stop: boolean) {
+  if (stop) return get(url)
+  return second(url)
+}
+function second(url: string) {
+  first(url, true)
+  return post('/api/fixed')
+}
+first('/api/top', false)
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == "first"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["route_match"] == "unknown"
+
+
+def test_large_wrapper_graph_converges_with_unmapped_leaf(
+    tmp_path: Path,
+) -> None:
+    """The bounded fixed-point passes carry both transports through 48 hops."""
+    root = _repo(tmp_path)
+    depth = 48
+    layers = [
+        (
+            "function layer0(url: string) {\n"
+            "  get(url)\n"
+            "  return post('/api/fixed')\n"
+            "}"
+        )
+    ]
+    layers.extend(
+        f"function layer{index}(url: string) {{ return layer{index - 1}(url) }}"
+        for index in range(1, depth)
+    )
+    layer_source = "\n".join(layers)
+    _frontend(
+        root,
+        "large-graph.ts",
+        (
+            "function get(url: string) { return fetch(url) }\n"
+            "function post(url: string) {\n"
+            "  return fetch(url, { method: 'POST' })\n"
+            "}\n"
+            f"{layer_source}\n"
+            f"layer{depth - 1}('/api/top')\n"
+        ),
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 2
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["expanded_wrapper"] == f"layer{depth - 1}"
+    assert operation["method"] is None
+    assert operation["transport_id"] is None
+    assert operation["url_template"] is None
+    assert operation["route_match"] == "unknown"
+
+
 def test_branch_transport_removal_mutation_restores_single_transport_link(
     tmp_path: Path,
 ) -> None:
