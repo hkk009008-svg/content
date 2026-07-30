@@ -52,6 +52,26 @@ def _project_dir(project_id: str) -> str:
     return os.path.join(PROJECTS_DIR, project_id)
 
 
+def is_safe_project_id(project_id: object) -> bool:
+    """Return whether *project_id* is one contained directory component.
+
+    Persisted IDs are generated as 12 lowercase hex characters, but read
+    boundaries historically also accept missing slug-like IDs and return 404.
+    This predicate preserves that behavior while rejecting absolute paths,
+    traversal components, separators on either platform, NULs, and empties
+    before any lock/load operation can create or normalize external state.
+    """
+    return (
+        isinstance(project_id, str)
+        and bool(project_id)
+        and project_id not in {".", ".."}
+        and "\x00" not in project_id
+        and "/" not in project_id
+        and "\\" not in project_id
+        and not os.path.isabs(project_id)
+    )
+
+
 def _project_file(project_id: str) -> str:
     return os.path.join(_project_dir(project_id), "project.json")
 

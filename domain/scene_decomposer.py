@@ -8,18 +8,35 @@ import copy
 import json
 import os
 import re
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Optional, List
 from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.provider_catalog import RuntimeSnapshot, project_legacy_registry
 from domain.project_manager import make_shot
 from domain.video_engine_policy import (
+    VideoPolicyReason,
+    VideoTargetPolicyError,
+    build_runtime_snapshot,
     eligible_shot_targets,
     evaluate_shot_target,
     resolve_video_ranking,
 )
 from config.settings import settings
+
+
+def _terminal_video_policy_runtime_snapshot() -> RuntimeSnapshot:
+    """Observe readiness at the terminal lock-held shot write boundary."""
+
+    return build_runtime_snapshot()
+
+
+def _terminal_video_policy_current_date() -> date:
+    """Return the UTC policy date through a deterministic test seam."""
+
+    return datetime.now(timezone.utc).date()
+
+
 # Camera motion options — canonical list used by per-shot generation.
 CAMERA_MOTIONS = [
     "zoom_in_slow", "zoom_out_slow", "zoom_in_fast",
@@ -1169,6 +1186,46 @@ def update_scene_shots(
         latest_typed = _Project.model_validate(latest_project)
         for i, scene in enumerate(latest_typed.scenes):
             if scene.id == scene_id:
+                settings = latest_project.get("global_settings", {})
+                api_engines = (
+                    settings.get("api_engines", {})
+                    if isinstance(settings, dict)
+                    else {}
+                )
+                aspect_ratio = (
+                    settings.get("aspect_ratio")
+                    if isinstance(settings, dict)
+                    else None
+                )
+                snapshot = _terminal_video_policy_runtime_snapshot()
+                on_date = _terminal_video_policy_current_date()
+                for shot_index, shot in enumerate(shots):
+                    requested = (
+                        shot.get("target_api")
+                        if isinstance(shot, dict)
+                        else None
+                    )
+                    decision = evaluate_shot_target(
+                        requested,
+                        snapshot=snapshot,
+                        on_date=on_date,
+                        api_engines=api_engines,
+                        aspect_ratio=aspect_ratio,
+                    )
+                    if not decision.accepted:
+                        raise VideoTargetPolicyError(
+                            target=requested,
+                            reason=(
+                                decision.reason
+                                or VideoPolicyReason.UNKNOWN
+                            ),
+                            shot_id=(
+                                shot.get("id", "")
+                                if isinstance(shot, dict)
+                                and isinstance(shot.get("id"), str)
+                                else f"shot[{shot_index}]"
+                            ),
+                        )
                 latest_project["scenes"][i]["shots"] = shots
                 latest_project["scenes"][i]["num_shots"] = len(shots)
                 return True

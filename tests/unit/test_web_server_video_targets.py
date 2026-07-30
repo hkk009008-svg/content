@@ -59,6 +59,7 @@ def _persist_project(
     targets=("AUTO",),
     shot_ids=None,
     api_engines=None,
+    aspect_ratio=None,
 ):
     from domain import project_manager
 
@@ -92,6 +93,8 @@ def _persist_project(
         latest["scenes"] = [scene]
         if api_engines is not None:
             latest["global_settings"]["api_engines"] = api_engines
+        if aspect_ratio is not None:
+            latest["global_settings"]["aspect_ratio"] = aspect_ratio
         return True
 
     project_manager.mutate_project(project["id"], _mutate, timeout=5)
@@ -128,6 +131,69 @@ def test_project_config_returns_404_for_missing_project(client):
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "Project not found"}
+
+
+@pytest.mark.parametrize(
+    "project_id",
+    [
+        "",
+        ".",
+        "..",
+        "../outside",
+        "nested/outside",
+        r"nested\outside",
+        "/tmp/outside",
+    ],
+)
+def test_project_config_rejects_uncontained_id_before_load(
+    client,
+    monkeypatch,
+    project_id,
+):
+    """A query ID is fenced before load can read, lock, normalize, or write."""
+    import web_server
+
+    load_bomb = MagicMock(
+        side_effect=AssertionError("uncontained project_id reached load"),
+    )
+    monkeypatch.setattr(web_server, "load_project", load_bomb)
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": project_id},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "Invalid project_id"}
+    load_bomb.assert_not_called()
+
+
+def test_project_config_external_path_preserves_outside_sentinel(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    """An absolute external project path is neither read nor normalized."""
+    import web_server
+
+    outside = tmp_path / "outside-project"
+    outside.mkdir()
+    sentinel = outside / "project.json"
+    before = b'{"id":"outside","target_api":"SORA_2"}'
+    sentinel.write_bytes(before)
+    load_bomb = MagicMock(
+        side_effect=AssertionError("outside project was read"),
+    )
+    monkeypatch.setattr(web_server, "load_project", load_bomb)
+
+    response = client.get(
+        "/api/config",
+        query_string={"project_id": str(outside)},
+    )
+
+    assert response.status_code == 400
+    load_bomb.assert_not_called()
+    assert sentinel.read_bytes() == before
 
 
 def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
@@ -178,12 +244,12 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
         "in_use": False,
         "historical": False,
     }
-    assert by_key["KLING_3_0"]["can_select"] is True
-    assert by_key["KLING_3_0"]["reason"] is None
+    assert by_key["KLING_3_0"]["can_select"] is False
+    assert by_key["KLING_3_0"]["reason"] == "project_disabled"
     assert by_key["KLING_3_0"]["configured_enabled"] is False
     assert by_key["KLING_3_0"]["can_configure"] is True
     assert by_key["KLING_3_0"]["in_use"] is True
-    assert by_key["KLING_3_0"]["historical"] is False
+    assert by_key["KLING_3_0"]["historical"] is True
 
     assert by_key["SORA_2"]["can_select"] is False
     assert by_key["SORA_2"]["reason"] == "retired"
@@ -209,6 +275,35 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
     assert "runtime_options" not in serialized_rows
 
 
+def test_project_config_applies_project_aspect_policy(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, aspect: aspect != "9:16",
+    )
+    pid, _scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        aspect_ratio="9:16",
+    )
+
+    response = client.get(f"/api/config?project_id={pid}")
+
+    assert response.status_code == 200
+    by_key = {
+        row["key"]: row
+        for row in response.get_json()["video_engines"]
+    }
+    assert by_key["KLING_3_0"]["can_select"] is False
+    assert by_key["KLING_3_0"]["reason"] == "aspect_incompatible"
+
+
 def test_direct_shot_write_accepts_current_selectable_target(
     client,
     tmp_path,
@@ -226,6 +321,71 @@ def test_direct_shot_write_accepts_current_selectable_target(
 
     assert response.status_code == 200
     assert _find_shot(_load_project(pid), shot_id)["target_api"] == "KLING_3_0"
+
+
+@pytest.mark.parametrize(
+    ("api_engines", "aspect_ratio", "target", "reason"),
+    [
+        (
+            {"KLING_3_0": {"enabled": False}},
+            "16:9",
+            "KLING_3_0",
+            "project_disabled",
+        ),
+    ],
+)
+def test_direct_shot_write_applies_latest_project_policy(
+    client,
+    tmp_path,
+    monkeypatch,
+    api_engines,
+    aspect_ratio,
+    target,
+    reason,
+):
+    pid, _scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
+    )
+
+    response = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"target_api": target},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == reason
+    assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
+
+
+def test_direct_shot_write_applies_project_aspect_policy(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, aspect: aspect != "9:16",
+    )
+    pid, _scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        aspect_ratio="9:16",
+    )
+
+    response = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"target_api": "KLING_3_0"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == "aspect_incompatible"
+    assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
 
 
 def test_direct_shot_policy_rejection_has_stable_409_shape(
@@ -254,6 +414,73 @@ def test_direct_shot_policy_rejection_has_stable_409_shape(
         "retryable": False,
         "shot_id": shot_id,
     }
+    assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_target_policy_observation_occurs_inside_latest_project_lock(
+    client,
+    tmp_path,
+    monkeypatch,
+    nested,
+):
+    """A pre-lock ready snapshot cannot authorize a target after readiness changes."""
+    import web_server
+    from domain.provider_catalog import RuntimeSnapshot
+
+    pid, scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    real_mutate_project = web_server.mutate_project
+    inside_mutator = {"value": False}
+
+    def guarded_mutate(project_id, mutator, **kwargs):
+        def under_lock(latest):
+            inside_mutator["value"] = True
+            try:
+                return mutator(latest)
+            finally:
+                inside_mutator["value"] = False
+
+        return real_mutate_project(project_id, under_lock, **kwargs)
+
+    def unavailable_runtime():
+        assert inside_mutator["value"] is True
+        return RuntimeSnapshot()
+
+    def current_date():
+        assert inside_mutator["value"] is True
+        return _POLICY_DATE
+
+    monkeypatch.setattr(web_server, "mutate_project", guarded_mutate)
+    monkeypatch.setattr(
+        web_server,
+        "_video_policy_runtime_snapshot",
+        unavailable_runtime,
+    )
+    monkeypatch.setattr(
+        web_server,
+        "_video_policy_current_date",
+        current_date,
+    )
+
+    if nested:
+        proposed = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+        proposed[0]["target_api"] = "KLING_3_0"
+        response = client.put(
+            f"/api/projects/{pid}/scenes/{scene_id}",
+            json={"shots": proposed},
+        )
+    else:
+        response = client.put(
+            f"/api/projects/{pid}/shots/{shot_id}",
+            json={"target_api": "KLING_3_0"},
+        )
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == "runtime_unavailable"
     assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
 
 
@@ -367,6 +594,50 @@ def test_direct_duplicate_id_cannot_clone_historical_grandfather(
     )
 
 
+def test_nested_scene_empty_shots_clears_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO", "AUTO"),
+    )
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"shots": []},
+    )
+
+    assert response.status_code == 200
+    persisted_scene = _load_project(pid)["scenes"][0]
+    assert persisted_scene["shots"] == []
+    assert persisted_scene["num_shots"] == 0
+
+
+def test_nested_scene_null_shots_is_400_without_write(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0])
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"title": "must not persist", "shots": None},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "shots must be a JSON array"}
+    assert _load_project(pid)["scenes"][0] == before
+
+
 def test_nested_scene_target_rejection_is_atomic(
     client,
     tmp_path,
@@ -418,6 +689,80 @@ def test_nested_scene_round_trips_one_unique_historical_target(
     shot = _find_shot(_load_project(pid), shot_id)
     assert shot["target_api"] == "SORA_2"
     assert shot["prompt"] == "updated historical shot"
+
+
+def test_nested_scene_write_applies_project_disabled_policy(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+        api_engines={"KLING_3_0": {"enabled": False}},
+    )
+    proposed = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+    proposed[0]["target_api"] = "KLING_3_0"
+
+    response = client.put(
+        f"/api/projects/{pid}/scenes/{scene_id}",
+        json={"shots": proposed},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == "project_disabled"
+    assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
+
+
+def test_duplicate_scene_route_cannot_borrow_historical_grandfather(
+    client,
+    monkeypatch,
+):
+    """Even one matching shot is ambiguous when the route scene ID repeats."""
+    import web_server
+
+    latest = {
+        "id": "duplicate-scene-project",
+        "name": "duplicate-scene-project",
+        "characters": [],
+        "locations": [],
+        "scenes": [
+            {
+                "id": "duplicate-scene",
+                "shots": [{
+                    "id": "historical-shot",
+                    "target_api": "SORA_2",
+                    "prompt": "original",
+                }],
+            },
+            {
+                "id": "duplicate-scene",
+                "shots": [],
+            },
+        ],
+    }
+    proposed = deepcopy(latest["scenes"][0]["shots"])
+    proposed[0]["prompt"] = "must not persist"
+
+    def _mutate_without_normalizing(_pid, mutator, **_kwargs):
+        return mutator(latest)
+
+    monkeypatch.setattr(web_server, "load_project", lambda *_a, **_k: latest)
+    monkeypatch.setattr(
+        web_server,
+        "mutate_project",
+        _mutate_without_normalizing,
+    )
+
+    response = client.put(
+        "/api/projects/duplicate-scene-project/scenes/duplicate-scene",
+        json={"shots": proposed},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["reason"] == "retired"
+    assert latest["scenes"][0]["shots"][0]["prompt"] == "original"
 
 
 def test_nested_duplicate_payload_cannot_clone_historical_grandfather(
@@ -498,6 +843,124 @@ def test_missing_project_and_shot_remain_404(
 
     assert missing_shot.status_code == 404
     assert missing_project.status_code == 404
+
+
+def test_terminal_generated_writer_rejects_latest_project_disabled_target(
+    tmp_path,
+    monkeypatch,
+):
+    """Final generated shots are fenced atomically at the lock-held writer."""
+    import domain.scene_decomposer as scene_decomposer
+    from domain import project_manager
+    from domain.video_engine_policy import VideoTargetPolicyError
+
+    pid, scene_id, (shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+        api_engines={"KLING_3_0": {"enabled": False}},
+    )
+    project = _load_project(pid)
+    generated = deepcopy(project["scenes"][0]["shots"])
+    generated[0]["target_api"] = "KLING_3_0"
+    real_mutate_project = project_manager.mutate_project
+    inside_mutator = {"value": False}
+
+    def guarded_mutate(project_id, mutator, **kwargs):
+        def under_lock(latest):
+            inside_mutator["value"] = True
+            try:
+                return mutator(latest)
+            finally:
+                inside_mutator["value"] = False
+
+        return real_mutate_project(project_id, under_lock, **kwargs)
+
+    def runtime_snapshot():
+        assert inside_mutator["value"] is True
+        return _fal_runtime()
+
+    def policy_date():
+        assert inside_mutator["value"] is True
+        return _POLICY_DATE
+
+    monkeypatch.setattr(project_manager, "mutate_project", guarded_mutate)
+    monkeypatch.setattr(
+        scene_decomposer,
+        "_terminal_video_policy_runtime_snapshot",
+        runtime_snapshot,
+    )
+    monkeypatch.setattr(
+        scene_decomposer,
+        "_terminal_video_policy_current_date",
+        policy_date,
+    )
+
+    with pytest.raises(VideoTargetPolicyError) as exc_info:
+        scene_decomposer.update_scene_shots(
+            project,
+            scene_id,
+            generated,
+        )
+
+    assert exc_info.value.target == "KLING_3_0"
+    assert exc_info.value.reason == "project_disabled"
+    assert exc_info.value.shot_id == shot_id
+    assert _find_shot(_load_project(pid), shot_id)["target_api"] == "AUTO"
+
+
+def test_decompose_http_maps_post_reviewer_target_rejection_atomically(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    """A ChiefDirector-style terminal mutation cannot bypass the HTTP fence."""
+    import domain.scene_decomposer as scene_decomposer
+    import web_server
+
+    pid, scene_id, (existing_shot_id,) = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("AUTO",),
+    )
+    before = deepcopy(_load_project(pid)["scenes"][0]["shots"])
+    post_reviewer_shots = [{
+        "id": "chief-modified-shot",
+        "target_api": "SORA_2",
+    }]
+    monkeypatch.setattr(
+        web_server,
+        "decompose_scene",
+        lambda *_args, **_kwargs: post_reviewer_shots,
+    )
+    monkeypatch.setattr(
+        scene_decomposer,
+        "_terminal_video_policy_runtime_snapshot",
+        _fal_runtime,
+    )
+    monkeypatch.setattr(
+        scene_decomposer,
+        "_terminal_video_policy_current_date",
+        lambda: _POLICY_DATE,
+    )
+
+    response = client.post(
+        f"/api/projects/{pid}/scenes/{scene_id}/decompose",
+        json={},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Target video engine is unavailable",
+        "error_kind": "target_api_policy",
+        "code": "target_api_unavailable",
+        "target": "SORA_2",
+        "reason": "retired",
+        "retryable": False,
+        "shot_id": "chief-modified-shot",
+    }
+    assert _load_project(pid)["scenes"][0]["shots"] == before
+    assert _find_shot(_load_project(pid), existing_shot_id)["target_api"] == "AUTO"
 
 
 def test_generated_shot_validation_calls_the_same_policy_evaluator(

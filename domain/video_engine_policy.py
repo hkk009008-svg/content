@@ -57,6 +57,27 @@ class VideoTargetDecision:
     reason: VideoPolicyReason | None = None
 
 
+class VideoTargetPolicyError(Exception):
+    """One rejected persisted target, suitable for stable boundary mapping."""
+
+    def __init__(
+        self,
+        *,
+        target: object,
+        reason: VideoPolicyReason | str,
+        shot_id: str,
+    ):
+        reason_value = (
+            reason.value
+            if isinstance(reason, VideoPolicyReason)
+            else str(reason)
+        )
+        super().__init__(reason_value)
+        self.target = target if isinstance(target, str) else ""
+        self.reason = reason_value
+        self.shot_id = shot_id
+
+
 @dataclass(frozen=True)
 class VideoEngineRejection:
     """One rejected member of an ordered engine seed."""
@@ -172,6 +193,8 @@ def evaluate_shot_target(
     *,
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> VideoTargetDecision:
     """Resolve a proposed new shot target, coercing failures to ``AUTO``.
 
@@ -194,6 +217,10 @@ def evaluate_shot_target(
             reason = VideoPolicyReason.NOT_SELECTABLE
         elif not policy.dispatchable:
             reason = VideoPolicyReason.NOT_DISPATCHABLE
+        elif _is_project_disabled(key, api_engines):
+            reason = VideoPolicyReason.PROJECT_DISABLED
+        elif not is_video_aspect_compatible(key, aspect_ratio):
+            reason = VideoPolicyReason.ASPECT_INCOMPATIBLE
         elif not runtime_availability(
             key,
             _snapshot_or_default(snapshot),

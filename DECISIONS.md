@@ -3296,3 +3296,35 @@ Evidence:
   retained batch cost.
 - **Cross-ref:** ADR-017; `cinema/storyboard.py`;
   `cinema/phases/motion_render.py`; `phase_c_ffmpeg.py`.
+
+## ADR-068 — Persisted video targets are authorized at the terminal write boundary
+
+- **Date:** 2026-07-30
+- **Status:** Accepted.
+- **Context.** Runtime dispatch already rejected unavailable concrete video
+  targets, but public config and authoring paths could expose or persist targets
+  without applying the latest project enablement, aspect-ratio compatibility,
+  readiness, and date-retirement rules together. Generated shots could also be
+  changed by a reviewer after an earlier policy pass, and ambiguous duplicate
+  scene/shot identifiers made historical-value grandfathering unsafe.
+- **Decision.** Use the typed video-engine evaluator for project config rows and
+  every public or generated target write. Capture project settings, runtime
+  readiness, and the UTC policy date inside the same latest-project lock that
+  performs mutation. Re-evaluate every generated/reviewed target at the
+  terminal writer and reject the batch atomically with the same stable policy
+  error as public writes. Grandfather an unchanged historical target only when
+  the route scene and exact shot each resolve uniquely. Reject unsafe
+  project-ID path components before config loading.
+- **Consequences.**
+  - Config visibility, direct and nested authoring, and terminal generation
+    share one policy vocabulary and the latest project state.
+  - A reviewer cannot introduce a disabled, incompatible, unavailable, or
+    retired target between decomposition and persistence.
+  - Ambiguous legacy duplicate identifiers can no longer authorize a write;
+    they must be repaired before an unavailable historical target can round-trip.
+  - Valid slug-like missing project IDs retain the established 404 behavior,
+    while traversal, absolute, separator-bearing, empty, and malformed IDs fail
+    with 400 before any read.
+- **Cross-ref:** `domain/video_engine_policy.py`;
+  `domain/scene_decomposer.py`; `domain/project_manager.py`; `web_server.py`;
+  `tests/unit/test_web_server_video_targets.py`.

@@ -114,6 +114,37 @@ def test_selectable_engine_requires_credential_and_module() -> None:
     assert allowed.target == "KLING_3_0"
 
 
+def test_authoring_target_applies_project_disable_and_aspect(
+    monkeypatch,
+) -> None:
+    disabled = evaluate_shot_target(
+        "KLING_3_0",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={"KLING_3_0": {"enabled": False}},
+        aspect_ratio="16:9",
+    )
+    assert disabled.accepted is False
+    assert disabled.reason is VideoPolicyReason.PROJECT_DISABLED
+
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, _aspect: False,
+    )
+    incompatible = evaluate_shot_target(
+        "KLING_3_0",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={},
+        aspect_ratio="9:16",
+    )
+    assert incompatible.accepted is False
+    assert incompatible.reason is VideoPolicyReason.ASPECT_INCOMPATIBLE
+
+
 def test_veo_runtime_alternatives_require_complete_api_key_or_adc_path() -> None:
     missing_service = RuntimeSnapshot(
         credentials={"google_cloud_project"},

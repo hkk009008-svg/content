@@ -42,7 +42,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from project_manager import (
     MutationResult, ProjectLockError, create_project, load_project, delete_project,
-    list_projects, mutate_project,
+    is_safe_project_id, list_projects, mutate_project,
     add_character, remove_character, add_location, remove_location,
     add_object, remove_object, get_object,
     add_scene, remove_scene, reorder_scenes,
@@ -62,6 +62,7 @@ from cinema.services import state_snapshot, checkpoint_info
 from domain.provider_catalog import CATALOG, Modality, RuntimeSnapshot
 from domain.video_engine_policy import (
     VideoPolicyReason,
+    VideoTargetPolicyError,
     build_runtime_snapshot,
     evaluate_shot_target,
 )
@@ -137,16 +138,6 @@ def _json_object_or_none():
     return data if isinstance(data, dict) else None
 
 
-class _ShotTargetPolicyError(Exception):
-    """One rejected public target write, safe to map to a stable HTTP 409."""
-
-    def __init__(self, *, target: str, reason: str, shot_id: str):
-        super().__init__(reason)
-        self.target = target
-        self.reason = reason
-        self.shot_id = shot_id
-
-
 def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
     """Observe current symbolic readiness without retaining secret values."""
 
@@ -167,6 +158,8 @@ def _raise_if_target_rejected(
     may_grandfather: bool,
     snapshot: RuntimeSnapshot,
     on_date,
+    api_engines: Mapping[str, object] | None,
+    aspect_ratio: object,
 ) -> None:
     """Fence a proposed target while preserving one exact historical value."""
 
@@ -176,6 +169,8 @@ def _raise_if_target_rejected(
         requested,
         snapshot=snapshot,
         on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
     )
     if decision.accepted:
         return
@@ -184,14 +179,14 @@ def _raise_if_target_rejected(
         if decision.reason is not None
         else VideoPolicyReason.UNKNOWN.value
     )
-    raise _ShotTargetPolicyError(
+    raise VideoTargetPolicyError(
         target=requested,
         reason=reason,
         shot_id=shot_id,
     )
 
 
-def _shot_target_policy_response(exc: _ShotTargetPolicyError):
+def _shot_target_policy_response(exc: VideoTargetPolicyError):
     return jsonify({
         "error": "Target video engine is unavailable",
         "error_kind": "target_api_policy",
@@ -454,6 +449,11 @@ def _project_video_engine_rows(
     )
     if not isinstance(api_engines, Mapping):
         api_engines = {}
+    aspect_ratio = (
+        settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+        if isinstance(settings, Mapping)
+        else DEFAULT_ASPECT_RATIO
+    )
 
     def _configuration(key: str) -> tuple[bool, bool]:
         configured = api_engines.get(key)
@@ -483,6 +483,8 @@ def _project_video_engine_rows(
             entry.key,
             snapshot=snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
         configured_enabled, can_configure = _configuration(entry.key)
         is_in_use = entry.key in in_use
@@ -508,6 +510,8 @@ def _project_video_engine_rows(
             key,
             snapshot=snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
         configured_enabled, can_configure = _configuration(key)
         legacy = API_REGISTRY.get(key, {})
@@ -540,6 +544,8 @@ def get_config():
     project_id = request.args.get("project_id")
     project = None
     if project_id is not None:
+        if not is_safe_project_id(project_id):
+            return jsonify({"error": "Invalid project_id"}), 400
         project = load_project(project_id, timeout=HTTP_PROJECT_TIMEOUT)
         if not project:
             return jsonify({"error": "Project not found"}), 404
@@ -1629,8 +1635,9 @@ def api_update_scene(pid, sid):
     if data is None:
         return jsonify({"error": "JSON object required"}), 400
 
+    shots_are_updated = "shots" in data
     proposed_shots = data.get("shots")
-    if proposed_shots is not None:
+    if shots_are_updated:
         if not isinstance(proposed_shots, list):
             return jsonify({"error": "shots must be a JSON array"}), 400
         for index, shot in enumerate(proposed_shots):
@@ -1648,31 +1655,18 @@ def api_update_scene(pid, sid):
                     ),
                 }), 400
 
-    policy_snapshot = (
-        _video_policy_runtime_snapshot()
-        if proposed_shots
-        else None
-    )
-    policy_date = (
-        _video_policy_current_date()
-        if proposed_shots
-        else None
-    )
-
     def _mutate_project(latest_project: dict):
         latest_typed = Project.model_validate(latest_project)
-        scene_index = next(
-            (
-                index
-                for index, scene in enumerate(latest_typed.scenes)
-                if scene.id == sid
-            ),
-            None,
-        )
-        if scene_index is None:
+        matching_scene_indices = [
+            index
+            for index, scene in enumerate(latest_typed.scenes)
+            if scene.id == sid
+        ]
+        if not matching_scene_indices:
             return MutationResult(None, save=False)
+        scene_index = matching_scene_indices[0]
 
-        if proposed_shots is not None:
+        if shots_are_updated:
             latest_matches: dict[str, list[tuple[str, str]]] = {}
             for scene in latest_typed.scenes:
                 for shot in scene.shots:
@@ -1684,8 +1678,19 @@ def api_update_scene(pid, sid):
                 for shot in proposed_shots
                 if isinstance(shot.get("id"), str)
             )
-            assert policy_snapshot is not None
-            assert policy_date is not None
+            policy_snapshot = _video_policy_runtime_snapshot()
+            policy_date = _video_policy_current_date()
+            settings = latest_project.get("global_settings", {})
+            api_engines = (
+                settings.get("api_engines", {})
+                if isinstance(settings, Mapping)
+                else {}
+            )
+            aspect_ratio = (
+                settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+                if isinstance(settings, Mapping)
+                else DEFAULT_ASPECT_RATIO
+            )
             for shot in proposed_shots:
                 shot_id = (
                     shot.get("id")
@@ -1695,6 +1700,7 @@ def api_update_scene(pid, sid):
                 matches = latest_matches.get(shot_id, [])
                 may_grandfather = (
                     bool(shot_id)
+                    and len(matching_scene_indices) == 1
                     and len(matches) == 1
                     and matches[0][0] == sid
                     and proposed_counts[shot_id] == 1
@@ -1711,9 +1717,14 @@ def api_update_scene(pid, sid):
                     may_grandfather=may_grandfather,
                     snapshot=policy_snapshot,
                     on_date=policy_date,
+                    api_engines=api_engines,
+                    aspect_ratio=aspect_ratio,
                 )
 
-        latest_project["scenes"][scene_index].update(data)
+        scene_updates = dict(data)
+        if shots_are_updated:
+            scene_updates["num_shots"] = len(proposed_shots)
+        latest_project["scenes"][scene_index].update(scene_updates)
         return latest_project["scenes"][scene_index]
 
     try:
@@ -1723,7 +1734,7 @@ def api_update_scene(pid, sid):
             timeout=HTTP_PROJECT_TIMEOUT,
             snapshot=project,
         )
-    except _ShotTargetPolicyError as exc:
+    except VideoTargetPolicyError as exc:
         return _shot_target_policy_response(exc)
     if result:
         return jsonify(result)
@@ -1841,7 +1852,15 @@ def api_decompose_scene(pid, sid):
         settings,
         style_rules,
     )
-    update_scene_shots(project, sid, shots, timeout=HTTP_PROJECT_TIMEOUT)
+    try:
+        update_scene_shots(
+            project,
+            sid,
+            shots,
+            timeout=HTTP_PROJECT_TIMEOUT,
+        )
+    except VideoTargetPolicyError as exc:
+        return _shot_target_policy_response(exc)
 
     return jsonify({"shots": shots})
 
@@ -2380,17 +2399,6 @@ def api_update_shot(pid, shot_id):
         return jsonify({"error": "target_api must be a string"}), 400
 
     target_is_updated = "target_api" in updates
-    policy_snapshot = (
-        _video_policy_runtime_snapshot()
-        if target_is_updated
-        else None
-    )
-    policy_date = (
-        _video_policy_current_date()
-        if target_is_updated
-        else None
-    )
-
     def _mutate_project(project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
         # for-find.  Project.model_validate(project) validates the latest
@@ -2411,8 +2419,19 @@ def api_update_shot(pid, shot_id):
         if matches:
             scene_index, shot_index, shot = matches[0]
             if target_is_updated:
-                assert policy_snapshot is not None
-                assert policy_date is not None
+                policy_snapshot = _video_policy_runtime_snapshot()
+                policy_date = _video_policy_current_date()
+                settings = project.get("global_settings", {})
+                api_engines = (
+                    settings.get("api_engines", {})
+                    if isinstance(settings, Mapping)
+                    else {}
+                )
+                aspect_ratio = (
+                    settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+                    if isinstance(settings, Mapping)
+                    else DEFAULT_ASPECT_RATIO
+                )
                 _raise_if_target_rejected(
                     updates["target_api"],
                     shot_id=shot_id,
@@ -2420,6 +2439,8 @@ def api_update_shot(pid, shot_id):
                     may_grandfather=len(matches) == 1,
                     snapshot=policy_snapshot,
                     on_date=policy_date,
+                    api_engines=api_engines,
+                    aspect_ratio=aspect_ratio,
                 )
             project["scenes"][scene_index]["shots"][shot_index].update(
                 updates
@@ -2433,7 +2454,7 @@ def api_update_shot(pid, shot_id):
             _mutate_project,
             timeout=HTTP_PROJECT_TIMEOUT,
         )
-    except _ShotTargetPolicyError as exc:
+    except VideoTargetPolicyError as exc:
         return _shot_target_policy_response(exc)
     if result is None:
         return jsonify({"error": "Project not found"}), 404

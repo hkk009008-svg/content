@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:81](web_server.py:81) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:90](web_server.py:90) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:82](web_server.py:82) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:118-119](web_server.py:118) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:120-121](web_server.py:120) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:1983](web_server.py:1983)) does
+  `api_stream` ([web_server.py:2002](web_server.py:2002)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -199,7 +199,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:277-284](web_server.py:277)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:272-279](web_server.py:272)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -519,7 +519,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.2 `project_manager.py` defaults
 
-`make_project()` ([domain/project_manager.py:309](domain/project_manager.py:309))
+`make_project()` ([domain/project_manager.py:329](domain/project_manager.py:329))
 seeds these `global_settings`:
 
 ```python
@@ -538,7 +538,7 @@ seeds these `global_settings`:
 "color_drift_sensitivity": 0.3,
 ```
 
-`normalize_project_schema()` ([domain/project_manager.py:552-559](domain/project_manager.py:552))
+`normalize_project_schema()` ([domain/project_manager.py:567-574](domain/project_manager.py:567))
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
@@ -561,8 +561,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:773](domain/scene_decomposer.py:773)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:918](domain/scene_decomposer.py:918)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:790](domain/scene_decomposer.py:790)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:935](domain/scene_decomposer.py:935)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -649,7 +649,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1769](web_server.py:1769) — uses the
+`api_generate_dialogue` at [web_server.py:1780](web_server.py:1780) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1078,7 +1078,7 @@ in `workflow_selector.py`/`cinema/context.py` are archaeology, not a live import
 These values are **historical order seeds, not executable truth**.
 `GEMINI_OMNI` remains at the head for compatibility/evidence, but the typed
 catalog marks it known-broken, so
-`filter_dispatch_candidates` ([domain/video_engine_policy.py:262](domain/video_engine_policy.py:262))
+`filter_dispatch_candidates` ([domain/video_engine_policy.py:289](domain/video_engine_policy.py:289))
 always rejects it. `ShotController.generate_motion_take` prepends a cached
 optimizer suggestion when present, filters the whole ordered seed once using
 the current UTC date, symbolic runtime snapshot, project `api_engines`, and
@@ -1086,6 +1086,18 @@ aspect ratio, then prices only the first admitted engine. A concrete persisted
 target is a one-engine pin: rejection returns structured
 `target_api_policy/target_api_unavailable` before budget, progress, TTS, take
 creation, or output-path work; it never silently becomes an AUTO cascade.
+
+The public authoring surface uses that same decision policy rather than a
+separate registry check. Project-scoped config reads reject unsafe
+`project_id` components before any load; config rows reflect the latest
+project enablement and aspect ratio. Direct shot writes, nested scene shot
+writes, and the terminal generated-shot writer all evaluate against the
+latest lock-held project settings, UTC policy date, and runtime snapshot
+before mutation. Exact historical targets may round-trip only when both their
+scene and shot identifiers resolve uniquely; ambiguous legacy data fails
+closed. Generated/reviewed shot batches are re-evaluated at their terminal
+write boundary so an upstream policy pass cannot authorize a later-mutated
+target.
 
 Dialogue AUTO routing prepends the ranked native-audio seed before the
 template. Thus known-broken Gemini is retained as rejection evidence while a
