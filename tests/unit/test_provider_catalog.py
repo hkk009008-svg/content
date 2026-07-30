@@ -81,12 +81,27 @@ def test_legacy_projection_overlays_typed_effective_truth() -> None:
 
     assert sora["maturity"] == Maturity.STABLE.value
     assert sora["lifecycle"] == Lifecycle.RETIRED.value
+    assert sora["status"] == "retired"
     assert sora["product_support"] == ProductSupport.LIMITED.value
     assert sora["provider"] == Provider.OPENAI.value
     assert sora["selectable"] is False
     assert sora["dispatchable"] is False
     assert sora["spendable"] is False
     assert sora["sunset_on"] == "2026-09-24"
+
+
+def test_legacy_projection_status_is_fail_closed_and_date_effective() -> None:
+    before = project_legacy_registry(API_REGISTRY, on_date=PRE_SUNSET)
+    at_sunset = project_legacy_registry(API_REGISTRY, on_date=SUNSET)
+
+    assert before["SORA_NATIVE"]["status"] == "live"
+    assert at_sunset["SORA_NATIVE"]["status"] == "retired"
+    assert before["SORA_2"]["status"] == "retired"
+    assert before["GEMINI_OMNI"]["status"] == "disabled"
+    assert before["RUNWAY_ACT_ONE"]["status"] == "retired"
+    assert before["ELEVENLABS_DIALOGUE"]["status"] == "beta"
+    for key in ("SORA_2", "GEMINI_OMNI", "RUNWAY_ACT_ONE"):
+        assert before[key]["status"] != "live"
 
 
 def test_sora_fal_is_retired_and_cannot_be_enabled_mutation_pin() -> None:
@@ -243,7 +258,8 @@ def test_known_parameter_contracts_are_pinned() -> None:
     foley = constraints("STABLE_AUDIO_FOLEY")
     assert foley["duration"].maximum == 190
     assert (foley["steps"].minimum, foley["steps"].maximum) == (30, 100)
-    assert (foley["cfg"].minimum, foley["cfg"].maximum) == (1, 10)
+    assert "cfg" not in foley
+    assert (foley["cfg_scale"].minimum, foley["cfg_scale"].maximum) == (1, 10)
 
 
 def test_fal_availability_requires_credential_and_module() -> None:
@@ -291,17 +307,18 @@ def test_kling_native_availability_requires_both_credentials_and_jwt() -> None:
 
 
 def test_ltx_only_trusts_fal_alternative_until_adapter_repair() -> None:
-    invalid_native_claim = RuntimeSnapshot(
-        credentials={"ltx_api_key"},
-        modules={"ltx"},
-    )
+    with pytest.raises(ValueError, match="unknown symbolic names") as exc_info:
+        RuntimeSnapshot(credentials={"ltx_api_key"})
+    assert "ltx_api_key" not in repr(exc_info.value)
+
+    no_trustworthy_option = RuntimeSnapshot()
     trustworthy_fal = RuntimeSnapshot(
         credentials={"fal_key"},
         modules={"fal_client"},
     )
 
     native_result = runtime_availability(
-        "LTX", invalid_native_claim, on_date=PRE_SUNSET
+        "LTX", no_trustworthy_option, on_date=PRE_SUNSET
     )
     fal_result = runtime_availability("LTX", trustworthy_fal, on_date=PRE_SUNSET)
 
@@ -350,7 +367,6 @@ def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
         credentials={
             "fal_key",
             "google_api_key",
-            "gemini_api_key",
             "openai_api_key",
         },
         modules={"fal_client", "google.genai", "openai"},
@@ -401,12 +417,69 @@ def test_runtime_snapshot_from_settings_never_retains_or_renders_secrets() -> No
     assert sentinel not in str(result)
 
 
+@pytest.mark.parametrize("field_name", ("credentials", "modules", "services"))
+def test_runtime_snapshot_rejects_unknown_names_without_rendering_them(
+    field_name: str,
+) -> None:
+    sentinel = "TOP_SECRET_DIRECT_CONSTRUCTION_SENTINEL"
+
+    with pytest.raises(ValueError, match="unknown symbolic names") as exc_info:
+        RuntimeSnapshot(**{field_name: {sentinel}})
+
+    assert sentinel not in repr(exc_info.value)
+    assert sentinel not in str(exc_info.value)
+
+
+def test_runtime_snapshot_rejects_requirement_names_in_the_wrong_kind() -> None:
+    with pytest.raises(ValueError, match="credentials"):
+        RuntimeSnapshot(credentials={"fal_client"})
+    with pytest.raises(ValueError, match="modules"):
+        RuntimeSnapshot(modules={"fal_key"})
+    with pytest.raises(ValueError, match="services"):
+        RuntimeSnapshot(services={"openai"})
+
+
 def test_sources_are_single_checked_records_with_unverified_urls_fail_closed() -> None:
     for key, entry in CATALOG.items():
         assert isinstance(entry.source, SourceCheck), key
         assert entry.source.checked_at == date(2026, 7, 30), key
         if entry.source.kind is SourceKind.UNVERIFIED:
             assert entry.source.url is None, key
+
+
+@pytest.mark.parametrize(
+    ("kind", "url"),
+    (
+        (SourceKind.PRIMARY_CONTRACT, None),
+        (SourceKind.PRIMARY_CONTRACT, ""),
+        (SourceKind.PRIMARY_CONTRACT, "provider.example/api"),
+        (SourceKind.PRIMARY_CONTRACT, "ftp://provider.example/api"),
+        (SourceKind.PRIMARY_CONTRACT, "http://"),
+        (SourceKind.PRIMARY_CONTRACT, "https:///missing-host"),
+        (SourceKind.LIFECYCLE_NOTICE, None),
+        (SourceKind.LIFECYCLE_NOTICE, "file:///tmp/notice"),
+    ),
+)
+def test_verified_sources_require_nonempty_http_urls(
+    kind: SourceKind,
+    url: str | None,
+) -> None:
+    with pytest.raises(ValueError, match=r"HTTP\(S\) URL"):
+        SourceCheck(checked_at=date(2026, 7, 30), url=url, kind=kind)
+
+
+def test_unverified_sources_reject_claimed_urls() -> None:
+    with pytest.raises(ValueError, match="must not claim"):
+        SourceCheck(
+            checked_at=date(2026, 7, 30),
+            url="https://provider.example/unverified",
+            kind=SourceKind.UNVERIFIED,
+        )
+    assert SourceCheck(
+        checked_at=date(2026, 7, 30),
+        url=None,
+        kind=SourceKind.REPO_EVIDENCE,
+    ).url is None
 
 
 def test_catalog_entry_field_boundary_is_exactly_typed() -> None:

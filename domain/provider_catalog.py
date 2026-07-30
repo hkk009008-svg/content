@@ -18,6 +18,7 @@ from enum import StrEnum
 from importlib.util import find_spec
 from types import MappingProxyType
 from typing import Callable, Mapping
+from urllib.parse import urlparse
 
 
 class Modality(StrEnum):
@@ -134,6 +135,19 @@ class SourceCheck:
     def __post_init__(self) -> None:
         if self.kind is SourceKind.UNVERIFIED and self.url is not None:
             raise ValueError("unverified source checks must not claim a URL")
+        if self.kind in {
+            SourceKind.PRIMARY_CONTRACT,
+            SourceKind.LIFECYCLE_NOTICE,
+        }:
+            parsed = urlparse(self.url) if isinstance(self.url, str) else None
+            if (
+                parsed is None
+                or parsed.scheme.lower() not in {"http", "https"}
+                or not parsed.netloc
+            ):
+                raise ValueError(
+                    "primary contracts and lifecycle notices require an HTTP(S) URL"
+                )
 
 
 @dataclass(frozen=True)
@@ -221,9 +235,28 @@ class RuntimeSnapshot:
     services: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "credentials", frozenset(self.credentials))
-        object.__setattr__(self, "modules", frozenset(self.modules))
-        object.__setattr__(self, "services", frozenset(self.services))
+        supplied = {
+            RequirementKind.CREDENTIAL: frozenset(self.credentials),
+            RequirementKind.MODULE: frozenset(self.modules),
+            RequirementKind.SERVICE: frozenset(self.services),
+        }
+        labels = {
+            RequirementKind.CREDENTIAL: "credentials",
+            RequirementKind.MODULE: "modules",
+            RequirementKind.SERVICE: "services",
+        }
+        for kind, names in supplied.items():
+            if not names <= _RUNTIME_REQUIREMENT_NAMES[kind]:
+                raise ValueError(
+                    f"runtime snapshot {labels[kind]} contain unknown symbolic names"
+                )
+        object.__setattr__(
+            self,
+            "credentials",
+            supplied[RequirementKind.CREDENTIAL],
+        )
+        object.__setattr__(self, "modules", supplied[RequirementKind.MODULE])
+        object.__setattr__(self, "services", supplied[RequirementKind.SERVICE])
 
     @classmethod
     def from_settings(
@@ -241,20 +274,8 @@ class RuntimeSnapshot:
         a remote service or pod is ready.
         """
 
-        credential_names = {
-            requirement.name
-            for entry in CATALOG.values()
-            for option in entry.runtime_options
-            for requirement in option
-            if requirement.kind is RequirementKind.CREDENTIAL
-        }
-        module_names = {
-            requirement.name
-            for entry in CATALOG.values()
-            for option in entry.runtime_options
-            for requirement in option
-            if requirement.kind is RequirementKind.MODULE
-        }
+        credential_names = _RUNTIME_REQUIREMENT_NAMES[RequirementKind.CREDENTIAL]
+        module_names = _RUNTIME_REQUIREMENT_NAMES[RequirementKind.MODULE]
         present_credentials = frozenset(
             name for name in credential_names if bool(getattr(settings_obj, name, ""))
         )
@@ -440,7 +461,7 @@ _FAL_SVD_PARAMETERS = (
 _FOLEY_PARAMETERS = (
     ParameterConstraint("duration", maximum=190),
     ParameterConstraint("steps", minimum=30, maximum=100),
-    ParameterConstraint("cfg", minimum=1, maximum=10),
+    ParameterConstraint("cfg_scale", minimum=1, maximum=10),
 )
 
 
@@ -1014,6 +1035,22 @@ CATALOG: Mapping[str, CatalogEntry] = MappingProxyType(
     {entry.key: entry for entry in _CATALOG_ROWS}
 )
 
+_RUNTIME_REQUIREMENT_NAMES: Mapping[
+    RequirementKind,
+    frozenset[str],
+] = MappingProxyType(
+    {
+        kind: frozenset(
+            requirement.name
+            for entry in CATALOG.values()
+            for option in entry.runtime_options
+            for requirement in option
+            if requirement.kind is kind
+        )
+        for kind in RequirementKind
+    }
+)
+
 
 def get_entry(key: str) -> CatalogEntry:
     """Return the canonical entry, raising ``KeyError`` for unknown IDs."""
@@ -1132,6 +1169,7 @@ def project_legacy_registry(
             {
                 "label": entry.label,
                 "modality": entry.modality.value,
+                "status": _legacy_effective_status(entry, policy),
                 "maturity": entry.maturity.value,
                 "lifecycle": policy.lifecycle.value,
                 "product_support": entry.product_support.value,
@@ -1150,6 +1188,21 @@ def project_legacy_registry(
         )
         projected[key] = row
     return projected
+
+
+def _legacy_effective_status(
+    entry: CatalogEntry,
+    policy: EffectivePolicy,
+) -> str:
+    """Map typed policy into the legacy eligibility vocabulary, fail closed."""
+
+    if policy.lifecycle is Lifecycle.RETIRED:
+        return "retired"
+    if not policy.dispatchable:
+        return "disabled"
+    if entry.maturity is Maturity.BETA:
+        return "beta"
+    return "live"
 
 
 __all__ = [
