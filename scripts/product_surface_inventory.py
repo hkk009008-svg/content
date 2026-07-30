@@ -409,6 +409,8 @@ def _validate_transport(
         row["_transport_ref"], allowed_sources, f"{label}._transport_ref", nullable=False
     )
     _source_fact(row["source"], allowed_sources, label)
+    if ref.rpartition(":")[0] != row["source"]["path"]:
+        _schema_error(f"{label} reference/source paths disagree")
     _normalized_text(row["url_expression"], f"{label}.url_expression", allow_empty=True)
     _url(row["url_template"], f"{label}.url_template")
     if "enclosing_function" in row:
@@ -435,7 +437,7 @@ def _validate_transport(
 def _validate_operation(
     row: Any,
     allowed_sources: set[str],
-    transport_refs: set[str],
+    transport_refs: dict[str, str],
     index: int,
 ) -> None:
     label = f"operations[{index}]"
@@ -475,8 +477,11 @@ def _validate_operation(
         if row["method"] is not None or row["_transport_ref"] is not None:
             _schema_error(f"{label} must not claim a method or transport reference")
         ref = None
-    if ref is not None and ref not in transport_refs:
-        _schema_error(f"{label} has a dangling transport reference")
+    if ref is not None:
+        if ref not in transport_refs:
+            _schema_error(f"{label} has a dangling transport reference")
+        if transport_refs[ref] != row["source"]["path"]:
+            _schema_error(f"{label} crosses frontend source files")
 
 
 def _validate_unresolved(
@@ -540,12 +545,12 @@ def _validate_frontend_payload(payload: Any, root: Path) -> dict[str, Any]:
         if type(top[key]) is not list:
             _schema_error(f"payload.{key} must be a list")
     allowed_sources = set(expected_files)
-    transport_refs: set[str] = set()
+    transport_refs: dict[str, str] = {}
     for index, row in enumerate(top["transports"]):
         ref = _validate_transport(row, allowed_sources, index)
         if ref in transport_refs:
             _schema_error("transport references must be unique")
-        transport_refs.add(ref)
+        transport_refs[ref] = row["source"]["path"]
     for index, row in enumerate(top["operations"]):
         _validate_operation(row, allowed_sources, transport_refs, index)
     for index, row in enumerate(top["unresolved"]):

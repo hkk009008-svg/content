@@ -829,6 +829,86 @@ def test_compiler_helper_schema_corruption_fails_before_id_construction(
         inventory_module._frontend(root)
 
 
+@pytest.mark.parametrize(
+    "contradiction",
+    ["transport_reference_path", "operation_source_path"],
+)
+def test_cross_file_reference_contradictions_fail_before_id_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    contradiction: str,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "fact.ts", "")
+    _frontend(root, "other.ts", "")
+    payload = _valid_helper_payload()
+    payload["files"] = ["web/src/fact.ts", "web/src/other.ts"]
+    if contradiction == "transport_reference_path":
+        payload["transports"][0]["_transport_ref"] = "web/src/other.ts:0"
+        payload["operations"][0]["_transport_ref"] = "web/src/other.ts:0"
+    else:
+        payload["operations"][0]["source"]["path"] = "web/src/other.ts"
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_ids(*_args, **_kwargs):
+        raise AssertionError("relational validation must precede ID construction")
+
+    monkeypatch.setattr(inventory_module, "_assign_ids", forbidden_ids)
+
+    with pytest.raises(inventory_module.FrontendInventoryError):
+        inventory_module._frontend(root)
+
+
+def test_same_file_wrapper_reference_is_accepted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repo(tmp_path)
+    _frontend(root, "fact.ts", "")
+    payload = _valid_helper_payload()
+    payload["operations"][0].update(
+        {
+            "expanded_wrapper": "load",
+            "kind": "one_hop_wrapper_call",
+        }
+    )
+    _mock_helper_payload(monkeypatch, payload)
+
+    transports, operations, _unresolved, _version = inventory_module._frontend(root)
+
+    assert operations[0]["kind"] == "one_hop_wrapper_call"
+    assert operations[0]["transport_id"] == transports[0]["id"]
+    assert operations[0]["source"]["path"] == transports[0]["source"]["path"]
+
+
+@pytest.mark.parametrize("mode", ["write", "check"])
+def test_cross_file_reference_failure_does_not_mutate_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    root = _repo(tmp_path / "repo")
+    _frontend(root, "fact.ts", "")
+    _frontend(root, "other.ts", "")
+    output = root / "inventory.json"
+    output.write_text("prior artifact\n", encoding="utf-8")
+    payload = _valid_helper_payload()
+    payload["files"] = ["web/src/fact.ts", "web/src/other.ts"]
+    payload["operations"][0]["source"]["path"] = "web/src/other.ts"
+    _mock_helper_payload(monkeypatch, payload)
+
+    def forbidden_write(*_args, **_kwargs):
+        raise AssertionError("cross-file facts must never reach the writer")
+
+    monkeypatch.setattr(inventory_module, "_atomic_write", forbidden_write)
+    arguments = ["--root", str(root), "--output", str(output)]
+    if mode == "check":
+        arguments.append("--check")
+
+    assert inventory_module.main(arguments) == 1
+    assert output.read_text(encoding="utf-8") == "prior artifact\n"
+
+
 @pytest.mark.parametrize("failure_mode", ["unavailable", "nonzero", "invalid_json"])
 def test_frontend_compiler_failures_preserve_prior_output(
     tmp_path: Path,
