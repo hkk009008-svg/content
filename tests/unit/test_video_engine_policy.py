@@ -224,6 +224,19 @@ def test_project_explicit_disable_rejects_otherwise_ready_candidate() -> None:
     assert absent_is_not_disabled.candidates == ("SEEDANCE",)
 
 
+def test_portrait_dispatch_rejects_unwired_engine_with_structured_reason() -> None:
+    result = filter_dispatch_candidates(
+        ["LTX", "SEEDANCE"],
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        aspect_ratio="9:16",
+    )
+    assert result.candidates == ("SEEDANCE",)
+    assert [(item.key, item.reason) for item in result.rejections] == [
+        ("LTX", VideoPolicyReason.ASPECT_INCOMPATIBLE),
+    ]
+
+
 def test_dispatch_filter_preserves_order_dedupes_and_reports_rejections() -> None:
     result = filter_dispatch_candidates(
         [

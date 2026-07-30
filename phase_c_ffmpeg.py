@@ -2,12 +2,22 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 import json
 import subprocess
+from datetime import date
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Optional
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+from domain.provider_catalog import RuntimeSnapshot
+from domain.video_engine_policy import (
+    PORTRAIT_CAPABLE_VIDEO_ENGINES,
+    VideoCandidateResult,
+    build_runtime_snapshot,
+    filter_dispatch_candidates,
+)
 from performance._net import safe_download
 
 logger = logging.getLogger(__name__)
@@ -37,10 +47,7 @@ _GEMINI_OMNI_QUOTA_TTL_S: int = 600  # 10 min — Gemini Developer API Tier-1 ro
 # and Seedance 2.0's aspect_ratio enum includes 9:16 (fal /api schema).
 # Note: the Kling dispatch keys are KLING_NATIVE + KLING_3_0
 # (there is no bare "KLING"); there is no Hedra branch in this module.
-PORTRAIT_CAPABLE = frozenset({
-    "VEO_NATIVE", "VEO", "SORA_NATIVE", "SORA_2",
-    "KLING_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "RUNWAY", "SEEDANCE",
-})
+PORTRAIT_CAPABLE = PORTRAIT_CAPABLE_VIDEO_ENGINES
 
 # Seconds requested per shot type from the fal Seedance endpoints (duration
 # enum: 4-15s ints; mirrors _sora_durations). Module-level because the cost
@@ -49,20 +56,20 @@ PORTRAIT_CAPABLE = frozenset({
 # otherwise under-record by 38% (money-gate review 2026-07-11).
 SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
 
-# Once-per-run structural flag: SEEDANCE is the default-cascade head and the
-# action primary, so a missing fal client degrades the whole run, not one clip.
+# Once-per-run structural flag: multiple admitted fallbacks use FAL, so a
+# missing client degrades the whole run, not one clip.
 _FAL_MISSING_WARNED = False
+_VIDEO_POLICY_GUARD_TOKEN = object()
 
 # Default engine cascade for generate_ai_video when the caller passes no
 # video_fallbacks — quality order. Module-level so tests pin the REAL list
 # (the old test kept a local copy that silently drifted for two migrations).
-# GEMINI_OMNI leads (Google-first, WS2) with VEO_NATIVE promoted to 2nd —
-# both Google APIs take priority over the post-Sora-sunset ordering below.
-# SEEDANCE next since the Sora sunset (2026-09-24); KLING_3_0 (fal v3 Pro,
-# #11 AA i2v arena) outranks the legacy kling-v1-6 KLING_NATIVE route.
+# Known-broken GEMINI_OMNI and retired SORA_2 are intentionally absent.  This
+# remains an order seed only: the typed entry guard below is the executable
+# authority for lifecycle, runtime, project, and aspect eligibility.
 DEFAULT_VIDEO_CASCADE = [
-    "GEMINI_OMNI", "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
-    "RUNWAY_GEN4", "LTX", "KLING_NATIVE", "SORA_2", "VEO", "RUNWAY",
+    "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
+    "RUNWAY_GEN4", "LTX", "KLING_NATIVE", "VEO", "RUNWAY",
 ]
 
 
@@ -81,17 +88,78 @@ def _gemini_omni_quota_blocked() -> bool:
     the module-level comment on that constant for why it's separate from Veo's)."""
     return _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL > time.time()
 
-try:
-    from runwayml import RunwayML, TaskFailedError
-except ImportError:
-    RunwayML = None
-    TaskFailedError = None
+fal_client = None
+FAL_AVAILABLE: bool | None = None
 
-try:
-    import fal_client
+
+def _load_fal_client():
+    """Import the FAL provider only after the dispatch policy admits a chain."""
+
+    global fal_client, FAL_AVAILABLE
+    if FAL_AVAILABLE is True and fal_client is not None:
+        return fal_client
+    if FAL_AVAILABLE is False:
+        return None
+    try:
+        import fal_client as imported_fal_client
+    except ImportError:
+        FAL_AVAILABLE = False
+        return None
+    fal_client = imported_fal_client
     FAL_AVAILABLE = True
-except ImportError:
-    FAL_AVAILABLE = False
+    return fal_client
+
+
+def _runtime_module_probe(name: str) -> bool:
+    """Treat an injected/loaded module as available without importing it."""
+
+    if name in sys.modules:
+        return True
+    try:
+        return find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+def _serialized_policy_rejections(
+    result: VideoCandidateResult,
+) -> list[dict[str, str]]:
+    return [
+        {"key": rejection.key, "reason": rejection.reason.value}
+        for rejection in result.rejections
+    ]
+
+
+def _dispatch_policy_error(
+    requested: object,
+    result: VideoCandidateResult,
+) -> dict:
+    target = requested if isinstance(requested, str) else ""
+    reason = next(
+        (
+            rejection.reason.value
+            for rejection in result.rejections
+            if target != "AUTO" and rejection.key == target
+        ),
+        None,
+    )
+    if reason is None:
+        reason = next(
+            (
+                rejection.reason.value
+                for rejection in result.rejections
+                if rejection.key != "AUTO"
+            ),
+            "no_eligible_candidates",
+        )
+    return {
+        "error": "Target video engine is unavailable",
+        "error_kind": "target_api_policy",
+        "code": "target_api_unavailable",
+        "target_api": target,
+        "reason": reason,
+        "retryable": False,
+    }
 
 
 def generate_ai_video(
@@ -113,6 +181,11 @@ def generate_ai_video(
     duration: str = "8s",
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
+    _policy_snapshot: RuntimeSnapshot | None = None,
+    _policy_date: date | None = None,
+    _policy_allow_primary_fallback: bool = False,
+    _policy_candidates: tuple[str, ...] | None = None,
+    _policy_guard_token: object | None = None,
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -146,8 +219,80 @@ def generate_ai_video(
         would_exceed() reads 0.0 and the gate silently admits them.
     """
     from cinema.context import get_project_setting
-    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio, is_portrait
+    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio
     _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
+    # True entry fence: resolve the complete chain exactly once, before
+    # attempted_apis, routing logs, sleeps, provider imports/constructors,
+    # uploads/downloads, or billing callbacks.  Recursive cascade hops receive
+    # the immutable admitted tuple and never revisit raw/default seeds.
+    if _policy_guard_token is not _VIDEO_POLICY_GUARD_TOKEN:
+        requested_api = target_api if isinstance(target_api, str) else ""
+        requested_upper = requested_api.upper()
+        if requested_upper == "AUTO":
+            raw_fallbacks = (
+                list(video_fallbacks)
+                if video_fallbacks is not None
+                else list(DEFAULT_VIDEO_CASCADE)
+            )
+            policy_seed: list[object] = ["AUTO", *raw_fallbacks]
+        elif video_fallbacks is not None:
+            policy_seed = [requested_upper, *video_fallbacks]
+        else:
+            # A concrete target with no explicit chain is pinned.  Provider
+            # failure or policy rejection must not revive global defaults.
+            policy_seed = [requested_upper]
+
+        configured_engines = get_project_setting(ctx, "api_engines", None)
+        policy_snapshot = (
+            _policy_snapshot
+            if _policy_snapshot is not None
+            else build_runtime_snapshot(
+                settings_obj=settings,
+                module_probe=_runtime_module_probe,
+            )
+        )
+        dispatch_policy = filter_dispatch_candidates(
+            policy_seed,
+            snapshot=policy_snapshot,
+            on_date=_policy_date,
+            api_engines=configured_engines,
+            aspect_ratio=_aspect,
+        )
+        serialized_rejections = _serialized_policy_rejections(dispatch_policy)
+        if _cascade_out is not None:
+            existing_rejections = _cascade_out.setdefault(
+                "policy_rejections",
+                [],
+            )
+            for rejection in serialized_rejections:
+                if rejection not in existing_rejections:
+                    existing_rejections.append(rejection)
+
+        primary_rejected = any(
+            rejection.key == requested_upper
+            for rejection in dispatch_policy.rejections
+        )
+        may_use_safe_chain = (
+            requested_upper == "AUTO"
+            or _policy_allow_primary_fallback
+        )
+        if (
+            not dispatch_policy.candidates
+            or (primary_rejected and not may_use_safe_chain)
+        ):
+            if _cascade_out is not None:
+                _cascade_out["policy_error"] = _dispatch_policy_error(
+                    requested_api,
+                    dispatch_policy,
+                )
+            return None
+
+        _policy_candidates = dispatch_policy.candidates
+        if requested_upper == "AUTO" or primary_rejected:
+            target_api = _policy_candidates[0]
+        else:
+            target_api = requested_upper
 
     if attempted_apis is None:
         attempted_apis = []
@@ -216,27 +361,10 @@ def generate_ai_video(
     )
 
     def try_next_api():
-        # Smart cascade — use shot-type-specific fallbacks if provided
-        if video_fallbacks:
-            fallback_list = video_fallbacks
-        else:
-            fallback_list = list(DEFAULT_VIDEO_CASCADE)
-
-        # Filter cascade to engines the operator has enabled.
-        # Missing key → treat as enabled (permissive). Explicit enabled:False → drop.
-        if ctx is not None:
-            from cinema.context import get_project_setting
-            _api_engines = get_project_setting(ctx, "api_engines", None)
-            if isinstance(_api_engines, dict):
-                fallback_list = [
-                    api for api in fallback_list
-                    if _api_engines.get(api, {}).get("enabled", True) is not False
-                ]
-
-        if is_portrait(_aspect):
-            fallback_list = [api for api in fallback_list if api.upper() in PORTRAIT_CAPABLE]
-
-        for api in fallback_list:
+        # This tuple was filtered once at the true entry boundary.  Never read
+        # raw fallbacks/defaults here: doing so could revive a retired,
+        # disabled, unavailable, or aspect-incompatible engine.
+        for api in _policy_candidates or ():
             if api not in attempted_apis:
                 logger.info("Cascade routing to next engine", extra={"engine": api})
                 return generate_ai_video(
@@ -264,6 +392,11 @@ def generate_ai_video(
                     driving_video_path=driving_video_path,
                     negative_prompt=negative_prompt,
                     ctx=ctx, _cascade_out=_cascade_out,
+                    _policy_snapshot=_policy_snapshot,
+                    _policy_date=_policy_date,
+                    _policy_allow_primary_fallback=_policy_allow_primary_fallback,
+                    _policy_candidates=_policy_candidates,
+                    _policy_guard_token=_VIDEO_POLICY_GUARD_TOKEN,
                 )
 
         # All APIs failed — try the cascade once more after a quota cooldown.
@@ -286,10 +419,9 @@ def generate_ai_video(
             extra={"retry": _cascade_retries + 1, "max_cascade_retries": MAX_CASCADE_RETRIES},
         )
         time.sleep(30)
-        # Seed the post-cooldown pass from the SAME default the first pass
-        # used — a hardcoded legacy engine here made the retry pass diverge
-        # from DEFAULT_VIDEO_CASCADE (review finding, 2026-07-11).
-        first_api = (video_fallbacks or DEFAULT_VIDEO_CASCADE)[0]
+        # Retry the already-admitted chain.  Raw/default seeds are never
+        # reloaded after the cooldown.
+        first_api = (_policy_candidates or ())[0]
         return generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, [], multi_angle_refs, _cascade_retries=_cascade_retries + 1,
@@ -302,39 +434,15 @@ def generate_ai_video(
             driving_video_path=driving_video_path,
             negative_prompt=negative_prompt,
             ctx=ctx, _cascade_out=_cascade_out,
+            _policy_snapshot=_policy_snapshot,
+            _policy_date=_policy_date,
+            _policy_allow_primary_fallback=_policy_allow_primary_fallback,
+            _policy_candidates=_policy_candidates,
+            _policy_guard_token=_VIDEO_POLICY_GUARD_TOKEN,
         )
 
-    # If the operator has disabled this engine via api_engines, skip straight to
-    # the cascade. This check is placed after try_next_api() is defined so it can
-    # call it immediately. Respects operator intent: "if I disabled engine X,
-    # don't use X even when explicitly targeted."
-    if ctx is not None:
-        from cinema.context import get_project_setting
-        _api_engines = get_project_setting(ctx, "api_engines", None)
-        if isinstance(_api_engines, dict):
-            if _api_engines.get(target_api.upper(), {}).get("enabled", True) is False:
-                logger.info(
-                    "Engine disabled by api_engines — delegating to cascade",
-                    extra={"engine": target_api.upper()},
-                )
-                return try_next_api()
-
-    # Portrait projects: a target that cannot produce 9:16 must NOT be dispatched as the
-    # INITIAL target — skip straight to the cascade (portrait-filtered inside try_next_api).
-    # Mirrors the disabled-engine short-circuit above. Without this guard, a non-portrait-
-    # capable initial target (e.g. establishing_shot → LTX, which is excluded from
-    # PORTRAIT_CAPABLE) is dispatched unfiltered: it writes a landscape clip and the
-    # post-gen backstop is the sole defense — and _accept_or_reject fail-opens on a probe
-    # failure, so the landscape clip is accepted (F1). The retry-pass first_api
-    # (try_next_api's quota-cooldown branch) re-enters generate_ai_video from the top, so
-    # this single guard also closes that path. target_api was already appended to
-    # attempted_apis above, so the cascade correctly skips it.
-    if is_portrait(_aspect) and target_api.upper() not in PORTRAIT_CAPABLE:
-        logger.info(
-            "Engine cannot produce portrait aspect — delegating to portrait-filtered cascade",
-            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
-        )
-        return try_next_api()
+    # Provider imports are deliberately delayed until after the entry fence.
+    _load_fal_client()
 
     # ═══════════════════════════════════════════════════════════════
     # NATIVE API HANDLERS (priority — direct, no proxy, lower cost)
@@ -586,7 +694,8 @@ def generate_ai_video(
     # ═══════════════════════════════════════════════════════════════
 
     elif target_api.upper() == "SORA_2":
-        # Sora 2 via fal.ai — strongest motion physics, 25 seconds continuous
+        # Legacy Sora 2 fal payload. Typed policy always retires this key, so
+        # this branch is intentionally unreachable for executable dispatch.
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
@@ -1073,8 +1182,8 @@ def generate_ai_video(
             return try_next_api()
 
     elif target_api.upper() == "GEMINI_OMNI":
-        # Native Gemini Omni Flash (Preview) — Google-first primary (WS2).
-        # Gemini Developer API only (no Vertex surface for this model today).
+        # Legacy Gemini Omni Flash payload. The typed catalog marks the product
+        # known-broken, so executable dispatch cannot reach this branch.
         global _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL
         if _gemini_omni_quota_blocked():
             remaining = int(_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL - time.time())

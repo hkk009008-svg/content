@@ -82,6 +82,7 @@ import logging
 import math
 import os
 import time
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project, make_take
@@ -97,6 +98,12 @@ from lip_sync import (
     upscale_video_seedvr2,
 )
 from audio.dialogue import scene_characters as _scene_characters, shot_characters as _shot_characters
+from domain.provider_catalog import RuntimeSnapshot
+from domain.video_engine_policy import (
+    VideoCandidateResult,
+    build_runtime_snapshot,
+    filter_dispatch_candidates,
+)
 
 
 def _directorial_iteration_enabled() -> bool:
@@ -116,6 +123,63 @@ def _directorial_iteration_enabled() -> bool:
 
 
 _VALID_DIALOGUE_VOICE_MODES = {"overlay", "native"}
+
+
+def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
+    """Build the dispatch snapshot at the controller's pre-spend boundary."""
+
+    return build_runtime_snapshot()
+
+
+def _video_policy_current_date() -> date:
+    """UTC policy date, kept as a seam for deterministic boundary tests."""
+
+    return datetime.now(timezone.utc).date()
+
+
+def _policy_rejections(result: VideoCandidateResult) -> list[dict[str, str]]:
+    """Return stable, JSON-safe rejection evidence in seed order."""
+
+    return [
+        {"key": rejection.key, "reason": rejection.reason.value}
+        for rejection in result.rejections
+    ]
+
+
+def _target_policy_failure(
+    target_api: object,
+    result: VideoCandidateResult,
+) -> dict:
+    """Build the stable fail-closed response for an unavailable shot target."""
+
+    requested = target_api if isinstance(target_api, str) else ""
+    reason = next(
+        (
+            rejection.reason.value
+            for rejection in result.rejections
+            if requested != "AUTO" and rejection.key == requested
+        ),
+        None,
+    )
+    if reason is None:
+        reason = next(
+            (
+                rejection.reason.value
+                for rejection in result.rejections
+                if rejection.key != "AUTO"
+            ),
+            "no_eligible_candidates",
+        )
+    return {
+        "success": False,
+        "error": "Target video engine is unavailable",
+        "error_kind": "target_api_policy",
+        "code": "target_api_unavailable",
+        "target_api": requested,
+        "reason": reason,
+        "retryable": False,
+        "rejections": _policy_rejections(result),
+    }
 
 
 def _dialogue_voice_mode(settings: dict) -> str:
@@ -1822,18 +1886,8 @@ class ShotController:
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
-        prev_shot = scene.get("shots", [])[shot_index - 1] if shot_index > 0 else None
-        approved_anchor = self._resolve_previous_approved_keyframe(scene, shot_index)
-        enhanced = self.continuity.enhance_shot_prompt(
-            shot,
-            scene,
-            prev_shot,
-            shot_index,
-            approved_anchor_image=approved_anchor,
-        )
-        cc = enhanced.get("continuity_config", {})
         from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
-        from domain.scene_decomposer import API_REGISTRY
+        from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
 
         resolved_shot_type = classify_shot_type(shot)
         raw_api = shot.get("target_api", "AUTO")
@@ -1857,59 +1911,75 @@ class ShotController:
         _voice_mode = _dialogue_voice_mode(settings)  # resolve once; reuse at all dialogue sites
 
         if raw_api == "AUTO":
-            # Prefer the optimizer's per-shot suggestion over the shot-type template.
+            # The historical optimizer/template values are only an ORDERED
+            # seed.  Executability is decided once below by the typed policy.
+            template = WORKFLOW_TEMPLATES.get(
+                resolved_shot_type,
+                WORKFLOW_TEMPLATES["medium"],
+            )
             cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
-            if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
-                target_api = cached_suggestion
-                # F1a Lane V #18 §2 fix: preserve template fallbacks even when honoring
-                # a cached suggestion, so non-dialogue shots with a suggestion don't lose
-                # their cross-engine fallback chain.  Dialogue shots (see upgrade below)
-                # get None explicitly because the native-audio engine's internal cascade
-                # handles failures and cross-engine fallback to KLING_NATIVE would
-                # reintroduce the "no native audio" bug.
-                template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
-                video_fallbacks = template.get("video_fallbacks")
-            else:
-                template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
-                target_api = template["target_api"]
-                video_fallbacks = template.get("video_fallbacks")
+            ordered_seed: list[object] = []
+            if cached_suggestion and cached_suggestion != "AUTO":
+                ordered_seed.append(cached_suggestion)
+            ordered_seed.append(template.get("target_api", "AUTO"))
+            ordered_seed.extend(template.get("video_fallbacks") or ())
 
-            # F1a Lane V #18 §1 fix (consumer-side): when has_dialogue is True, the
-            # resolved target_api MUST carry native_audio for the native-audio path to
-            # work.  The optimizer's suggestion for dialogue_close_up returns KLING_3_0
-            # (first video-modality entry in PURPOSE_API_RANKING before VEO_NATIVE), which
-            # has no native_audio.  Override to the first native_audio video engine in the
-            # purpose ranking.  If none exists (policy change in API_REGISTRY), fall through
-            # to the current target_api and rely on the standalone lipsync pass (F1b).
-            #
-            # Task 3 (dialogue_voice_mode):
-            # - overlay mode (default): keep VEO_NATIVE as primary via the override,
-            #   but DO NOT null video_fallbacks. Restored cascade means a Veo RAI-block
-            #   falls through to Kling/Sora/etc. (silent) → F1b overlay still fires.
-            # - native mode: preserve today's behavior verbatim (force native-audio
-            #   engine + video_fallbacks=None so embedded voice is never lost to a
-            #   cross-engine fallback that lacks native_audio).
+            # Preserve dialogue routing using only policy-eligible engines.
+            # The legacy ranking currently names known-broken GEMINI_OMNI
+            # before VEO_NATIVE; both remain useful seed evidence, but the
+            # typed filter below rejects Gemini and promotes a ready Veo.
             if has_dialogue:
-                _pre_override_api = target_api
-                target_api, video_fallbacks = _resolve_dialogue_routing(
-                    cached_purpose,
-                    _voice_mode,
-                    target_api,
-                    video_fallbacks,
-                )
-                if target_api != _pre_override_api:
-                    logger.info(
-                        "dialogue routing override: %s → %s "
-                        "(purpose=%s; original suggestion lacked native_audio)",
-                        _pre_override_api,
-                        target_api,
-                        cached_purpose,
+                native_audio_seed = [
+                    engine
+                    for engine in PURPOSE_API_RANKING.get(cached_purpose, ())
+                    if (
+                        API_REGISTRY.get(engine, {}).get("native_audio")
+                        and API_REGISTRY.get(engine, {}).get("modality") == "video"
                     )
-                # If no native_audio engine found in ranking: keep resolved target_api.
-                # F1b's mandatory lipsync pass will cover the gap.
+                ]
+                if native_audio_seed:
+                    if _voice_mode == "native":
+                        ordered_seed = native_audio_seed
+                    else:
+                        ordered_seed = [*native_audio_seed, *ordered_seed]
         else:
-            target_api = raw_api
-            video_fallbacks = None
+            # A persisted explicit target is a pin, not a request to search the
+            # global default cascade.
+            ordered_seed = [raw_api]
+
+        policy_snapshot = _video_policy_runtime_snapshot()
+        policy_date = _video_policy_current_date()
+        dispatch_policy = filter_dispatch_candidates(
+            ordered_seed,
+            snapshot=policy_snapshot,
+            on_date=policy_date,
+            api_engines=settings.get("api_engines"),
+            aspect_ratio=settings.get("aspect_ratio", "16:9"),
+        )
+        if not dispatch_policy.candidates:
+            return _target_policy_failure(raw_api, dispatch_policy)
+
+        target_api = dispatch_policy.primary
+        video_fallbacks = (
+            list(dispatch_policy.fallbacks)
+            if raw_api == "AUTO"
+            else None
+        )
+        policy_rejections = _policy_rejections(dispatch_policy)
+
+        # Continuity enrichment is deliberately after the dispatch fence: an
+        # unavailable explicit target or empty AUTO chain exits before any
+        # downstream generation preparation.
+        prev_shot = scene.get("shots", [])[shot_index - 1] if shot_index > 0 else None
+        approved_anchor = self._resolve_previous_approved_keyframe(scene, shot_index)
+        enhanced = self.continuity.enhance_shot_prompt(
+            shot,
+            scene,
+            prev_shot,
+            shot_index,
+            approved_anchor_image=approved_anchor,
+        )
+        cc = enhanced.get("continuity_config", {})
 
         # Pre-spend budget gate (STRATEGIC_REVIEW-2026-06-10 P0-2 / ADR-022):
         # all PER-TAKE motion spend routes through this function (web
@@ -2037,7 +2107,9 @@ class ShotController:
                         exc_info=True,
                     )
 
-        _video_cascade: dict = {}
+        _video_cascade: dict = {
+            "policy_rejections": list(policy_rejections),
+        }
         temp_vid = generate_ai_video(
             source_image,
             shot.get("camera", "zoom_in_slow"),
@@ -2055,9 +2127,20 @@ class ShotController:
             duration=_veo_duration,
             ctx=motion_ctx,
             _cascade_out=_video_cascade,
+            _policy_snapshot=policy_snapshot,
+            _policy_date=policy_date,
+            _policy_allow_primary_fallback=(raw_api == "AUTO"),
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):
+            if _video_cascade.get("policy_error"):
+                return {
+                    "success": False,
+                    **_video_cascade["policy_error"],
+                    "rejections": list(
+                        _video_cascade.get("policy_rejections", ())
+                    ),
+                }
             # Total cascade failure can still carry BILLED attempts (a provider
             # returned a video that then failed download / aspect backstop).
             # Record them before bailing or the spend is invisible to the gate.
@@ -2067,6 +2150,10 @@ class ShotController:
             return {"success": False, "error": "Video generation failed"}
         if "cascade_metadata" in _video_cascade:
             take["cascade_metadata"] = _video_cascade["cascade_metadata"]
+        if _video_cascade.get("policy_rejections"):
+            take.setdefault("cascade_metadata", {})["policy_rejections"] = list(
+                _video_cascade["policy_rejections"]
+            )
         # Billed-attempt trail rides along for the finalize cost record —
         # UNCONDITIONALLY (money-gate NIT 2026-07-11): a leftover aspect-
         # rejected file can reach finalize with billed attempts but NO

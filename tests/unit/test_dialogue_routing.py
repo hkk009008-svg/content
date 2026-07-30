@@ -16,9 +16,11 @@ from __future__ import annotations
 import sys
 import os
 import types
+from datetime import date
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+from domain.provider_catalog import RuntimeSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -181,21 +183,29 @@ class TestAutoRoutingDecisions:
             f"got {kwargs.get('target_api')!r}"
         )
 
-    def test_no_optimizer_cache_uses_template(self, tmp_path):
-        """When no optimizer cache is present, routing falls back to the shot-type template.
+    def test_no_optimizer_cache_uses_filtered_template_seed(self, tmp_path):
+        """Without optimizer cache, typed policy filters the template seed.
 
         Calls the REAL generate_motion_take; asserts generate_ai_video received
-        a template API (classify_shot_type mock returns 'medium').
+        the first ready engine after known-broken template entries are removed.
         """
-        from workflow_selector import WORKFLOW_TEMPLATES
-
         project = self._make_project(tmp_path, target_api="AUTO")  # no optimizer_cache
-        kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
-        template_apis = {t["target_api"] for t in WORKFLOW_TEMPLATES.values()}
-        assert kwargs.get("target_api") in template_apis, (
-            f"without optimizer cache, target_api must come from a template; "
-            f"got {kwargs.get('target_api')!r}"
-        )
+        with (
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
+        ):
+            kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
+        assert kwargs.get("target_api") == "VEO_NATIVE"
+        assert kwargs.get("video_fallbacks") == []
 
 
 # ---------------------------------------------------------------------------

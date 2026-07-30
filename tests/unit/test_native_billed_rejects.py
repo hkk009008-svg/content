@@ -14,9 +14,11 @@ check; this pins it so deleting the append goes RED.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from domain.provider_catalog import RuntimeSnapshot
 
 
 def _ctx(aspect: str):
@@ -70,12 +72,6 @@ def _run_native(target_api: str, module_name: str, class_attr: str, aspect: str 
     ("SORA_NATIVE", "sora_native", "SoraNativeAPI"),
     ("VEO_NATIVE", "veo_native", "VeoNativeAPI"),
     ("LTX", "ltx_native", "LTXVideoAPI"),
-    # GEMINI_OMNI (WS2, 2026-07-18): writes via output_path= like the other
-    # native branches (never touches _download_video_or_cascade) and calls
-    # _note_billed_attempt before the aspect backstop (phase_c_ffmpeg.py's
-    # GEMINI_OMNI branch mirrors VEO_NATIVE's shape exactly here) — same
-    # billed-but-rejected leak this file exists to pin.
-    ("GEMINI_OMNI", "gemini_omni_native", "GeminiOmniAPI"),
 ])
 def test_native_branch_notes_billed_attempt_on_aspect_reject(target_api, module_name, class_attr):
     cascade = _run_native(target_api, module_name, class_attr)
@@ -85,6 +81,46 @@ def test_native_branch_notes_billed_attempt_on_aspect_reject(target_api, module_
         f"{target_api} billed then aspect-rejected — spend must be noted for "
         f"the budget gate; got {cascade!r}"
     )
+
+
+def test_known_broken_gemini_omni_is_denied_before_provider_or_billing() -> None:
+    mock_inst = MagicMock()
+    mock_mod = MagicMock()
+    mock_mod.GeminiOmniAPI.return_value = mock_inst
+    cascade: dict = {}
+    attempted: list[str] = []
+
+    with patch.dict(sys.modules, {"gemini_omni_native": mock_mod}):
+        sys.modules.pop("phase_c_ffmpeg", None)
+        try:
+            import phase_c_ffmpeg
+            result = phase_c_ffmpeg.generate_ai_video(
+                image_path="/tmp/f.png",
+                camera_motion="zoom_in_slow",
+                target_api="GEMINI_OMNI",
+                output_mp4="/tmp/o.mp4",
+                shot_type="medium",
+                attempted_apis=attempted,
+                ctx=_ctx("16:9"),
+                _cascade_out=cascade,
+                _policy_snapshot=RuntimeSnapshot(
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                ),
+                _policy_date=date(2026, 9, 23),
+            )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+
+    assert result is None
+    assert attempted == []
+    assert "billed_attempts" not in cascade
+    assert cascade["policy_error"]["reason"] == "unsupported"
+    assert cascade["policy_rejections"] == [
+        {"key": "GEMINI_OMNI", "reason": "unsupported"},
+    ]
+    mock_mod.GeminiOmniAPI.assert_not_called()
+    mock_inst.generate_video.assert_not_called()
 
 
 if __name__ == "__main__":

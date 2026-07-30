@@ -43,6 +43,7 @@ class VideoPolicyReason(StrEnum):
     UNSUPPORTED = "unsupported"
     RUNTIME_UNAVAILABLE = "runtime_unavailable"
     PROJECT_DISABLED = "project_disabled"
+    ASPECT_INCOMPATIBLE = "aspect_incompatible"
     AUTO_SENTINEL = "auto_sentinel"
 
 
@@ -88,6 +89,38 @@ _UNSUPPORTED_PRODUCT_STATES = frozenset(
         ProductSupport.UNSUPPORTED,
     }
 )
+
+# This is dispatch-wiring truth, not a claim about every provider product in
+# the abstract.  These are the engines whose current branch in
+# ``phase_c_ffmpeg.generate_ai_video`` can request and verify portrait output.
+# Lifecycle, runtime, and product-support gates are still evaluated
+# independently, so a key in this set is not automatically executable.
+PORTRAIT_CAPABLE_VIDEO_ENGINES = frozenset(
+    {
+        "VEO_NATIVE",
+        "VEO",
+        "SORA_NATIVE",
+        "KLING_NATIVE",
+        "KLING_3_0",
+        "RUNWAY_GEN4",
+        "RUNWAY",
+        "SEEDANCE",
+    }
+)
+
+
+def is_video_aspect_compatible(key: str, aspect_ratio: object) -> bool:
+    """Return whether the current dispatch branch can honor ``aspect_ratio``.
+
+    Project validation currently offers landscape ``16:9`` and portrait
+    ``9:16``.  Unknown/legacy values retain the established landscape default;
+    only the portrait route needs an engine allowlist.
+    """
+
+    return (
+        aspect_ratio != "9:16"
+        or key in PORTRAIT_CAPABLE_VIDEO_ENGINES
+    )
 
 
 def build_runtime_snapshot(
@@ -232,6 +265,7 @@ def filter_dispatch_candidates(
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
     api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> VideoCandidateResult:
     """Filter a future ordered dispatch chain without performing dispatch.
 
@@ -258,6 +292,8 @@ def filter_dispatch_candidates(
                 reason = VideoPolicyReason.NOT_DISPATCHABLE
             elif _is_project_disabled(key, api_engines):
                 reason = VideoPolicyReason.PROJECT_DISABLED
+            elif not is_video_aspect_compatible(key, aspect_ratio):
+                reason = VideoPolicyReason.ASPECT_INCOMPATIBLE
             elif not runtime_availability(
                 key,
                 current,
@@ -322,6 +358,7 @@ def resolve_workflow_candidates(
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
     api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> VideoCandidateResult:
     """Resolve historical workflow order into a safe future routing view."""
 
@@ -330,6 +367,7 @@ def resolve_workflow_candidates(
         snapshot=snapshot,
         on_date=on_date,
         api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
     )
 
 
@@ -342,6 +380,8 @@ __all__ = [
     "eligible_shot_targets",
     "evaluate_shot_target",
     "filter_dispatch_candidates",
+    "is_video_aspect_compatible",
+    "PORTRAIT_CAPABLE_VIDEO_ENGINES",
     "resolve_video_ranking",
     "resolve_workflow_candidates",
 ]

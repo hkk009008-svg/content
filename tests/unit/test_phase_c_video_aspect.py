@@ -3,7 +3,7 @@
 TC-4 — VEO_NATIVE path threads aspect_ratio="9:16" into veo.generate_video().
 TC-5 — VEO fal path puts aspect_ratio="9:16" into fal_client.subscribe arguments
        (+ landscape refute: 16:9 → "16:9").
-TC-6 — SORA_2 fal path puts fal_aspect_ratio(_aspect) into subscribe arguments.
+TC-6 — retired SORA_2 is rejected before its legacy fal payload for either aspect.
 TC-7 — RUNWAY_GEN4 route uses model='gen4_turbo' (valid SDK enum) + emits portrait ratio.
 TC-8 — RUNWAY (gen3a) route emits portrait ratio via runway_ratio.
 
@@ -12,9 +12,11 @@ All tests are offline — no Vertex, no network, no spend.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from domain.provider_catalog import RuntimeSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -159,76 +161,55 @@ class TestVeoFalAspect:
 
 
 # ---------------------------------------------------------------------------
-# TC-6 — SORA_2 fal: generate_ai_video puts fal_aspect_ratio(_aspect) into arguments
+# TC-6 — SORA_2 fal: retired payload stays unreachable for every aspect
 # ---------------------------------------------------------------------------
 class TestSora2FalAspect:
-    """Drive generate_ai_video(target_api='SORA_2', ...) and assert that
-    fal_client.subscribe receives arguments['aspect_ratio']=='9:16' for portrait
-    and '16:9' for landscape (refute).
-    """
+    """The legacy payload remains in source, but typed policy always denies it."""
 
     def _run_sora_fal(self, aspect: str):
-        """Run generate_ai_video(SORA_2) with the given aspect, return the captured
-        fal_client.subscribe call_args_list."""
         stub_fal = MagicMock()
-        # SORA_2 reads result["video"]["url"] — must return VIDEO shape or the branch
-        # will bail to cascade and subscribe never produces the aspect_ratio we want.
-        stub_fal.subscribe.return_value = {"video": {"url": "https://x/sora.mp4"}}
-        stub_fal.upload_file.return_value = "https://cdn.fal.ai/sora-ref.jpg"
-
-        stub_settings = MagicMock()
-        stub_settings.fal_key = "fk-test-key"
-
         sys.modules.pop("phase_c_ffmpeg", None)
-
+        cascade: dict = {}
+        attempted: list[str] = []
         try:
-            with patch("os.path.exists", return_value=True), \
-                 patch("urllib.request.urlretrieve"), \
-                 patch.dict("sys.modules", {"veo_native": MagicMock()}):
+            with patch.dict("sys.modules", {"fal_client": stub_fal}):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.fal_client = stub_fal
                 phase_c_ffmpeg.FAL_AVAILABLE = True
-                phase_c_ffmpeg.settings = stub_settings
-                # Same boundary as the VEO fal helper: stub safe_download so the
-                # subscribe-returned URL isn't really downloaded (offline + no cascade).
-                phase_c_ffmpeg.safe_download = lambda url, out: out
-                phase_c_ffmpeg.generate_ai_video(
+                result = phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
                     target_api="SORA_2",
                     output_mp4="/tmp/sora_out.mp4",
                     shot_type="portrait",
+                    attempted_apis=attempted,
                     ctx=_ctx(aspect),
+                    _cascade_out=cascade,
+                    _policy_snapshot=RuntimeSnapshot(
+                        credentials={"fal_key"},
+                        modules={"fal_client"},
+                    ),
+                    _policy_date=date(2026, 9, 23),
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
+        return result, attempted, cascade, stub_fal
 
-        return stub_fal.subscribe.call_args_list
+    def test_sora2_fal_portrait_is_denied_before_payload(self):
+        result, attempted, cascade, stub_fal = self._run_sora_fal("9:16")
+        assert result is None
+        assert attempted == []
+        assert cascade["policy_error"]["reason"] == "retired"
+        stub_fal.upload_file.assert_not_called()
+        stub_fal.subscribe.assert_not_called()
 
-    def test_sora2_fal_portrait_aspect_in_arguments(self):
-        """Portrait ctx → arguments['aspect_ratio'] == '9:16' and endpoint is sora-2."""
-        calls = self._run_sora_fal("9:16")
-        assert calls, "fal_client.subscribe was never called"
-        call = calls[0]
-        pos_args = call.args
-        kw = call.kwargs
-        assert pos_args and pos_args[0] == "fal-ai/sora-2/image-to-video", (
-            f"Wrong fal endpoint; got positional args: {pos_args}"
-        )
-        arguments = kw.get("arguments", {})
-        assert arguments.get("aspect_ratio") == "9:16", (
-            f"Expected aspect_ratio='9:16' in subscribe arguments; got: {arguments}"
-        )
-
-    def test_sora2_fal_landscape_keeps_16_9(self):
-        """Landscape ctx → arguments['aspect_ratio'] == '16:9' (refute)."""
-        calls = self._run_sora_fal("16:9")
-        assert calls, "fal_client.subscribe was never called"
-        kw = calls[0].kwargs
-        arguments = kw.get("arguments", {})
-        assert arguments.get("aspect_ratio") == "16:9", (
-            f"Expected aspect_ratio='16:9'; got: {arguments}"
-        )
+    def test_sora2_fal_landscape_is_denied_before_payload(self):
+        result, attempted, cascade, stub_fal = self._run_sora_fal("16:9")
+        assert result is None
+        assert attempted == []
+        assert cascade["policy_error"]["reason"] == "retired"
+        stub_fal.upload_file.assert_not_called()
+        stub_fal.subscribe.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -802,21 +783,14 @@ class TestPortraitRoutingSafety:
         )
 
     # ------------------------------------------------------------------
-    # Test 5 (F1 regression): a non-portrait-capable INITIAL target must
-    # be rejected and cascade — never dispatched. Closes the PF-4 gap.
+    # Test 5 (F1 regression): a pinned non-portrait-capable target must
+    # fail closed — never dispatch or silently cascade. Closes the PF-4 gap.
     # ------------------------------------------------------------------
     def test_non_portrait_capable_initial_target_rejected_for_portrait(self):
         """F1: target_api='LTX' (the establishing_shot route; LTX ∉ PORTRAIT_CAPABLE)
-        at a portrait project. The cascade's is_portrait filter only guards the
-        fallback_list — the INITIAL target was dispatched unfiltered, so LTX wrote a
-        landscape clip and the backstop fail-opened on probe failure → landscape
-        accepted. After the top-level pre-dispatch guard, LTX must NEVER be dispatched;
-        the portrait-capable fallback (VEO_NATIVE) wins instead.
-
-        Reproduction faithfulness: probe returns no dims ({"format": {}}) → the
-        backstop fail-opens (accept). WITHOUT the guard, LTX is dispatched first and
-        wins with that fail-open (the F1 harm — landscape leaks). WITH the guard, LTX
-        is skipped, VEO_NATIVE is dispatched, and VEO wins.
+        at a portrait project. The typed entry fence rejects it before either
+        LTX or the supplied VEO fallback is constructed: explicit pins never
+        silently become AUTO semantics.
         """
         output_mp4 = "/tmp/f1_initial_target_out.mp4"
         _cascade_out = {}
@@ -850,6 +824,11 @@ class TestPortraitRoutingSafety:
                     video_fallbacks=["LTX", "VEO_NATIVE"],
                     ctx=_ctx("9:16"),
                     _cascade_out=_cascade_out,
+                    _policy_snapshot=RuntimeSnapshot(
+                        credentials={"google_api_key", "fal_key"},
+                        modules={"google.genai", "fal_client"},
+                    ),
+                    _policy_date=date(2026, 9, 23),
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
@@ -869,9 +848,10 @@ class TestPortraitRoutingSafety:
         assert not ltx_mod.LTXVideoAPI.called, (
             "LTXVideoAPI was constructed — initial-target portrait guard missing (F1)"
         )
-        # The portrait-capable fallback must win, not LTX.
-        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "VEO_NATIVE", (
-            f"Expected VEO_NATIVE to win after LTX skipped; got: {_cascade_out}"
-        )
-        assert result == output_mp4
-        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "VEO_NATIVE"
+        assert not veo_inst.generate_video.called
+        assert not veo_mod.VeoNativeAPI.called
+        assert result is None
+        assert _cascade_out["policy_error"]["reason"] == "aspect_incompatible"
+        assert _cascade_out["policy_rejections"] == [
+            {"key": "LTX", "reason": "aspect_incompatible"},
+        ]

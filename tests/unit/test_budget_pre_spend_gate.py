@@ -20,9 +20,11 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from domain.provider_catalog import RuntimeSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +162,6 @@ class TestPreSpendBudgetGate:
         """Anti-mutation pin: the gate must price the RESOLVED engine, not the
         raw 'AUTO' sentinel (API_COST_USD.get('AUTO') is 0.0 — estimating it
         would silently disable the pre-spend estimate for AUTO shots)."""
-        from workflow_selector import WORKFLOW_TEMPLATES
-
         project = self._make_project(target_api="AUTO")
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
         cost_tracker.would_exceed.return_value = True
@@ -172,11 +172,24 @@ class TestPreSpendBudgetGate:
         with (
             patch("cinema.shots.controller.generate_ai_video", gen_vid),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
         assert result.get("success") is False
-        resolved = WORKFLOW_TEMPLATES["medium"]["target_api"]
+        # The template is a historical order seed; its known-broken Gemini
+        # head is filtered, leaving the injected ready Veo engine.
+        resolved = "VEO_NATIVE"
         assert resolved != "AUTO"
         cost_tracker.would_exceed.assert_called_once_with(resolved)
         cost_tracker.would_exceed_cost.assert_not_called()
@@ -264,6 +277,214 @@ class TestPreSpendBudgetGate:
         ]
         assert motion_events, "expected a MOTION progress event"
         assert motion_events[0].kwargs.get("engine") == "KLING_NATIVE"
+
+    @pytest.mark.parametrize(
+        ("target_api", "snapshot", "expected_reason"),
+        [
+            ("SORA_2", RuntimeSnapshot(), "retired"),
+            ("SORA_NATIVE", RuntimeSnapshot(), "runtime_unavailable"),
+        ],
+    )
+    def test_legacy_explicit_target_fails_before_any_spend_or_take_effect(
+        self,
+        tmp_path,
+        target_api,
+        snapshot,
+        expected_reason,
+    ):
+        """A stored explicit target is fenced before budget, TTS, progress, or take I/O."""
+
+        project = self._make_project(target_api=target_api)
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        bomb = AssertionError("downstream effect escaped target policy fence")
+        cost_tracker.would_exceed.side_effect = bomb
+        cost_tracker.would_exceed_cost.side_effect = bomb
+        lifecycle.report_progress.side_effect = bomb
+        ctrl._take_output_path.side_effect = bomb
+        ctrl._core.continuity.enhance_shot_prompt.side_effect = bomb
+        host._ensure_shot_audio.side_effect = bomb
+        host._ensure_scene_audio.side_effect = bomb
+        generate = MagicMock(side_effect=bomb)
+        make_take_mock = MagicMock(side_effect=bomb)
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", generate),
+            patch("cinema.shots.controller.make_take", make_take_mock),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=snapshot,
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result == {
+            "success": False,
+            "error": "Target video engine is unavailable",
+            "error_kind": "target_api_policy",
+            "code": "target_api_unavailable",
+            "target_api": target_api,
+            "reason": expected_reason,
+            "retryable": False,
+            "rejections": [
+                {"key": target_api, "reason": expected_reason},
+            ],
+        }
+        generate.assert_not_called()
+        make_take_mock.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("target_api", "settings", "expected_reason"),
+        [
+            (
+                "SEEDANCE",
+                {"api_engines": {"SEEDANCE": {"enabled": False}}},
+                "project_disabled",
+            ),
+            ("LTX", {"aspect_ratio": "9:16"}, "aspect_incompatible"),
+        ],
+    )
+    def test_project_and_aspect_policy_fail_before_budget(
+        self,
+        tmp_path,
+        target_api,
+        settings,
+        expected_reason,
+    ):
+        project = self._make_project(target_api=target_api)
+        project["global_settings"].update(settings)
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.side_effect = AssertionError(
+            "budget gate must not run for a policy-rejected target"
+        )
+        generate = MagicMock()
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", generate),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"fal_key"},
+                    modules={"fal_client"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["error_kind"] == "target_api_policy"
+        assert result["reason"] == expected_reason
+        assert result["rejections"] == [
+            {"key": target_api, "reason": expected_reason},
+        ]
+        generate.assert_not_called()
+        lifecycle.report_progress.assert_not_called()
+
+    def test_auto_empty_runtime_fails_before_budget_and_preserves_rejections(
+        self,
+        tmp_path,
+    ):
+        project = self._make_project(target_api="AUTO")
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.side_effect = AssertionError(
+            "empty AUTO chain must fail before budget"
+        )
+        generate = MagicMock()
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", generate),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["error_kind"] == "target_api_policy"
+        assert result["target_api"] == "AUTO"
+        assert result["retryable"] is False
+        assert result["reason"] == "unsupported"
+        assert result["rejections"][0] == {
+            "key": "GEMINI_OMNI",
+            "reason": "unsupported",
+        }
+        assert not any(
+            rejection["key"] == "SORA_2"
+            for rejection in result["rejections"]
+        )
+        generate.assert_not_called()
+        lifecycle.report_progress.assert_not_called()
+
+    def test_auto_filtered_chain_preserves_suggestion_order_and_dedupes(
+        self,
+        tmp_path,
+    ):
+        project = self._make_project(target_api="AUTO")
+        project["scenes"][0]["shots"][0]["optimizer_cache"] = {
+            "spec": {
+                "purpose": "action_motion",
+                "suggested_video_api": "LTX",
+            }
+        }
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        clip = str(tmp_path / "clip.mp4")
+        open(clip, "wb").write(b"fake_mp4")
+        captured_take = {}
+
+        def _finalize(scene, shot, take, video_path, **kwargs):
+            captured_take.update(take)
+            return {
+                "success": True,
+                "take": dict(take),
+                "video": video_path,
+                "identity_score": 0.0,
+            }
+
+        ctrl._finalize_motion_take = MagicMock(side_effect=_finalize)
+        generate = MagicMock(return_value=clip)
+        snapshot = RuntimeSnapshot(
+            credentials={"fal_key"},
+            modules={"fal_client"},
+        )
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", generate),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=snapshot,
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=date(2026, 9, 23),
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["success"] is True
+        kwargs = generate.call_args.kwargs
+        assert generate.call_args.args[2] == "LTX"
+        assert kwargs["video_fallbacks"] == ["KLING_3_0", "SEEDANCE"]
+        assert kwargs["_policy_snapshot"] is snapshot
+        assert kwargs["_policy_allow_primary_fallback"] is True
+        assert cost_tracker.would_exceed.call_args.args == ("LTX",)
+        assert captured_take["cascade_metadata"]["policy_rejections"][0] == {
+            "key": "GEMINI_OMNI",
+            "reason": "unsupported",
+        }
 
 
 class TestBudgetPhaseAbort:
