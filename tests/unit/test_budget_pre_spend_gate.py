@@ -731,6 +731,40 @@ class TestBudgetPhaseAbort:
         assert result.ok is False
         assert "budget" in result.message.lower()
 
+    def test_storyboard_budget_gate_exception_never_constructs_paid_client(
+        self,
+        tmp_path,
+    ):
+        """An unavailable budget decision fails closed to the guarded shot path."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        gen = self._make_gen(tmp_path, {"success": True})
+        gen.cost_tracker.would_exceed.side_effect = RuntimeError("tracker down")
+        phase = MotionRenderPhase(
+            shot_generator=gen,
+            project=self._make_project(storyboard_mode=True),
+        )
+        with (
+            patch(
+                "cinema.phases.motion_render._storyboard_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.phases.motion_render._storyboard_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch(
+                "kling_native.KlingNativeAPI",
+                side_effect=AssertionError("paid batch client constructed"),
+            ) as mock_kling_cls,
+        ):
+            result = phase.run(self._make_ctx())
+
+        mock_kling_cls.assert_not_called()
+        gen.cost_tracker.record_api_call.assert_not_called()
+        assert gen.generate_motion_take.call_count == 3
+        assert result.ok is True
+
 
 class TestPerformancePreSpendBudgetGate:
     """generate_performance_take refuses paid retargeting before dispatch."""

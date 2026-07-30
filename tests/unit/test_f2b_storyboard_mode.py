@@ -82,6 +82,11 @@ def _make_ctx(aspect: str | None = None, cancelled: bool = False) -> MagicMock:
     return ctx
 
 
+def _write_nonempty(path: str) -> None:
+    with open(path, "wb") as handle:
+        handle.write(b"offline-media-stub")
+
+
 def _make_shot(shot_id: str, kf_take_id: str = "kf_001", has_final: bool = False) -> dict:
     shot = {
         "id": shot_id,
@@ -311,7 +316,7 @@ class TestFlagOff:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -359,7 +364,7 @@ class TestIneligibleScenes:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -388,7 +393,7 @@ class TestIneligibleScenes:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
 
@@ -401,7 +406,7 @@ class TestIneligibleScenes:
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
-                    open(p, "w").close()
+                    _write_nonempty(p)
                 mock_split.return_value = seg_paths
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -424,7 +429,7 @@ class TestIneligibleScenes:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
 
@@ -437,7 +442,7 @@ class TestIneligibleScenes:
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(6)]
                 for p in seg_paths:
-                    open(p, "w").close()
+                    _write_nonempty(p)
                 mock_split.return_value = seg_paths
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -473,7 +478,7 @@ class TestPortraitDisqualifiesStoryboard:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         ctx = _make_ctx(aspect="9:16")  # PORTRAIT
@@ -489,7 +494,7 @@ class TestPortraitDisqualifiesStoryboard:
             mock_kling_cls.return_value = mock_kling
             seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
             for p in seg_paths:
-                open(p, "w").close()
+                _write_nonempty(p)
             mock_split.return_value = seg_paths
 
             phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -513,7 +518,7 @@ class TestPortraitDisqualifiesStoryboard:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         ctx = _make_ctx(aspect="16:9")  # LANDSCAPE
@@ -526,7 +531,7 @@ class TestPortraitDisqualifiesStoryboard:
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
-                    open(p, "w").close()
+                    _write_nonempty(p)
                 mock_split.return_value = seg_paths
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -547,7 +552,7 @@ class TestPortraitDisqualifiesStoryboard:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         ctx = _make_ctx(aspect=None)  # no aspect → landscape default
@@ -560,7 +565,7 @@ class TestPortraitDisqualifiesStoryboard:
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
                 for p in seg_paths:
-                    open(p, "w").close()
+                    _write_nonempty(p)
                 mock_split.return_value = seg_paths
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -587,7 +592,7 @@ class TestStoryboardPartialFinalizeFailure:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         # Segment 1 (shot s1_1) fails to finalize; 0 and 2 succeed.
@@ -606,7 +611,7 @@ class TestStoryboardPartialFinalizeFailure:
             with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
                 seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
                 for p in seg_paths:
-                    open(p, "w").close()
+                    _write_nonempty(p)
                 mock_split.return_value = seg_paths
 
                 phase = MotionRenderPhase(shot_generator=gen, project=project)
@@ -636,13 +641,13 @@ class TestStoryboardHappyPath:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         storyboard_path = str(tmp_path / "combined.mp4")
         seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n_shots)]
         for p in seg_paths:
-            open(p, "w").close()
+            _write_nonempty(p)
 
         with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
             mock_kling = MagicMock()
@@ -708,7 +713,7 @@ class TestStoryboardHappyPath:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         # REAL tracker: budget_usd=None → would_exceed() is always False, so the
@@ -718,7 +723,7 @@ class TestStoryboardHappyPath:
         storyboard_path = str(tmp_path / "combined.mp4")
         seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
         for p in seg_paths:
-            open(p, "w").close()
+            _write_nonempty(p)
 
         with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
             mock_kling = MagicMock()
@@ -762,7 +767,7 @@ class TestStoryboardHappyPath:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         gen.cost_tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=None)
@@ -770,7 +775,7 @@ class TestStoryboardHappyPath:
         storyboard_path = str(tmp_path / "combined.mp4")
         seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
         for p in seg_paths:
-            open(p, "w").close()
+            _write_nonempty(p)
 
         with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
             mock_kling = MagicMock()
@@ -824,13 +829,13 @@ class TestStoryboardHappyPath:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         storyboard_path = str(tmp_path / "combined.mp4")
         seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
         for p in seg_paths:
-            open(p, "w").close()
+            _write_nonempty(p)
 
         with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
             mock_kling = MagicMock()
@@ -854,6 +859,39 @@ class TestStoryboardHappyPath:
         assert durations_arg is not None
         assert len(durations_arg) == n
 
+    @pytest.mark.parametrize(
+        ("shot_count", "expected_durations"),
+        [
+            (4, [5.0, 5.0, 4.0, 1.0]),
+            (6, [5.0, 5.0, 2.0, 1.0, 1.0, 1.0]),
+        ],
+    )
+    def test_provider_and_splitter_share_capped_duration_plan(
+        self,
+        tmp_path,
+        shot_count,
+        expected_durations,
+    ):
+        """Provider input and local splitting must describe one <=15s timeline."""
+        (
+            result,
+            _gen,
+            mock_kling,
+            mock_split,
+            _seg_paths,
+            _storyboard_path,
+        ) = self._run_storyboard(shot_count, tmp_path)
+
+        provider_shots = mock_kling.generate_storyboard.call_args.kwargs["shots"]
+        provider_durations = [shot["duration"] for shot in provider_shots]
+        split_durations = mock_split.call_args.kwargs["durations"]
+
+        assert result.ok is True
+        assert provider_durations == expected_durations
+        assert split_durations == expected_durations
+        assert sum(provider_durations) <= 15.0
+        assert min(provider_durations) >= 1.0
+
 
 # ---------------------------------------------------------------------------
 # (e) generate_storyboard returns None → fallback to per-shot
@@ -869,7 +907,7 @@ class TestStoryboardFallback:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
 
@@ -895,7 +933,7 @@ class TestStoryboardFallback:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
 
@@ -923,7 +961,7 @@ class TestStoryboardFallback:
 
         kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
         for p in kf_paths.values():
-            open(p, "w").close()
+            _write_nonempty(p)
 
         gen = _make_gen_mock(kf_paths=kf_paths)
         storyboard_path = str(tmp_path / "combined.mp4")
@@ -940,6 +978,49 @@ class TestStoryboardFallback:
 
         # Must have fallen back to per-shot
         assert gen.generate_motion_take.call_count == 2
+        assert result.ok is True
+
+    def test_empty_segment_rejects_whole_batch_before_any_finalize(self, tmp_path):
+        """One zero-byte segment invalidates the batch before writes begin."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot(f"s1_{index}") for index in range(3)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        storyboard_path = str(tmp_path / "combined.mp4")
+        _write_nonempty(storyboard_path)
+        segment_paths = [
+            str(tmp_path / f"seg_{index}.mp4")
+            for index in range(3)
+        ]
+        _write_nonempty(segment_paths[0])
+        open(segment_paths[1], "wb").close()
+        _write_nonempty(segment_paths[2])
+
+        with (
+            patch("kling_native.KlingNativeAPI") as mock_kling_cls,
+            patch("phase_c_ffmpeg.split_video_into_segments") as mock_split,
+        ):
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = storyboard_path
+            mock_kling_cls.return_value = mock_kling
+            mock_split.return_value = segment_paths
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(_make_lifecycle())
+
+        mock_kling.generate_storyboard.assert_called_once()
+        gen._shot_ctrl._finalize_motion_take.assert_not_called()
+        assert gen.generate_motion_take.call_count == 3
         assert result.ok is True
 
     def test_missing_keyframe_skips_storyboard(self, tmp_path):

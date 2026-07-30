@@ -24,6 +24,12 @@ import time
 import base64
 import jwt
 import requests
+from cinema.storyboard import (
+    STORYBOARD_MAX_DURATION_S,
+    STORYBOARD_MAX_SHOTS,
+    STORYBOARD_MIN_SHOT_DURATION_S,
+    allocate_storyboard_durations,
+)
 from config.settings import settings
 
 
@@ -350,8 +356,9 @@ class KlingNativeAPI:
                 print("[KLING-NATIVE] Error: No shots provided for storyboard")
                 return None
 
-            max_total_duration = 15.0
-            num_shots = min(len(shots), 6)  # Kling supports up to 6 shots
+            num_shots = min(
+                len(shots), STORYBOARD_MAX_SHOTS
+            )  # Kling supports up to 6 shots
             active_shots = shots[:num_shots]
 
             if num_shots < len(shots):
@@ -360,27 +367,30 @@ class KlingNativeAPI:
                     f"max 6 for storyboard"
                 )
 
-            # Distribute duration across shots
-            # Respect per-shot durations if provided, otherwise split evenly
-            per_shot_duration = max_total_duration / num_shots
-
+            durations = allocate_storyboard_durations(active_shots)
             multi_prompt = []
-            total_allocated = 0.0
-
-            for shot in active_shots:
-                shot_dur = float(shot.get("duration", per_shot_duration))
-                # Clamp so we don't exceed total budget
-                remaining = max_total_duration - total_allocated
-                shot_dur = min(shot_dur, remaining)
-                shot_dur = max(shot_dur, 1.0)  # Minimum 1 second per shot
-
+            for shot, shot_dur in zip(active_shots, durations):
                 multi_prompt.append({
                     "prompt": shot["prompt"],
                     "duration": str(round(shot_dur, 1)),
                 })
-                total_allocated += shot_dur
 
-            total_duration = str(round(total_allocated))
+            total_allocated = round(sum(durations), 1)
+            if (
+                any(
+                    duration < STORYBOARD_MIN_SHOT_DURATION_S
+                    for duration in durations
+                )
+                or total_allocated > STORYBOARD_MAX_DURATION_S
+            ):
+                raise RuntimeError(
+                    "storyboard duration allocator violated provider limits"
+                )
+            total_duration = (
+                str(int(total_allocated))
+                if total_allocated.is_integer()
+                else str(total_allocated)
+            )
 
             print(
                 f"[KLING-NATIVE] Storyboard: {num_shots} shots, "

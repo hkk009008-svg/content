@@ -330,6 +330,75 @@ def test_generate_video_timeout_override_reaches_poll_task(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# generate_storyboard — one canonical provider-capped duration allocation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("shot_count", "expected_durations"),
+    [
+        (4, [5.0, 5.0, 4.0, 1.0]),
+        (6, [5.0, 5.0, 2.0, 1.0, 1.0, 1.0]),
+    ],
+)
+def test_storyboard_payload_stays_within_provider_cap_after_minimums(
+    tmp_path,
+    shot_count,
+    expected_durations,
+):
+    """The 1s floor must not push a capped allocation back above 15s.
+
+    The former adapter first capped the requested durations, then applied the
+    one-second floor. Four 5s shots therefore described a 16s provider payload;
+    six described 18s. Reserve each remaining minimum during allocation so the
+    final provider payload and its declared total remain coherent.
+    """
+    from cinema.storyboard import allocate_storyboard_durations
+
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "storyboard.mp4")
+    shots = [
+        {"prompt": f"shot {index}", "duration": 5.0}
+        for index in range(shot_count)
+    ]
+
+    with (
+        patch.object(
+            kling_native.requests,
+            "post",
+            return_value=_ok_post_response(),
+        ) as mock_post,
+        patch.object(
+            api,
+            "poll_task",
+            return_value={
+                "task_result": {
+                    "videos": [{"url": "https://example.com/storyboard.mp4"}],
+                },
+            },
+        ),
+        patch.object(api, "download_video", return_value=out_path),
+    ):
+        result = api.generate_storyboard(
+            image_path=img_path,
+            shots=shots,
+            output_path=out_path,
+        )
+
+    body = mock_post.call_args.kwargs["json"]
+    payload_durations = [
+        float(item["duration"])
+        for item in body["multi_prompt"]
+    ]
+    assert result == out_path
+    assert allocate_storyboard_durations(shots) == expected_durations
+    assert payload_durations == expected_durations
+    assert float(body["duration"]) == sum(expected_durations)
+    assert sum(payload_durations) <= 15.0
+    assert min(payload_durations) >= 1.0
+
+
+# ---------------------------------------------------------------------------
 # poll_task — characterization (kling_native.py:170; backoff [3,5,8,12,15] at :190,226-229)
 #
 # poll_task loops: time.sleep(interval) FIRST, then requests.get(...).  So the

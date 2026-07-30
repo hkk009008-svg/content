@@ -39,6 +39,7 @@ from datetime import date, datetime, timezone
 from typing import Callable, Optional
 
 from cinema.phases.base import PhaseResult
+from cinema.storyboard import allocate_storyboard_durations
 from domain.provider_catalog import RuntimeSnapshot
 from domain.video_engine_policy import (
     build_runtime_snapshot,
@@ -141,9 +142,13 @@ class MotionRenderPhase:
             try:
                 refused = bool(tracker.would_exceed("KLING_NATIVE"))
             except Exception:
-                # Best-effort tracker (test stubs): match the posture of the
-                # cost-record below, which is also wrapped.
-                refused = False
+                logger.warning(
+                    "storyboard batch: budget gate failed for scene=%s; "
+                    "falling through to guarded per-shot path",
+                    scene_id,
+                    exc_info=True,
+                )
+                return ok_count, fail_count, False
             if refused:
                 logger.info(
                     "storyboard batch: budget gate refused launch for scene=%s; "
@@ -169,7 +174,6 @@ class MotionRenderPhase:
 
         # Per-shot motion prompts + durations.
         shots_for_storyboard = []
-        durations = []
         for shot, _kf in shot_kf_pairs:
             prompt = (
                 shot.get("motion_description")
@@ -177,9 +181,23 @@ class MotionRenderPhase:
                 or shot.get("camera")
                 or "cinematic motion"
             )
-            dur = float(shot.get("duration", 5.0))
-            shots_for_storyboard.append({"prompt": prompt, "duration": dur})
-            durations.append(dur)
+            shots_for_storyboard.append(
+                {"prompt": prompt, "duration": shot.get("duration", 5.0)}
+            )
+        try:
+            durations = allocate_storyboard_durations(shots_for_storyboard)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "storyboard batch: invalid duration plan for scene=%s (%s); "
+                "falling through to per-shot",
+                scene_id,
+                exc,
+            )
+            return ok_count, fail_count, False
+        for storyboard_shot, duration in zip(
+            shots_for_storyboard, durations
+        ):
+            storyboard_shot["duration"] = duration
 
         # image_references: the other shots' keyframes (indices 1..N-1) for
         # cross-shot character/style consistency.
@@ -263,6 +281,26 @@ class MotionRenderPhase:
                 "in scene=%s; falling through to per-shot",
                 len(segment_paths) if segment_paths else 0,
                 num_shots,
+                scene_id,
+            )
+            return ok_count, fail_count, False
+        invalid_segments = []
+        for index, segment_path in enumerate(segment_paths):
+            try:
+                is_nonempty_file = (
+                    bool(segment_path)
+                    and os.path.isfile(segment_path)
+                    and os.path.getsize(segment_path) > 0
+                )
+            except OSError:
+                is_nonempty_file = False
+            if not is_nonempty_file:
+                invalid_segments.append(index)
+        if invalid_segments:
+            logger.warning(
+                "storyboard batch: empty or missing segments %s in scene=%s; "
+                "falling through to per-shot",
+                invalid_segments,
                 scene_id,
             )
             return ok_count, fail_count, False
