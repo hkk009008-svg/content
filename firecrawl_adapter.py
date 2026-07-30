@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from ipaddress import IPv4Address, IPv6Address
 import re
 from threading import Lock
+from unicodedata import category as unicode_category
 from urllib.parse import urlsplit
 
 
@@ -50,6 +51,7 @@ _URL_ERROR = "URL must be a valid HTTP(S) URL without credentials."
 _HOST_LABEL = re.compile(
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 )
+_ASCII_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
 def _raise_url_error() -> None:
@@ -71,18 +73,30 @@ def _validate_hostname(hostname: str) -> None:
     except ValueError:
         pass
 
-    # Four decimal labels are interpreted as an IPv4 candidate, not a DNS
-    # fallback.  This keeps malformed dotted addresses deterministic.
-    raw_labels = hostname.rstrip(".").split(".")
-    if len(raw_labels) == 4 and all(label.isdecimal() for label in raw_labels):
-        _raise_url_error()
-    if not raw_labels or any(not label for label in raw_labels):
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
         _raise_url_error()
 
-    ascii_labels = []
-    for label in raw_labels:
+    has_terminal_dot = ascii_hostname.endswith(".")
+    canonical_hostname = (
+        ascii_hostname[:-1] if has_terminal_dot else ascii_hostname
+    )
+    if not canonical_hostname or canonical_hostname.endswith("."):
+        _raise_url_error()
+
+    # Four decimal labels are interpreted as an IPv4 candidate, not a DNS
+    # fallback.  This keeps malformed dotted addresses deterministic.
+    ascii_labels = canonical_hostname.split(".")
+    if len(ascii_labels) == 4 and all(
+        label.isdecimal() for label in ascii_labels
+    ):
+        _raise_url_error()
+    if any(not label for label in ascii_labels):
+        _raise_url_error()
+
+    for ascii_label in ascii_labels:
         try:
-            ascii_label = label.encode("idna").decode("ascii")
             if ascii_label.lower().startswith("xn--"):
                 decoded = ascii_label.encode("ascii").decode("idna")
                 round_trip = decoded.encode("idna").decode("ascii")
@@ -93,35 +107,49 @@ def _validate_hostname(hostname: str) -> None:
 
         if not _HOST_LABEL.fullmatch(ascii_label):
             _raise_url_error()
-        ascii_labels.append(ascii_label)
 
-    if len(".".join(ascii_labels)) > 253:
+    if len(canonical_hostname) > 253:
         _raise_url_error()
 
 
+def _validate_percent_escapes(url: str) -> None:
+    """Require every raw percent sign to begin one ASCII hex triplet."""
+    position = 0
+    while True:
+        position = url.find("%", position)
+        if position < 0:
+            return
+        escape = url[position + 1:position + 3]
+        if (
+            len(escape) != 2
+            or any(character not in _ASCII_HEX_DIGITS for character in escape)
+        ):
+            _raise_url_error()
+        position += 3
+
+
 def _validate_url(url: str) -> str:
-    """Return a normalized HTTP(S) URL without making a network request."""
+    """Return the original HTTP(S) URL after deterministic local validation."""
     if not isinstance(url, str) or not url or url != url.strip():
         _raise_url_error()
     if any(
         character.isspace()
-        or ord(character) < 32
-        or ord(character) == 127
+        or unicode_category(character) in {"Cc", "Cs"}
         for character in url
     ):
         _raise_url_error()
+    _validate_percent_escapes(url)
 
-    normalized = url
-    scheme_delimiter = normalized.find("://")
+    scheme_delimiter = url.find("://")
     if scheme_delimiter <= 0:
         _raise_url_error()
     authority_start = scheme_delimiter + 3
-    authority_end = len(normalized)
+    authority_end = len(url)
     for delimiter in "/?#":
-        position = normalized.find(delimiter, authority_start)
+        position = url.find(delimiter, authority_start)
         if position >= 0:
             authority_end = min(authority_end, position)
-    authority = normalized[authority_start:authority_end]
+    authority = url[authority_start:authority_end]
     if (
         not authority
         or "\\" in authority
@@ -130,7 +158,7 @@ def _validate_url(url: str) -> str:
         _raise_url_error()
 
     try:
-        parsed = urlsplit(normalized)
+        parsed = urlsplit(url)
         hostname = parsed.hostname
         port = parsed.port
         username = parsed.username
@@ -154,7 +182,7 @@ def _validate_url(url: str) -> str:
         _raise_url_error()
 
     _validate_hostname(hostname)
-    return normalized
+    return url
 
 
 def _get_client(api_key: str):
@@ -249,11 +277,11 @@ def _extract_markdown(result: object) -> str:
 
 def scrape_markdown(url: str, *, api_key: str) -> str:
     """Scrape one URL through the current SDK and return validated markdown."""
-    normalized_url = _validate_url(url)
+    validated_url = _validate_url(url)
     client = _get_client(api_key)
 
     try:
-        result = client.scrape(normalized_url, formats=["markdown"])
+        result = client.scrape(validated_url, formats=["markdown"])
     except Exception:
         raise FirecrawlScrapeError(
             "Firecrawl scrape request failed."
