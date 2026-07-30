@@ -1,9 +1,11 @@
 import math
+from datetime import date
 
 import pytest
 
 from workflow_selector import (
     classify_shot_type,
+    get_resolved_workflow_routing,
     get_workflow_params,
     apply_workflow_params,
     WORKFLOW_TEMPLATES,
@@ -11,6 +13,8 @@ from workflow_selector import (
     MOTION_FIDELITY_FLOORS,
     get_adaptive_pulid_weight,
 )
+from domain.provider_catalog import RuntimeSnapshot
+from domain.video_engine_policy import VideoPolicyReason
 from domain.shot_types import (
     SHOT_TYPE_CLOSE,
     SHOT_TYPE_PORTRAIT,
@@ -20,6 +24,17 @@ from domain.shot_types import (
     SHOT_TYPE_ACTION,
 )
 from identity.types import FailureReason
+
+
+PRE_SUNSET = date(2026, 9, 23)
+SUNSET = date(2026, 9, 24)
+
+
+def _fal_snapshot():
+    return RuntimeSnapshot(
+        credentials={"fal_key"},
+        modules={"fal_client"},
+    )
 
 
 # Valid target_api / video_fallback values accepted by the cinema pipeline.
@@ -104,6 +119,111 @@ class TestGetWorkflowParams:
         params2 = get_workflow_params("portrait")
         params1["steps"] = 999
         assert params2["steps"] != 999
+
+
+class TestResolvedWorkflowRouting:
+    def test_raw_templates_remain_historical_order_seeds(self):
+        assert {
+            template["target_api"]
+            for template in WORKFLOW_TEMPLATES.values()
+        } == {"GEMINI_OMNI"}
+        assert WORKFLOW_TEMPLATES["action"]["video_fallbacks"] == [
+            "VEO_NATIVE",
+            "SEEDANCE",
+            "SORA_NATIVE",
+            "KLING_3_0",
+            "RUNWAY_GEN4",
+            "LTX",
+        ]
+
+    def test_resolved_accessor_filters_broken_and_unavailable_in_seed_order(self):
+        routing = get_resolved_workflow_routing(
+            "portrait",
+            runtime_snapshot=_fal_snapshot(),
+            on_date=PRE_SUNSET,
+        )
+        assert routing.candidates == ("KLING_3_0", "SEEDANCE")
+        assert routing.primary == "KLING_3_0"
+        assert routing.fallbacks == ("SEEDANCE",)
+        assert [(item.key, item.reason) for item in routing.rejections] == [
+            ("GEMINI_OMNI", VideoPolicyReason.UNSUPPORTED),
+            ("VEO_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
+            ("KLING_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
+            ("RUNWAY_GEN4", VideoPolicyReason.RUNTIME_UNAVAILABLE),
+        ]
+
+    def test_empty_runtime_returns_auto_and_no_provider(self):
+        routing = get_resolved_workflow_routing(
+            "landscape",
+            runtime_snapshot=RuntimeSnapshot(),
+            on_date=PRE_SUNSET,
+        )
+        assert routing.candidates == ()
+        assert routing.primary == "AUTO"
+        assert routing.fallbacks == ()
+        assert "GEMINI_OMNI" not in routing.candidates
+
+    def test_project_disabled_engines_are_removed_without_reordering(self):
+        routing = get_resolved_workflow_routing(
+            "action",
+            settings={
+                "api_engines": {
+                    "SEEDANCE": {"enabled": False},
+                    "KLING_3_0": {"enabled": False},
+                    "LTX": {"enabled": False},
+                }
+            },
+            runtime_snapshot=_fal_snapshot(),
+            on_date=PRE_SUNSET,
+        )
+        assert routing.candidates == ()
+        assert routing.primary == "AUTO"
+        assert {
+            item.key
+            for item in routing.rejections
+            if item.reason is VideoPolicyReason.PROJECT_DISABLED
+        } == {"SEEDANCE", "KLING_3_0", "LTX"}
+
+    def test_sora_native_is_pre_sunset_fallback_only(self):
+        snapshot = RuntimeSnapshot(
+            credentials={"fal_key", "openai_api_key"},
+            modules={"fal_client", "openai"},
+        )
+        before = get_resolved_workflow_routing(
+            "action",
+            runtime_snapshot=snapshot,
+            on_date=PRE_SUNSET,
+        )
+        assert before.candidates == (
+            "SEEDANCE",
+            "SORA_NATIVE",
+            "KLING_3_0",
+            "LTX",
+        )
+
+        on_boundary = get_resolved_workflow_routing(
+            "action",
+            runtime_snapshot=snapshot,
+            on_date=SUNSET,
+        )
+        assert "SORA_NATIVE" not in on_boundary.candidates
+        assert any(
+            item.key == "SORA_NATIVE"
+            and item.reason is VideoPolicyReason.RETIRED
+            for item in on_boundary.rejections
+        )
+
+    def test_get_workflow_params_consumes_resolved_accessor(self):
+        params = get_workflow_params(
+            "action",
+            runtime_snapshot=_fal_snapshot(),
+            on_date=PRE_SUNSET,
+        )
+        assert params["target_api"] == "SEEDANCE"
+        assert params["video_fallbacks"] == ["KLING_3_0", "LTX"]
+        assert params["pulid_weight"] == WORKFLOW_TEMPLATES["action"]["pulid_weight"]
+        assert params["guidance"] == WORKFLOW_TEMPLATES["action"]["guidance"]
+        assert params["steps"] == WORKFLOW_TEMPLATES["action"]["steps"]
 
 
 # --- apply_workflow_params ---

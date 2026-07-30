@@ -4,6 +4,7 @@ Replaces the monolithic 20-prompt auto-generation (phase_a_generator.py) with
 per-scene decomposition. Takes user-defined scenes and converts them into
 technically precise image generation prompts via GPT-4o.
 """
+from datetime import date
 from typing import Any, Optional, List
 
 import os
@@ -11,7 +12,13 @@ import json
 import re
 from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
+from domain.provider_catalog import RuntimeSnapshot, project_legacy_registry
 from domain.project_manager import make_shot
+from domain.video_engine_policy import (
+    eligible_shot_targets,
+    evaluate_shot_target,
+    resolve_video_ranking,
+)
 from config.settings import settings
 # Camera motion options — canonical list used by per-shot generation.
 CAMERA_MOTIONS = [
@@ -34,7 +41,7 @@ VISUAL_EFFECTS = [
 # modality:   "video" | "image" | "lipsync" | "tts" | "music" | "foley" | "upscale"
 # best_for:   list of purpose tags (see PURPOSE_TAGS below)
 # status:     "live" (plumbed + tested) | "beta" (plumbed, untested) | "planned" (not yet wired)
-API_REGISTRY = {
+_LEGACY_API_REGISTRY_SEED = {
     # --- META ---
     "AUTO":          {"label": "Auto (Smart Routing)",  "category": "smart",     "description": "Picks best API per shot type automatically", "modality": "video", "best_for": ["auto"], "status": "live"},
 
@@ -93,7 +100,28 @@ API_REGISTRY = {
     "SEEDVR2":       {"label": "SeedVR2",              "category": "upscale",   "description": "Cloud video upscale, currently wired in post-process", "modality": "upscale", "best_for": ["upscale_video"], "per_shot_cost": 0.08, "quality_score": 0.86, "latency_s": 90, "status": "live"},
     "CCSR":          {"label": "CCSR (image)",         "category": "upscale",   "description": "Real-world photo restoration — environments, lighter than SUPIR", "modality": "upscale", "best_for": ["upscale_image"], "per_shot_cost": 0.015, "quality_score": 0.88, "latency_s": 25, "status": "planned"},
 }
-TARGET_APIS = list(API_REGISTRY.keys())
+
+# Compatibility projection: retain the literal historical rows above, but do
+# not let their stale ``status`` strings claim that retired or broken engines
+# are live.  ``project_legacy_registry`` deep-copies every row, so consumers of
+# this compatibility view cannot mutate the historical ordering/data seed.
+API_REGISTRY = project_legacy_registry(_LEGACY_API_REGISTRY_SEED)
+
+
+def get_eligible_target_apis(
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> list[str]:
+    """Return the current shot-authoring enum as a fresh mutable list."""
+
+    return list(eligible_shot_targets(snapshot=snapshot, on_date=on_date))
+
+
+# Import-time compatibility snapshot only.  Executable schema and validation
+# paths call ``get_eligible_target_apis`` so injected runtime/date truth remains
+# identical across the LLM contract and the eventual ``make_shot`` write.
+TARGET_APIS = get_eligible_target_apis()
 
 # Purpose tags — the abstraction over shot-type that drives purpose-based routing.
 # Each purpose maps to a ranked list of API keys, best-first. The orchestrator
@@ -146,6 +174,21 @@ PURPOSE_API_RANKING = {
     "product_in_scene":         ["KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "RUNWAY_GEN4", "SORA_NATIVE", "SEEDANCE"],
     "product_reveal_motion":    ["SORA_NATIVE", "SEEDANCE", "KLING_3_0", "RUNWAY_GEN4"],
 }
+
+_VIDEO_AUTHORING_PURPOSES = frozenset(
+    {
+        "dialogue_close_up",
+        "talking_head_full",
+        "action_motion",
+        "static_portrait",
+        "establishing_shot",
+        "macro_detail",
+        "style_locked_sequence",
+        "product_hero",
+        "product_in_scene",
+        "product_reveal_motion",
+    }
+)
 
 
 # Provider → API key prefix mapping for billing attribution. The user signs up
@@ -282,17 +325,34 @@ def estimate_short_cost(
     }
 
 
-def rank_apis_for_purpose(purpose: str, *, status_filter=("live", "beta"),
-                          max_per_shot_cost=None, exclude=()):
+def rank_apis_for_purpose(
+    purpose: str,
+    *,
+    status_filter=("live", "beta"),
+    max_per_shot_cost=None,
+    exclude=(),
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+):
     """Return APIs ordered best-first for a given purpose.
 
-    Filters to entries whose status is in status_filter and (if given) whose
-    per_shot_cost is below max_per_shot_cost. Used by the orchestrator to pick
-    the best API for a shot. UI uses it to render the per-purpose picker.
+    Video-authoring purposes use typed catalog policy plus runtime readiness;
+    their historical ranking is order only, never status authority.  Non-video
+    purposes retain the legacy status/cost behavior.
 
     Returns: list of (api_key, api_dict) tuples.
     """
     rank = PURPOSE_API_RANKING.get(purpose, [])
+    eligible_video_keys: set[str] | None = None
+    if purpose in _VIDEO_AUTHORING_PURPOSES:
+        eligible_video_keys = set(
+            resolve_video_ranking(
+                rank,
+                snapshot=snapshot,
+                on_date=on_date,
+            ).candidates
+        )
+
     out = []
     for key in rank:
         if key in exclude:
@@ -300,7 +360,10 @@ def rank_apis_for_purpose(purpose: str, *, status_filter=("live", "beta"),
         info = API_REGISTRY.get(key)
         if not info:
             continue
-        if status_filter and info.get("status", "live") not in status_filter:
+        if eligible_video_keys is not None:
+            if key not in eligible_video_keys:
+                continue
+        elif status_filter and info.get("status", "live") not in status_filter:
             continue
         cost = info.get("per_shot_cost", 0.0)
         if max_per_shot_cost is not None and cost > max_per_shot_cost:
@@ -325,13 +388,21 @@ MUSIC_MOODS = [
 ]
 
 
-def _build_cinedecompose_shot_schema() -> dict:
+def _build_cinedecompose_shot_schema(
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> dict:
     """Return the identity-safe JSON-object contract shared by both LLM paths.
 
     Root shape is ``{"shots": [ ... ]}`` so OpenAI ``response_format=
     {"type": "json_object"}`` and the prompt agree. Enum lists are copied so
     callers cannot mutate the module-level catalogs via the returned schema.
     """
+    target_apis = get_eligible_target_apis(
+        snapshot=snapshot,
+        on_date=on_date,
+    )
     shot_item = {
         "type": "object",
         "properties": {
@@ -346,7 +417,7 @@ def _build_cinedecompose_shot_schema() -> dict:
             },
             "camera": {"type": "string", "enum": list(CAMERA_MOTIONS)},
             "visual_effect": {"type": "string", "enum": list(VISUAL_EFFECTS)},
-            "target_api": {"type": "string", "enum": list(TARGET_APIS)},
+            "target_api": {"type": "string", "enum": target_apis},
             "scene_foley": {
                 "type": "string",
                 "description": "Environmental sound effects for this moment",
@@ -435,8 +506,19 @@ def _extract_shots_list(parsed: Any) -> list:
     )
 
 
-def _validate_raw_shot(shot: Any, *, index: int) -> dict:
-    """Validate one shot against the executable schema. Raises ValueError."""
+def _validate_raw_shot(
+    shot: Any,
+    *,
+    index: int,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> dict:
+    """Validate one shot and fence its newly authored video target.
+
+    Structural contract breaches still raise.  An explicit unsafe video-engine
+    suggestion is instead coerced to ``AUTO`` with a stable policy reason, so
+    fallback is deterministic and never invents a different provider.
+    """
     if not isinstance(shot, dict):
         raise ValueError(f"shot[{index}] must be an object, got {type(shot).__name__}")
 
@@ -464,8 +546,16 @@ def _validate_raw_shot(shot: Any, *, index: int) -> dict:
         raise ValueError(
             f"shot[{index}] invalid visual_effect: {shot['visual_effect']!r}"
         )
-    if shot["target_api"] not in TARGET_APIS:
-        raise ValueError(f"shot[{index}] invalid target_api: {shot['target_api']!r}")
+    target_decision = evaluate_shot_target(
+        shot["target_api"],
+        snapshot=snapshot,
+        on_date=on_date,
+    )
+    shot["target_api"] = target_decision.target
+    if target_decision.reason is not None:
+        shot["_target_api_policy_reason"] = target_decision.reason.value
+    else:
+        shot.pop("_target_api_policy_reason", None)
     if not isinstance(shot["scene_foley"], str) or not shot["scene_foley"].strip():
         raise ValueError(f"shot[{index}] scene_foley must be a non-empty string")
     if not isinstance(shot["action_context"], str) or not shot["action_context"].strip():
@@ -501,11 +591,13 @@ def _enrich_validated_shots(
     characters: List[dict],
     target_shots: int,
     ensemble_meta: Optional[dict] = None,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
 ) -> List[dict]:
     """Validate shot count + fields, then build make_shot records.
 
-    Invalid enums / missing fields / bad prompts raise ValueError rather than
-    silently defaulting — callers fall back to ``_fallback_decompose``.
+    Missing fields and structural enum/prompt violations raise.  Unsafe
+    ``target_api`` values are explicitly fenced to ``AUTO`` with a reason.
     """
     if not (_CINEDECOMPOSE_MIN_SHOTS <= len(shots) <= _CINEDECOMPOSE_MAX_SHOTS):
         raise ValueError(
@@ -520,7 +612,12 @@ def _enrich_validated_shots(
     default_char_ids = [c["id"] for c in characters]
     validated: List[dict] = []
     for i, shot in enumerate(shots):
-        _validate_raw_shot(shot, index=i)
+        _validate_raw_shot(
+            shot,
+            index=i,
+            snapshot=snapshot,
+            on_date=on_date,
+        )
         char_ids = shot["characters_in_frame"] or default_char_ids
         shot_record = make_shot(
             prompt=shot["prompt"],
@@ -534,6 +631,9 @@ def _enrich_validated_shots(
         )
         shot_record["action_context"] = shot["action_context"]
         shot_record["intent_notes"] = scene.get("action", "")
+        target_reason = shot.get("_target_api_policy_reason")
+        if target_reason:
+            shot_record["target_api_policy_reason"] = target_reason
         if ensemble_meta:
             shot_record["ensemble_winner"] = ensemble_meta.get("winner")
             shot_record["ensemble_scores"] = ensemble_meta.get("scores")
@@ -541,9 +641,20 @@ def _enrich_validated_shots(
     return validated
 
 
-def _render_cinedecompose_system_prompt(system_prompt: str) -> str:
+def _render_cinedecompose_system_prompt(
+    system_prompt: str,
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> str:
     """Append the canonical shot schema to a CineDecompose system prompt."""
-    schema = _build_cinedecompose_shot_schema()
+    if snapshot is None and on_date is None:
+        schema = _build_cinedecompose_shot_schema()
+    else:
+        schema = _build_cinedecompose_shot_schema(
+            snapshot=snapshot,
+            on_date=on_date,
+        )
     return system_prompt + "\n\nJSON Schema:\n" + json.dumps(schema, indent=2)
 
 
@@ -648,7 +759,9 @@ R1. Shots follow physical logic — characters do not teleport between shots.
 R2. Camera angles are physically achievable and cinematic.
 R3. Every shot specifies environmental Foley sound effects in scene_foley field.
 R4. Aspect ratio: {_aspect} {_aspect_orientation}.
-R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default to "AUTO" — pick the best API for each shot.
+R5. Set target_api to the best eligible concrete value in the JSON Schema.
+    If the schema exposes only AUTO or no concrete engine is suitable, use AUTO.
+    Never invent or substitute a provider outside the schema enum.
 R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
 </ADDITIONAL_RULES>
 
@@ -664,6 +777,9 @@ def decompose_scene(
     global_settings: dict,
     style_rules: Optional[dict] = None,
     cost_tracker=None,
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
 ) -> List[dict]:
     """
     Takes a user-defined scene and produces 2-5 shot breakdowns via GPT-4o.
@@ -752,7 +868,11 @@ Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in chara
 
 Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot objects. No markdown wrapping."""
 
-    full_system = _render_cinedecompose_system_prompt(system_prompt)
+    full_system = _render_cinedecompose_system_prompt(
+        system_prompt,
+        snapshot=runtime_snapshot,
+        on_date=on_date,
+    )
 
     try:
         from web_research import run_with_tools
@@ -781,6 +901,8 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
             scene=scene,
             characters=characters,
             target_shots=target_shots,
+            snapshot=runtime_snapshot,
+            on_date=on_date,
         )
 
         print(f"   ✅ Decomposed scene '{scene.get('title')}' into {len(validated)} shots")
@@ -800,6 +922,9 @@ def competitive_decompose_scene(
     global_settings: dict,
     style_rules: Optional[dict] = None,
     cost_tracker=None,
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
 ) -> List[dict]:
     """
     Multi-LLM competitive scene decomposition.
@@ -896,7 +1021,11 @@ Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in chara
 
 Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot objects. No markdown wrapping."""
 
-    full_system = _render_cinedecompose_system_prompt(system_prompt)
+    full_system = _render_cinedecompose_system_prompt(
+        system_prompt,
+        snapshot=runtime_snapshot,
+        on_date=on_date,
+    )
 
     # ------------------------------------------------------------------
     # 7. Run competitive generation via LLMEnsemble
@@ -919,7 +1048,16 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
         winning_raw = result.winner_content
         if winning_raw is None:
             print("   [Ensemble] Winning candidate was None — falling back to decompose_scene()")
-            return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
+            return decompose_scene(
+                scene,
+                characters,
+                location,
+                global_settings,
+                style_rules,
+                cost_tracker=cost_tracker,
+                runtime_snapshot=runtime_snapshot,
+                on_date=on_date,
+            )
 
         # ------------------------------------------------------------------
         # 8. Parse + validate via the shared executable contract
@@ -934,6 +1072,8 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
                 "winner": result.models_used[result.winner_index],
                 "scores": result.scores,
             },
+            snapshot=runtime_snapshot,
+            on_date=on_date,
         )
 
         print(
@@ -947,7 +1087,16 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
         print(f"   [Ensemble] Competitive decomposition failed: {e}")
         traceback.print_exc()
         print("   [Ensemble] Falling back to single-model decompose_scene()")
-        return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
+        return decompose_scene(
+            scene,
+            characters,
+            location,
+            global_settings,
+            style_rules,
+            cost_tracker=cost_tracker,
+            runtime_snapshot=runtime_snapshot,
+            on_date=on_date,
+        )
 
 
 def _fallback_decompose(

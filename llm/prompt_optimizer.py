@@ -23,9 +23,21 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Optional
+from datetime import date
+from typing import Callable, Optional
 
-from domain.scene_decomposer import API_REGISTRY, PURPOSE_TAGS, rank_apis_for_purpose
+from domain.provider_catalog import RuntimeSnapshot
+from domain.scene_decomposer import (
+    API_REGISTRY,
+    PURPOSE_API_RANKING,
+    PURPOSE_TAGS,
+    rank_apis_for_purpose,
+)
+from domain.video_engine_policy import (
+    build_runtime_snapshot,
+    eligible_shot_targets,
+    evaluate_shot_target,
+)
 
 
 # Whitelist of acceptable purpose values from PURPOSE_TAGS. The LLM hallucinates
@@ -170,7 +182,7 @@ def _heuristic_purpose_with_objects(
     return "static_portrait"
 
 
-_OPTIMIZER_SYSTEM_PROMPT = """You are a senior cinema technical director AND commercial product
+_OPTIMIZER_SYSTEM_PROMPT_TEMPLATE = """You are a senior cinema technical director AND commercial product
 photographer. You translate creative intent into structured generation specs that an AI
 image-and-video pipeline can execute at the highest possible quality.
 
@@ -183,7 +195,7 @@ Schema:
   "purpose":                string,  // one of: dialogue_close_up | talking_head_full | action_motion | static_portrait | establishing_shot | macro_detail | style_locked_sequence | product_hero | product_in_scene | product_reveal_motion
   "shot_type":              string,  // one of: portrait | medium | wide | action | landscape
   "suggested_image_api":    string,  // FLUX_DEV | HIDREAM_I1 | SD3_5_LARGE
-  "suggested_video_api":    string,  // GEMINI_OMNI | KLING_3_0 | KLING_NATIVE | SEEDANCE | SORA_NATIVE | VEO_NATIVE | LTX | RUNWAY_GEN4 | AUTO
+  "suggested_video_api":    string,  // __VIDEO_API_ENUM__
   "suggested_lipsync":      string,  // SYNC_SO_V3 | MUSETALK | OMNIHUMAN_V1_5 | LATENTSYNC | null
   "negative_constraints":   string,  // what to avoid: "plastic skin, identity drift, oversaturated, deformed hands, off-brand product, mis-shaped logo"
   "identity_anchor":        string,  // critical visual features to preserve — for objects: brand color, logo, distinctive geometry; for characters: face/hair/build
@@ -199,14 +211,10 @@ GUIDELINES (apply rigorously):
    aperture (f/1.4 - f/8), depth-of-field cue, lighting direction, camera height,
    movement (static, dolly, tracking, crane).
 
-2. PURPOSE → API RECOMMENDATION:
-   - dialogue_close_up: video_api=GEMINI_OMNI or VEO_NATIVE; lipsync=SYNC_SO_V3
-   - talking_head_full: video_api=GEMINI_OMNI or VEO_NATIVE; lipsync=OMNIHUMAN_V1_5 or SYNC_SO_V3
-   - action_motion: video_api=GEMINI_OMNI (Google-first) or SEEDANCE (multi-character: binds up to 9 refs; Sora retires 2026-09-24); lipsync=null
-   - static_portrait: video_api=GEMINI_OMNI or KLING_3_0 (Kling v3 Pro on fal; KLING_NATIVE is the legacy v1.6 fallback); lipsync=null
-   - establishing_shot: video_api=GEMINI_OMNI or LTX or VEO_NATIVE; lipsync=null
-   - macro_detail: video_api=SORA_NATIVE or LTX; lipsync=null
-   - style_locked_sequence: video_api=RUNWAY_GEN4; lipsync per dialogue need
+2. PURPOSE → VIDEO API RECOMMENDATION:
+__VIDEO_ROUTING_GUIDANCE__
+   Use only values in the current suggested_video_api enum. AUTO is the safe
+   router sentinel when no concrete eligible engine is listed.
 
 3. NEGATIVE CONSTRAINTS must target common AI failures:
    "plastic skin, frozen face, identity drift, mismatched eyes, deformed hands,
@@ -263,11 +271,61 @@ GUIDELINES (apply rigorously):
    - negative_constraints for products MUST include: "off-brand colors, deformed
      logo, mis-shaped product silhouette, wrong proportions, plastic-looking
      metallic surface, missing brand mark."
-   - For commercial pieces, lean toward HIDREAM_I1 (image) and SORA_NATIVE
-     (video reveal; SEEDANCE after the 2026-09-24 Sora sunset) — they preserve
-     product geometry better than the character-focused engines.
+   - For commercial pieces, use the highest-ranked currently eligible video
+     engine from the purpose guidance; never revive a retired provider.
 
 Output ONLY the JSON. Nothing else."""
+
+
+_OPTIMIZER_VIDEO_PURPOSES = (
+    "dialogue_close_up",
+    "talking_head_full",
+    "action_motion",
+    "static_portrait",
+    "establishing_shot",
+    "macro_detail",
+    "style_locked_sequence",
+    "product_hero",
+    "product_in_scene",
+    "product_reveal_motion",
+)
+
+
+def _build_optimizer_system_prompt(
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> str:
+    """Render the optimizer contract from the same typed authoring policy."""
+
+    current = snapshot if snapshot is not None else build_runtime_snapshot()
+    target_apis = eligible_shot_targets(
+        snapshot=current,
+        on_date=on_date,
+    )
+    enum_text = " | ".join(target_apis)
+    guidance_lines = []
+    for purpose in _OPTIMIZER_VIDEO_PURPOSES:
+        ranked = rank_apis_for_purpose(
+            purpose,
+            snapshot=current,
+            on_date=on_date,
+        )
+        candidates = [key for key, _info in ranked]
+        guidance_lines.append(
+            f"   - {purpose}: video_api="
+            f"{' or '.join(candidates) if candidates else 'AUTO'}"
+        )
+    return (
+        _OPTIMIZER_SYSTEM_PROMPT_TEMPLATE
+        .replace("__VIDEO_API_ENUM__", enum_text)
+        .replace("__VIDEO_ROUTING_GUIDANCE__", "\n".join(guidance_lines))
+    )
+
+
+# Compatibility snapshot for tests and diagnostics.  Runtime calls render from
+# their injected/current snapshot instead of treating this string as authority.
+_OPTIMIZER_SYSTEM_PROMPT = _build_optimizer_system_prompt()
 
 
 def _heuristic_shot_type(user_input: str, has_chars: bool) -> str:
@@ -297,11 +355,35 @@ def _heuristic_purpose(shot_type: str, has_dialogue: bool) -> str:
     return "static_portrait"
 
 
-def _top_live_api_for_purpose(purpose: str, modality: str) -> str:
-    """Pick the highest-ranked live API of a given modality for a purpose."""
-    ranked = rank_apis_for_purpose(purpose, status_filter=("live",))
-    for key, info in ranked:
-        if info.get("modality") == modality:
+def _top_live_api_for_purpose(
+    purpose: str,
+    modality: str,
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> str:
+    """Pick a safe highest-ranked API for a purpose and modality."""
+
+    if modality == "video":
+        ranked = rank_apis_for_purpose(
+            purpose,
+            status_filter=("live",),
+            snapshot=snapshot,
+            on_date=on_date,
+        )
+        if ranked:
+            return ranked[0][0]
+        # Never invent an arbitrary video provider when the typed ranking is
+        # empty. AUTO preserves the router decision for a later boundary.
+        return "AUTO"
+
+    # Preserve the historical per-purpose order for non-video modalities.
+    for key in PURPOSE_API_RANKING.get(purpose, ()):
+        info = API_REGISTRY.get(key, {})
+        if (
+            info.get("modality") == modality
+            and info.get("status", "live") == "live"
+        ):
             return key
     # Fallback to any modality match in the registry
     for key, info in API_REGISTRY.items():
@@ -319,6 +401,9 @@ def _fallback_optimize(
     objects: Optional[list] = None,
     primary_subject: str = "character",
     intent_notes: str = "",
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
 ) -> dict:
     """Deterministic fallback — runs without an LLM. Produces a reasonable spec
     using heuristics + the user's own input as the seed prompt. Lower quality
@@ -494,8 +579,22 @@ def _fallback_optimize(
         "purpose": purpose,
         "shot_type": shot_type,
         "suggested_image_api": img_api,
-        "suggested_video_api": _top_live_api_for_purpose(purpose, "video"),
-        "suggested_lipsync": _top_live_api_for_purpose(purpose, "lipsync") if has_dialogue else None,
+        "suggested_video_api": _top_live_api_for_purpose(
+            purpose,
+            "video",
+            snapshot=runtime_snapshot,
+            on_date=on_date,
+        ),
+        "suggested_lipsync": (
+            _top_live_api_for_purpose(
+                purpose,
+                "lipsync",
+                snapshot=runtime_snapshot,
+                on_date=on_date,
+            )
+            if has_dialogue
+            else None
+        ),
         "negative_constraints": negatives,
         "identity_anchor": identity_anchor,
         "camera": camera_str,
@@ -508,7 +607,14 @@ def _fallback_optimize(
     }
 
 
-def _coerce_to_valid_keys(spec: dict, has_chars: bool, has_dialogue: bool) -> dict:
+def _coerce_to_valid_keys(
+    spec: dict,
+    has_chars: bool,
+    has_dialogue: bool,
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+) -> dict:
     """Sanitize LLM output — replace invalid enum values with safe defaults.
 
     Normalization order: ``shot_type`` first, then ``purpose`` (which may
@@ -524,11 +630,31 @@ def _coerce_to_valid_keys(spec: dict, has_chars: bool, has_dialogue: bool) -> di
         )
     if spec.get("suggested_image_api") not in API_REGISTRY:
         spec["suggested_image_api"] = "FLUX_DEV"
-    if spec.get("suggested_video_api") not in API_REGISTRY:
-        spec["suggested_video_api"] = "AUTO"
+    target_decision = evaluate_shot_target(
+        spec.get("suggested_video_api"),
+        snapshot=runtime_snapshot,
+        on_date=on_date,
+    )
+    spec["suggested_video_api"] = target_decision.target
+    if target_decision.reason is not None:
+        existing_reasoning = spec.get("reasoning")
+        routing_reason = (
+            "video target coerced to AUTO "
+            f"({target_decision.reason.value})"
+        )
+        spec["reasoning"] = (
+            f"{existing_reasoning.rstrip()} {routing_reason}"
+            if isinstance(existing_reasoning, str) and existing_reasoning.strip()
+            else routing_reason
+        )
     if has_dialogue:
         if spec.get("suggested_lipsync") not in API_REGISTRY:
-            spec["suggested_lipsync"] = _top_live_api_for_purpose(spec["purpose"], "lipsync")
+            spec["suggested_lipsync"] = _top_live_api_for_purpose(
+                spec["purpose"],
+                "lipsync",
+                snapshot=runtime_snapshot,
+                on_date=on_date,
+            )
     else:
         spec["suggested_lipsync"] = None
     # Fill missing string fields with empty rather than None to keep downstream simple
@@ -565,6 +691,10 @@ def optimize_shot_prompt(
     intent_notes: str = "",
     ensemble=None,
     cost_tracker=None,
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+    module_probe: Callable[[str], bool] | None = None,
 ) -> dict:
     """Translate raw user intent into a structured shot generation spec.
 
@@ -596,6 +726,11 @@ def optimize_shot_prompt(
     location = location or {}
     global_settings = global_settings or {}
     has_chars = len(characters) > 0
+    policy_snapshot = (
+        runtime_snapshot
+        if runtime_snapshot is not None
+        else build_runtime_snapshot(module_probe=module_probe)
+    )
 
     # Lazy-load the ensemble so this module imports cleanly even if the LLM
     # SDKs are missing.
@@ -609,6 +744,8 @@ def optimize_shot_prompt(
                 user_input, characters, location, global_settings,
                 has_dialogue, objects=objects, primary_subject=primary_subject,
                 intent_notes=intent_notes,
+                runtime_snapshot=policy_snapshot,
+                on_date=on_date,
             )
 
     char_lines = []
@@ -653,7 +790,10 @@ def optimize_shot_prompt(
     try:
         result = ensemble.competitive_generate(
             task_type="decompose",
-            system_prompt=_OPTIMIZER_SYSTEM_PROMPT,
+            system_prompt=_build_optimizer_system_prompt(
+                snapshot=policy_snapshot,
+                on_date=on_date,
+            ),
             user_prompt=user_prompt,
             json_mode=True,
         )
@@ -666,7 +806,13 @@ def optimize_shot_prompt(
             raise ValueError(
                 f"optimizer result must be an object, got {type(spec).__name__}"
             )
-        spec = _coerce_to_valid_keys(spec, has_chars, has_dialogue)
+        spec = _coerce_to_valid_keys(
+            spec,
+            has_chars,
+            has_dialogue,
+            runtime_snapshot=policy_snapshot,
+            on_date=on_date,
+        )
         optimized_prompt = _normalize_structured_image_prompt(spec["image_prompt"])
         if (
             optimized_prompt is not None
@@ -691,6 +837,8 @@ def optimize_shot_prompt(
             objects=objects,
             primary_subject=primary_subject,
             intent_notes=intent_notes,
+            runtime_snapshot=policy_snapshot,
+            on_date=on_date,
         )["image_prompt"]
         normalized_fallback = _normalize_structured_image_prompt(fallback_prompt)
         if normalized_fallback is None:
@@ -703,6 +851,8 @@ def optimize_shot_prompt(
             user_input, characters, location, global_settings,
             has_dialogue, objects=objects, primary_subject=primary_subject,
             intent_notes=intent_notes,
+            runtime_snapshot=policy_snapshot,
+            on_date=on_date,
         )
 
 

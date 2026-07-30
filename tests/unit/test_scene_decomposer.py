@@ -1,31 +1,55 @@
-"""Unit tests for domain/scene_decomposer.py's WS2 (Google-first) routing data:
-API_REGISTRY, PURPOSE_API_RANKING, BILLING_PROVIDERS, and rank_apis_for_purpose().
-
-Scope: GEMINI_OMNI's registration and ranking placement per the WS2 spec
-(config/prompts/pipeline_context.md + workflow_selector.py carry the parallel
-shot-type-level wiring; those are covered by test_workflow_selector.py and
-test_cascade_logic.py). This file is the previously-missing dedicated
-coverage for scene_decomposer.py's own purpose-ranking exports — the
-production data was already landed (commits 13f1be52/dc66697b); this closes
-the test-coverage gap on it.
-"""
+"""Typed compatibility and purpose-ranking tests for scene decomposition."""
 from __future__ import annotations
 
+from datetime import date
+
 import domain.scene_decomposer as sd
+from domain.provider_catalog import RuntimeSnapshot
+
+
+PRE_SUNSET = date(2026, 9, 23)
+
+
+def _fal_snapshot() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"fal_key"},
+        modules={"fal_client"},
+    )
 
 
 # ---------------------------------------------------------------------------
 # API_REGISTRY — GEMINI_OMNI entry shape
 # ---------------------------------------------------------------------------
 
-def test_gemini_omni_registered_in_api_registry():
+def test_gemini_omni_registry_row_preserves_history_but_projects_disabled_truth():
     assert "GEMINI_OMNI" in sd.API_REGISTRY
     entry = sd.API_REGISTRY["GEMINI_OMNI"]
     assert entry["category"] == "native"
     assert entry["modality"] == "video"
-    assert entry["status"] == "live"
+    assert entry["status"] == "disabled"
+    assert entry["dispatchable"] is False
+    assert entry["selectable"] is False
     assert entry["native_audio"] is True
     assert entry["per_shot_cost"] == 0.56
+
+
+def test_registry_projection_statuses_and_raw_history_are_separate():
+    assert sd.API_REGISTRY["AUTO"]["status"] == "live"
+    assert sd.API_REGISTRY["SORA_2"]["status"] == "retired"
+    assert sd.API_REGISTRY["GEMINI_OMNI"]["status"] == "disabled"
+
+    assert sd._LEGACY_API_REGISTRY_SEED["SORA_2"]["status"] == "live"
+    assert sd._LEGACY_API_REGISTRY_SEED["GEMINI_OMNI"]["status"] == "live"
+    assert (
+        sd._LEGACY_API_REGISTRY_SEED["AUTO"]["best_for"]
+        is not sd.API_REGISTRY["AUTO"]["best_for"]
+    )
+    for key in ("SORA_2", "GEMINI_OMNI", "KLING_3_0"):
+        for field in ("description", "best_for", "per_shot_cost"):
+            assert (
+                sd.API_REGISTRY[key][field]
+                == sd._LEGACY_API_REGISTRY_SEED[key][field]
+            )
 
 
 def test_gemini_omni_best_for_covers_ws2_shot_purposes():
@@ -125,35 +149,63 @@ def test_every_api_registry_video_native_key_has_a_billing_provider():
 # rank_apis_for_purpose() — the orchestrator-facing walk
 # ---------------------------------------------------------------------------
 
-def test_rank_apis_for_purpose_action_motion_returns_gemini_omni_first():
-    ranked = sd.rank_apis_for_purpose("action_motion")
-    assert ranked[0][0] == "GEMINI_OMNI"
+def test_rank_apis_for_purpose_action_motion_uses_typed_runtime_truth():
+    ranked = sd.rank_apis_for_purpose(
+        "action_motion",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert [key for key, _info in ranked] == ["SEEDANCE", "KLING_3_0"]
     assert ranked[0][1]["status"] == "live"
 
 
 def test_rank_apis_for_purpose_respects_max_cost_excluding_gemini_omni():
     # GEMINI_OMNI's per_shot_cost is 0.56; a budget cap below that must skip it.
-    ranked = sd.rank_apis_for_purpose("action_motion", max_per_shot_cost=0.50)
+    ranked = sd.rank_apis_for_purpose(
+        "action_motion",
+        max_per_shot_cost=0.50,
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
     assert all(key != "GEMINI_OMNI" for key, _info in ranked)
 
 
-def test_rank_apis_for_purpose_dialogue_close_up_gemini_omni_is_video():
-    # Confirms the entry rank_apis_for_purpose surfaces for GEMINI_OMNI really
-    # is a video engine (not accidentally shadowed by a differently-keyed
-    # lipsync entry), matching the dialogue-native-audio walk's own filter.
-    ranked = dict(sd.rank_apis_for_purpose("dialogue_close_up"))
-    assert ranked["GEMINI_OMNI"]["modality"] == "video"
-    assert ranked["GEMINI_OMNI"]["native_audio"] is True
+def test_rank_apis_for_purpose_dialogue_excludes_nonvideo_and_broken_entries():
+    snapshot = RuntimeSnapshot(
+        credentials={"google_api_key"},
+        modules={"google.genai"},
+    )
+    ranked = dict(
+        sd.rank_apis_for_purpose(
+            "dialogue_close_up",
+            snapshot=snapshot,
+            on_date=PRE_SUNSET,
+        )
+    )
+    assert list(ranked) == ["VEO_NATIVE"]
+    assert ranked["VEO_NATIVE"]["modality"] == "video"
+    assert ranked["VEO_NATIVE"]["native_audio"] is True
 
 
-def test_dialogue_native_audio_walk_selects_gemini_omni():
-    # Mirrors cinema/shots/controller.py:_resolve_dialogue_routing's own walk
-    # (first live video engine with native_audio=True in the purpose ranking)
-    # without importing controller.py's heavy-dep-laden module.
+def test_legacy_dialogue_walk_no_longer_surfaces_broken_gemini():
     winner = None
     for key in sd.PURPOSE_API_RANKING["dialogue_close_up"]:
         info = sd.API_REGISTRY.get(key, {})
         if info.get("native_audio") and info.get("modality") == "video" and info.get("status") == "live":
             winner = key
             break
-    assert winner == "GEMINI_OMNI"
+    assert winner == "VEO_NATIVE"
+
+
+def test_nonvideo_rankings_do_not_change_with_video_runtime_snapshot():
+    without_runtime = sd.rank_apis_for_purpose(
+        "narration",
+        snapshot=RuntimeSnapshot(),
+        on_date=PRE_SUNSET,
+    )
+    with_fal_runtime = sd.rank_apis_for_purpose(
+        "narration",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert without_runtime == with_fal_runtime

@@ -5,6 +5,7 @@ to gpt-4o, biasing shot framing horizontal for a vertical deliverable. These
 pin that a portrait project is described as vertical, and that 16:9 is unchanged.
 """
 from copy import deepcopy
+from datetime import date
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -12,7 +13,18 @@ from unittest.mock import MagicMock
 import pytest
 
 import domain.scene_decomposer as sd
+from domain.provider_catalog import RuntimeSnapshot
 from domain.scene_decomposer import _build_cinedecompose_system_prompt
+
+
+PRE_SUNSET = date(2026, 9, 23)
+
+
+def _fal_snapshot():
+    return RuntimeSnapshot(
+        credentials={"fal_key"},
+        modules={"fal_client"},
+    )
 
 
 def _prompt(aspect):
@@ -207,6 +219,88 @@ def test_shared_shot_schema_enum_lists_are_mutation_isolated():
         assert second_values == source
         assert f"FIRST_ONLY_{field}" not in source
         assert f"FIRST_ONLY_{field}" not in second_values
+
+
+def test_injected_runtime_drives_one_identical_schema_validator_and_write_set():
+    snapshot = _fal_snapshot()
+    schema = sd._build_cinedecompose_shot_schema(
+        snapshot=snapshot,
+        on_date=PRE_SUNSET,
+    )
+    allowed = _shot_item_schema(schema)["properties"]["target_api"]["enum"]
+    assert allowed == ["AUTO", "KLING_3_0", "SEEDANCE", "VEO"]
+
+    for target_api in allowed:
+        raw = _valid_shot()
+        raw["target_api"] = target_api
+        validated = sd._validate_raw_shot(
+            raw,
+            index=0,
+            snapshot=snapshot,
+            on_date=PRE_SUNSET,
+        )
+        assert validated["target_api"] == target_api
+        assert "_target_api_policy_reason" not in validated
+
+        shots = [_valid_shot(), _valid_shot()]
+        for shot in shots:
+            shot["target_api"] = target_api
+        records = sd._enrich_validated_shots(
+            shots,
+            scene={"id": "scene_policy", "action": "walk"},
+            characters=[{"id": "char_a", "name": "Alice"}],
+            target_shots=2,
+            snapshot=snapshot,
+            on_date=PRE_SUNSET,
+        )
+        assert {record["target_api"] for record in records} == {target_api}
+
+
+@pytest.mark.parametrize(
+    ("target_api", "reason"),
+    [
+        ("SORA_2", "retired"),
+        ("GEMINI_OMNI", "unsupported"),
+        ("RUNWAY_ACT_ONE", "non_video"),
+        ("VEO_NATIVE", "runtime_unavailable"),
+        ("DOES_NOT_EXIST", "unknown"),
+    ],
+)
+def test_invalid_llm_target_is_fenced_to_auto_with_reason(
+    target_api,
+    reason,
+):
+    raw = _valid_shot()
+    raw["target_api"] = target_api
+    validated = sd._validate_raw_shot(
+        raw,
+        index=0,
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert validated["target_api"] == "AUTO"
+    assert validated["_target_api_policy_reason"] == reason
+
+
+def test_make_shot_write_receives_only_fenced_target_and_reason():
+    shots = [_valid_shot(), _valid_shot()]
+    for shot in shots:
+        shot["target_api"] = "SORA_2"
+
+    records = sd._enrich_validated_shots(
+        shots,
+        scene={"id": "scene_policy", "action": "walk"},
+        characters=[{"id": "char_a", "name": "Alice"}],
+        target_shots=2,
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert [record["target_api"] for record in records] == ["AUTO", "AUTO"]
+    assert [record["target_api_policy_reason"] for record in records] == [
+        "retired",
+        "retired",
+    ]
 
 
 def test_rendered_schema_respects_hc1_identity_firewall():

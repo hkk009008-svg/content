@@ -12,9 +12,22 @@ Covers:
 from __future__ import annotations
 
 import json
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
+
+from domain.provider_catalog import RuntimeSnapshot
+
+
+PRE_SUNSET = date(2026, 9, 23)
+
+
+def _fal_snapshot():
+    return RuntimeSnapshot(
+        credentials={"fal_key"},
+        modules={"fal_client"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -698,3 +711,113 @@ def test_coerce_normalizes_shot_type_before_purpose():
     )
     assert spec["shot_type"] == "landscape"
     assert spec["purpose"] == "establishing_shot"
+
+
+def test_optimizer_prompt_enum_and_guidance_use_injected_typed_policy():
+    from llm.prompt_optimizer import (
+        _OPTIMIZER_SYSTEM_PROMPT_TEMPLATE,
+        _build_optimizer_system_prompt,
+    )
+
+    rendered = _build_optimizer_system_prompt(
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert (
+        '"suggested_video_api":    string,  '
+        "// AUTO | KLING_3_0 | SEEDANCE | VEO"
+    ) in rendered
+    assert "action_motion: video_api=SEEDANCE or KLING_3_0" in rendered
+    for stale in ("GEMINI_OMNI", "SORA_2", "SORA_NATIVE", "RUNWAY_ACT_ONE"):
+        assert stale not in rendered
+        assert stale not in _OPTIMIZER_SYSTEM_PROMPT_TEMPLATE
+
+
+def test_optimizer_prompt_keeps_auto_when_no_concrete_engine_is_ready():
+    from llm.prompt_optimizer import _build_optimizer_system_prompt
+
+    rendered = _build_optimizer_system_prompt(
+        snapshot=RuntimeSnapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert '"suggested_video_api":    string,  // AUTO' in rendered
+    assert "action_motion: video_api=AUTO" in rendered
+
+
+@pytest.mark.parametrize(
+    ("suggestion", "reason"),
+    [
+        ("GEMINI_OMNI", "unsupported"),
+        ("SORA_2", "retired"),
+        ("SORA_NATIVE", "not_selectable"),
+        ("RUNWAY_ACT_ONE", "non_video"),
+        ("VEO_NATIVE", "runtime_unavailable"),
+        ("MADE_UP_ENGINE", "unknown"),
+    ],
+)
+def test_optimizer_coerces_ineligible_video_suggestion_to_auto_with_reason(
+    suggestion,
+    reason,
+):
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = suggestion
+    result = _coerce_to_valid_keys(
+        spec,
+        has_chars=True,
+        has_dialogue=False,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert result["suggested_video_api"] == "AUTO"
+    assert f"video target coerced to AUTO ({reason})" in result["reasoning"]
+
+
+def test_optimizer_keeps_ready_selectable_suggestion_without_reason_mutation():
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = "KLING_3_0"
+    original_reasoning = spec["reasoning"]
+    result = _coerce_to_valid_keys(
+        spec,
+        has_chars=True,
+        has_dialogue=False,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert result["suggested_video_api"] == "KLING_3_0"
+    assert result["reasoning"] == original_reasoning
+
+
+def test_nonvideo_lipsync_ranking_keeps_historical_purpose_order():
+    from llm.prompt_optimizer import _top_live_api_for_purpose
+
+    assert _top_live_api_for_purpose(
+        "dialogue_close_up",
+        "lipsync",
+        snapshot=RuntimeSnapshot(),
+        on_date=PRE_SUNSET,
+    ) == "SYNC_SO_V3"
+
+
+def test_optimizer_llm_path_uses_same_injected_enum_and_write_fence():
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = "SORA_2"
+    ensemble = _minimal_ensemble_mock(spec)
+    result = optimize_shot_prompt(
+        user_input="a runner crosses the frame",
+        characters=[{"id": "char_a", "name": "A"}],
+        ensemble=ensemble,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    sent_prompt = ensemble.competitive_generate.call_args.kwargs["system_prompt"]
+    assert "// AUTO | KLING_3_0 | SEEDANCE | VEO" in sent_prompt
+    assert result["suggested_video_api"] == "AUTO"
+    assert "retired" in result["reasoning"]
+    ensemble.competitive_generate.assert_called_once()

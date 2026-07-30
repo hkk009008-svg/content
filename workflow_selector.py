@@ -14,7 +14,15 @@ Each type optimizes: PuLID weight, guidance, steps, denoise.
 
 import math
 import re
-from typing import Dict, List, Optional
+from datetime import date
+from typing import Callable, Dict, List, Mapping, Optional
+
+from domain.provider_catalog import RuntimeSnapshot
+from domain.video_engine_policy import (
+    VideoCandidateResult,
+    build_runtime_snapshot,
+    resolve_workflow_candidates,
+)
 
 # Shot type → optimized parameters
 # Based on the paper's recommendation to route tasks to appropriate engines
@@ -224,10 +232,53 @@ def classify_shot_type(shot: dict) -> str:
     return "medium"
 
 
+def get_resolved_workflow_routing(
+    shot_type: str,
+    *,
+    settings: Optional[dict] = None,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+    module_probe: Callable[[str], bool] | None = None,
+) -> VideoCandidateResult:
+    """Resolve a historical template's video order through typed policy.
+
+    ``WORKFLOW_TEMPLATES`` remains the compatibility/order seed.  This accessor
+    is the executable view: it preserves order, removes duplicates, records
+    rejection evidence, honors an explicit project ``enabled: false``, and
+    yields ``primary == "AUTO"`` when no concrete engine is currently ready.
+    """
+
+    template = WORKFLOW_TEMPLATES.get(
+        shot_type,
+        WORKFLOW_TEMPLATES["medium"],
+    )
+    api_engines: Mapping[str, object] | None = None
+    if isinstance(settings, Mapping):
+        configured_engines = settings.get("api_engines")
+        if isinstance(configured_engines, Mapping):
+            api_engines = configured_engines
+    snapshot = (
+        runtime_snapshot
+        if runtime_snapshot is not None
+        else build_runtime_snapshot(module_probe=module_probe)
+    )
+    return resolve_workflow_candidates(
+        template.get("target_api", "AUTO"),
+        template.get("video_fallbacks", ()),
+        snapshot=snapshot,
+        on_date=on_date,
+        api_engines=api_engines,
+    )
+
+
 def get_workflow_params(
     shot_type: str,
     quality_tier: str = "production",
     settings: Optional[dict] = None,
+    *,
+    runtime_snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+    module_probe: Callable[[str], bool] | None = None,
 ) -> Dict:
     """Get the optimized workflow parameters for a shot type.
 
@@ -246,6 +297,15 @@ def get_workflow_params(
     Returns: copy of the matching template dict (callers may mutate freely).
     """
     params = WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"]).copy()
+    routing = get_resolved_workflow_routing(
+        shot_type,
+        settings=settings,
+        runtime_snapshot=runtime_snapshot,
+        on_date=on_date,
+        module_probe=module_probe,
+    )
+    params["target_api"] = routing.primary
+    params["video_fallbacks"] = list(routing.fallbacks)
 
     if settings:
         # Per-project UI overrides — overlay only EXISTING param-dict keys.
@@ -374,4 +434,3 @@ def get_adaptive_pulid_weight(
     if abs(delta) > 0.01:
         print(f"      [ADAPTIVE] PuLID weight for {character_id}: {base_weight} → {adapted:.2f} (delta={delta:+.2f})")
     return adapted
-
