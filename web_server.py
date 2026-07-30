@@ -8,6 +8,8 @@ import logging
 import math
 import os
 import warnings
+from collections import Counter
+from collections.abc import Mapping
 from functools import wraps
 
 # Suppress noisy warnings from google/urllib3 libraries
@@ -43,7 +45,7 @@ from project_manager import (
     list_projects, mutate_project,
     add_character, remove_character, add_location, remove_location,
     add_object, remove_object, get_object,
-    add_scene, update_scene, remove_scene, reorder_scenes,
+    add_scene, remove_scene, reorder_scenes,
     make_character, make_location, make_object, make_scene, get_project_dir,
 )
 from character_manager import create_character_with_images, VOICE_POOL
@@ -57,6 +59,12 @@ from cinema_pipeline import CinemaPipeline
 from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported, DEFAULT_ASPECT_RATIO
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
+from domain.provider_catalog import CATALOG, Modality, RuntimeSnapshot
+from domain.video_engine_policy import (
+    VideoPolicyReason,
+    build_runtime_snapshot,
+    evaluate_shot_target,
+)
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
 from config.settings import settings as env_settings
@@ -127,6 +135,72 @@ def _parse_ip_adapter_weight(value) -> float:
 def _json_object_or_none():
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else None
+
+
+class _ShotTargetPolicyError(Exception):
+    """One rejected public target write, safe to map to a stable HTTP 409."""
+
+    def __init__(self, *, target: str, reason: str, shot_id: str):
+        super().__init__(reason)
+        self.target = target
+        self.reason = reason
+        self.shot_id = shot_id
+
+
+def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
+    """Observe current symbolic readiness without retaining secret values."""
+
+    return build_runtime_snapshot()
+
+
+def _video_policy_current_date():
+    """Return the UTC policy date through a deterministic test seam."""
+
+    return datetime.now(timezone.utc).date()
+
+
+def _raise_if_target_rejected(
+    requested: str,
+    *,
+    shot_id: str,
+    current_target: object,
+    may_grandfather: bool,
+    snapshot: RuntimeSnapshot,
+    on_date,
+) -> None:
+    """Fence a proposed target while preserving one exact historical value."""
+
+    if may_grandfather and requested == current_target:
+        return
+    decision = evaluate_shot_target(
+        requested,
+        snapshot=snapshot,
+        on_date=on_date,
+    )
+    if decision.accepted:
+        return
+    reason = (
+        decision.reason.value
+        if decision.reason is not None
+        else VideoPolicyReason.UNKNOWN.value
+    )
+    raise _ShotTargetPolicyError(
+        target=requested,
+        reason=reason,
+        shot_id=shot_id,
+    )
+
+
+def _shot_target_policy_response(exc: _ShotTargetPolicyError):
+    return jsonify({
+        "error": "Target video engine is unavailable",
+        "error_kind": "target_api_policy",
+        "code": "target_api_unavailable",
+        "target": exc.target,
+        "reason": exc.reason,
+        "retryable": False,
+        "shot_id": exc.shot_id,
+    }), 409
 
 
 # S21 (cycle-9 Surface B): re-assembly busy tracking.
@@ -325,10 +399,152 @@ def serve_static(path):
 # Configuration — exposed parameters for the UI
 # ---------------------------------------------------------------------------
 
+_API_ENGINE_DEFAULTS = {
+    "KLING_3_0": {
+        "enabled": True, "duration": "5",
+    },
+    "SEEDANCE": {
+        "enabled": True, "resolution": "720p",
+    },
+    "KLING_NATIVE": {
+        "enabled": True, "duration": "5", "face_consistency": True,
+        "storyboard_mode": False,
+    },
+    "SORA_NATIVE": {
+        "enabled": True, "duration": 4, "resolution": "1080p",
+    },
+    "VEO_NATIVE": {
+        "enabled": True, "duration": "6s", "generate_audio": False,
+    },
+    "LTX": {
+        "enabled": True, "resolution": "1080p",
+        "camera_motion_native": True,
+    },
+    "RUNWAY_GEN4": {
+        "enabled": True, "duration": 10, "resolution": "1080p",
+    },
+}
+
+
+def _project_video_engine_rows(
+    project: dict,
+    *,
+    snapshot: RuntimeSnapshot,
+    on_date,
+) -> list[dict]:
+    """Build a public, secret-free target discovery view for one project."""
+
+    persisted_targets: list[str] = []
+    for scene in project.get("scenes", []):
+        if not isinstance(scene, Mapping):
+            continue
+        for shot in scene.get("shots", []):
+            if not isinstance(shot, Mapping):
+                continue
+            target = shot.get("target_api")
+            if isinstance(target, str) and target and target not in persisted_targets:
+                persisted_targets.append(target)
+    in_use = frozenset(persisted_targets)
+
+    settings = project.get("global_settings", {})
+    api_engines = (
+        settings.get("api_engines", {})
+        if isinstance(settings, Mapping)
+        else {}
+    )
+    if not isinstance(api_engines, Mapping):
+        api_engines = {}
+
+    def _configuration(key: str) -> tuple[bool, bool]:
+        configured = api_engines.get(key)
+        default = _API_ENGINE_DEFAULTS.get(key)
+        source = configured if isinstance(configured, Mapping) else default
+        enabled = (
+            source.get("enabled", True) is not False
+            if isinstance(source, Mapping)
+            else True
+        )
+        can_configure = key in _API_ENGINE_DEFAULTS or key in api_engines
+        return enabled, can_configure
+
+    typed_entries = [
+        CATALOG["AUTO"],
+        *[
+            entry
+            for key, entry in CATALOG.items()
+            if key != "AUTO" and entry.modality is Modality.VIDEO
+        ],
+    ]
+    rows: list[dict] = []
+    typed_video_keys: set[str] = set()
+    for entry in typed_entries:
+        typed_video_keys.add(entry.key)
+        decision = evaluate_shot_target(
+            entry.key,
+            snapshot=snapshot,
+            on_date=on_date,
+        )
+        configured_enabled, can_configure = _configuration(entry.key)
+        is_in_use = entry.key in in_use
+        rows.append({
+            "key": entry.key,
+            "label": entry.label,
+            "can_select": decision.accepted,
+            "reason": (
+                decision.reason.value
+                if decision.reason is not None
+                else None
+            ),
+            "configured_enabled": configured_enabled,
+            "can_configure": can_configure,
+            "in_use": is_in_use,
+            "historical": is_in_use and not decision.accepted,
+        })
+
+    for key in persisted_targets:
+        if key in typed_video_keys:
+            continue
+        decision = evaluate_shot_target(
+            key,
+            snapshot=snapshot,
+            on_date=on_date,
+        )
+        configured_enabled, can_configure = _configuration(key)
+        legacy = API_REGISTRY.get(key, {})
+        label = (
+            legacy.get("label")
+            if isinstance(legacy, Mapping)
+            and isinstance(legacy.get("label"), str)
+            else key
+        )
+        rows.append({
+            "key": key,
+            "label": label,
+            "can_select": False,
+            "reason": (
+                decision.reason.value
+                if decision.reason is not None
+                else VideoPolicyReason.UNKNOWN.value
+            ),
+            "configured_enabled": configured_enabled,
+            "can_configure": can_configure,
+            "in_use": True,
+            "historical": True,
+        })
+    return rows
+
+
 @app.route("/api/config", methods=["GET"])
 def get_config():
     """Returns all controllable parameters for the UI panels."""
-    return jsonify({
+    project_id = request.args.get("project_id")
+    project = None
+    if project_id is not None:
+        project = load_project(project_id, timeout=HTTP_PROJECT_TIMEOUT)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+    config = {
         "camera_motions": CAMERA_MOTIONS,
         "visual_effects": VISUAL_EFFECTS,
         "target_apis": TARGET_APIS,
@@ -358,30 +574,7 @@ def get_config():
         ],
         "lip_sync_modes": ["auto", "overlay", "generation", "skip"],
         "dialogue_voice_modes": ["overlay", "native"],
-        "api_engine_defaults": {
-            "KLING_3_0": {
-                "enabled": True, "duration": "5",
-            },
-            "SEEDANCE": {
-                "enabled": True, "resolution": "720p",
-            },
-            "KLING_NATIVE": {
-                "enabled": True, "duration": "5", "face_consistency": True,
-                "storyboard_mode": False,
-            },
-            "SORA_NATIVE": {
-                "enabled": True, "duration": 4, "resolution": "1080p",
-            },
-            "VEO_NATIVE": {
-                "enabled": True, "duration": "6s", "generate_audio": False,
-            },
-            "LTX": {
-                "enabled": True, "resolution": "1080p", "camera_motion_native": True,
-            },
-            "RUNWAY_GEN4": {
-                "enabled": True, "duration": 10, "resolution": "1080p",
-            },
-        },
+        "api_engine_defaults": _API_ENGINE_DEFAULTS,
         # V11: dropdown options for new settings
         "cost_optimization_levels": [
             {"value": "quality_first", "label": "Quality First"},
@@ -405,7 +598,14 @@ def get_config():
         "purpose_api_ranking": PURPOSE_API_RANKING,
         # Billing attribution for cost estimator
         "billing_providers": BILLING_PROVIDERS,
-    })
+    }
+    if project is not None:
+        config["video_engines"] = _project_video_engine_rows(
+            project,
+            snapshot=_video_policy_runtime_snapshot(),
+            on_date=_video_policy_current_date(),
+        )
+    return jsonify(config)
 
 
 @app.route("/api/projects/<pid>/apply-language-defaults", methods=["POST"])
@@ -1422,8 +1622,109 @@ def api_update_scene(pid, sid):
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    data = request.json or {}
-    result = update_scene(project, sid, data, timeout=HTTP_PROJECT_TIMEOUT)
+
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+
+    proposed_shots = data.get("shots")
+    if proposed_shots is not None:
+        if not isinstance(proposed_shots, list):
+            return jsonify({"error": "shots must be a JSON array"}), 400
+        for index, shot in enumerate(proposed_shots):
+            if not isinstance(shot, dict):
+                return jsonify({
+                    "error": f"shots[{index}] must be a JSON object",
+                }), 400
+            if (
+                "target_api" not in shot
+                or not isinstance(shot["target_api"], str)
+            ):
+                return jsonify({
+                    "error": (
+                        f"shots[{index}].target_api must be a string"
+                    ),
+                }), 400
+
+    policy_snapshot = (
+        _video_policy_runtime_snapshot()
+        if proposed_shots
+        else None
+    )
+    policy_date = (
+        _video_policy_current_date()
+        if proposed_shots
+        else None
+    )
+
+    def _mutate_project(latest_project: dict):
+        latest_typed = Project.model_validate(latest_project)
+        scene_index = next(
+            (
+                index
+                for index, scene in enumerate(latest_typed.scenes)
+                if scene.id == sid
+            ),
+            None,
+        )
+        if scene_index is None:
+            return MutationResult(None, save=False)
+
+        if proposed_shots is not None:
+            latest_matches: dict[str, list[tuple[str, str]]] = {}
+            for scene in latest_typed.scenes:
+                for shot in scene.shots:
+                    latest_matches.setdefault(shot.id, []).append(
+                        (scene.id, shot.target_api)
+                    )
+            proposed_counts = Counter(
+                shot.get("id")
+                for shot in proposed_shots
+                if isinstance(shot.get("id"), str)
+            )
+            assert policy_snapshot is not None
+            assert policy_date is not None
+            for shot in proposed_shots:
+                shot_id = (
+                    shot.get("id")
+                    if isinstance(shot.get("id"), str)
+                    else ""
+                )
+                matches = latest_matches.get(shot_id, [])
+                may_grandfather = (
+                    bool(shot_id)
+                    and len(matches) == 1
+                    and matches[0][0] == sid
+                    and proposed_counts[shot_id] == 1
+                )
+                current_target = (
+                    matches[0][1]
+                    if may_grandfather
+                    else None
+                )
+                _raise_if_target_rejected(
+                    shot["target_api"],
+                    shot_id=shot_id,
+                    current_target=current_target,
+                    may_grandfather=may_grandfather,
+                    snapshot=policy_snapshot,
+                    on_date=policy_date,
+                )
+
+        latest_project["scenes"][scene_index].update(data)
+        return latest_project["scenes"][scene_index]
+
+    try:
+        result = mutate_project(
+            pid,
+            _mutate_project,
+            timeout=HTTP_PROJECT_TIMEOUT,
+            snapshot=project,
+        )
+    except _ShotTargetPolicyError as exc:
+        return _shot_target_policy_response(exc)
     if result:
         return jsonify(result)
     return jsonify({"error": "Scene not found"}), 404
@@ -2057,7 +2358,9 @@ def api_update_shot(pid, shot_id):
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 
-    data = request.json
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
     allowed_fields = {
         "target_api",
         "camera",
@@ -2070,8 +2373,23 @@ def api_update_shot(pid, shot_id):
     }
     updates = {k: v for k, v in data.items() if k in allowed_fields}
 
-    if "target_api" in updates and updates["target_api"] not in TARGET_APIS:
-        return jsonify({"error": f"Invalid target_api. Must be one of: {TARGET_APIS}"}), 400
+    if (
+        "target_api" in updates
+        and not isinstance(updates["target_api"], str)
+    ):
+        return jsonify({"error": "target_api must be a string"}), 400
+
+    target_is_updated = "target_api" in updates
+    policy_snapshot = (
+        _video_policy_runtime_snapshot()
+        if target_is_updated
+        else None
+    )
+    policy_date = (
+        _video_policy_current_date()
+        if target_is_updated
+        else None
+    )
 
     def _mutate_project(project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
@@ -2084,14 +2402,39 @@ def api_update_shot(pid, shot_id):
         # latest_typed.scenes[i].shots[j] and project["scenes"][i]["shots"][j]
         # is preserved by pydantic list-order invariant.
         latest_typed = Project.model_validate(project)
-        for i, scene in enumerate(latest_typed.scenes):
-            for j, shot in enumerate(scene.shots):
-                if shot.id == shot_id:
-                    project["scenes"][i]["shots"][j].update(updates)
-                    return True
+        matches = [
+            (scene_index, shot_index, shot)
+            for scene_index, scene in enumerate(latest_typed.scenes)
+            for shot_index, shot in enumerate(scene.shots)
+            if shot.id == shot_id
+        ]
+        if matches:
+            scene_index, shot_index, shot = matches[0]
+            if target_is_updated:
+                assert policy_snapshot is not None
+                assert policy_date is not None
+                _raise_if_target_rejected(
+                    updates["target_api"],
+                    shot_id=shot_id,
+                    current_target=shot.target_api,
+                    may_grandfather=len(matches) == 1,
+                    snapshot=policy_snapshot,
+                    on_date=policy_date,
+                )
+            project["scenes"][scene_index]["shots"][shot_index].update(
+                updates
+            )
+            return True
         return MutationResult(False, save=False)
 
-    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    try:
+        result = mutate_project(
+            pid,
+            _mutate_project,
+            timeout=HTTP_PROJECT_TIMEOUT,
+        )
+    except _ShotTargetPolicyError as exc:
+        return _shot_target_policy_response(exc)
     if result is None:
         return jsonify({"error": "Project not found"}), 404
     if result:

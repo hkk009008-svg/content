@@ -115,9 +115,9 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 
 ## 3. Entry point — `web_server.py`
 
-**2770 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
-two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2274-2275](web_server.py:2274)).
-Verified 2026-06-18 via `wc -l web_server.py` → 2770 and an AST route probe →
+**3119 LOC, 66 `@app.route` decorators, 65 view functions** (one handler binds
+two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2623-2624](web_server.py:2623)).
+Verified 2026-07-30 via `wc -l web_server.py` → 3119 and an AST route probe →
 66 route decorators / 65 route functions.
 
 ### 3.1 Route inventory (grouped)
@@ -144,12 +144,12 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 | Symbol | Lock? | Lives at |
 |---|---|---|
 | `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:81](web_server.py:81) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:73](web_server.py:73) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:111-112](web_server.py:111) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:82](web_server.py:82) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:118-119](web_server.py:118) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
-spawned by `POST /generate` ([web_server.py:1606](web_server.py:1606)).
+spawned by `POST /generate` ([web_server.py:1964](web_server.py:1964)).
 **Cancellation is cooperative** — `pipeline.cancel()` flips a flag the worker
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
@@ -160,11 +160,11 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:1682](web_server.py:1682)) does
+  `api_stream` ([web_server.py:1983](web_server.py:1983)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:1604](web_server.py:1604)) after success or error.
+  ([web_server.py:1962](web_server.py:1962)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -199,7 +199,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:201-208](web_server.py:201)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:277-284](web_server.py:277)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -649,7 +649,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1468](web_server.py:1468) — uses the
+`api_generate_dialogue` at [web_server.py:1769](web_server.py:1769) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
