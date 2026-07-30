@@ -357,7 +357,7 @@ def rank_apis_for_purpose(
     for key in rank:
         if key in exclude:
             continue
-        info = API_REGISTRY.get(key)
+        info = (API_REGISTRY if eligible_video_keys is not None else _LEGACY_API_REGISTRY_SEED).get(key)
         if not info:
             continue
         if eligible_video_keys is not None:

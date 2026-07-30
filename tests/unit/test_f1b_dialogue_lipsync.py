@@ -896,6 +896,7 @@ class TestGenerateMotionTakeOverlayWiring:
     def test_overlay_dialogue_budget_gate_counts_mandatory_lipsync_before_video(self, tmp_path):
         """Near-budget overlay dialogue refuses before video when video+lipsync exceeds cap."""
         from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
 
         project = self._make_overlay_dialogue_project(tmp_path, voice_mode="overlay")
         ctrl, host = self._build_controller(project, tmp_path)
@@ -914,13 +915,23 @@ class TestGenerateMotionTakeOverlayWiring:
         tracker.spent_usd = 0.26
         tracker.budget_usd = 0.60
         assert tracker.spent_usd + API_COST_USD["VEO_NATIVE"] <= tracker.budget_usd
-        # WS2: GEMINI_OMNI (native audio) now outranks VEO_NATIVE in dialogue
-        # routing (domain/scene_decomposer.py PURPOSE_API_RANKING), so the
-        # dialogue video generate_motion_take actually dispatches is
-        # GEMINI_OMNI, not VEO_NATIVE — the envelope the budget gate checks
-        # follows the real routing change (this is an expected-value update,
-        # not a masking one: the routing change IS intended).
-        expected_envelope = API_COST_USD["GEMINI_OMNI"] + API_COST_USD["LIPSYNC_DEFAULT"]
+        dialogue_winner = next(
+            key
+            for key in PURPOSE_API_RANKING["dialogue_close_up"]
+            if API_REGISTRY.get(key, {}).get("native_audio")
+            and API_REGISTRY[key].get("modality") == "video"
+            and API_REGISTRY[key].get("status") == "live"
+        )
+        # Typed compatibility truth disables GEMINI_OMNI, so the legacy
+        # dialogue walk skips it and selects the next live native-audio video
+        # entry, VEO_NATIVE. The budget gate prices that resolved route plus
+        # mandatory sync-3 overlay before either paid call.
+        assert API_REGISTRY["GEMINI_OMNI"]["status"] == "disabled"
+        assert dialogue_winner == "VEO_NATIVE"
+        expected_envelope = (
+            API_COST_USD[dialogue_winner] + API_COST_USD["LIPSYNC_DEFAULT"]
+        )
+        assert expected_envelope == pytest.approx(0.97)
         assert tracker.spent_usd + expected_envelope > tracker.budget_usd
         tracker.would_exceed.return_value = False
         tracker.would_exceed_cost.side_effect = (

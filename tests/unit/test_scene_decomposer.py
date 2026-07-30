@@ -81,9 +81,8 @@ def test_gemini_omni_leads_establishing_shot_ranking():
 
 
 def test_gemini_omni_second_in_dialogue_close_up_behind_sync_so_v3():
-    # SYNC_SO_V3 (lipsync, not a video engine) stays the top pick; GEMINI_OMNI
-    # is the first VIDEO+native_audio candidate the dialogue-routing walk
-    # (cinema/shots/controller.py:_resolve_dialogue_routing) will select.
+    # Historical ordering stays intact. The compatibility projection marks
+    # GEMINI_OMNI disabled, so the dialogue-routing walk skips it at runtime.
     ranking = sd.PURPOSE_API_RANKING["dialogue_close_up"]
     assert ranking[0] == "SYNC_SO_V3"
     assert ranking[1] == "GEMINI_OMNI"
@@ -197,15 +196,86 @@ def test_legacy_dialogue_walk_no_longer_surfaces_broken_gemini():
     assert winner == "VEO_NATIVE"
 
 
-def test_nonvideo_rankings_do_not_change_with_video_runtime_snapshot():
-    without_runtime = sd.rank_apis_for_purpose(
-        "narration",
-        snapshot=RuntimeSnapshot(),
-        on_date=PRE_SUNSET,
-    )
-    with_fal_runtime = sd.rank_apis_for_purpose(
-        "narration",
-        snapshot=_fal_snapshot(),
-        on_date=PRE_SUNSET,
-    )
-    assert without_runtime == with_fal_runtime
+def test_nonvideo_purpose_rows_preserve_legacy_membership_order_and_status():
+    expected = {
+        "narration": ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO"],
+        "music_score": ["SUNO_V5"],
+        "foley": ["STABLE_AUDIO_FOLEY"],
+        "upscale_image": ["SUPIR_V0Q"],
+        "upscale_video": ["SEEDVR2"],
+    }
+    nonvideo_purposes = set(sd.PURPOSE_API_RANKING) - sd._VIDEO_AUTHORING_PURPOSES
+    assert nonvideo_purposes == set(expected)
+
+    for purpose, expected_keys in expected.items():
+        without_runtime = sd.rank_apis_for_purpose(
+            purpose,
+            snapshot=RuntimeSnapshot(),
+            on_date=PRE_SUNSET,
+        )
+        with_fal_runtime = sd.rank_apis_for_purpose(
+            purpose,
+            snapshot=_fal_snapshot(),
+            on_date=PRE_SUNSET,
+        )
+        assert [key for key, _info in without_runtime] == expected_keys
+        assert with_fal_runtime == without_runtime
+        assert all(info["status"] == "live" for _key, info in without_runtime)
+        assert all(
+            info is sd._LEGACY_API_REGISTRY_SEED[key]
+            for key, info in without_runtime
+        )
+
+
+def test_nonvideo_rankings_preserve_representative_legacy_fields():
+    representatives = {
+        "narration": (
+            "OPENAI_AUDIO",
+            {"label": "OpenAI gpt-4o-audio", "modality": "tts",
+             "status": "live", "per_shot_cost": 0.012},
+        ),
+        "music_score": (
+            "SUNO_V5",
+            {"label": "Suno V5", "modality": "music",
+             "status": "live", "per_shot_cost": 0.10},
+        ),
+        "foley": (
+            "STABLE_AUDIO_FOLEY",
+            {"label": "Stable Audio (Foley)", "modality": "foley",
+             "status": "live", "per_shot_cost": 0.03},
+        ),
+        "upscale_image": (
+            "SUPIR_V0Q",
+            {"label": "SUPIR-v0Q (image)", "modality": "upscale",
+             "status": "live", "per_shot_cost": 0.02},
+        ),
+        "upscale_video": (
+            "SEEDVR2",
+            {"label": "SeedVR2", "modality": "upscale",
+             "status": "live", "per_shot_cost": 0.08},
+        ),
+    }
+
+    for purpose, (key, expected_fields) in representatives.items():
+        ranked = dict(sd.rank_apis_for_purpose(purpose))
+        assert key in ranked
+        for field, expected_value in expected_fields.items():
+            assert ranked[key][field] == expected_value
+
+
+def test_nonvideo_status_filter_uses_legacy_planned_rows():
+    expected_planned = {
+        "narration": ["F5_TTS"],
+        "music_score": ["ELEVENLABS_MUSIC", "STABLE_AUDIO_2"],
+        "foley": ["ADOBE_AUDIO_AI"],
+        "upscale_image": ["CCSR"],
+        "upscale_video": ["TOPAZ_ASTRA"],
+    }
+
+    for purpose, expected_keys in expected_planned.items():
+        ranked = sd.rank_apis_for_purpose(
+            purpose,
+            status_filter=("planned",),
+        )
+        assert [key for key, _info in ranked] == expected_keys
+        assert all(info["status"] == "planned" for _key, info in ranked)

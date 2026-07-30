@@ -571,7 +571,8 @@ gets 2 shots; a 12.5s scene gets 5.
 
 **Output per shot:** `prompt, camera, visual_effect, target_api, scene_foley,
 characters_in_frame, action_context`. `target_api` IS set per-shot (Rule R5);
-falls through to `"AUTO"` if LLM returns an unrecognized key.
+every policy-ineligible authored value is coerced to `"AUTO"`, with its stable
+reason retained as `target_api_policy_reason`.
 
 ### 7.5 `ContinuityEngine` ([domain/continuity_engine.py](domain/continuity_engine.py))
 
@@ -1084,10 +1085,10 @@ shots classify as `medium` and route Gemini Omni → Veo Native → Kling v3 Pro
 override — `_resolve_dialogue_routing`, `cinema/shots/controller.py:134`,
 §10 below — which scans `PURPOSE_API_RANKING` for the first
 `native_audio=True AND modality=="video"` engine and can pin it ahead of
-this template order; `GEMINI_OMNI` now carries `native_audio: True` same as
-`VEO_NATIVE` and outranks it in `PURPOSE_API_RANKING["dialogue_close_up"]`
-— `domain/scene_decomposer.py:44` / `:124` — so it, not `VEO_NATIVE`, is
-what F1a actually pins today).
+this template order; the `API_REGISTRY` compatibility view marks
+`GEMINI_OMNI` disabled, so the scan skips it and currently pins
+`VEO_NATIVE`, the first live compatibility entry under the current seed —
+`domain/scene_decomposer.py:52` / `:108`).
 
 ### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:173-218](workflow_selector.py:173))
 
