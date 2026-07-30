@@ -190,7 +190,7 @@ class MotionRenderPhase:
             )
         try:
             durations = allocate_storyboard_durations(shots_for_storyboard)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             logger.warning(
                 "storyboard batch: invalid duration plan for scene=%s (%s); "
                 "falling through to per-shot",

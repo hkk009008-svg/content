@@ -51,7 +51,7 @@ def allocate_storyboard_durations(
         raw_duration = shot.get("duration", default_duration)
         try:
             requested = float(raw_duration)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(
                 f"storyboard shot {index} duration must be a finite number"
             ) from exc

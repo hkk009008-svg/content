@@ -1029,8 +1029,8 @@ Status: **FIXED 2026-06-13 (`cf32ca3`, operator2 impl; director2 verifies)** —
 core seam (`classify_shot_type` → return `"wide"` when the landscape bucket matches a
 char-bearing shot) re-engages identity in both tiers, but **two downstream consumers branch
 on the `shot_type=="landscape"` string** and were re-keyed in `cf32ca3`: the
-LTX-4K branch ([`phase_c_ffmpeg.py:639-641`](phase_c_ffmpeg.py:639)) → `"4k" if shot_type in ("landscape","wide")`,
-and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:597-601`](phase_c_ffmpeg.py:597)) **guarded-broadened**
+LTX-4K branch ([`phase_c_ffmpeg.py:652-654`](phase_c_ffmpeg.py:652)) → `"4k" if shot_type in ("landscape","wide")`,
+and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:610-614`](phase_c_ffmpeg.py:610)) **guarded-broadened**
 (wide gets Veo ambient *unless* overlay-dialogue — `has_dialogue and not dialogue_native_audio` — so no
 double-voice on a genuine wide+overlay-dialogue shot; director2 Pair-B call). A seam-only fix would have
 re-introduced a 4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
@@ -1135,22 +1135,22 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:179-280](phase_c_ffmpeg.py:179))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:181-283](phase_c_ffmpeg.py:181))
 
 The public function is an independent true entry fence
-([phase_c_ffmpeg.py:209-280](phase_c_ffmpeg.py:209)): it filters the entire
+([phase_c_ffmpeg.py:208-283](phase_c_ffmpeg.py:208)): it filters the entire
 primary + caller-supplied fallback/AUTO-default seed once at
-[phase_c_ffmpeg.py:226-232](phase_c_ffmpeg.py:226), before
+[phase_c_ffmpeg.py:228-234](phase_c_ffmpeg.py:228), before
 `attempted_apis` mutation, routing logs, sleeps, provider imports or
 constructors, uploads/downloads, and billed-attempt callbacks. Runtime and UTC
 date are observed only through private patchable seams
-([phase_c_ffmpeg.py:123-135](phase_c_ffmpeg.py:123)); the public signature
+([phase_c_ffmpeg.py:125-137](phase_c_ffmpeg.py:125)); the public signature
 accepts no snapshot, date, admitted-candidate tuple, recursion token, bypass
 flag, or retry state. The immutable admitted tuple crosses the private
 `_execute_admitted_video_chain` trust boundary
-([phase_c_ffmpeg.py:283-1291](phase_c_ffmpeg.py:283)) and is reused directly by
+([phase_c_ffmpeg.py:286-1304](phase_c_ffmpeg.py:286)) and is reused directly by
 every cascade hop and cooldown retry
-([phase_c_ffmpeg.py:406-479](phase_c_ffmpeg.py:406)). Direct explicit targets
+([phase_c_ffmpeg.py:417-492](phase_c_ffmpeg.py:417)). Direct explicit targets
 fail on primary rejection even when raw fallbacks were supplied; an accepted
 explicit primary may cascade only across the other admitted members. AUTO may
 select the first admitted member. `_cascade_out` records ordered
@@ -1162,22 +1162,22 @@ for compatibility archaeology but are unreachable through executable dispatch.
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :488 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :532 | `sora_native.SoraNativeAPI`; admitted only before its 2026-09-24 sunset | OPENAI_API_KEY |
-| `VEO_NATIVE` | :581 | `veo_native.VeoNativeAPI` | Vertex AI or GOOGLE_API_KEY |
-| `GEMINI_OMNI` | :1221 | legacy `gemini_omni_native.GeminiOmniAPI` payload; **unreachable (known-broken)** | GOOGLE_API_KEY or GEMINI_API_KEY |
-| `LTX` | :623 | `ltx_native.LTXVideoAPI`; rejected for `9:16` by current dispatch-wiring policy | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :672 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :733 | legacy inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")`; **unreachable (retired)** | FAL_KEY |
-| `VEO` | :791 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :880 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")`; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
-| `FAL_SVD` | :999 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any default/template cascade** |
-| `RUNWAY` | :1078 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :1120 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
+| `KLING_NATIVE` | :501 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :545 | `sora_native.SoraNativeAPI`; admitted only before its 2026-09-24 sunset | OPENAI_API_KEY |
+| `VEO_NATIVE` | :594 | `veo_native.VeoNativeAPI` | Vertex AI or GOOGLE_API_KEY |
+| `GEMINI_OMNI` | :1234 | legacy `gemini_omni_native.GeminiOmniAPI` payload; **unreachable (known-broken)** | GOOGLE_API_KEY or GEMINI_API_KEY |
+| `LTX` | :636 | `ltx_native.LTXVideoAPI`; rejected for `9:16` by current dispatch-wiring policy | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :685 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :746 | legacy inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")`; **unreachable (retired)** | FAL_KEY |
+| `VEO` | :804 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :893 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/image-to-video")`; `elements` identity (frontal + ≤3 refs) | FAL_KEY |
+| `FAL_SVD` | :1012 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any default/template cascade** |
+| `RUNWAY` | :1091 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :1133 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default AUTO order seed
 
-[phase_c_ffmpeg.py:69-72](phase_c_ffmpeg.py:69):
+[phase_c_ffmpeg.py:71-74](phase_c_ffmpeg.py:71):
 ```python
 DEFAULT_VIDEO_CASCADE = [
     "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
@@ -1212,8 +1212,8 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:35](phase_c_ffmpeg.py:35))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:36](phase_c_ffmpeg.py:36))
-- Check: `_veo_quota_blocked()` ([:75-81](phase_c_ffmpeg.py:75))
-- Set on 429/quota error ([:866-874](phase_c_ffmpeg.py:866))
+- Check: `_veo_quota_blocked()` ([:77-83](phase_c_ffmpeg.py:77))
+- Set on 429/quota error ([:881-885](phase_c_ffmpeg.py:881))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
@@ -1224,14 +1224,26 @@ Core: `_veo_quota_blocked`, `_load_fal_client`,
 `_runtime_module_probe`, `_video_policy_runtime_snapshot`,
 `_video_policy_current_date`, `_dispatch_policy_error`, `generate_ai_video`,
 `_execute_admitted_video_chain`,
-`stitch_modules` (ffmpeg concat demuxer), `_probe_storyboard_video`,
-`validate_storyboard_segment`, `split_video_into_segments`,
+`stitch_modules` (ffmpeg concat demuxer), `_probe_storyboard_video`
+([phase_c_ffmpeg.py:1345](phase_c_ffmpeg.py:1345)),
+`validate_storyboard_segment`
+([phase_c_ffmpeg.py:1448](phase_c_ffmpeg.py:1448)),
+`split_video_into_segments`
+([phase_c_ffmpeg.py:1486](phase_c_ffmpeg.py:1486)),
 `assess_motion_quality` (OpenCV Farneback flow →
 {smoothness, frozen_ratio, recommendation∈{accept,interpolate,regenerate}}),
 `apply_color_grade` (8 named presets + optional LUT3D), `adjust_speed` (setpts
 + atempo), `measure_loudness`, `probe_final_media`, `two_pass_loudnorm` (EBU R128
 — pass-1 measure via JSON parse of stderr, pass-2 normalize; defaults
 `I=-14 LUFS, LRA=11, TP=-1.5 dBTP`).
+The storyboard splitter proves source coverage from the video stream only:
+either its explicit duration or decoded-frame count divided by a validated
+average frame rate, never the potentially audio-inflated container duration.
+Expected and allocated durations must be finite and positive. Output names are
+single contained components in a real invocation-owned directory; source and
+cut durations use an inclusive two-frame tolerance. The splitter validates each
+cut, then `MotionRenderPhase` independently validates the complete batch again
+before its first take write.
 **Scene transitions (opt-in, cycle-17):** `xfade_concat` chains per-scene videos
 with an xfade (video) + a *conditional* acrossfade — audio is crossfaded only when
 every input has an audio stream (`_has_audio_stream`); otherwise the output is
@@ -1245,8 +1257,8 @@ with embedded audio, some without) pad the silent legs with `anullsrc` + normali
 every leg, preserving embedded audio across the stitch (Lane V #25 M1, fixed).
 
 *Typed dispatch fence, payload-branch anchors, default seed, quota anchors,
-and helper count verified: 2026-07-30. Remaining §9 claims last verified:
-2026-06-13.*
+helper count, and storyboard split contract verified: 2026-07-30. Remaining
+§9 claims last verified: 2026-06-13.*
 
 ---
 

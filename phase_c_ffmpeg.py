@@ -1339,14 +1339,17 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
 
 STORYBOARD_SEGMENT_MIN_TOLERANCE_S = 0.05
 STORYBOARD_SEGMENT_MAX_TOLERANCE_S = 0.25
+STORYBOARD_SEGMENT_COMPARISON_EPSILON_S = 1e-9
 
 
 def _probe_storyboard_video(path: str) -> tuple:
     """Return ``(video_duration_s, duration_tolerance_s)`` for *path*.
 
-    The tolerance is two encoded frames, bounded to 50–250 ms.  Two frames
-    accommodate MP4 timestamp rounding and encoder delay without accepting a
-    materially short or duplicated segment.
+    Coverage uses explicit video-stream duration or positive counted decoded
+    frames divided by a validated/derived average frame rate—never container
+    duration, which a longer audio stream can inflate.  The tolerance is two
+    frame periods, bounded to 50–250 ms, accommodating timestamp rounding and
+    encoder delay without accepting a materially short or duplicated segment.
     """
     try:
         stat_result = os.stat(path, follow_symlinks=False)
@@ -1358,8 +1361,7 @@ def _probe_storyboard_video(path: str) -> tuple:
                 "-select_streams", "v:0",
                 "-count_frames",
                 "-show_entries",
-                "stream=codec_type,duration,avg_frame_rate,nb_read_frames:"
-                "format=duration",
+                "stream=codec_type,duration,avg_frame_rate,nb_read_frames",
                 "-of", "json",
                 path,
             ],
@@ -1374,21 +1376,64 @@ def _probe_storyboard_video(path: str) -> tuple:
             raise ValueError("no video stream")
         stream = streams[0]
         raw_frame_count = stream.get("nb_read_frames")
-        if raw_frame_count in (None, "N/A") or int(raw_frame_count) <= 0:
+        if raw_frame_count in (None, "N/A"):
             raise ValueError("video stream has no decoded frames")
-        raw_duration = stream.get("duration")
-        if raw_duration in (None, "N/A"):
-            raw_duration = (data.get("format") or {}).get("duration")
-        duration_s = float(raw_duration)
-        if not math.isfinite(duration_s) or duration_s <= 0:
-            raise ValueError("video duration is not finite and positive")
+        decoded_frames = int(raw_frame_count)
+        if decoded_frames <= 0:
+            raise ValueError("video stream has no decoded frames")
 
         frame_rate_s = str(stream.get("avg_frame_rate") or "0/0")
-        numerator_text, denominator_text = frame_rate_s.split("/", 1)
-        numerator = float(numerator_text)
-        denominator = float(denominator_text)
-        fps = numerator / denominator if denominator > 0 else 0.0
-        frame_tolerance = 2.0 / fps if fps > 0 else 0.1
+        try:
+            numerator_text, denominator_text = frame_rate_s.split("/", 1)
+            numerator = float(numerator_text)
+            denominator = float(denominator_text)
+        except (TypeError, ValueError, OverflowError):
+            numerator = 0.0
+            denominator = 0.0
+        candidate_fps = (
+            numerator / denominator
+            if (
+                math.isfinite(numerator)
+                and math.isfinite(denominator)
+                and numerator > 0
+                and denominator > 0
+            )
+            else 0.0
+        )
+        fps = (
+            candidate_fps
+            if math.isfinite(candidate_fps) and candidate_fps > 0
+            else 0.0
+        )
+
+        # Container duration may be inflated by a longer audio stream.  Use
+        # only explicit video-stream duration, or derive video coverage from
+        # decoded frames and a validated average frame rate.
+        duration_s = None
+        raw_duration = stream.get("duration")
+        if raw_duration not in (None, "N/A"):
+            candidate_duration_s = float(raw_duration)
+            if (
+                math.isfinite(candidate_duration_s)
+                and candidate_duration_s > 0
+            ):
+                duration_s = candidate_duration_s
+        if duration_s is None:
+            if fps <= 0:
+                raise ValueError(
+                    "video duration unavailable and frame rate is invalid"
+                )
+            duration_s = decoded_frames / fps
+        if not math.isfinite(duration_s) or duration_s <= 0:
+            raise ValueError("video duration is not finite and positive")
+        if fps <= 0:
+            fps = decoded_frames / duration_s
+            if not math.isfinite(fps) or fps <= 0:
+                raise ValueError(
+                    "video frame tolerance cannot be derived"
+                )
+
+        frame_tolerance = 2.0 / fps
         tolerance_s = min(
             STORYBOARD_SEGMENT_MAX_TOLERANCE_S,
             max(STORYBOARD_SEGMENT_MIN_TOLERANCE_S, frame_tolerance),
@@ -1406,14 +1451,32 @@ def validate_storyboard_segment(
 ) -> float:
     """Require a video stream whose duration matches the allocated segment.
 
-    Returns the measured video-stream duration.  A RuntimeError means the
-    caller must reject the entire split before registering any segment.
+    The expected duration must be finite and positive.  Returns the measured
+    video-stream duration.  A RuntimeError means the caller must reject the
+    entire split before registering any segment.
     """
+    try:
+        normalized_expected_s = float(expected_duration_s)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(
+            "storyboard segment expected duration must be finite and positive"
+        ) from exc
+    if (
+        not math.isfinite(normalized_expected_s)
+        or normalized_expected_s <= 0
+    ):
+        raise RuntimeError(
+            "storyboard segment expected duration must be finite and positive"
+        )
+
     actual_duration_s, tolerance_s = _probe_storyboard_video(path)
-    if abs(actual_duration_s - expected_duration_s) > tolerance_s:
+    if (
+        abs(actual_duration_s - normalized_expected_s)
+        > tolerance_s + STORYBOARD_SEGMENT_COMPARISON_EPSILON_S
+    ):
         raise RuntimeError(
             "storyboard segment duration mismatch for "
-            f"{path}: expected={expected_duration_s:.3f}s "
+            f"{path}: expected={normalized_expected_s:.3f}s "
             f"actual={actual_duration_s:.3f}s "
             f"tolerance={tolerance_s:.3f}s"
         )
@@ -1437,9 +1500,10 @@ def split_video_into_segments(
         durations: Ordered list of finite positive floats, one per desired
             segment (seconds).  The source video must cover their full sum.
         output_dir: Invocation-owned directory in which to write segment
-            files.  It is created if absent and must be empty at entry.
-        stem: Filename prefix for segment files.  Final names are
-            ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
+            files.  It is created if absent and must be empty, real, and
+            non-symlink at entry.
+        stem: One safe filename-component prefix for segment files.  Final
+            names are ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
 
     Returns:
         List of absolute paths to the written segment files, in order.
@@ -1449,8 +1513,10 @@ def split_video_into_segments(
     Raises:
         RuntimeError: If the source is too short, lacks a video stream, any
             ffmpeg subprocess fails, or an output lacks the expected video
-            stream/duration.  Deterministic output paths are removed before
-            the exception escapes.
+            stream/duration; also if durations, stem, or output ownership are
+            invalid.  Every returned path must remain lexically and
+            realpath-contained by ``output_dir``.  Deterministic output paths
+            are removed before the exception escapes.
 
     Notes:
         - Seeks after opening the input and re-encodes each segment.  This is
@@ -1461,6 +1527,32 @@ def split_video_into_segments(
         - Every segment, including the last, has an explicit ``-t`` duration;
           provider tail frames outside the allocated timeline are ignored.
     """
+    from urllib.parse import unquote
+
+    if not isinstance(stem, str) or not stem:
+        raise RuntimeError(
+            "split_video_into_segments: stem must be one safe filename "
+            "component"
+        )
+    decoded_stem = stem
+    while True:
+        next_decoded_stem = unquote(decoded_stem)
+        if next_decoded_stem == decoded_stem:
+            break
+        decoded_stem = next_decoded_stem
+    if any(
+        candidate in {".", ".."}
+        or "\x00" in candidate
+        or "/" in candidate
+        or "\\" in candidate
+        or os.path.isabs(candidate)
+        for candidate in (stem, decoded_stem)
+    ):
+        raise RuntimeError(
+            "split_video_into_segments: stem must be one safe filename "
+            "component"
+        )
+
     if not source_path or not os.path.exists(source_path):
         logger.warning("split_video_into_segments: source not found", extra={"source_path": source_path})
         return []
@@ -1472,7 +1564,7 @@ def split_video_into_segments(
     for idx, raw_duration in enumerate(durations):
         try:
             duration_s = float(raw_duration)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise RuntimeError(
                 f"split_video_into_segments: invalid duration at index {idx}"
             ) from exc
@@ -1484,7 +1576,12 @@ def split_video_into_segments(
 
     source_duration_s, source_tolerance_s = _probe_storyboard_video(source_path)
     allocated_duration_s = sum(normalized_durations)
-    if source_duration_s + source_tolerance_s < allocated_duration_s:
+    if (
+        source_duration_s
+        + source_tolerance_s
+        + STORYBOARD_SEGMENT_COMPARISON_EPSILON_S
+        < allocated_duration_s
+    ):
         raise RuntimeError(
             "split_video_into_segments: source does not cover allocated "
             f"timeline (source={source_duration_s:.3f}s, "
@@ -1492,19 +1589,42 @@ def split_video_into_segments(
             f"tolerance={source_tolerance_s:.3f}s)"
         )
 
-    os.makedirs(output_dir, exist_ok=True)
-    if os.listdir(output_dir):
+    owned_output_dir = os.path.abspath(os.fspath(output_dir))
+    os.makedirs(owned_output_dir, exist_ok=True)
+    output_stat = os.stat(owned_output_dir, follow_symlinks=False)
+    if not stat.S_ISDIR(output_stat.st_mode):
+        raise RuntimeError(
+            "split_video_into_segments: output_dir must be a real "
+            "invocation-owned directory"
+        )
+    if os.listdir(owned_output_dir):
         raise RuntimeError(
             "split_video_into_segments: output_dir must be empty and "
             "invocation-owned"
         )
 
-    segment_paths = [
-        os.path.abspath(
-            os.path.join(output_dir, f"{stem}_{idx:03d}.mp4")
+    real_output_dir = os.path.realpath(owned_output_dir)
+    segment_paths = []
+    for idx in range(len(normalized_durations)):
+        candidate_path = os.path.abspath(
+            os.path.join(
+                owned_output_dir,
+                f"{stem}_{idx:03d}.mp4",
+            )
         )
-        for idx in range(len(normalized_durations))
-    ]
+        if (
+            os.path.commonpath((owned_output_dir, candidate_path))
+            != owned_output_dir
+            or os.path.commonpath(
+                (real_output_dir, os.path.realpath(candidate_path))
+            )
+            != real_output_dir
+        ):
+            raise RuntimeError(
+                "split_video_into_segments: segment path escaped "
+                "invocation-owned directory"
+            )
+        segment_paths.append(candidate_path)
     start = 0.0
 
     try:

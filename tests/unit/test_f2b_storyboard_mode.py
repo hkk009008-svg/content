@@ -968,6 +968,88 @@ class TestStoryboardHappyPath:
 # ---------------------------------------------------------------------------
 
 class TestStoryboardFallback:
+    @pytest.mark.parametrize("duration", [10**1000, -(10**1000)])
+    def test_huge_integer_duration_falls_back_before_provider(
+        self,
+        tmp_path,
+        duration,
+    ):
+        """Oversized persisted JSON integers take the guarded per-shot path."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        shots[0]["duration"] = duration
+        project = _make_project(
+            [_make_scene("scene_1", shots)],
+            storyboard_mode=True,
+        )
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        with patch(
+            "kling_native.KlingNativeAPI",
+            side_effect=AssertionError(
+                "invalid duration reached paid provider construction"
+            ),
+        ) as kling_cls:
+            result = MotionRenderPhase(
+                shot_generator=gen,
+                project=project,
+            ).run(_make_lifecycle())
+
+        kling_cls.assert_not_called()
+        gen.cost_tracker.record_api_call.assert_not_called()
+        assert gen.generate_motion_take.call_count == len(shots)
+        assert result.ok is True
+
+    def test_allocator_overflow_falls_back_before_provider(
+        self,
+        tmp_path,
+    ):
+        """The phase boundary itself guards allocator overflow regressions."""
+        from cinema.phases import motion_render
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        project = _make_project(
+            [_make_scene("scene_1", shots)],
+            storyboard_mode=True,
+        )
+        kf_paths = {
+            shot["id"]: str(tmp_path / f"{shot['id']}.jpg")
+            for shot in shots
+        }
+        for path in kf_paths.values():
+            _write_nonempty(path)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        with (
+            patch.object(
+                motion_render,
+                "allocate_storyboard_durations",
+                side_effect=OverflowError("mutation probe"),
+            ),
+            patch(
+                "kling_native.KlingNativeAPI",
+                side_effect=AssertionError(
+                    "allocator overflow reached paid provider construction"
+                ),
+            ) as kling_cls,
+        ):
+            result = motion_render.MotionRenderPhase(
+                shot_generator=gen,
+                project=project,
+            ).run(_make_lifecycle())
+
+        kling_cls.assert_not_called()
+        gen.cost_tracker.record_api_call.assert_not_called()
+        assert gen.generate_motion_take.call_count == len(shots)
+        assert result.ok is True
+
     def test_none_result_falls_back_to_per_shot(self, tmp_path):
         from cinema.phases.motion_render import MotionRenderPhase
 

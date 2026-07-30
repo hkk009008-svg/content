@@ -66,6 +66,28 @@ def _make_tiny_mp4(
     )
 
 
+def _make_short_video_with_long_audio(path: str) -> None:
+    """Create a container whose audio is much longer than its video stream."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i",
+            "testsrc2=size=64x48:duration=3:rate=10",
+            "-f", "lavfi", "-i",
+            "sine=frequency=1000:sample_rate=44100:duration=15",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            path,
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def _video_duration(path: str) -> float:
     """Return video duration in seconds via ffprobe."""
     result = subprocess.run(
@@ -297,6 +319,67 @@ class TestSplitVideoIntoSegments:
 
         assert not (tmp_path / "segs").exists()
 
+    def test_source_two_frame_coverage_boundary_is_inclusive(
+        self,
+        tmp_path,
+    ):
+        """Source coverage consumes its frame tolerance without widening it."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        accepted_dir = tmp_path / "accepted"
+        cut_calls = []
+
+        def capture_cut(command, **kwargs):
+            del kwargs
+            cut_calls.append(command)
+            return MagicMock(returncode=0)
+
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                return_value=(4.8000000005, 0.2),
+            ),
+            patch(
+                "phase_c_ffmpeg.validate_storyboard_segment",
+                return_value=5.0,
+            ),
+            patch("phase_c_ffmpeg.subprocess.run", side_effect=capture_cut),
+        ):
+            accepted = split_video_into_segments(
+                source_path=str(src),
+                durations=[5.0],
+                output_dir=str(accepted_dir),
+            )
+
+        assert len(cut_calls) == 1
+        assert accepted == [
+            os.path.abspath(accepted_dir / "segment_000.mp4")
+        ]
+
+        rejected_dir = tmp_path / "rejected"
+        with (
+            patch(
+                "phase_c_ffmpeg._probe_storyboard_video",
+                return_value=(4.799998, 0.2),
+            ),
+            patch(
+                "phase_c_ffmpeg.subprocess.run",
+                side_effect=AssertionError(
+                    "outside source tolerance launched a cut"
+                ),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="does not cover"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[5.0],
+                    output_dir=str(rejected_dir),
+                )
+
+        assert not rejected_dir.exists()
+
     def test_validation_failure_cleans_only_deterministic_outputs(
         self, tmp_path,
     ):
@@ -351,6 +434,199 @@ class TestSplitVideoIntoSegments:
         with patch("subprocess.run", return_value=probe_result):
             with pytest.raises(RuntimeError, match="no decoded frames"):
                 _probe_storyboard_video(str(src))
+
+    def test_probe_ignores_container_duration_and_uses_frames_per_second(
+        self,
+        tmp_path,
+    ):
+        """Missing stream duration derives 3s, not the 15s container value."""
+        from phase_c_ffmpeg import _probe_storyboard_video
+
+        src = tmp_path / "audio-inflated-container.mkv"
+        src.write_bytes(b"fakevideo")
+        probe_result = MagicMock(
+            stdout=(
+                '{"streams":[{"codec_type":"video","duration":"N/A",'
+                '"avg_frame_rate":"10/1","nb_read_frames":"30"}],'
+                '"format":{"duration":"15.0"}}'
+            )
+        )
+
+        with patch("subprocess.run", return_value=probe_result):
+            duration_s, tolerance_s = _probe_storyboard_video(str(src))
+
+        assert duration_s == 3.0
+        assert tolerance_s == pytest.approx(0.2)
+
+    @pytest.mark.parametrize("frame_rate", ["0/0", "N/A", "malformed"])
+    def test_probe_derives_two_frame_tolerance_when_rate_is_missing(
+        self,
+        tmp_path,
+        frame_rate,
+    ):
+        """A valid stream duration plus frame count still yields two frames."""
+        from phase_c_ffmpeg import _probe_storyboard_video
+
+        src = tmp_path / "missing-rate.mp4"
+        src.write_bytes(b"fakevideo")
+        probe_result = MagicMock(
+            stdout=(
+                '{"streams":[{"codec_type":"video","duration":"5.0",'
+                f'"avg_frame_rate":"{frame_rate}",'
+                '"nb_read_frames":"120"}]}'
+            )
+        )
+
+        with patch("subprocess.run", return_value=probe_result):
+            duration_s, tolerance_s = _probe_storyboard_video(str(src))
+
+        assert duration_s == 5.0
+        assert tolerance_s == pytest.approx(2.0 / 24.0)
+
+    @pytest.mark.parametrize(
+        "stem",
+        [
+            "",
+            ".",
+            "..",
+            "../escaped",
+            "nested/escaped",
+            "/absolute/escaped",
+            r"..\escaped",
+            "%2e%2e%2fescaped",
+            "%252e%252e%252fescaped",
+            "%2e%2e%5cescaped",
+        ],
+    )
+    def test_unsafe_stem_rejected_before_probe_or_output_creation(
+        self,
+        tmp_path,
+        stem,
+    ):
+        """Caller-controlled names cannot escape the owned split directory."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            side_effect=AssertionError("unsafe stem reached ffprobe"),
+        ):
+            with pytest.raises(RuntimeError, match="safe filename component"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[1.0],
+                    output_dir=str(out_dir),
+                    stem=stem,
+                )
+
+        assert not out_dir.exists()
+
+    def test_symlink_output_directory_is_not_invocation_owned(
+        self,
+        tmp_path,
+    ):
+        """An empty external directory cannot be adopted through a symlink."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        external_dir = tmp_path / "external"
+        external_dir.mkdir()
+        linked_dir = tmp_path / "linked"
+        linked_dir.symlink_to(external_dir, target_is_directory=True)
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            return_value=(2.0, 0.1),
+        ):
+            with pytest.raises(RuntimeError, match="real invocation-owned"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[1.0],
+                    output_dir=str(linked_dir),
+                )
+
+        assert list(external_dir.iterdir()) == []
+
+    @pytest.mark.parametrize("duration", [10**1000, -(10**1000)])
+    def test_huge_integer_duration_rejected_before_probe(
+        self,
+        tmp_path,
+        duration,
+    ):
+        """JSON integers outside float range fail closed without subprocesses."""
+        from phase_c_ffmpeg import split_video_into_segments
+
+        src = tmp_path / "storyboard.mp4"
+        src.write_bytes(b"fakevideo")
+        out_dir = tmp_path / "segs"
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            side_effect=AssertionError("invalid duration reached ffprobe"),
+        ):
+            with pytest.raises(RuntimeError, match="invalid duration"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[duration],
+                    output_dir=str(out_dir),
+                )
+
+        assert not out_dir.exists()
+
+    @pytest.mark.parametrize(
+        "expected_duration",
+        [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            0.0,
+            -1.0,
+            10**1000,
+        ],
+    )
+    def test_invalid_expected_duration_rejected_before_probe(
+        self,
+        expected_duration,
+    ):
+        """NaN and non-positive expectations cannot bypass mismatch checks."""
+        from phase_c_ffmpeg import validate_storyboard_segment
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            side_effect=AssertionError("invalid expectation reached ffprobe"),
+        ):
+            with pytest.raises(RuntimeError, match="finite and positive"):
+                validate_storyboard_segment(
+                    "/unused/segment.mp4",
+                    expected_duration,
+                )
+
+    def test_exact_two_frame_boundary_is_inclusive_despite_float_error(self):
+        """A tiny representation error cannot reject the documented bound."""
+        from phase_c_ffmpeg import validate_storyboard_segment
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            return_value=(5.2000000005, 0.2),
+        ):
+            assert validate_storyboard_segment("/segment.mp4", 5.0) == (
+                5.2000000005
+            )
+
+    def test_duration_beyond_two_frame_boundary_is_rejected(self):
+        """The comparison epsilon must not widen the documented tolerance."""
+        from phase_c_ffmpeg import validate_storyboard_segment
+
+        with patch(
+            "phase_c_ffmpeg._probe_storyboard_video",
+            return_value=(5.200002, 0.2),
+        ):
+            with pytest.raises(RuntimeError, match="duration mismatch"):
+                validate_storyboard_segment("/segment.mp4", 5.0)
 
     @pytest.mark.parametrize(
         "durations",
@@ -417,6 +693,41 @@ class TestSplitVideoIntoSegments:
                 durations=[5.0, 5.0, 4.0, 1.0],
                 output_dir=str(out_dir),
             )
+
+        assert not out_dir.exists()
+
+    @pytest.mark.skipif(not _ffmpeg_available(), reason="ffmpeg not available")
+    def test_long_audio_cannot_inflate_source_video_coverage(self, tmp_path):
+        """A 15s container with only 3s of video fails before any cut."""
+        from phase_c_ffmpeg import (
+            _probe_storyboard_video,
+            split_video_into_segments,
+        )
+
+        src = tmp_path / "short-video-long-audio.mkv"
+        _make_short_video_with_long_audio(str(src))
+        assert _video_duration(str(src)) > 14.0
+        video_duration_s, _tolerance_s = _probe_storyboard_video(str(src))
+        assert video_duration_s == pytest.approx(3.0, abs=0.01)
+
+        out_dir = tmp_path / "segs"
+        real_subprocess_run = subprocess.run
+
+        def ffprobe_only(command, **kwargs):
+            if command[0] == "ffmpeg":
+                raise AssertionError("source coverage failure launched a cut")
+            return real_subprocess_run(command, **kwargs)
+
+        with patch(
+            "phase_c_ffmpeg.subprocess.run",
+            side_effect=ffprobe_only,
+        ):
+            with pytest.raises(RuntimeError, match="does not cover"):
+                split_video_into_segments(
+                    source_path=str(src),
+                    durations=[5.0, 5.0, 4.0, 1.0],
+                    output_dir=str(out_dir),
+                )
 
         assert not out_dir.exists()
 

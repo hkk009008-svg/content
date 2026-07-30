@@ -3272,28 +3272,38 @@ Evidence:
   shorter than the allocated timeline could still yield multiple non-empty
   files that the phase registered as distinct takes.
 - **Decision.** Before cutting, require a decodable video stream whose duration
-  covers the full allocated timeline. Cut every segment, including the last,
-  with output-side seek, an explicit duration, and re-encoding. Probe every cut
-  for a positive decoded-frame count and require its measured video duration to
-  match the allocation within two encoded frames, bounded to 50–250 ms. The
-  phase repeats this validation across all segments before its first take write.
-  Split outputs live in a unique invocation-owned directory and only its exact
-  deterministic names may be finalized or cleaned; a path merely returned by a
-  faulty splitter conveys no ownership. Any pre-finalize failure rejects the
-  whole batch and falls through to guarded per-shot generation.
+  covers the full allocated timeline. Prove that duration from the video stream
+  itself—explicit stream duration or decoded frames divided by a validated
+  average frame rate—never from an audio-inflated container duration. Cut every
+  segment, including the last, with output-side seek, an explicit duration, and
+  re-encoding. Probe every cut for a positive decoded-frame count and require
+  its measured video duration to match the allocation within an inclusive
+  tolerance of two video-frame intervals, bounded to 50–250 ms. The phase
+  repeats this validation across all segments before its first take write.
+  Split outputs live in a unique invocation-owned real, non-symlink directory;
+  stems must be one safe filename component, and only exact deterministic names
+  proven lexically and realpath-contained may be finalized or cleaned. A path
+  merely returned by a faulty splitter conveys no ownership. Split durations
+  and validation expectations must be finite and positive; non-finite or
+  non-convertible requested durations—including JSON integers outside float
+  range—fall back before provider dispatch. Any pre-finalize failure rejects
+  the whole batch and falls through to guarded per-shot generation.
 - **Consequences.**
   - Non-keyframe boundaries and the last segment are bounded accurately; short
     provider output cannot be duplicated into apparently valid takes.
-  - Splitting costs additional local encode time and one source plus per-output
-    ffprobe pass.
+  - Splitting costs additional local encode time, one source-video probe, and
+    two per-output probe passes: the splitter validates each cut, then the phase
+    independently revalidates the whole batch before persistence.
   - ADR-017's billing rule is unchanged: the already-incurred storyboard batch
     cost remains recorded when validation or splitting fails, and fallback
     generations record their own real costs.
 - **Evidence.** `tests/unit/test_f2a_storyboard_primitives.py` executes real
   FFmpeg regressions for `[5,5,4,1]`, `[5,5,2,1,1,1]`, the five-second-GOP
-  `[1,1,1,3]` case, and a three-second undersupply. Phase tests pin
-  pre-finalize validation, owned cleanup, arbitrary-path preservation, and
-  retained batch cost.
+  `[1,1,1,3]` case, a three-second undersupply, and a 15-second container whose
+  video stream ends at three seconds while audio continues. Phase and primitive
+  tests pin pre-finalize validation, overflow fallback, finite expectations,
+  inclusive tolerance, contained names, owned cleanup, arbitrary-path
+  preservation, and retained batch cost.
 - **Cross-ref:** ADR-017; `cinema/storyboard.py`;
   `cinema/phases/motion_render.py`; `phase_c_ffmpeg.py`.
 

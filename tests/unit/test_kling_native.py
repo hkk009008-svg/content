@@ -420,6 +420,20 @@ def test_storyboard_allocator_clamps_finite_extremes_before_scaling(
     assert allocate_storyboard_durations(shots) == expected
 
 
+@pytest.mark.parametrize("requested", [10**1000, -(10**1000)])
+def test_storyboard_allocator_rejects_integer_outside_float_range(requested):
+    """An oversized JSON integer is invalid input, not an uncaught overflow."""
+    from cinema.storyboard import allocate_storyboard_durations
+
+    with pytest.raises(ValueError, match="finite number"):
+        allocate_storyboard_durations(
+            [
+                {"prompt": "oversized", "duration": requested},
+                {"prompt": "normal", "duration": 5.0},
+            ]
+        )
+
+
 # ---------------------------------------------------------------------------
 # poll_task — characterization (kling_native.py:170; backoff [3,5,8,12,15] at :190,226-229)
 #
