@@ -675,8 +675,9 @@ per slice, independent spec + quality review recorded in this ledger **before
 the next dependent slice dispatches** (the post-`14ddd8b4` review gap must not
 recur); implementers sequential wherever owned files overlap; full offline
 matrix (smoke, backend suite, web test/build, `pip check`) at each wave
-boundary; R-MEASURE for any ranking/cost claim. All slices below are offline
-(fixture-based) except 13d's real-local-server no-spend journey.
+boundary; a dedicated surface-inventory regeneration commit at each wave
+boundary (below); R-MEASURE for any ranking/cost claim. All slices below are
+offline (fixture-based) except 13d's real-local-server no-spend journey.
 
 - **Wave R (in flight):** retroactive reviews of the five owed families
   (workflow `wf_b11a3a2c-ade`, 12 read-only reviewers). Triage gate: any
@@ -704,6 +705,40 @@ boundary; R-MEASURE for any ranking/cost claim. All slices below are offline
 - **Wave 7 — documentation unification:** 14a → 14b → 14c (final drift gate).
 - **Wave 8 — evidence-led pruning:** 15a–15g, each gated on the caller-evidence
   requirements already listed; only after the full contract matrix is green.
+
+#### Wave-boundary surface-inventory regeneration
+
+Once every slice in a wave is committed — **not before** — regenerate the
+generated artifact and land it as its own commit:
+
+```
+.venv/bin/python scripts/product_surface_inventory.py --root . \
+  --output docs/generated/product_surface_inventory.json
+.venv/bin/python -m pytest \
+  tests/unit/test_product_surface_inventory.py::test_repository_artifact_is_current -q
+```
+
+Precedent: `3ad04f6c` (wave 3), `b10ac746` (wave 4), `ce391c00` (wave 5) —
+each a standalone `chore(audit):` commit. Never fold the regenerated JSON into
+a feature commit: it is derived state, and mixing it hides which source change
+moved the surface.
+
+**A red `test_repository_artifact_is_current` mid-wave is expected, not a
+defect to chase.** The artifact records `source.line` for every frontend
+transport, so any edit above a `fetch` in a component makes it stale without
+changing the surface at all. Diff the regenerated output against the committed
+one before concluding a route or transport actually changed — as of
+2026-08-01 the entire staleness was `CapabilityConsole.tsx` line 372 → 422 in
+two rows. Regenerating mid-wave only pins a line number the next slice moves
+again.
+
+Until `dcc7b048` this test could not execute in CI at all: the `pytest-unit`
+job installed no `web/node_modules`, so the TypeScript helper was unresolvable
+and the 82 tests in that file that invoke it failed on the dependency — 82 of
+the 104 failures in run `30621088290`. The file's other 78 tests mock the
+helper (`_mock_helper_payload`) and passed regardless, which is why the gap
+read as ordinary suite noise rather than a disarmed gate. Treat any earlier
+signal on this gate as uninformative.
 
 ## Completion gate
 
