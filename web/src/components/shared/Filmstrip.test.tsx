@@ -1,5 +1,5 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect, vi } from 'vitest'
+import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import Filmstrip from './Filmstrip'
 import type { Project, Shot, ShotState } from '../../types/project'
 
@@ -64,6 +64,20 @@ function makeProject(shotCount: number): Project {
   }
 }
 
+function okResponse(): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    blob: async () => new Blob(['bytes']),
+  } as unknown as Response
+}
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
 describe('Filmstrip', () => {
   it('windows to 40 shots and shows a "+N more" control for the overflow', () => {
     const { container } = render(<Filmstrip project={makeProject(45)} projectId="proj1" />)
@@ -114,5 +128,91 @@ describe('Filmstrip', () => {
     fireEvent.click(container.querySelector('[data-shot-id="shot-1"]')!)
 
     expect(onShotClick).toHaveBeenCalledWith('shot-1')
+  })
+
+  describe('thumbnail media state rendering (slice 13c)', () => {
+    /**
+     * The thumbnail used to hand `fileUrl(...)` straight to a raw `<img>`
+     * -- a moved/deleted take rendered the browser's own blank/broken-image
+     * icon with no explanation. It now routes through `MediaAsset`, so
+     * every case below is a `data-media-state` the shared primitive
+     * produces, not something Filmstrip renders by hand.
+     */
+    beforeEach(() => {
+      vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:mock'), revokeObjectURL: vi.fn() })
+    })
+
+    it('a shot with no generated_image renders the idle state, not a blank tile -- and never fetches', () => {
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { container } = render(<Filmstrip project={makeProject(1)} projectId="proj1" />)
+
+      const tile = container.querySelector('[data-shot-id="shot-0"]')
+      expect(tile?.querySelector('[data-media-state="idle"]')).not.toBeNull()
+      expect(screen.getByText('No take')).toBeInTheDocument()
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('shows the loading state synchronously while the fetch is in flight', () => {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))) // never resolves within this test
+      const project = makeProject(1)
+      project.scenes[0].shots[0].generated_image = 'shots/sh0/outputs/kf.jpg'
+
+      const { container } = render(<Filmstrip project={project} projectId="proj1" />)
+
+      expect(container.querySelector('[data-shot-id="shot-0"] [data-media-state="loading"]')).not.toBeNull()
+    })
+
+    it('a take whose file cannot be found shows the shared "missing" state, not a broken <img>', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: false, status: 404, headers: { get: () => null } }) as unknown as Response),
+      )
+      const project = makeProject(1)
+      project.scenes[0].shots[0].generated_image = 'shots/sh0/outputs/kf.jpg'
+
+      const { container } = render(<Filmstrip project={project} projectId="proj1" />)
+
+      await waitFor(() =>
+        expect(container.querySelector('[data-shot-id="shot-0"] [data-media-state="missing"]')).not.toBeNull(),
+      )
+      expect(screen.getByText('Media missing')).toBeInTheDocument()
+      expect(container.querySelector('img')).toBeNull()
+    })
+
+    it('a resolved take renders the actual thumbnail through MediaAsset (no raw <img src> bypass)', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => okResponse()))
+      const project = makeProject(1)
+      project.scenes[0].shots[0].generated_image = 'shots/sh0/outputs/kf.jpg'
+
+      const { container } = render(<Filmstrip project={project} projectId="proj1" />)
+
+      await waitFor(() =>
+        expect(container.querySelector('[data-shot-id="shot-0"] [data-media-state="ready"]')).not.toBeNull(),
+      )
+      const img = container.querySelector('img')
+      expect(img).not.toBeNull()
+      expect(img).toHaveAttribute('src', 'blob:mock')
+    })
+
+    it('a migrated (moved-project) take renders the media and discloses the relocation', async () => {
+      const headers = new Map([['X-Media-Migrated', '1']])
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          headers: { get: (k: string) => headers.get(k) ?? null },
+          blob: async () => new Blob(['bytes']),
+        }) as unknown as Response),
+      )
+      const project = makeProject(1)
+      project.scenes[0].shots[0].generated_image = '/old/root/proj1/shots/sh0/outputs/kf.jpg'
+
+      render(<Filmstrip project={project} projectId="proj1" />)
+
+      await waitFor(() => expect(screen.getByText(/relocated/i)).toBeInTheDocument())
+    })
   })
 })
