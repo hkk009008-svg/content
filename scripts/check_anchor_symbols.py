@@ -22,6 +22,12 @@ lines = text.splitlines()
 # `symbol` ... (`path.py:123`)   or   (`path.py:123`) after a backticked symbol
 ANCHOR = re.compile(r"`([A-Za-z0-9_./-]+\.py):(\d+)(?:[-–]\d+)?`")
 SYM = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)`")
+# Lines that ARE a definition: a route decorator, a def/class, or a module-level
+# binding. An anchor pointing at one of these is right regardless of which
+# symbol the doc sentence happens to name first.
+DEF_SITE = re.compile(
+    r"^(@\w+[\w.]*\.route\b|@app\.\w+\b|def |async def |class |[A-Za-z_]\w*\s*(:[^=]+)?=)"
+)
 
 cache = {}
 
@@ -47,6 +53,16 @@ for i, line in enumerate(lines, 1):
             stale.append((i, path, n, f"out of bounds (file has {len(s)})"))
             continue
         target = s[n - 1].strip()
+        # A DEFINITION SITE is correct by construction — accept without the
+        # symbol-proximity check. Without this, a doc line that carries several
+        # symbols and several anchors (a table row naming a helper AND the
+        # endpoint that calls it) reports every one of its anchors as suspect,
+        # because each anchor gets tested against the LINE's symbols rather than
+        # its own. That produced 9 false positives on PROGRAM-MANUAL.md, all
+        # landing squarely on the right @app.route.
+        if DEF_SITE.match(target):
+            ok += 1
+            continue
         # symbols mentioned on the doc line, nearest-before this anchor
         syms = [x.group(1) for x in SYM.finditer(line[: m.start()])]
         syms = [x for x in syms if not x.endswith(".py")][-3:]
