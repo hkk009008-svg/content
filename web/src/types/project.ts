@@ -417,6 +417,10 @@ export interface ProgressEvent {
   budget?: number
 }
 
+/** Subset of {"start","cancel","pause","resume"} the server currently
+ *  considers legal for a project (`web_server.py:_pipeline_action_authority`). */
+export type PipelineAction = 'start' | 'cancel' | 'pause' | 'resume'
+
 export interface PipelineState {
   paused: boolean
   cancelled: boolean
@@ -427,6 +431,16 @@ export interface PipelineState {
   failed_shots: string[]
   scenes_completed: number
   gate_status: GateStatus
+  /** Slice 8a (2026-07-30 comprehensive-unification plan) -- additive to
+   *  every field above on every 200 response from
+   *  `GET /api/projects/<pid>/pipeline-state`, on both the live-pipeline
+   *  and disk-snapshot branches. Derived from the SAME
+   *  `_running_pipelines` / `_PIPELINE_PENDING` registry that gates
+   *  `/generate`, `/cancel`, `/pause`, `/resume` -- never from transport/SSE
+   *  connectivity. Absent only on the distinct 404 "Project not found"
+   *  error shape, which this interface does not model. */
+  running: boolean
+  allowed_actions: PipelineAction[]
 }
 
 export interface GateStatus {

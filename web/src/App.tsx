@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
 import type { Project, AppConfig, ProgressEvent } from './types/project'
 import { usePipelineState } from './hooks/usePipelineState'
 import { ErrorBoundary } from './components/ui'
 import { PageProvider, usePage } from './context/PageContext'
 import ProjectSelector from './components/ProjectSelector'
 import AppShell from './components/AppShell'
+import { apiGet, apiPost } from './lib/api'
 
 const API = '/api'
 
@@ -22,39 +23,29 @@ export default function App() {
 }
 
 function AppInner() {
-  const { setPage } = usePage()
+  const { setPage, resetForNewProject } = usePage()
   const [project, setProject] = useState<Project | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
-  const [generating, setGenerating] = useState(false)
+  // True only while THIS session's own /generate request is in flight (a
+  // brief, self-correcting spinner) -- NOT "is the pipeline running".
+  // That truth comes from the hook's server-derived `running` below; see
+  // the `generating={running || starting}` prop passed to AppShell.
+  const [starting, setStarting] = useState(false)
+  // Surfaces a failed mutation this component owns directly (generate/
+  // cancel) or one wrapped by `withRefresh` (approve/reject/iterate/...).
+  // Slice 8 requirement 5: 409/non-2xx is an error, never painted as
+  // optimistic success.
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
     stages, activeStage, shotStates, directorReview, processEvent,
-    isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
+    isPaused, failedShots, running, refreshPipelineState,
+    pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
     approveScreening, reassembleProject,
   } = usePipelineState(project?.id ?? null)
-
-  // Config is project-scoped once a project is selected: `video_engines`
-  // (the server-reconciled engine-selectability view UI pickers consume —
-  // see web/src/lib/engines.ts) reads that project's persisted shot targets
-  // + api_engines overrides, so it's only meaningful with `project_id` set.
-  // Nothing before project-selection (ProjectSelector) reads `config`, so
-  // there's no need to fetch it until a project exists.
-  useEffect(() => {
-    if (!project) return
-    fetch(`${API}/config?project_id=${encodeURIComponent(project.id)}`).then(r => r.json()).then(setConfig).catch(() => {})
-  }, [project?.id])
-
-  const loadProject = useCallback(async (id: string) => {
-    const res = await fetch(`${API}/projects/${id}`)
-    if (res.ok) setProject(await res.json())
-  }, [])
-
-  const refreshProject = useCallback(async () => {
-    if (project) await loadProject(project.id)
-  }, [project, loadProject])
 
   // P1-3: sticky BUDGET_EXCEEDED halt. Owned HERE (not in a page) because the
   // gate fires mid-run and must survive page switches — AppShell renders the
@@ -66,20 +57,77 @@ function AppInner() {
     if (latest?.stage === 'BUDGET_EXCEEDED') setBudgetHalt(latest)
   }, [latest])
 
+  // PID boundary (Slice 8b): everything App.tsx itself owns resets
+  // synchronously (before paint) the instant the project identity changes
+  // -- `AppInner` never unmounts across a project switch (only the
+  // conditionally-rendered ProjectSelector/AppShell subtree does), so
+  // without this, project B would render with project A's stale config,
+  // in-flight-request spinner, budget halt, and page/focus still set.
+  // `usePipelineState`'s own project-scoped fields (shots/failures/stage/
+  // running/allowedActions) reset the same way inside that hook.
+  useLayoutEffect(() => {
+    setConfig(null)
+    setStarting(false)
+    setActionError(null)
+    setBudgetHalt(null)
+    resetForNewProject()
+  }, [project?.id, resetForNewProject])
+
+  // Config is project-scoped once a project is selected: `video_engines`
+  // (the server-reconciled engine-selectability view UI pickers consume —
+  // see web/src/lib/engines.ts) reads that project's persisted shot targets
+  // + api_engines overrides, so it's only meaningful with `project_id` set.
+  // Nothing before project-selection (ProjectSelector) reads `config`, so
+  // there's no need to fetch it until a project exists. Guarded against a
+  // stale response landing after a further project switch — the
+  // layout effect above already reset `config` to null synchronously, and
+  // an out-of-order resolve here must not paint over the newer project.
+  useEffect(() => {
+    if (!project) return
+    let cancelled = false
+    const pid = project.id
+    apiGet<AppConfig>(`${API}/config?project_id=${encodeURIComponent(pid)}`).then((result) => {
+      if (cancelled) return
+      if (result.ok) setConfig(result.data)
+    })
+    return () => { cancelled = true }
+  }, [project?.id])
+
+  const loadProject = useCallback(async (id: string) => {
+    const result = await apiGet<Project>(`${API}/projects/${id}`)
+    if (result.ok) setProject(result.data)
+  }, [])
+
+  const refreshProject = useCallback(async () => {
+    if (project) await loadProject(project.id)
+  }, [project, loadProject])
+
   const handleGenerate = async () => {
     if (!project) return
-    setGenerating(true)
+    setActionError(null)
     setBudgetHalt(null) // new run: the previous halt is history
-    setPage('run')  // Switch to the Run page (replaces the old mode='pipeline')
-    await fetch(`${API}/projects/${project.id}/generate`, { method: 'POST' })
-    startSSE()
+    setStarting(true)
+    const result = await apiPost<{ error?: string }>(`${API}/projects/${project.id}/generate`)
+    setStarting(false)
+    if (result.ok) {
+      setPage('run')  // Switch to the Run page (replaces the old mode='pipeline')
+      startSSE()
+    } else {
+      setActionError(result.error)
+    }
+    await refreshPipelineState() // authoritative truth either way
   }
 
   const handleCancel = async () => {
     if (!project) return
-    await fetch(`${API}/projects/${project.id}/cancel`, { method: 'POST' })
-    stopSSE()
-    setGenerating(false)
+    setActionError(null)
+    const result = await apiPost(`${API}/projects/${project.id}/cancel`)
+    if (result.ok) {
+      stopSSE()
+    } else {
+      setActionError(result.error)
+    }
+    await refreshPipelineState() // authoritative truth either way
   }
 
   const handleBackToSetup = () => {
@@ -88,6 +136,15 @@ function AppInner() {
 
   const withRefresh = useCallback(async (action: () => Promise<any>) => {
     const result = await action()
+    // Feature-specific mutation functions (usePipelineState.ts) always
+    // resolve to an object with a truthy `.error` string on failure, never
+    // throw, and never claim success on a non-2xx — see that file's
+    // `postJson`. Surface it; a success result clears any prior error.
+    if (result && typeof result === 'object' && 'error' in result && result.error) {
+      setActionError(String(result.error))
+    } else {
+      setActionError(null)
+    }
     await refreshProject()
     return result
   }, [refreshProject])
@@ -115,12 +172,13 @@ function AppInner() {
     }
   }, [latest, project, refreshProject])
 
-  // Watch for generation completion
+  // Re-confirm run/allowed-actions truth from the server on a terminal SSE
+  // stage, instead of assuming completion locally (Slice 8 requirement 3).
   useEffect(() => {
     if (latest?.stage === 'DONE' || latest?.stage === 'ERROR' || latest?.stage === 'COMPLETE') {
-      setGenerating(false)
+      refreshPipelineState()
     }
-  }, [latest])
+  }, [latest, refreshPipelineState])
 
   if (!project) {
     return <ProjectSelector onSelect={loadProject} />
@@ -139,12 +197,28 @@ function AppInner() {
       : null
 
   const pipelineLoadingLabel =
-    generating && !isStreaming && events.length === 0
+    starting && !isStreaming && events.length === 0
       ? 'Calling the projection room'
       : null
 
   return (
     <ErrorBoundary>
+      {actionError && (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-[60] flex max-w-sm items-start gap-3
+            rounded border border-fail/50 bg-fail px-4 py-3 text-sm text-white shadow-lg"
+        >
+          <span className="flex-1">{actionError}</span>
+          <button
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
+            className="text-white/80 hover:text-white"
+          >
+            &times;
+          </button>
+        </div>
+      )}
       <AppShell
         // ── EditorialShell-parity props ──
         project={project}
@@ -152,7 +226,7 @@ function AppInner() {
         events={events}
         latest={latest}
         isStreaming={isStreaming}
-        generating={generating}
+        generating={running || starting}
         onBackToProjects={() => setProject(null)}
         onGenerate={handleGenerate}
         onCancel={handleCancel}

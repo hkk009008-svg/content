@@ -1,6 +1,7 @@
-import { useState, useCallback, useMemo } from 'react'
-import type { ProgressEvent, ShotState, PipelineStage, DirectorReview, PipelineState } from '../types/project'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import type { ProgressEvent, ShotState, PipelineStage, DirectorReview, PipelineState, PipelineAction } from '../types/project'
 import { useSSE } from './useSSE'
+import { apiGet, apiPost } from '../lib/api'
 
 const PIPELINE_STAGES: PipelineStage[] = [
   { id: 'STYLE', label: 'Style Rules', status: 'pending' },
@@ -36,6 +37,91 @@ export function usePipelineState(projectId: string | null) {
   const [failedShots, setFailedShots] = useState<string[]>([])
   const [activeShotId, setActiveShotId] = useState<string | null>(null)
   const [notesBuffer, setNotesBuffer] = useState<ProgressEvent[]>([])
+  // Slice 8b: server-derived lifecycle authority
+  // (`web_server.py:_pipeline_action_authority`, via
+  // `GET /api/projects/<pid>/pipeline-state`). NEVER inferred from
+  // `sse.isStreaming` (transport connectivity is not job truth) -- see
+  // `fetchAndHydrate` / `refreshPipelineState` below.
+  const [running, setRunning] = useState(false)
+  const [allowedActions, setAllowedActions] = useState<PipelineAction[]>([])
+
+  // Guards every pipeline-state fetch (project-switch hydration AND
+  // on-demand post-mutation refreshes) against an out-of-order arrival:
+  // bumped before every fetch is issued and on effect cleanup, compared
+  // when a fetch resolves. A response whose epoch no longer matches the
+  // current one was superseded by a newer fetch (a fresh project switch,
+  // or a fresh refresh) and is dropped rather than applied.
+  const epochRef = useRef(0)
+
+  // Shared by the PID-switch effect below and `start()` -- both need the
+  // same "forget everything about the previous run" reset.
+  const resetLocalState = useCallback(() => {
+    setShotStates(new Map())
+    setDirectorReview(null)
+    setCompletedStages(new Set())
+    setActiveStage(null)
+    setIsPaused(false)
+    setFailedShots([])
+    setActiveShotId(null)
+    setNotesBuffer([])
+    setRunning(false)
+    setAllowedActions([])
+  }, [])
+
+  const hydrateFrom = useCallback((state: PipelineState) => {
+    setIsPaused(!!state.paused)
+    setFailedShots(state.failed_shots ?? [])
+    setActiveStage(state.current_stage || null)
+    setRunning(!!state.running)
+    setAllowedActions(state.allowed_actions ?? [])
+    // NOTE: shot_results / gate_status are intentionally NOT reconciled
+    // into shotStates/completedStages here. The legacy snapshot's status
+    // vocabulary (e.g. "in_progress") does not match the SSE-driven
+    // ShotStatus union this hook otherwise populates from `processEvent`,
+    // and unifying the two is the documented job of the Slice 11
+    // stage-vocabulary work, not this slice's action-authority contract.
+    // Leaving them alone means a page reload mid-run repaints shot cards
+    // as fresh SSE events arrive, rather than risking a wrong badge from
+    // a mismatched status enum.
+  }, [])
+
+  const fetchAndHydrate = useCallback(async (pid: string) => {
+    epochRef.current += 1
+    const myEpoch = epochRef.current
+    const result = await apiGet<PipelineState>(`/api/projects/${pid}/pipeline-state`)
+    if (epochRef.current !== myEpoch) return // superseded by a newer switch/refresh
+    if (result.ok) hydrateFrom(result.data)
+  }, [hydrateFrom])
+
+  // PID boundary (Slice 8b): reset synchronously so no part of the OLD
+  // project's shot/failure/stage/action state is visible even for a
+  // paint, then hydrate from the NEW project's real backend state instead
+  // of assuming a fresh idle run -- a project can already be mid-run,
+  // paused, or pending-start when it's selected (e.g. a page reload, or
+  // switching back to a project with a run left going).
+  useEffect(() => {
+    resetLocalState()
+    if (!projectId) {
+      epochRef.current += 1 // invalidate anything still in flight for the old id
+      return
+    }
+    void fetchAndHydrate(projectId)
+    return () => {
+      // Also invalidate on cleanup (real unmount, or React 18 StrictMode's
+      // dev-only double-invoke) even though no new fetch follows here.
+      epochRef.current += 1
+    }
+  }, [projectId, resetLocalState, fetchAndHydrate])
+
+  /** Public, no-arg refresh: re-fetch and re-derive running/allowed_actions
+   *  (plus the other hydrated fields) from the server right now. Used
+   *  after pause/resume/generate/cancel so the UI reflects CONFIRMED
+   *  backend truth instead of assuming the POST means the transition
+   *  already happened. No-ops when there is no active project. */
+  const refreshPipelineState = useCallback(() => {
+    if (!projectId) return Promise.resolve()
+    return fetchAndHydrate(projectId)
+  }, [projectId, fetchAndHydrate])
 
   // Route incoming events to the right state buckets
   const processEvent = useCallback((event: ProgressEvent) => {
@@ -120,26 +206,40 @@ export function usePipelineState(projectId: string | null) {
     }))
   }, [completedStages, activeStage])
 
-  // Pipeline control actions
+  // Pipeline control actions -- neither flips local state optimistically.
+  // Each fires the POST, then re-confirms truth from the server: the
+  // request succeeding does not mean the transition already happened (the
+  // pending-start window is exactly this), so `isPaused`/`running`/
+  // `allowedActions` only ever change via `hydrateFrom` (Slice 8
+  // requirement 5 -- never paint optimistic success).
   const pause = useCallback(async () => {
     if (!projectId) return
-    await fetch(`/api/projects/${projectId}/pause`, { method: 'POST' })
-    setIsPaused(true)
-  }, [projectId])
+    await apiPost(`/api/projects/${projectId}/pause`)
+    await refreshPipelineState()
+  }, [projectId, refreshPipelineState])
 
   const resume = useCallback(async () => {
     if (!projectId) return
-    await fetch(`/api/projects/${projectId}/resume`, { method: 'POST' })
-    setIsPaused(false)
-  }, [projectId])
+    await apiPost(`/api/projects/${projectId}/resume`)
+    await refreshPipelineState()
+  }, [projectId, refreshPipelineState])
 
+  /** Every POST mutation below funnels through here. A non-2xx response, a
+   *  non-JSON body, or a network failure ALWAYS yields an object with a
+   *  truthy `.error` string (synthesizing one when the endpoint's own
+   *  failure body omitted it) -- so the existing `if (!result?.error)` /
+   *  `if (result?.success)` checks in ReviewStage.tsx / ScreeningStage.tsx
+   *  stay truthful for every failure mode, not just the ones a given
+   *  endpoint happens to encode in JSON. A real 2xx body passes through
+   *  unchanged (existing callers read fields like `.take`/`.approved`
+   *  straight off it). */
   const postJson = useCallback(async (path: string, body?: Record<string, any>) => {
-    const res = await fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    })
-    return res.json()
+    const result = await apiPost<Record<string, any>>(path, body)
+    if (result.ok) return result.data ?? {}
+    const bodyRecord = (result.body && typeof result.body === 'object' && !Array.isArray(result.body))
+      ? result.body as Record<string, any>
+      : {}
+    return { ...bodyRecord, success: false, error: bodyRecord.error || result.error }
   }, [])
 
   const regenerateShot = useCallback(async (shotId: string, positivePrompt?: string, negativePrompt?: string) => {
@@ -245,13 +345,8 @@ export function usePipelineState(projectId: string | null) {
       body.verb = verb
       body.params = params ?? {}
     }
-    const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return res.json()
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`, body)
+  }, [projectId, postJson])
 
   /** S20 (cycle-9 Surface B): operator approves the screened cut.
    *  POSTs to /api/projects/<pid>/screening/approve. The endpoint is
@@ -261,12 +356,8 @@ export function usePipelineState(projectId: string | null) {
    *  contract as iterateTake). */
   const approveScreening = useCallback(async () => {
     if (!projectId) return null
-    const res = await fetch(`/api/projects/${projectId}/screening/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    return res.json()
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/screening/approve`)
+  }, [projectId, postJson])
 
   /** S21 (cycle-9 Surface B): re-assemble the cut from current approved takes.
    *  POSTs to /api/projects/<pid>/assemble/re-assemble with
@@ -282,33 +373,19 @@ export function usePipelineState(projectId: string | null) {
    *  a "force re-assemble" power-user override (not wired into UI for v1). */
   const reassembleProject = useCallback(async (onlyIfChanged: boolean = true) => {
     if (!projectId) return null
-    const res = await fetch(`/api/projects/${projectId}/assemble/re-assemble`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ only_if_changed: onlyIfChanged }),
-    })
-    // (S21 reviewer Minor #5 fold) Guard against a non-JSON 500/timeout
-    // surface (proxy 504, HTML error page from a misconfigured route).
-    // Returning a JSON-shaped object lets the UI render the error inline
-    // instead of crashing on res.json() parse failure.
-    if (!res.ok) {
-      return { success: false, error: res.statusText || `HTTP ${res.status}` }
-    }
-    return res.json()
-  }, [projectId])
+    // (S21 reviewer Minor #5's non-JSON/500 guard is now `postJson`'s job
+    // uniformly -- see its docstring above.)
+    return postJson(`/api/projects/${projectId}/assemble/re-assemble`, { only_if_changed: onlyIfChanged })
+  }, [projectId, postJson])
 
-  // Enhanced start that also processes events
+  // Enhanced start that also processes events -- reuses the same reset
+  // `usePipelineState` applies at a project switch, since starting a new
+  // run within the SAME project needs to forget the previous run's shot/
+  // failure/stage state too.
   const start = useCallback(() => {
-    setShotStates(new Map())
-    setDirectorReview(null)
-    setCompletedStages(new Set())
-    setActiveStage(null)
-    setIsPaused(false)
-    setFailedShots([])
-    setActiveShotId(null)
-    setNotesBuffer([])
+    resetLocalState()
     sse.start()
-  }, [sse])
+  }, [sse, resetLocalState])
 
   return {
     shotStates,
@@ -320,6 +397,10 @@ export function usePipelineState(projectId: string | null) {
     failedShots,
     activeShotId,
     notesBuffer,
+    // Slice 8b: server-derived lifecycle authority + refresh.
+    running,
+    allowedActions,
+    refreshPipelineState,
     // Pipeline controls
     pause,
     resume,

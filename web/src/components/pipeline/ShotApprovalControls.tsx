@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ShotState } from '../../types/project'
+import { apiPost } from '../../lib/api'
 
 interface Props {
   shot: Partial<ShotState>
@@ -12,27 +13,35 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
   const [rejecting, setRejecting] = useState(false)
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const score = shot.identity_score
   const lowScore = score != null && score < 0.7
 
   const handleApprove = async () => {
     setLoading(true)
-    await fetch(`/api/projects/${projectId}/shots/${shotId}/plan/approve`, { method: 'POST' })
+    setError(null)
+    const result = await apiPost(`/api/projects/${projectId}/shots/${shotId}/plan/approve`)
     setLoading(false)
-    onAction()
+    if (!result.ok) setError(result.error)
+    onAction() // refresh authoritative state either way
   }
 
   const handleReject = async () => {
     setLoading(true)
-    await fetch(`/api/projects/${projectId}/shots/${shotId}/plan/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason }),
-    })
+    setError(null)
+    const result = await apiPost(`/api/projects/${projectId}/shots/${shotId}/plan/reject`, { reason })
     setLoading(false)
-    setRejecting(false)
-    onAction()
+    // Slice 8 requirement 5: a non-2xx/network failure is an error, not
+    // optimistic success -- keep the rejection editor (input + reason)
+    // open with the operator's text intact instead of closing as if the
+    // reject had landed.
+    if (result.ok) {
+      setRejecting(false)
+    } else {
+      setError(result.error)
+    }
+    onAction() // refresh authoritative state either way
   }
 
   return (
@@ -84,6 +93,12 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {error && (
+        <div role="alert" className="text-eyebrow text-fail bg-fail/10 px-2 py-1 rounded">
+          {error}
         </div>
       )}
     </div>
