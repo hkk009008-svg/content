@@ -69,6 +69,16 @@ class TestCascadeRetryLogic:
     Pins the PRODUCTION DEFAULT_VIDEO_CASCADE constant — the previous local
     copy silently drifted from production through two migrations (the Sora
     sunset and the Kling v3 Pro promotion) because it never imported it.
+
+    Retry-EXHAUSTION is deliberately NOT tested here: these are cascade-order
+    assertions over WORKFLOW_TEMPLATES/DEFAULT_VIDEO_CASCADE, with no dispatch
+    harness to observe termination. The real, mutation-grade coverage of
+    MAX_CASCADE_RETRIES lives in test_generate_ai_video_params.py's
+    test_multi_engine_all_fail_terminates_after_max_retries, which drives the actual
+    generate_ai_video and counts quota-cooldown sleeps. A former
+    test_cascade_retries_max_is_two here asserted "max is two" against its own
+    local range(3) — it touched no production symbol, so it could not fail, and
+    its name propagated a limit (2) that never matched the source default (1).
     """
 
     def _default_cascade(self):
@@ -106,15 +116,6 @@ class TestCascadeRetryLogic:
         remaining = [api for api in cascade if api not in attempted]
         assert len(remaining) == 0, "No APIs left — should trigger retry"
 
-    def test_cascade_retries_max_is_two(self):
-        """_cascade_retries >= 2 should terminate cascade (return None)."""
-        # Simulating the logic from try_next_api()
-        for retries in range(3):
-            if retries >= 2:
-                assert True, "Should return None at retry >= 2"
-            else:
-                assert retries < 2, "Should continue retrying"
-
     def test_video_fallbacks_override_default_cascade(self):
         """When video_fallbacks is provided, it should be used instead of default."""
         custom_fallbacks = ["RUNWAY_GEN4", "LTX"]
@@ -127,7 +128,8 @@ class TestCascadeRetryLogic:
 
     def test_fresh_attempted_set_on_retry(self):
         """After full cascade exhaustion, retry starts with empty attempted_apis."""
-        # Simulating: all exhausted, _cascade_retries < 2 → restart with set()
+        # Simulating: all exhausted, _cascade_retries < MAX_CASCADE_RETRIES
+        # (try_next_api's default is 1, not 2) → restart with set()
         fresh_attempted = set()
         first_api = "KLING_NATIVE"
         assert first_api not in fresh_attempted
