@@ -1,0 +1,53 @@
+#!/bin/bash
+# Cinemaker — start the Content cinema pipeline web server and open the UI.
+#
+# Lives INSIDE the repo (Content/Cinemaker.app) so the repo root is derived
+# from the bundle's own location: the launcher keeps working if the whole
+# folder is moved or renamed, which is the same portability property slice 10
+# gave the project's media paths.
+set -euo pipefail
+
+BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(dirname "$BUNDLE")"
+cd "$ROOT"
+
+PY="$ROOT/.venv/bin/python"
+LOG="$ROOT/logs/cinemaker-launch.log"
+mkdir -p "$(dirname "$LOG")"
+
+fail() {
+  # No terminal is attached when launched from Finder, so surface errors in a
+  # dialog rather than dying silently.
+  /usr/bin/osascript -e "display alert \"Cinemaker\" message \"$1\" as critical" >/dev/null 2>&1 || true
+  exit 1
+}
+
+[ -x "$PY" ] || fail "Python venv not found at .venv/bin/python — run: python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+[ -f "$ROOT/web_server.py" ] || fail "web_server.py not found in $ROOT"
+[ -d "$ROOT/web/dist" ] || fail "web/dist is missing — run: npm --prefix web run build"
+
+# Already running? Just focus the existing instance instead of starting a second.
+if /usr/bin/curl -s -o /dev/null -m 1 "http://localhost:8080/" ; then
+  /usr/bin/open "http://localhost:8080"
+  exit 0
+fi
+
+{ echo; echo "=== $(date) — Cinemaker launch from $ROOT ==="; } >> "$LOG"
+"$PY" web_server.py >> "$LOG" 2>&1 &
+SERVER_PID=$!
+
+# Wait for the port to answer before opening the browser, so the user never
+# lands on a connection-refused page.
+for _ in $(seq 1 60); do
+  if /usr/bin/curl -s -o /dev/null -m 1 "http://localhost:8080/" ; then
+    /usr/bin/open "http://localhost:8080"
+    wait "$SERVER_PID"
+    exit 0
+  fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    fail "The server exited during startup. See $LOG"
+  fi
+  sleep 0.5
+done
+
+fail "Server did not answer on :8080 within 30s. See $LOG"
