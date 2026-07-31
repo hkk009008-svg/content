@@ -25,10 +25,22 @@ Classification from `workflow_selector.py:classify_shot_type()`. Priority order:
 
 Parameters from `WORKFLOW_TEMPLATES` in `workflow_selector.py`:
 
+**Two things changed pipeline-wide — read these before using any block below:**
+
+1. **`target_api` is `GEMINI_OMNI` for every shot type** (Google-first migration,
+   WS2 — Gemini Omni Flash is arena #1), with `VEO_NATIVE` as the shared first
+   fallback everywhere. The engines that used to be primaries (KLING_3_0 for
+   portrait/medium, LTX for wide/landscape, SEEDANCE for action) are now
+   *fallbacks* and keep their old rationale in that role.
+2. **`pulid_start_at` is `0.0` across the production tier.** The prior
+   SDXL-era values (portrait 0.20 / medium 0.25 / wide 0.35 / action 0.30) were
+   a structural no-op on FLUX; fixed 2026-06-13 (DECISIONS.md ADR-025,
+   validated OFF 0.6205 → ON 0.8779).
+
 ### Portrait (Close-up face focus)
 ```
 pulid_weight:              1.0    # Maximum face-lock
-pulid_start_at:            0.20   # Earlier = stronger identity bake-in
+pulid_start_at:            0.0    # FLUX: bind from step 0 (coarse-identity window)
 pulid_end_at:              1.0
 guidance:                  3.5    # FLUX sweet spot
 steps:                     25     # Finer skin texture, pore detail, iris sharpness
@@ -38,14 +50,16 @@ pag_scale:                 3.0    # Sharpen face details without oversaturation
 controlnet_depth_strength: 0.35
 ip_adapter_weight:         0.25   # Minimal style transfer
 denoise_default:           0.25   # Tighter temporal consistency
-target_api:                KLING_3_0  # fal Kling v3 Pro — best-ranked Kling (#11 AA i2v arena); `elements` identity binding
-video_fallbacks:           ['KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE']  # native = legacy kling-v1-6, proven identity fallback
+target_api:                GEMINI_OMNI  # Google-first primary (WS2); native audio
+video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE']
+                           # KLING_3_0 = fal Kling v3 Pro (#11 AA i2v arena), `elements` identity binding
+                           # KLING_NATIVE = legacy kling-v1-6, proven identity fallback
 ```
 
 ### Medium (Waist-up balanced)
 ```
 pulid_weight:              0.9
-pulid_start_at:            0.25
+pulid_start_at:            0.0    # FLUX: bind from step 0
 pulid_end_at:              1.0
 guidance:                  3.5
 steps:                     20
@@ -55,14 +69,14 @@ pag_scale:                 3.0    # Enhance mid-range detail (clothing, backgrou
 controlnet_depth_strength: 0.40
 ip_adapter_weight:         0.30
 denoise_default:           0.35
-target_api:                KLING_3_0  # fal Kling v3 Pro (see portrait note)
-video_fallbacks:           [KLING_NATIVE, RUNWAY_GEN4, SEEDANCE, LTX]
+target_api:                GEMINI_OMNI  # Google-first primary (WS2)
+video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE', 'LTX']
 ```
 
 ### Wide (Establishing shot, environment-primary)
 ```
 pulid_weight:              0.65   # Lower — environment matters more
-pulid_start_at:            0.35   # Later start — let environment establish
+pulid_start_at:            0.0    # FLUX: bind from step 0
 pulid_end_at:              0.9    # 90% — final 10% for environment polish
 guidance:                  3.0
 steps:                     20
@@ -72,14 +86,15 @@ pag_scale:                 2.5    # Lower — avoid over-sharpening
 controlnet_depth_strength: 0.50   # Strongest spatial lock
 ip_adapter_weight:         0.35
 denoise_default:           0.45
-target_api:                LTX    # 4K, 3D camera, depth-aware, cheapest
-video_fallbacks:           [VEO_NATIVE, KLING_3_0, RUNWAY_GEN4]
+target_api:                GEMINI_OMNI  # Google-first primary (WS2)
+video_fallbacks:           ['VEO_NATIVE', 'LTX', 'KLING_3_0', 'RUNWAY_GEN4']
+                           # LTX (4K, 3D camera, depth-aware, cheapest) demoted from primary to 2nd fallback
 ```
 
 ### Action (Dynamic movement)
 ```
 pulid_weight:              0.8    # Slightly reduced — action poses stress face
-pulid_start_at:            0.30
+pulid_start_at:            0.0    # FLUX: bind from step 0
 pulid_end_at:              1.0
 guidance:                  3.5
 steps:                     20
@@ -89,8 +104,10 @@ pag_scale:                 2.0    # Lower — motion needs softness not crispnes
 controlnet_depth_strength: 0.30   # Light spatial guidance
 ip_adapter_weight:         0.25
 denoise_default:           0.40
-target_api:                SEEDANCE  # #1 AA i2v arena (2026-07); multi-ref (≤9 images) binds multi-character; Sora retires 2026-09-24
-video_fallbacks:           ['SORA_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']  # Sora first fallback until the sunset, then errors fast and cascades
+target_api:                GEMINI_OMNI  # Google-first primary (WS2)
+video_fallbacks:           ['VEO_NATIVE', 'SEEDANCE', 'SORA_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']
+                           # SEEDANCE (#1 AA i2v arena 2026-07; multi-ref ≤9 images binds multi-character) demoted to 2nd fallback
+                           # SORA_NATIVE stays 3rd until the 2026-09-24 sunset, then errors fast and cascades on
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -106,9 +123,22 @@ pag_scale:                 3.5    # Maximum detail sharpening
 controlnet_depth_strength: 0.55   # Strong spatial lock
 ip_adapter_weight:         0.40   # Max style transfer
 denoise_default:           0.55
-target_api:                LTX    # 4K, no face, cheapest, best environments
-video_fallbacks:           [VEO_NATIVE, KLING_3_0]
+target_api:                GEMINI_OMNI  # Google-first primary (WS2)
+video_fallbacks:           ['VEO_NATIVE', 'LTX', 'KLING_3_0']
+                           # LTX (4K, no face, cheapest, best environments) demoted from primary
 ```
+
+**Dialogue shots** are not a ComfyUI template — they borrow portrait/medium for
+image gen, then route to a video API with native lipsync. The video cascade is
+`GEMINI_OMNI → VEO_NATIVE → Kling Lip Sync → Omnihuman`, data-driven via
+`PURPOSE_API_RANKING` / `_resolve_dialogue_routing` in
+`domain/scene_decomposer.py`.
+
+**Runtime availability gate**: `GEMINI_OMNI` needs `GOOGLE_API_KEY` or
+`GEMINI_API_KEY`. Without either it is runtime-unavailable and every cascade
+above effectively starts at `VEO_NATIVE` — so a missing key silently changes
+the primary engine for the whole run rather than failing loud
+(`domain/video_engine_policy.py`, `domain/provider_catalog.py`).
 
 ---
 
@@ -125,7 +155,17 @@ From `phase_c_ffmpeg.py:generate_ai_video()`:
 
 **Error handling**: Each API wrapped in try/catch. On exception → `try_next_api()`. Detailed logging per attempt.
 
-**Global quota flags**: Veo uses a TTL timestamp (`_VEO_QUOTA_EXHAUSTED_UNTIL`, auto-expires after 1800s) checked via `_veo_quota_blocked()` — not a simple boolean flag.
+**Global quota flags** (TTL timestamps, not boolean flags — each engine has its
+own pair; do NOT reuse one engine's cooldown for another):
+
+| Engine | Timestamp | Checked via | TTL |
+|--------|-----------|-------------|-----|
+| Veo | `_VEO_QUOTA_EXHAUSTED_UNTIL` | `_veo_quota_blocked()` | `_VEO_QUOTA_TTL_S` = 1800s (30 min) |
+| Gemini Omni | `_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL` | `_gemini_omni_quota_blocked()` | `_GEMINI_OMNI_QUOTA_TTL_S` = 600s (10 min, Gemini Developer API Tier-1 rolling spend window) |
+
+Gemini Omni's quota-exhaustion vocabulary includes its own `budget_exceeded`
+status alongside the usual `429`/`quota`/`exhausted` string matches
+(`phase_c_ffmpeg.py:38-43`, `gemini_omni_native.py`).
 
 ---
 
@@ -162,29 +202,68 @@ This creates a feedback loop: poor identity scores automatically tighten PuLID o
 
 ## Cost Optimization
 
-**Cheapest to most expensive** (approximate relative cost per video):
+**Cheapest to most expensive**, per ~5s clip. These are the committed estimates
+in `cost_tracker.py`'s `API_COST_USD` — not a hand-maintained `$`-tier guess:
 
-1. **LTX** — $  (4K capable, no polling overhead)
-2. **Kling** — $$  (subject binding premium)
-3. **Veo** — $$$  (reference images add cost)
-4. **Runway** — $$$  (10s fixed, moderate cost)
-5. **Sora** — $$$$  (best motion; retires 2026-09-24)
-6. **Seedance** — $$$$$  (~$1.51 per 5s clip @720p standard; #1 arena quality, multi-reference)
+| Engine | Est. USD / ~5s | Note |
+|--------|---------------|------|
+| VEO_NATIVE | 0.30 | cheapest video engine — and the shared first fallback everywhere |
+| LTX | 0.36 | **floor estimate**: fal ltx-2.3 $0.06/s audio-off @1080p × 6s *minimum*. The dispatcher's default is 8s, so this flat figure under-records ~33% on default shots |
+| KLING_NATIVE | 0.50 | legacy v1.6; pre-v3 estimate |
+| RUNWAY_GEN4 | 0.50 | 10s fixed |
+| KLING_3_0 | 0.56 | fal kling-video/v3/pro $0.112/s audio-off |
+| GEMINI_OMNI | 0.56 | $0.112/s × ~5s — **web-verified, not repo-measured** (see caveat below) |
+| SORA_NATIVE | 0.80 | best motion; retires 2026-09-24 |
+| SEEDANCE | 1.51 | $0.3024/s @720p standard; #1 arena quality, multi-reference |
 
-**Cost strategy**: Use LTX for all wide/landscape/environment shots. Reserve Seedance (Sora until its sunset) for scenes where physics/motion quality or multi-character binding is critical. Kling is the best value for character-driven shots.
+Note this inverts a long-standing assumption in older docs: **Veo is cheaper
+than LTX**, not more expensive.
+
+⚠️ **The GEMINI_OMNI figure is the weakest number in this table.** Duration is
+prompt-inferred on that API (no structured duration kwarg), so a flat per-clip
+estimate risks the exact under-billing pattern SEEDANCE had to be fixed for on
+2026-07-11. A duration-probe (`ffprobe` on the downloaded mp4) is recommended
+before this figure is load-bearing at scale. Whenever a caller supplies the
+actual dispatched duration, `record_api_call(duration_seconds=...)` computes the
+true per-second cost from `API_COST_PER_SECOND_USD` instead of these flat
+figures — prefer that path.
+
+**Cost strategy**: cost is no longer what picks the primary — `GEMINI_OMNI` is
+primary everywhere on quality grounds (arena #1), and the cascade order, not
+price, decides what runs. Price matters when you deliberately override
+`target_api` or when the Google engines are unavailable: LTX still earns its
+slot on wide/landscape (4K, no face to distort at distance), and Seedance is
+worth its 3× premium only where physics/motion or multi-character binding is
+genuinely critical.
 
 ---
 
-## Optimal Duration by Scenario
+## Duration Constraints by Engine
 
-| Scenario | API | Duration | Rationale |
-|----------|-----|----------|-----------|
-| Dialogue/reaction | Kling | 5s | Face consistency, natural pacing |
-| Walking/medium action | Kling/Sora | 4–5s | Avoid temporal drift |
-| Complex motion | Sora | 8s | More frames for smooth physics |
-| Wide environment | LTX/Veo | 6–8s | Time to establish setting |
-| Landscape/cinematic pan | LTX | 8s | Slowest pan reveals detail |
-| Shot-to-shot transition | Veo | 5–6s | First+last frame interpolation |
+Duration is an **engine contract**, not a free parameter — pick it from what the
+engine actually accepts, then let the scenario refine within that set. Several
+of these reject (rather than snap) an out-of-enum value, so validate before the
+network call.
+
+| Engine | Accepts | Enforcement |
+|--------|---------|-------------|
+| **GEMINI_OMNI** | *prompt-inferred* — **no structured duration kwarg** | Encode the intent in the prompt text. Nothing validates it, and the flat cost estimate assumes ~5s (see the cost caveat above) |
+| VEO_NATIVE | 4s / 6s / 8s | Snaps to nearest valid; `"5s"` is server-rejected (INVALID_ARGUMENT) and clamped 5 → 6 (`veo_native._clamp_image_to_video_duration`) |
+| LTX | 6 / 8 / 10 | **Raises before any network call** on anything else (`LTXVideoAPI.DURATION_SECONDS`; mirrored as `phase_c_ffmpeg._LTX_DURATION_ENUM_S`, drift-pinned by `tests/unit/test_ltx_native.py`). Use `nearest_supported_duration()` to snap-up first |
+| SORA_NATIVE | 4 / 8 / 12 / 16 / 20 | Invalid values silently default to 4 — validate before submitting |
+| SEEDANCE | 4–15s ints | Per shot type via `SEEDANCE_DURATIONS`: action/wide/landscape 8s, portrait/medium 4s |
+| KLING_3_0 / KLING_NATIVE | 5s optimal | Longer durations increase temporal drift |
+| RUNWAY_GEN4 | 10s fixed | No variable length |
+
+**Scenario guidance** (within those constraints): 4–5s for dialogue/reaction and
+walking (minimize temporal drift); 8s for complex motion and wide/landscape
+establishing (full physics arcs, slow pans reveal detail); Veo 6s for
+shot-to-shot transitions where first+last-frame interpolation is the point.
+
+⚠️ `SEEDANCE_DURATIONS` is module-level *because* cost depends on it — an 8s
+action clip costed against the per-~5s `API_COST_USD["SEEDANCE"]` figure
+under-records by 38% (money-gate review 2026-07-11). Any new per-shot-type
+duration map needs the same treatment.
 
 ---
 
