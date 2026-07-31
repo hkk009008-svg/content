@@ -30,8 +30,6 @@ Invariants NOT covered by this script (the prose §15 list also includes):
   - §15.4  `import identity.validator` does NOT pull `phase_c_vision`
            (lazy import) — would need a fresh subprocess to verify; out of
            scope for a fast smoke script.
-  - §15.9  `cinema/pipeline.py:CinemaPipeline` has zero production callers
-           — static check, not runtime.
 
 Repo-hygiene gates also ride along (see the inline comments in main() for
 each one's severity split): doc-anchor drift (check_doc_claims), coordination

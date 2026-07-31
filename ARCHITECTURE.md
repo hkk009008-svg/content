@@ -515,15 +515,15 @@ File: `<temp_dir>/pipeline_state.json` (constant `CHECKPOINT_FILE`).
 | `checkpoint_info(pid) -> dict` | Reads `temp/pipeline_state.json` directly | [cinema/services.py:100-133](cinema/services.py:100) |
 | `_project_gate_status(project)` | `{total_shots, plans_approved, keyframes_approved, motions_generated, finals_approved}` | [cinema/services.py:48-58](cinema/services.py:48) |
 
-### 4.8 `cinema/pipeline.py` — generic driver (zero callers)
+### 4.8 `cinema/pipeline.py` — DELETED (ADR-081)
 
-A generic `CinemaPipeline` class living at `cinema/pipeline.py` exists as a
-preserved primitive but has **zero callers in production**. The orchestrator
-class at the **repo root** (`cinema_pipeline.py:CinemaPipeline`) is a
-different class with the same name; it does NOT inherit from nor use the
-generic driver.
+The generic `CinemaPipeline` driver that used to live here was deleted
+2026-08-01. It had zero callers for its entire life, and the name collision
+with the real orchestrator (`cinema_pipeline.CinemaPipeline`) cost a
+disambiguation note in roughly ten places across the truth docs. There is now
+exactly one class named `CinemaPipeline` in this repo, at the repo root.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-08-01*
 
 ---
 
@@ -2524,8 +2524,6 @@ codebase is broken OR this file is stale.
    + `get_project_setting(ctx, "tts_provider")` returns `"CARTESIA_SONIC_2"`
    (settings plumbing works).
 8. `phase_c_assembly.generate_ai_broll` is importable.
-9. `cinema/pipeline.py:CinemaPipeline` (the generic driver class) has zero
-   callers in production code.
 
 ### Smoke test
 
@@ -2537,9 +2535,8 @@ Single source of truth: [scripts/ci_smoke.py](scripts/ci_smoke.py). Run:
 
 The script verifies the runtime-executable subset of the invariants above
 (§15.2, §15.5, §15.6, §15.7, §15.8). Invariants §15.1 (all `.py` compile),
-§15.3 (`LLMEnsemble()` instantiates), §15.4 (lazy import isolation), and
-§15.9 (zero callers of `cinema/pipeline.py:CinemaPipeline`) are static or
-test-suite checks; see the script's module docstring for the split
+§15.3 (`LLMEnsemble()` instantiates), and §15.4 (lazy import isolation) are
+static or test-suite checks; see the script's module docstring for the split
 rationale. Exit 0 = invariants hold; exit 1 = drift.
 
 Beyond §15, the script also runs the repo-hygiene gates: doc-anchor drift

@@ -268,7 +268,7 @@ final disposition when the product rationale and tests are explicit.
 
 | Candidate | Current evidence | Required disposition |
 |---|---|---|
-| `cinema/pipeline.py:CinemaPipeline` | candidate only; full-scope absence not yet evidenced in this ledger | Re-grep full scope; remove only with tests |
+| `cinema/pipeline.py:CinemaPipeline` | RESOLVED — deleted 2026-08-01 (ADR-081); zero callers re-verified at full scope with a literal (non-regex) pattern | none |
 | `ltx_native.py` transition helpers | candidate only; full-scope absence not yet evidenced | Re-evaluate after LTX contract repair |
 | `face_validator_gate.py` helper methods | candidate only; full-scope absence not yet evidenced | Preserve until identity slice proves deletion safe |
 | `cinema/auto_approve.py:summarize_audit` | candidate only; full-scope absence not yet evidenced | Remove only under Slice 15 |
@@ -316,7 +316,7 @@ the audit baseline.
 | 14a prompts/env/skills/generated facts | `pipeline_context`, environment schema/example, active skills, generated/check mode | mechanism slices green | doc/config worker → two reviewers | OPEN |
 | 14b operator docs | `README.md`, `ARCHITECTURE.md`, `OPERATIONS.md`, relevant status/config references | 14a + mechanism slices | doc-sync worker → two reviewers | OPEN |
 | 14c Program Manual + final drift gate | affected manual sections, anchor corrections, final doc/smoke/dependency matrix | 14a/14b | manual worker → two reviewers | OPEN |
-| 15a `CinemaPipeline` candidate | `cinema/pipeline.py` plus exact caller/import tests discovered then | full contract matrix green | fresh worker → two reviewers | BLOCKED ON EVIDENCE |
+| 15a `CinemaPipeline` candidate | `cinema/pipeline.py` | deleted; suite + smoke green | director decision (ADR-081) | DONE |
 | 15b LTX transition helpers | exact helper definitions/callers after Slice 4 | Slice 4 + full matrix | fresh worker → two reviewers | BLOCKED ON EVIDENCE |
 | 15c face-validator helpers | exact helper definitions/callers after Slice 7 | Slice 7 + full matrix | fresh worker → two reviewers | BLOCKED ON EVIDENCE |
 | 15d `summarize_audit` | definition/callers and focused auto-approve tests | full matrix | fresh worker → two reviewers | BLOCKED ON EVIDENCE |

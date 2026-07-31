@@ -4048,3 +4048,67 @@ Evidence:
   `web/src/types/project.ts` (`ApiEngineConfig`);
   `web/src/components/setup/inspector/VideoSection.tsx`;
   `domain/project_manager.py`; `docs/TIER-F-AUDIT-cycle17-2026-05-28.md`.
+
+## ADR-081 — Delete `cinema/pipeline.py`; supersedes the 2026-06-03 KEEP
+
+Date: 2026-08-01
+
+Status: Accepted. Supersedes the KEEP recorded at `DECISIONS.md:766-769`
+(2026-06-03 prune cycle) for this one symbol. Everything else kept in that
+entry stands.
+
+Context. `cinema/pipeline.py::CinemaPipeline` was a 114-line generic driver
+that iterated a `list[Phase]`. It had zero callers for its entire life. On
+2026-06-03 it was reclassified prune-candidate -> KEEP on three supports, and
+the 2026-07-30 unification plan (slice 15a) re-affirmed DO-NOT-DELETE while
+explicitly reserving the reversal: *"Reversing that is a director/product
+decision, not a mechanical prune."* The user-principal made that decision on
+2026-08-01.
+
+Each of the three supports was re-examined before acting, and two of them
+turned out to be thinner than the KEEP represented:
+
+1. "§15.9 is a deliberate zero-callers GUARD invariant." It was NOT a guard.
+   §15.9 existed only as a line inside `scripts/ci_smoke.py`'s module
+   docstring, in the list of invariants the script explicitly does NOT check:
+     $ grep -nE "cinema/pipeline|cinema\.pipeline" scripts/ci_smoke.py
+       33:  - §15.9  `cinema/pipeline.py:CinemaPipeline` has zero production
+                     callers — static check, not runtime.
+   No executable check existed anywhere. A gate that cannot fail is not a
+   gate; it is a claim about one. This is the same class as ADR-027/028
+   (status-tally "GATE MET" is not correctness).
+2. "`cinema/phases/` references it as the future phase-scaffold orchestrator."
+   The reference was two docstring lines, both hedged with the word "future"
+   (`cinema/phases/__init__.py:5`, `cinema/phases/base.py:3`). Meanwhile the
+   real orchestrator has driven those exact phases the whole time. The
+   scaffold's "future" arrived and went somewhere else.
+3. "ARCHITECTURE §4.8 documents it as a preserved primitive." True, and the
+   only one of the three that held — but a doc section describing a file is
+   not a reason for the file.
+
+Decision. Delete the module. Zero callers re-verified at full scope with a
+LITERAL pattern immediately before deleting — a regex `cinema.pipeline`
+matches `cinema_pipeline` (`.` is a wildcard) and manufactures ~30 phantom
+callers, which is exactly the trap this symbol's name sets:
+  $ grep -rlnE "cinema/pipeline|cinema\.pipeline\b" tests/   -> NONE
+  $ git grep -lE "cinema/pipeline|cinema\.pipeline\b" -- '*.py'
+      -> docs/comments only; no import, no instantiation
+
+Consequence — the point of the change. The name collision cost a
+disambiguation note in ~10 places across the truth docs
+(`docs/PROGRAM-MANUAL.md` :117, :151, :358, :364, :382, :411, :672, :700,
+:1298, :1604, :2011), each one explaining that "the orchestrator" means the
+other class. Those are removed, not rewritten. There is now exactly one class
+named `CinemaPipeline` in this repo. Deleting 114 unreachable lines is minor;
+deleting the ambiguity that forced ~10 defensive paragraphs is the win.
+
+Reversal cost, honestly stated: the module is 114 lines and recoverable from
+git history at any time. If a real second caller ever needs a generic phase
+driver, writing it fresh against the then-current `Phase` protocol is cheaper
+than having carried a speculative one for 15 months.
+
+Cross-ref: `ARCHITECTURE.md` §4.8 + §15 (§15.9 removed);
+`scripts/ci_smoke.py` docstring; `cinema/__init__.py`;
+`cinema/phases/__init__.py`; `cinema/phases/base.py`;
+`docs/PROGRAM-MANUAL.md`; `docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md`
+(slice 15a); `docs/AUDIT-product-unification-2026-07-30.md`.

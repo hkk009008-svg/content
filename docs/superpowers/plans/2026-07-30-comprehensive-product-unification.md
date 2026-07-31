@@ -496,7 +496,14 @@ The plan blocks every 15x deletion on full-scope caller evidence. That evidence
 was produced (read-only, no production edits) and it CHANGES the disposition of
 the headline candidate:
 
-- **15a `cinema/pipeline.py:CinemaPipeline` — DO NOT DELETE.** Zero callers is
+- **15a `cinema/pipeline.py:CinemaPipeline` — DELETED 2026-08-01 (ADR-081).**
+  This entry originally read DO NOT DELETE, and correctly so at the time: the
+  reversal was reserved as "a director/product decision, not a mechanical
+  prune." The user-principal made that decision on 2026-08-01 and the module
+  is gone. On re-examination the §15.9 "guard invariant" cited below was
+  docstring-only with no executable check behind it. Original reasoning kept
+  verbatim below for provenance:
+  Zero callers is
   confirmed at full scope, but this was ALREADY litigated: `DECISIONS.md:766-769`
   (2026-06-03) reclassified this exact symbol from prune-candidate to KEEP —
   ARCHITECTURE §4.8 documents it as a "preserved primitive" and §15.9 makes the

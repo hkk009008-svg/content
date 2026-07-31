@@ -1,6 +1,6 @@
 """Phase protocol + PhaseResult — the contract every pipeline phase implements.
 
-The orchestrator (future `cinema.pipeline.CinemaPipeline`) drives the pipeline by
+The orchestrator (`cinema_pipeline.CinemaPipeline`) drives the pipeline by
 iterating a list of Phase instances and calling `.run(ctx)` on each. Phases
 mutate the shared `PipelineContext` to thread state downstream and return a
 `PhaseResult` so the orchestrator can decide whether to continue, skip, retry,

@@ -114,7 +114,6 @@ flowchart LR
 
 One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`) — drives that entire left-to-right sequence. You enter through the web server (`web_server.py`, a Flask app on port 8080); it constructs the pipeline (`web_server.py:1508`) and streams progress back to the browser over Server-Sent Events. There is exactly one entry point: the legacy CLI (`main.py`) has been deleted (verified: `ls main.py` → no such file).
 
-> **Disambiguation up front (a documented footgun):** there are *two* classes named `CinemaPipeline`. The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:58`). A separate, thin `cinema/pipeline.CinemaPipeline` (`cinema/pipeline.py:80`) is a generic list-of-phases driver that is **not** wired into the main run. Whenever this manual says "the orchestrator," it means the former.
 
 ### 1.4 Headline capabilities
 
@@ -148,7 +147,6 @@ This section traces a single idea from text to a finished, sound-synced cinemati
 
 The program has exactly one runtime entry point: `web_server.py` (Flask, port 8080) constructs a `cinema_pipeline.CinemaPipeline` and calls `.generate()` on it in a daemon thread (`web_server.py:1508–1535`). The old `main.py` CLI is deleted; there is no second path. Everything below happens inside that one orchestrator object.
 
-> **Naming caution:** there are *two* classes named `CinemaPipeline`. The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:58`). A second, unrelated `cinema/pipeline.CinemaPipeline` (`cinema/pipeline.py:80`) is a generic list-of-phases iterator that is **not** wired into `generate()`. Throughout this manual, "the orchestrator" always means the former.
 
 ### 2.1 The end-to-end pipeline (one program, eleven stages)
 
@@ -355,13 +353,13 @@ Six modules exist at **both** the repo root and inside `domain/`. In every case 
 
 Verified: `wc -l` on all twelve files shows 9 LOC each for the shims, the LOC above for the canonical files. New code should import from `domain.*` directly; the shims exist only to preserve legacy import surfaces from before the Phase-8 package move. Their docstrings mention `main.py` as a caller — that is stale (`main.py` was deleted).
 
-A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**. `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:58`) is the real orchestrator; `cinema/pipeline.CinemaPipeline` (`cinema/pipeline.py:80`) is an unrelated generic list-of-phases driver not wired into the main run. Any doc that says "CinemaPipeline" without a path is ambiguous — the orchestrator is always `cinema_pipeline.CinemaPipeline`. Likewise `pipeline_context.py` (a 15-line LLM-prompt-string loader) is **not** `cinema/context.py` (the typed `PipelineContext` dataclass).
+A naming hazard that used to recur throughout is now gone: the second, unrelated `CinemaPipeline` at `cinema/pipeline.py` was deleted 2026-08-01 (ADR-081). `cinema_pipeline.CinemaPipeline` is the only class by that name. Note `pipeline_context.py` (a 15-line LLM-prompt-string loader) is still **not** `cinema/context.py` (the typed `PipelineContext` dataclass).
 
 ### 3.1 Orchestration (the macro-spine)
 
 **Role:** `cinema_pipeline.CinemaPipeline` is the sole run driver. It owns the ordered gate sequence and `generate()` main loop, composes the three controllers (shot / review / checkpoint) over one shared `RunState`, and performs final assembly. Long-lived dependencies live on `PipelineCore`; per-run mutable state on `RunState`; pause/cancel/gate mechanics on `ThreadedLifecycle`.
 
-**Canonical modules:** `cinema_pipeline.py` (1767 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader), `cinema/pipeline.py` (generic driver, not the orchestrator).
+**Canonical modules:** `cinema_pipeline.py` (1767 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader).
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -379,7 +377,6 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `NullLifecycle` | `cinema/lifecycle.py:70` | No-op lifecycle whose `wait_for_gate` returns `True` unconditionally. **NOT used by `CinemaPipeline`** — was the deleted CLI's lifecycle. See §3.13 gotcha. |
 | `PipelineContext` | `cinema/context.py:51` | Typed shared state passed INTO phase `.run()` calls (`global_settings`, `lifecycle`, audio paths, legacy read-only `char_lora_*` snapshots, …). Dict-compat layer (`__getitem__`/`.get()`) keeps legacy dict-style phases working. |
 | `get_project_setting(ctx, key, default)` | `cinema/context.py:157` | **Canonical** read path for per-project UI knobs (reads `ctx.global_settings`). Must be used instead of `config.settings.Settings` for any user-tunable setting. |
-| `cinema.pipeline.CinemaPipeline` | `cinema/pipeline.py:80` | Generic `run()` over a `list[Phase]`; short-circuits on `ok=False`. NOT the orchestrator. |
 
 ### 3.2 Web / API surface (the user entry point)
 
@@ -408,7 +405,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** wraps the three per-shot loops (keyframe, performance, motion) in lightweight Protocol-conforming classes. Each takes a `PipelineContext`, iterates the project's shots, and returns a `PhaseResult` — leaving gates and retry policy to the orchestrator. `cinema/services.py` provides read-only disk-state helpers so web endpoints can read state without constructing the heavy pipeline.
 
-**Canonical modules:** `cinema/phases/base.py`, `keyframe_render.py`, `performance.py`, `motion_render.py`, plus `cinema/services.py` and the generic `cinema/pipeline.py`.
+**Canonical modules:** `cinema/phases/base.py`, `keyframe_render.py`, `performance.py`, `motion_render.py`, plus `cinema/services.py`.
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -669,7 +666,6 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 
 | Item | Where | Note |
 |---|---|---|
-| Two `CinemaPipeline` classes | `cinema_pipeline.py:58` vs `cinema/pipeline.py:80` | Orchestrator vs generic driver. Path disambiguates. |
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1064`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
@@ -697,7 +693,7 @@ This section walks the pipeline stage by stage in execution order, exactly as `C
 
 Two structural facts shape every stage below and are worth stating once:
 
-- **The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`).** There is a *second, unrelated* class also named `CinemaPipeline` at `cinema/pipeline.py:80` — a generic list-of-`Phase` driver that is **not** wired into the production `generate()` path. Wherever this section says "the orchestrator," it means `cinema_pipeline.py`.
+- **The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`).** It is now the only class by that name — the generic `cinema/pipeline.py` driver was deleted 2026-08-01 (ADR-081).
 - **Three render stages are `Phase` objects** (keyframe, performance, motion) implementing the `Phase` Protocol (`cinema/phases/base.py:61`). The **gates between them are not phases** — they are inline `_wait_for_gate(...)` calls in the orchestrator. Ordinary per-shot failures stay non-aborting and surface through `on_failure` into `failed_shots`; structured budget refusals stop performance or motion so the run does not keep walking shots that would be refused identically.
 
 ### Stage map and progress checkpoints
@@ -1295,7 +1291,7 @@ One file shapes **every** LLM call in the pipeline: `config/prompts/pipeline_con
 
 This section is the "how it all wires together" narrative. Sections 2–5 describe each subsystem in isolation; here we trace the **state object** that every subsystem reads and writes, the **hand-offs** between stages, the **gate/checkpoint/resume control system** that interleaves with generation, the **API fallback cascade**, the **"LLM everywhere" layer**, the **headless-vs-interactive** control split, and the **concurrency/locking** model that makes a single Flask process safe to drive multiple projects.
 
-A note on naming you must internalize before reading further: there are **two unrelated classes named `CinemaPipeline`**. The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:58`). A separate, generic list-of-phases driver also called `CinemaPipeline` lives at `cinema/pipeline.py:80` and is **not** used by the main `generate()` path. Everywhere below, "the orchestrator" means `cinema_pipeline.CinemaPipeline`.
+A naming note that no longer applies: there used to be two unrelated classes named `CinemaPipeline`. The generic list-of-phases driver was deleted 2026-08-01 (ADR-081), leaving `cinema_pipeline.CinemaPipeline` as the only one.
 
 ---
 
@@ -1601,7 +1597,6 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `cinema/runstate.py` | 157 | `RunState` dataclass — the single shared home for per-run mutable state; one instance, shared by all three controllers |
 | `cinema/lifecycle.py` | 208 | `LifecycleService` protocol + `NullLifecycle` (no-op, **not** wired into `CinemaPipeline`) + `ThreadedLifecycle` (interactive, event-backed) |
 | `cinema/context.py` | 211 | `PipelineContext` dataclass passed into phases; `get_project_setting()` canonical knob reader |
-| `cinema/pipeline.py` | 114 | A **second, unrelated** `CinemaPipeline` — a generic list-of-`Phase` driver; NOT the orchestrator (see divergence D-1) |
 | `pipeline_context.py` | 15 | Loads `config/prompts/pipeline_context.md` into `PIPELINE_CONTEXT`, injected into every LLM system prompt |
 | `web_services.py` | 121 | Pure SSE-event builder `make_progress_callback` (factored out for unit-testability) |
 
@@ -2008,7 +2003,7 @@ Each top-level file is a **9-line `from domain.X import *` re-export shim**; the
 
 #### Two classes named `CinemaPipeline` (D-1)
 
-`cinema/pipeline.py:80` is a **generic list-of-`Phase` driver**; `cinema_pipeline.py:984` is the **real orchestrator**. The generic driver is NOT used inside `generate()` — phases are run directly with `.run(ctx)`. Any doc saying "CinemaPipeline" without a path is ambiguous; the orchestrator is always `cinema_pipeline.CinemaPipeline`.
+`cinema_pipeline.py:984` is the orchestrator. The generic list-of-`Phase` driver that used to share its class name (`cinema/pipeline.py`) was deleted 2026-08-01 (ADR-081); phases are run directly with `.run(ctx)`.
 
 #### `pipeline_context.py` vs `cinema/context.py` (D-3)
 

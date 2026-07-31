@@ -5,7 +5,6 @@ Shared orchestration primitives for the interactive cinema pipeline
 
 Contents:
   cinema.context     — PipelineContext (typed shared state) + get_project_setting helper
-  cinema.pipeline    — generic driver that iterates a list of Phase instances
   cinema.phases.base — Phase protocol + PhaseResult
   cinema.shots       — per-shot generation controller
   cinema.lifecycle   — cancel / pause / progress service
