@@ -24,13 +24,14 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from domain.provider_catalog import RuntimeSnapshot
 from domain.scene_decomposer import (
     API_REGISTRY,
     PURPOSE_API_RANKING,
     PURPOSE_TAGS,
+    _project_video_engine_context,
     rank_apis_for_purpose,
 )
 from domain.video_engine_policy import (
@@ -614,6 +615,8 @@ def _coerce_to_valid_keys(
     *,
     runtime_snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> dict:
     """Sanitize LLM output — replace invalid enum values with safe defaults.
 
@@ -634,6 +637,8 @@ def _coerce_to_valid_keys(
         spec.get("suggested_video_api"),
         snapshot=runtime_snapshot,
         on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
     )
     spec["suggested_video_api"] = target_decision.target
     if target_decision.reason is not None:
@@ -726,6 +731,7 @@ def optimize_shot_prompt(
     location = location or {}
     global_settings = global_settings or {}
     has_chars = len(characters) > 0
+    api_engines, aspect_ratio = _project_video_engine_context(global_settings)
     policy_snapshot = (
         runtime_snapshot
         if runtime_snapshot is not None
@@ -812,6 +818,8 @@ def optimize_shot_prompt(
             has_dialogue,
             runtime_snapshot=policy_snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
         optimized_prompt = _normalize_structured_image_prompt(spec["image_prompt"])
         if (

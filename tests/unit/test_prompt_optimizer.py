@@ -791,6 +791,113 @@ def test_optimizer_keeps_ready_selectable_suggestion_without_reason_mutation():
     assert result["reasoning"] == original_reasoning
 
 
+# ---------------------------------------------------------------------------
+# FIX SLICE R2 — the optimizer coercion boundary (_coerce_to_valid_keys) must
+# see project-disabled/aspect state, mirroring the LLM-authoring boundary
+# fixed in _validate_raw_shot (commit 1b822551). Before this fix,
+# evaluate_shot_target() was called from here without api_engines/
+# aspect_ratio — an optimizer-suggested video engine that was project-
+# disabled or aspect-incompatible was accepted un-coerced and stashed into
+# take metadata for later motion routing.
+# ---------------------------------------------------------------------------
+
+def test_coerce_project_disabled_engine_to_auto_with_reason():
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = "KLING_3_0"
+    result = _coerce_to_valid_keys(
+        spec,
+        has_chars=True,
+        has_dialogue=False,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={"KLING_3_0": {"enabled": False}},
+    )
+    assert result["suggested_video_api"] == "AUTO"
+    assert "video target coerced to AUTO (project_disabled)" in result["reasoning"]
+
+
+def test_coerce_aspect_incompatible_engine_to_auto_with_reason(monkeypatch):
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, _aspect: False,
+    )
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = "KLING_3_0"
+    result = _coerce_to_valid_keys(
+        spec,
+        has_chars=True,
+        has_dialogue=False,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        aspect_ratio="9:16",
+    )
+    assert result["suggested_video_api"] == "AUTO"
+    assert "video target coerced to AUTO (aspect_incompatible)" in result["reasoning"]
+
+
+def test_coerce_without_project_state_still_accepts_live_target():
+    # Regression guard for the new optional parameters: omitting
+    # api_engines/aspect_ratio must not change behavior for an
+    # already-eligible target (both default to policy-neutral).
+    from llm.prompt_optimizer import _coerce_to_valid_keys
+
+    spec = _valid_spec()
+    spec["suggested_video_api"] = "KLING_3_0"
+    original_reasoning = spec["reasoning"]
+    result = _coerce_to_valid_keys(
+        spec,
+        has_chars=True,
+        has_dialogue=False,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert result["suggested_video_api"] == "KLING_3_0"
+    assert result["reasoning"] == original_reasoning
+
+
+def test_optimize_shot_prompt_threads_engine_context_into_coercion_boundary(
+    monkeypatch,
+):
+    """Entry-point proof: optimize_shot_prompt() must source api_engines/
+    aspect_ratio from its `global_settings` param and carry them into the
+    _coerce_to_valid_keys -> evaluate_shot_target boundary (the same source
+    the terminal update_scene_shots() write boundary reads).
+    """
+    import llm.prompt_optimizer as prompt_optimizer
+
+    captured = {}
+    real_evaluate_shot_target = prompt_optimizer.evaluate_shot_target
+
+    def _spy(*args, **kwargs):
+        captured["api_engines"] = kwargs.get("api_engines")
+        captured["aspect_ratio"] = kwargs.get("aspect_ratio")
+        return real_evaluate_shot_target(*args, **kwargs)
+
+    monkeypatch.setattr(prompt_optimizer, "evaluate_shot_target", _spy)
+
+    ensemble_mock = _minimal_ensemble_mock(_valid_spec())
+    global_settings = {
+        "api_engines": {"KLING_3_0": {"enabled": False}},
+        "aspect_ratio": "9:16",
+    }
+
+    prompt_optimizer.optimize_shot_prompt(
+        user_input="a woman stands in a corridor",
+        global_settings=global_settings,
+        ensemble=ensemble_mock,
+    )
+
+    assert captured["api_engines"] == {"KLING_3_0": {"enabled": False}}
+    assert captured["aspect_ratio"] == "9:16"
+
+
 def test_nonvideo_lipsync_ranking_keeps_historical_purpose_order():
     from llm.prompt_optimizer import _top_live_api_for_purpose
 
