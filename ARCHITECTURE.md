@@ -1645,7 +1645,7 @@ Key helpers (all in [`cinema/shots/controller.py`](cinema/shots/controller.py)):
 - `_resolve_f1b_audio` (`:284`) — picks per-shot vs. scene-level TTS audio.
 
 Assembler dedup: `cinema_pipeline.py:_build_scene_packages` (`:709`) counts both
-`audio_embedded` and `dialogue_audio_in_clip` (`:734`) to decide TTS suppression.
+`audio_embedded` and `dialogue_audio_in_clip` (`:746`) to decide TTS suppression.
 
 ### 10.7 Cascade-choice via `lip_sync_mode` and `dialogue_voice_mode`
 

@@ -402,7 +402,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `api_stream` (SSE) | `web_server.py:2981` | Yields `data: <json>\n\n`; 30s HEARTBEAT; terminates on `None` sentinel. **Single consumer** — no fan-out. |
 | `make_progress_callback(queue)` | `web_services.py:29` | Returns the `progress_cb(stage, detail, percent, …)` that `CinemaPipeline` receives; shapes the event dict and `queue.put`s it. Producer extras (`engine`, `spent`, `budget`, …) pass through with a JSON-serializability guard (NF-3 lift, P1-3). No-op if queue is `None`. |
 
-**Key endpoint families** (all under `/api/projects/<pid>/…`, line = `@app.route` decorator): CRUD for characters (`:552`), objects (`:979`), locations (`:1143`), scenes (`:1284`); scene prep — `generate-dialogue` (`:1362`), `decompose` (`:1398`), `style-rules` (`:1447`); run control — `generate` (`:1507`), `stream` (`:1576`), `cancel` (`:1597`), `pause`/`resume` (`:1998`/`:2008`); gates — plan `approve`/`reject` (`:1627`/`:1639`), keyframe/performance/final `approve` (`:1677`/`:1688`/`:1725`), `iterate` (`:1736`), `reject-auto-approve` (`:1839`); assembly + screening — `assemble` (`:2172`), `assemble/screen` (`:2194`), `screening/approve` (`:2280`), `assemble/re-assemble` (`:2369`); cost/cleanup/export — `cost-live` (`:2577`), `cleanup` (`:2557`), `export` (`:2613`).
+**Key endpoint families** (all under `/api/projects/<pid>/…`, line = `@app.route` decorator): CRUD for characters (`:571`), objects (`:1067`), locations (`:1242`), scenes (`:1383`); scene prep — `generate-dialogue` (`:1461`), `decompose` (`:1497`), `style-rules` (`:1546`); run control — `generate` (`:1606`), `stream` (`:1675`), `cancel` (`:1696`), `pause`/`resume` (`:2100`/`:2110`); gates — plan `approve`/`reject` (`:1726`/`:1738`), keyframe/performance/final `approve` (`:1776`/`:1787`/`:1824`), `iterate` (`:1835`), `reject-auto-approve` (`:1938`); assembly + screening — `assemble` (`:2274`), `assemble/screen` (`:2296`), `screening/approve` (`:2382`), `assemble/re-assemble` (`:2471`); cost/cleanup/export — `cost-live` (`:2681`), `cleanup` (`:2659`), `export` (`:2719`).
 
 ### 3.3 Phase system (the per-shot render loops)
 
@@ -888,9 +888,9 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:160`): `"uplo
 
 **INPUTS:** Approved keyframes (and approved performance takes where applicable). Per shot: `target_api`, `camera`, `duration`, `motion_description`/`prompt`, `negative_constraints`, `has_dialogue` (derived from optimizer purpose), `driving_video_path`, `multi_angle_refs`, `ctx` carrying `api_engines` + `cascade_retry_limit`.
 
-**PROCESSING** (`MotionRenderPhase.run`, `cinema/phases/motion_render.py:321` → `generate_motion_take` → `generate_ai_video`, `phase_c_ffmpeg.py:207`):
+**PROCESSING** (`MotionRenderPhase.run`, `cinema/phases/motion_render.py:525` → `generate_motion_take` → `generate_ai_video`, `phase_c_ffmpeg.py:207`):
 
-*Storyboard batch path (optional).* When `global_settings.api_engines.KLING_NATIVE.storyboard_mode=True` AND the aspect is non-portrait (M-1 guard, `motion_render.py:364` — portrait always takes the per-shot path) AND a scene has **2–6 unapproved shots** all with approved keyframes (`motion_render.py:393`), `_run_storyboard_scene` (`motion_render.py:100`) calls `KlingNativeAPI.generate_storyboard()` once, then `split_video_into_segments()` (`phase_c_ffmpeg.py:1706`) recovers per-shot clips, registering each via `_finalize_motion_take(record_cost=False)`. Cost is recorded once for the batch. **Caveat:** `storyboard_mode` is at the nested path `global_settings.api_engines.KLING_NATIVE.storyboard_mode`; reading it flat returns `None` (`_get_storyboard_mode`, `motion_render.py:65`). F2b wired this end-to-end: `_get_storyboard_mode` gates `_run_storyboard_scene`, with coverage in `tests/unit/test_f2b_storyboard_mode.py`.
+*Storyboard batch path (optional).* When `global_settings.api_engines.KLING_NATIVE.storyboard_mode=True` AND the aspect is non-portrait (M-1 guard, `motion_render.py:558` — portrait always takes the per-shot path) AND a scene has **2–6 unapproved shots** all with approved keyframes (`motion_render.py:590`), `_run_storyboard_scene` (`motion_render.py:126`) calls `KlingNativeAPI.generate_storyboard()` once, then `split_video_into_segments()` (`phase_c_ffmpeg.py:1706`) recovers per-shot clips, registering each via `_finalize_motion_take(record_cost=False)`. Cost is recorded once for the batch. **Caveat:** `storyboard_mode` is at the nested path `global_settings.api_engines.KLING_NATIVE.storyboard_mode`; reading it flat returns `None` (`_get_storyboard_mode`, `motion_render.py:65`). F2b wired this end-to-end: `_get_storyboard_mode` gates `_run_storyboard_scene`, with coverage in `tests/unit/test_f2b_storyboard_mode.py`.
 
 *Per-shot path* — `generate_ai_video` (`phase_c_ffmpeg.py:207`) classifies the shot, resolves the engine, and runs a fault-tolerant cascade.
 
@@ -1170,7 +1170,7 @@ the default since 2026-06-03. This realizes a *consistent character voice* (Veo 
 | `color_drift_sensitivity` | 0.3 | Lower = more aggressive color-correction recommendations | `global_settings` |
 | `coherence_threshold` | 0.6 (read with fallback; **not** scaffolded by default — set it explicitly) | Overall coherence floor below which a regenerate is recommended | `cinema/shots/controller.py:1932` |
 | `scene_transitions` | False | Cross-dissolve between scenes via ffmpeg `xfade` instead of hard cuts | `cinema_pipeline.py:1337` |
-| `transition_duration` | 0.5 s | xfade length; clamped to 0.4× shortest clip | `phase_c_ffmpeg.py:1539` |
+| `transition_duration` | 0.5 s | xfade length; clamped to 0.4× shortest clip | `cinema_pipeline.py:1375` |
 
 Location consistency is automatic: each location carries a fixed `seed` and a verbatim `prompt_fragment` injected into every shot at that location (`domain/location_manager.py:117`, `:198`).
 
