@@ -139,8 +139,26 @@ CORS(app, origins=list(env_settings.web_cors_origins))
 #   * The replay buffer is capped at _EVENT_REPLAY_CAP entries per project
 #     (bounded memory); older entries are evicted first (FIFO via
 #     `deque(maxlen=...)`).
+#   * FIX-SSE: each subscriber's LIVE delivery inbox (as opposed to the
+#     shared replay buffer above) is ALSO bounded, at _SUBSCRIBER_INBOX_CAP.
+#     Before this, a client that opened /stream and never read its HTTP
+#     response accumulated every published event in server memory for the
+#     run's lifetime -- unbounded per subscriber, multiplied by however many
+#     such clients attached. On overflow the oldest still-undelivered entry
+#     for THAT subscriber (and only that one) is dropped to make room; the
+#     drop is never silent -- the next live delivery to that subscriber is
+#     preceded by the same `{"stage": "GAP", "gap_from": ..., "gap_to": ...}`
+#     notice the reconnect-past-the-cap path above produces, so the client
+#     knows to re-sync. Delivery (publish() and close()) is always non-
+#     blocking: a slow/stalled subscriber can never stall the publisher,
+#     close(), or any OTHER subscriber. See _ProjectEventBus._deliver.
 
 _EVENT_REPLAY_CAP = 500  # ~500 small JSON dicts/project; bounded, documented.
+_SUBSCRIBER_INBOX_CAP = 500  # FIX-SSE: bounds each subscriber's live-delivery
+# inbox so a client that never reads /stream can't grow server memory without
+# limit; same order of magnitude as _EVENT_REPLAY_CAP -- a subscriber this far
+# behind is already as stale as a fresh reconnect, so degrading it the same
+# way (drop oldest + explicit GAP) loses nothing a reconnect wouldn't already.
 
 
 @dataclass(frozen=True)
@@ -149,7 +167,9 @@ class _EventSubscription:
 
     sub_id:  opaque handle passed back to unsubscribe().
     inbox:   this subscriber's PRIVATE queue -- future publishes land here
-             (never shared with any other subscriber).
+             (never shared with any other subscriber). Bounded at
+             _SUBSCRIBER_INBOX_CAP (FIX-SSE); see _ProjectEventBus._deliver
+             for the drop-oldest-and-GAP overflow contract.
     backlog: [(id, event), ...] to replay, in order, before live delivery;
              empty when there's nothing to replay.
     gap:     (first_lost_id, last_lost_id) inclusive, or None -- set when
@@ -171,29 +191,53 @@ class _ProjectEventBus:
     """Per-project broadcast fan-out with a bounded, replayable event log.
 
     Thread-safety: one lock guards `_buffer`, `_next_id`, `_subscribers`,
-    and `closed`. Delivery (`queue.Queue.put`) always happens OUTSIDE the
-    lock so a slow or already-abandoned subscriber queue can never block a
-    publish, a subscribe, or an unsubscribe on another thread.
+    `_gaps`, and `closed`. Delivery (via `_deliver`) always happens OUTSIDE
+    the lock so a slow or already-abandoned subscriber queue can never
+    block a publish, a subscribe, or an unsubscribe on another thread.
+
+    FIX-SSE: each subscriber's own inbox is bounded (`_inbox_cap`, default
+    _SUBSCRIBER_INBOX_CAP) -- previously unbounded, so a subscriber that
+    never drained its /stream response grew server memory by one event
+    per publish for as long as the run lasted. `_deliver` makes delivery
+    non-blocking and self-healing: a full inbox degrades ONLY that one
+    subscriber (oldest entry dropped, gap recorded in `_gaps` and
+    surfaced via `pop_gap`) and never blocks the publisher, `close()`, or
+    any other subscriber.
     """
 
-    def __init__(self, cap: int = _EVENT_REPLAY_CAP):
+    def __init__(self, cap: int = _EVENT_REPLAY_CAP, inbox_cap: int = _SUBSCRIBER_INBOX_CAP):
         self._lock = threading.Lock()
         self._buffer: deque[tuple[int, dict]] = deque(maxlen=cap)
         self._next_id = 1
         self._subscribers: dict[int, queue.Queue] = {}
         self._next_sub_id = 1
         self.closed = False
+        self._inbox_cap = inbox_cap
+        # FIX-SSE: sub_id -> (gap_from, gap_to) for a subscriber whose
+        # inbox overflowed and had its oldest entry evicted (see
+        # _deliver). At most one entry per CURRENTLY ATTACHED subscriber
+        # -- consumed by pop_gap() (the /stream generator, once per
+        # contiguous run of drops) and discarded by unsubscribe() on
+        # disconnect, so this dict can never grow with event volume the
+        # way the unbounded inbox it replaces did.
+        self._gaps: dict[int, tuple[int, int]] = {}
 
     def publish(self, event: dict) -> int:
         """Assign the next id, retain it in the replay buffer, and fan it
-        out to every currently-attached subscriber. Returns the id."""
+        out to every currently-attached subscriber. Returns the id.
+
+        Delivery (FIX-SSE) is non-blocking: a subscriber whose inbox is
+        full because it isn't draining fast enough is degraded on its
+        own (see _deliver) -- it never stalls this call for the caller
+        or for any other subscriber.
+        """
         with self._lock:
             event_id = self._next_id
             self._next_id += 1
             self._buffer.append((event_id, event))
-            targets = list(self._subscribers.values())
-        for inbox in targets:
-            inbox.put(("event", event_id, event))
+            targets = list(self._subscribers.items())
+        for sub_id, inbox in targets:
+            self._deliver(sub_id, inbox, ("event", event_id, event))
         return event_id
 
     def put(self, event: dict) -> None:
@@ -205,14 +249,84 @@ class _ProjectEventBus:
     def close(self) -> None:
         """Mark the bus closed and wake every currently-attached subscriber
         with the terminal sentinel. Idempotent -- safe to call more than
-        once (only the first call has any effect)."""
+        once (only the first call has any effect).
+
+        Delivery is non-blocking (FIX-SSE), exactly like publish() -- the
+        /generate daemon's finally block calls close() from its own
+        thread, and a subscriber whose inbox is already full must never
+        hang that thread waiting for room that will never come.
+        """
         with self._lock:
             if self.closed:
                 return
             self.closed = True
-            targets = list(self._subscribers.values())
-        for inbox in targets:
-            inbox.put(("end", None, None))
+            targets = list(self._subscribers.items())
+        for sub_id, inbox in targets:
+            self._deliver(sub_id, inbox, ("end", None, None))
+
+    def _deliver(self, sub_id: int, inbox: "queue.Queue", item: tuple) -> None:
+        """Non-blocking delivery of ONE item to ONE subscriber's bounded
+        inbox (FIX-SSE). Called by publish() and close() for every
+        currently-attached subscriber; never raises and never blocks,
+        so one slow subscriber can't stall the publisher, close(), or
+        any other subscriber.
+
+        A full inbox means only THIS subscriber isn't draining fast
+        enough. Degrade gracefully: evict the oldest still-undelivered
+        entry to make room, and record its id via _record_gap so the
+        /stream generator can surface an explicit GAP notice for the
+        lost range -- mirroring the replay-buffer-eviction GAP already
+        used for a reconnect past the cap (module comment above). A
+        dropped event is always reported, never silently lost.
+        """
+        try:
+            inbox.put_nowait(item)
+            return
+        except queue.Full:
+            pass
+        dropped_event_id = None
+        try:
+            _kind, dropped_event_id, _evt = inbox.get_nowait()
+        except queue.Empty:
+            pass  # this subscriber's own consumer drained it concurrently
+        if dropped_event_id is not None:
+            self._record_gap(sub_id, dropped_event_id)
+        try:
+            inbox.put_nowait(item)
+        except queue.Full:
+            # Lost a race for the single slot just freed to ANOTHER
+            # concurrent publish()/close() delivering to this same
+            # inbox (both call _deliver without holding a lock, by
+            # design -- see the class docstring). Vanishingly rare;
+            # report THIS item's own id as dropped too rather than
+            # lose it silently.
+            _kind, item_event_id, _evt = item
+            if item_event_id is not None:
+                self._record_gap(sub_id, item_event_id)
+
+    def _record_gap(self, sub_id: int, dropped_event_id: int) -> None:
+        """Record (coalescing) that dropped_event_id was evicted, unread,
+        from sub_id's inbox. Widens any already-pending gap for this
+        subscriber rather than replacing it, so an unbroken run of drops
+        collapses into exactly one GAP notice."""
+        with self._lock:
+            if sub_id not in self._subscribers:
+                return  # already unsubscribed; no stream left to notify
+            existing = self._gaps.get(sub_id)
+            if existing is None:
+                self._gaps[sub_id] = (dropped_event_id, dropped_event_id)
+            else:
+                lo, hi = existing
+                self._gaps[sub_id] = (min(lo, dropped_event_id), max(hi, dropped_event_id))
+
+    def pop_gap(self, sub_id: int) -> tuple[int, int] | None:
+        """Atomically take and clear sub_id's pending drop-gap, if any
+        (FIX-SSE overflow eviction recorded by _deliver/_record_gap).
+        The /stream generator calls this right before yielding its next
+        live-delivered item, so a widening run of drops surfaces as
+        exactly one GAP frame instead of one per dropped event."""
+        with self._lock:
+            return self._gaps.pop(sub_id, None)
 
     def subscribe(self, last_event_id: int | None) -> _EventSubscription:
         """Attach a new subscriber. See the module comment above this
@@ -223,7 +337,7 @@ class _ProjectEventBus:
         with self._lock:
             sub_id = self._next_sub_id
             self._next_sub_id += 1
-            inbox: queue.Queue = queue.Queue()
+            inbox: queue.Queue = queue.Queue(maxsize=self._inbox_cap)
             self._subscribers[sub_id] = inbox
 
             oldest_id = self._buffer[0][0] if self._buffer else None
@@ -247,6 +361,7 @@ class _ProjectEventBus:
         subscriber was never attached or already removed."""
         with self._lock:
             self._subscribers.pop(sub_id, None)
+            self._gaps.pop(sub_id, None)  # FIX-SSE: no orphaned gap state
 
 
 # SSE event buses per project (Slice 11a: was a single queue.Queue per
@@ -2794,6 +2909,27 @@ def _sse_format(event: dict, *, event_id: int | None, replayed: bool = False) ->
     return frame
 
 
+def _gap_event_dict(gap_from: int, gap_to: int, *, reason: str) -> dict:
+    """Build the wire shape for a GAP control frame.
+
+    Shared by the two places a subscriber can lose events without ever
+    being silently kept in the dark: a reconnect whose Last-Event-ID
+    aged out of the replay buffer, and FIX-SSE's live-delivery inbox
+    overflow (a subscriber too slow to keep up had its oldest
+    undelivered entry dropped -- see _ProjectEventBus._deliver). Same
+    stage/percent/gap_from/gap_to shape either way, so a client need
+    not special-case which path produced it; only ``reason`` (folded
+    into ``detail``, informational only) differs.
+    """
+    return {
+        "stage": "GAP",
+        "detail": f"Missed events {gap_from}-{gap_to} ({reason})",
+        "percent": -1,
+        "gap_from": gap_from,
+        "gap_to": gap_to,
+    }
+
+
 @app.route("/api/projects/<pid>/stream")
 def api_stream(pid):
     """SSE endpoint for real-time generation progress.
@@ -2818,13 +2954,7 @@ def api_stream(pid):
             if sub.gap is not None:
                 gap_from, gap_to = sub.gap
                 yield _sse_format(
-                    {
-                        "stage": "GAP",
-                        "detail": f"Missed events {gap_from}-{gap_to} (replay buffer cap exceeded)",
-                        "percent": -1,
-                        "gap_from": gap_from,
-                        "gap_to": gap_to,
-                    },
+                    _gap_event_dict(gap_from, gap_to, reason="replay buffer cap exceeded"),
                     event_id=None,
                 )
             for buffered_id, buffered_event in sub.backlog:
@@ -2839,6 +2969,22 @@ def api_stream(pid):
             while True:
                 try:
                     kind, event_id, event = sub.inbox.get(timeout=30)
+                    # FIX-SSE: this subscriber's inbox is bounded; an
+                    # overflow (this subscriber too slow to keep up)
+                    # records exactly which id range got dropped instead
+                    # of silently discarding it (_ProjectEventBus._deliver
+                    # / _record_gap). Surface it now, before whatever was
+                    # just dequeued -- pop_gap only ever concerns ids
+                    # strictly older than anything still queued, since
+                    # eviction always removes the then-current-oldest
+                    # entry, so this ordering is always correct.
+                    gap = bus.pop_gap(sub.sub_id)
+                    if gap is not None:
+                        gap_from, gap_to = gap
+                        yield _sse_format(
+                            _gap_event_dict(gap_from, gap_to, reason="subscriber too slow to keep up, events dropped"),
+                            event_id=None,
+                        )
                     if kind == "end":
                         yield _sse_format({"stage": "END", "detail": "Stream closed", "percent": 100}, event_id=None)
                         break

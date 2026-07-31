@@ -641,6 +641,30 @@ export interface LoraStatus extends LoraAvailability {
   best_strength?: number | null;
 }
 
+/** Evidence-backed capability row (Slice 12). `status` is the AUTHORED claim
+ *  (live/wired/stubbed/parked/inactive/dead); `engaged_static` is the
+ *  SEPARATELY COMPUTED, mechanically-validated fact — a component cannot be
+ *  `engaged_static: true` unless the server found a real, currently-resolving
+ *  production consumer AND a passing evidence test for it. `reason` is
+ *  always a human sentence (never a raw hash/id/anchor — those stay in the
+ *  server-side diagnostic view and are never sent to this page).
+ *  `runtime_availability` is kept independent of `engaged_static` per
+ *  product invariant 4 (never collapse static support and runtime
+ *  availability into one bit) — e.g. a capability can be structurally wired
+ *  (`engaged_static: true`) yet currently `runtime_availability:
+ *  'unavailable'` because a credential is missing. */
+export interface CapabilityComponent {
+  id: string;
+  title: string;
+  status: string;
+  exposure: 'ui' | 'api' | 'internal' | 'cli';
+  spend_kind: 'none' | 'compute_local' | 'paid_api' | 'pod_gpu';
+  engaged_static: boolean;
+  runtime_availability: 'available' | 'unavailable' | 'not_applicable';
+  runtime_reason: string | null;
+  reason: string;
+}
+
 export interface CapabilityScorecard {
   project_id: string; tier: string;
   summary: { shots_total: number; shots_clearing_all_bars: number };
@@ -649,7 +673,7 @@ export interface CapabilityScorecard {
   gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; top_vetoes: [string, number][] }>;
   lora_availability: LoraAvailability;
   lora: { char_id: string; strength: number | null; score: number | null; verdict: 'ok'|'warning'|'rejected' }[];
-  components: { id: string; title: string; status: string; note: string }[];
+  components: CapabilityComponent[];
   per_shot: { shot_id: string; identity: number|null; coherence: number|null; motion: number|null; lipsync: number|null; engine: string }[];
   provenance: { shot_id: string; engine: string; attempts: string[]; fallback: boolean }[];
   media: ScorecardMedia | null;

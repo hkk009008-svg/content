@@ -4,7 +4,7 @@ import { Badge, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 import { PROMPT_SECTION_TAGS, parsePromptSections, assemblePromptSections } from '../../lib/promptSections'
-import { apiPut } from '../../lib/api'
+import { apiPut, type ApiResult } from '../../lib/api'
 
 interface Props {
   project: Project
@@ -72,6 +72,11 @@ function ReadOnlyRow({ label, value }: { label: string; value: ReactNode }) {
  * saves through the character PUT (partial update). Pace + the identity
  * backend toggle are project-level `global_settings` and save through the
  * same `PUT /api/projects/{pid}` merge contract SettingsInspector uses.
+ *
+ * Every write above goes through `apiPut` + the shared `runMutation` helper
+ * below: a non-2xx/network failure surfaces the inline error banner and
+ * never refreshes; only a confirmed success clears it and pulls the
+ * authoritative project.
  */
 export default function ShotInspector({ project, config, scene, shot, shotState, apiBase = '', onRefreshProject }: Props) {
   const base = apiBase || '/api'
@@ -95,24 +100,19 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
     )
   }
 
-  /** Returns whether the save landed, so callers that applied an optimistic
-   *  local update (`updateField` below) can revert it on failure instead of
-   *  leaving a value showing that the server never actually confirmed --
-   *  the same "never paint success on a non-2xx" contract PromptEditor's
-   *  `handleSave` enforces for this identical endpoint. On success, the
-   *  authoritative project is re-fetched (mirrors `withRefresh` in
-   *  App.tsx); on failure, nothing is refetched -- the server state didn't
-   *  change, and the error banner is what the user needs to see. */
-  const persistShot = async (next: ShotForm): Promise<boolean> => {
-    const result = await apiPut(`${base}/projects/${project.id}/shots/${shot.id}`, {
-      prompt: assemblePromptSections(next.sections),
-      target_api: next.targetApi,
-      camera: next.camera,
-      visual_effect: next.visualEffect,
-      negative_constraints: next.negativeConstraints,
-      continuity_constraints: next.continuityConstraints,
-      intent_notes: next.intentNotes,
-    })
+  /** Shared truthfulness plumbing for every mutation in this panel: a
+   *  non-2xx or network failure surfaces via the inline error banner above
+   *  and does NOT refresh -- the server state didn't change, so there is
+   *  nothing new to pull and the banner is what the user needs to see. A
+   *  success clears the banner and re-fetches the authoritative project
+   *  (mirrors `withRefresh` in App.tsx) so every field reflects what the
+   *  backend actually persisted. Same "never paint success on a non-2xx"
+   *  contract PromptEditor's `handleSave` enforces for the sibling shots
+   *  endpoint -- factored out once three call sites in this panel
+   *  (persistShot, updateGlobalSetting, setVoice) needed the identical
+   *  check-then-refresh-or-surface shape. */
+  const runMutation = async (request: Promise<ApiResult<unknown>>): Promise<boolean> => {
+    const result = await request
     if (!result.ok) {
       setSaveError(result.error)
       return false
@@ -122,27 +122,38 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
     return true
   }
 
+  /** Returns whether the save landed, so callers that applied an optimistic
+   *  local update (`updateField` below) can revert it on failure instead of
+   *  leaving a value showing that the server never actually confirmed. */
+  const persistShot = (next: ShotForm): Promise<boolean> =>
+    runMutation(
+      apiPut(`${base}/projects/${project.id}/shots/${shot.id}`, {
+        prompt: assemblePromptSections(next.sections),
+        target_api: next.targetApi,
+        camera: next.camera,
+        visual_effect: next.visualEffect,
+        negative_constraints: next.negativeConstraints,
+        continuity_constraints: next.continuityConstraints,
+        intent_notes: next.intentNotes,
+      }),
+    )
+
   // Global-settings (project-level) writer — mirrors SettingsInspector's
   // `update(key, value)` contract (PUT /api/projects/{pid}, merge global_settings).
+  // Was a sibling defect of persistShot's pre-fix shape: a raw `fetch` with
+  // no `.ok` check that refreshed unconditionally, so a rejected write (the
+  // pace wpm field, the identity-backend toggle) surfaced no error and was
+  // indistinguishable from a success. Migrated onto apiPut + runMutation.
   const gs = project.global_settings as any
-  const updateGlobalSetting = async (key: string, value: unknown) => {
-    await fetch(`${base}/projects/${project.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ global_settings: { ...gs, [key]: value } }),
-    })
-    await onRefreshProject()
-  }
+  const updateGlobalSetting = (key: string, value: unknown): Promise<boolean> =>
+    runMutation(apiPut(`${base}/projects/${project.id}`, { global_settings: { ...gs, [key]: value } }))
 
   const primaryCharacter = project.characters.find((c) => c.id === shot.primary_character) ?? null
-  const setVoice = async (voiceId: string) => {
-    if (!primaryCharacter) return
-    await fetch(`${base}/projects/${project.id}/characters/${primaryCharacter.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voice_id: voiceId }),
-    })
-    await onRefreshProject()
+  // Same sibling defect as updateGlobalSetting above, on the character PUT
+  // that backs the Voice pill.
+  const setVoice = async (voiceId: string): Promise<boolean> => {
+    if (!primaryCharacter) return false
+    return runMutation(apiPut(`${base}/projects/${project.id}/characters/${primaryCharacter.id}`, { voice_id: voiceId }))
   }
 
   const updateSectionLocal = (tag: string, value: string) => {

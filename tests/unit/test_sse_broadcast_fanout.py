@@ -36,6 +36,7 @@ failing against the unmodified code.
 from __future__ import annotations
 
 import json
+import queue
 import threading
 import time
 from unittest.mock import MagicMock, patch
@@ -45,6 +46,7 @@ import pytest
 from web_server import (
     _EVENT_REPLAY_CAP,
     _ProjectEventBus,
+    _SUBSCRIBER_INBOX_CAP,
     _ensure_progress_queue,
     _make_progress_cb,
     _pipelines_lock,
@@ -629,3 +631,201 @@ def test_concurrent_subscribe_during_close_never_hangs():
             # time to receive close()'s broadcast.
             kind, _id, _evt = sub.inbox.get(timeout=2)
             assert kind == "end"
+
+
+# ---------------------------------------------------------------------------
+# 6. FIX-SSE: bounded subscriber inbox -- a slow/never-draining subscriber
+#    degrades on its own (capped + explicit GAP), and never blocks the
+#    publisher or any other subscriber.
+#
+# Defect (audit, pre-fix): each subscriber's live-delivery inbox
+# (queue.Queue(), constructed in _ProjectEventBus.subscribe) had no
+# maxsize -- a client that opens /stream and never reads its HTTP
+# response accumulates one entry per publish() in server memory for the
+# entire run's lifetime; N such clients multiply it. This is the same
+# class of bug the replay buffer's `deque(maxlen=...)` already solved for
+# the SHARED history -- it just hadn't been applied to each subscriber's
+# own PRIVATE queue yet.
+#
+# RED proof (run separately, not part of the pytest suite): a scratchpad
+# copy of the pre-fix web_server.py (queue.Queue() with no maxsize) was
+# exercised with test_slow_subscriber_inbox_is_capped_not_unbounded's
+# exact scenario -- publish _SUBSCRIBER_INBOX_CAP + 100 events to a
+# subscriber that never reads sub.inbox -- and sub.inbox.qsize() came
+# back as _SUBSCRIBER_INBOX_CAP + 100 (unbounded growth), failing the
+# `<= _SUBSCRIBER_INBOX_CAP` assertion below. Against the fixed code in
+# this tree, the same scenario caps at _SUBSCRIBER_INBOX_CAP. That test
+# uses ONLY the default constructor (no inbox_cap= override) so it is a
+# like-for-like comparison against the pre-fix public API.
+# ---------------------------------------------------------------------------
+
+def test_slow_subscriber_inbox_is_capped_not_unbounded():
+    """The core defect, pinned directly: publish comfortably past the
+    default cap to a subscriber that never drains at all, and require
+    the inbox to stay bounded instead of growing 1:1 with publish count
+    (which is exactly what an unbounded queue.Queue() would do)."""
+    bus = _ProjectEventBus()
+    sub = bus.subscribe(None)
+
+    n_published = _SUBSCRIBER_INBOX_CAP + 100
+    for i in range(n_published):
+        bus.publish({"stage": "TICK", "detail": str(i), "percent": i % 100})
+
+    assert sub.inbox.qsize() <= _SUBSCRIBER_INBOX_CAP
+    assert bus._subscribers  # the subscriber itself is still attached
+
+
+def test_slow_subscriber_overflow_keeps_the_newest_entries_and_drops_the_rest():
+    """Overflow must drop the OLDEST undelivered entries, never the
+    newest -- a subscriber that eventually starts draining should see
+    unbroken, ordered, recent history rather than a stale front it
+    never asked to keep."""
+    bus = _ProjectEventBus(inbox_cap=3)
+    sub = bus.subscribe(None)
+
+    ids = [bus.publish({"stage": "TICK", "detail": str(i), "percent": i}) for i in range(5)]
+
+    remaining_ids = []
+    while True:
+        try:
+            _kind, event_id, _evt = sub.inbox.get_nowait()
+        except queue.Empty:
+            break
+        remaining_ids.append(event_id)
+
+    assert remaining_ids == ids[2:], "must keep exactly the newest inbox_cap entries, in order"
+
+
+def test_slow_subscriber_overflow_records_one_coalesced_gap():
+    """Every dropped id is reported, never silently lost, and a run of
+    drops between two live reads coalesces into ONE (gap_from, gap_to)
+    range rather than one notice per dropped event."""
+    bus = _ProjectEventBus(inbox_cap=3)
+    sub = bus.subscribe(None)
+
+    ids = [bus.publish({"stage": "TICK", "detail": str(i), "percent": i}) for i in range(5)]
+
+    assert sub.inbox.qsize() == 3
+    gap = bus.pop_gap(sub.sub_id)
+    assert gap == (ids[0], ids[1]), "must cover exactly the two evicted ids, coalesced"
+    # pop_gap is take-and-clear: nothing left to report a second time.
+    assert bus.pop_gap(sub.sub_id) is None
+
+
+def test_slow_subscriber_overflow_gap_reported_on_the_wire_http_level(client):
+    """End-to-end: a real /stream HTTP subscriber that never reads past
+    its first frame, while events are published well past its bounded
+    inbox -- the GAP control frame this fix introduces must actually
+    reach the wire (not just _ProjectEventBus.pop_gap's Python API),
+    immediately before the next live event, and name exactly the
+    dropped id range."""
+    pid = "proj_slow_overflow_http"
+    bus = _ProjectEventBus(inbox_cap=2)
+    with _pipelines_lock:
+        _progress_queues[pid] = bus
+    # Non-empty snapshot backlog so the initial client.get() resolves
+    # from the in-memory backlog list instead of blocking on a live
+    # queue.get() -- same idiom as test_http_disconnect_removes_the_subscriber.
+    bus.publish({"stage": "SEED", "detail": "before subscribe", "percent": 0})
+
+    resp = client.get(f"/api/projects/{pid}/stream")
+    it = iter(resp.response)
+    seed_chunk = next(it)
+    assert _sse_body(seed_chunk)["stage"] == "SEED"
+
+    # Five more live publishes against a cap of 2, with this subscriber
+    # never draining its inbox in between -- three of them must be
+    # dropped (the two oldest survivors plus every publish beyond cap).
+    ids = [bus.publish({"stage": "TICK", "detail": str(i), "percent": i}) for i in range(5)]
+
+    gap_chunk = next(it)
+    assert not gap_chunk.startswith(b"id:"), "GAP is a control frame -- no id: framing line"
+    gap_body = _sse_body(gap_chunk)
+    assert gap_body["stage"] == "GAP"
+    assert gap_body["gap_from"] == ids[0]
+    assert gap_body["gap_to"] == ids[2]
+
+    live_chunk = next(it)
+    live_body = _sse_body(live_chunk)
+    assert live_body == {"stage": "TICK", "detail": "3", "percent": 3, "id": ids[3]}
+    assert "replayed" not in live_body, "this is a live delivery, not a replay"
+
+    resp.response.close()
+
+
+def test_healthy_subscriber_unaffected_by_a_slow_subscriber_on_the_same_bus():
+    """The defining isolation guarantee: one slow (never-draining)
+    subscriber's overflow must never cost a DIFFERENT, healthy
+    subscriber on the SAME bus a single event."""
+    bus = _ProjectEventBus(inbox_cap=3)
+    slow = bus.subscribe(None)
+    healthy = bus.subscribe(None)
+
+    for i in range(10):
+        event_id = bus.publish({"stage": "TICK", "detail": str(i), "percent": i})
+        # The healthy subscriber drains immediately after every publish,
+        # so its own inbox never approaches the cap -- it must still see
+        # every event, in order, with its real id.
+        kind, got_id, evt = healthy.inbox.get(timeout=1)
+        assert (kind, got_id, evt["detail"]) == ("event", event_id, str(i))
+
+    assert slow.inbox.qsize() == 3, "the slow subscriber's inbox is capped"
+    assert bus.pop_gap(slow.sub_id) is not None, "the slow subscriber's drops were recorded"
+    assert bus.pop_gap(healthy.sub_id) is None, "the healthy subscriber lost nothing"
+
+
+def test_publish_does_not_block_on_a_never_draining_subscriber():
+    """The publisher-side guarantee: publish() must never stall waiting
+    for a slow subscriber's inbox to free up. Proven directly rather
+    than inferred from _deliver's use of put_nowait/get_nowait: publish
+    thousands of events, well past the bounded cap, against a
+    subscriber that never reads a single item, from a background
+    thread, and require that thread to finish promptly. A blocking
+    put() on a full bounded queue (maxsize= alone, without the
+    put_nowait/evict fallback this fix adds) would hang this thread
+    forever, since nothing ever drains -- this test would then fail via
+    the join timeout instead of completing quickly."""
+    bus = _ProjectEventBus(inbox_cap=4)
+    bus.subscribe(None)  # attached, but never read from again
+
+    done = threading.Event()
+
+    def publish_a_lot():
+        for i in range(2000):
+            bus.publish({"stage": "TICK", "detail": str(i), "percent": i % 100})
+        done.set()
+
+    t = threading.Thread(target=publish_a_lot, daemon=True)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive(), "publish() blocked (thread failed to finish) on a slow subscriber"
+    assert done.is_set(), "publish() blocked on a slow subscriber's full inbox"
+
+
+def test_close_does_not_block_on_a_never_draining_subscriber():
+    """close() shares _deliver with publish() -- the /generate daemon's
+    finally block calls close() from its own thread and must never hang
+    it waiting for room in a subscriber's already-full, never-drained
+    inbox."""
+    bus = _ProjectEventBus(inbox_cap=4)
+    sub = bus.subscribe(None)
+    for i in range(20):  # comfortably past cap, never drained
+        bus.publish({"stage": "TICK", "detail": str(i), "percent": i})
+
+    t = threading.Thread(target=bus.close, daemon=True)
+    t.start()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive(), "close() blocked on a slow subscriber's full inbox"
+    assert bus.closed is True
+    # The terminal sentinel itself is subject to the same cap/eviction --
+    # it must still have been delivered (queue holds inbox_cap items,
+    # the last of which is the "end" sentinel) rather than silently lost.
+    kind = None
+    try:
+        while True:
+            kind, _id, _evt = sub.inbox.get_nowait()
+    except queue.Empty:
+        pass
+    assert kind == "end", "the terminal sentinel must survive overflow eviction too"
