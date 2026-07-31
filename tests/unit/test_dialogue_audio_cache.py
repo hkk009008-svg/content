@@ -30,20 +30,34 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _stub(name: str, **attrs):
+    """Build a trivial stub module. The caller decides how to install it."""
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
-for _dep in [
+_STUBBED_VIDEO_DEPS = (
     "veo_native", "kling_native", "sora_native", "ltx_native",
     "runway_native", "runway_gen4", "fal_proxy", "kling_3_0",
     "sora_2", "veo_fal",
-]:
-    if _dep not in sys.modules:
-        _stub(_dep)
+)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stub_heavy_video_deps():
+    """Install placeholder video-SDK modules for this module, then restore them.
+
+    A bare ``sys.modules[name] = stub`` leaks an attribute-less module into the
+    rest of the pytest process; the failure then surfaces in whichever *later*
+    file patches one of these names (e.g. ``@patch("ltx_native.LTXVideoAPI")``),
+    naming the innocent file in the traceback. MonkeyPatch.context undoes each
+    setitem on teardown, including deleting names that were absent beforehand.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        for dep in _STUBBED_VIDEO_DEPS:
+            mp.setitem(sys.modules, dep, _stub(dep))
+        yield
 
 
 # ---------------------------------------------------------------------------

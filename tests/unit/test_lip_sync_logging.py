@@ -23,16 +23,34 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _stub(name: str, **attrs):
+    """Build a trivial stub module. The caller decides how to install it."""
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
-for _dep in ["fal_client"]:
-    if _dep not in sys.modules:
-        _stub(_dep, upload_file=MagicMock(return_value="http://fake/url"))
+@pytest.fixture(autouse=True, scope="module")
+def _stub_fal_client():
+    """Install a fal_client placeholder for this module, then restore it.
+
+    This must be restored. Leaving the stub in sys.modules breaks
+    test_ltx_native.py, which reaches it *through the production module*:
+    ltx_native.py:18 does ``import fal_client``, and the tests then call
+    ``monkeypatch.setattr(ltx_native.fal_client, "subscribe", ...)``. Against
+    this stub that raises "module 'fal_client' has no attribute 'subscribe'"
+    and names test_ltx_native.py, which is innocent. Note the victim never
+    patches the string target "fal_client.subscribe", so grepping for patch
+    targets does not find it — any attribute access on a leaked stub is a
+    reachable failure.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(
+            sys.modules,
+            "fal_client",
+            _stub("fal_client", upload_file=MagicMock(return_value="http://fake/url")),
+        )
+        yield
 
 
 # ---------------------------------------------------------------------------

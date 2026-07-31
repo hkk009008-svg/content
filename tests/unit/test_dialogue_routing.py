@@ -30,11 +30,10 @@ from domain.provider_catalog import RuntimeSnapshot
 # ---------------------------------------------------------------------------
 
 def _stub_module(name: str, **attrs):
-    """Create a trivial stub module and inject it into sys.modules."""
+    """Build a trivial stub module. The caller decides how to install it."""
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
@@ -79,14 +78,28 @@ def _ready_veo_policy():
         yield
 
 
-# Stub heavy deps that are imported at module load in phase_c_ffmpeg / controller
-for _dep in [
+# Heavy deps that phase_c_ffmpeg / controller lazy-import inside their branches.
+_STUBBED_VIDEO_DEPS = (
     "veo_native", "kling_native", "sora_native", "ltx_native",
     "runway_native", "runway_gen4", "fal_proxy",
     "kling_3_0", "sora_2", "veo_fal",
-]:
-    if _dep not in sys.modules:
-        _stub_module(_dep)
+)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stub_heavy_video_deps():
+    """Install placeholder video-SDK modules for this module, then restore them.
+
+    A bare ``sys.modules[name] = stub`` leaks an attribute-less module into the
+    rest of the pytest process; the failure then surfaces in whichever *later*
+    file patches one of these names (e.g. ``@patch("ltx_native.LTXVideoAPI")``),
+    naming the innocent file in the traceback. MonkeyPatch.context undoes each
+    setitem on teardown, including deleting names that were absent beforehand.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        for dep in _STUBBED_VIDEO_DEPS:
+            mp.setitem(sys.modules, dep, _stub_module(dep))
+        yield
 
 # ---------------------------------------------------------------------------
 # Test 1 — Routing: dialogue-purpose shot with optimizer cache → VEO_NATIVE

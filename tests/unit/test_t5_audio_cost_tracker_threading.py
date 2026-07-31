@@ -25,11 +25,13 @@ from cost_tracker import CostTracker
 # ---------------------------------------------------------------------------
 
 def _stub(name: str, **attrs):
-    """Inject a minimal stub module so heavy imports don't block collection."""
+    """Build a minimal stub module. Install it with monkeypatch.setitem so it is
+    removed again — a bare ``sys.modules[name] = mod`` outlives the test and the
+    failure then lands on a LATER file that patches an attribute this stub lacks.
+    """
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
@@ -110,6 +112,7 @@ class TestFalBgmCostTrackerThreading:
         """Stub fal_client.subscribe + urllib.request.urlretrieve."""
         # fal_client may not be installed; stub it
         fal_mod = _stub("fal_client")
+        monkeypatch.setitem(sys.modules, "fal_client", fal_mod)
         audio_content = b"ID3-FAKE-BGM"
 
         def _fake_subscribe(endpoint, arguments=None, **kwargs):
@@ -126,8 +129,12 @@ class TestFalBgmCostTrackerThreading:
 
         monkeypatch.setattr("urllib.request.urlretrieve", _fake_urlretrieve)
 
-        # Stub out the optional research_engine import to avoid network
+        # Stub out the optional research_engine import to avoid network.
+        # Must be restored: test_location_research.py and test_style_director.py
+        # patch research_engine.research_location_visual / .research_cinematography,
+        # which this one-attribute stub does not have.
         research_mod = _stub("research_engine", research_music_reference=lambda *a, **k: "")
+        monkeypatch.setitem(sys.modules, "research_engine", research_mod)
         return fal_mod
 
     def test_passes_tracker_records_spend(self, monkeypatch, tmp_path):
