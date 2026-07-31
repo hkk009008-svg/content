@@ -471,6 +471,24 @@ integration verification, but does not implement the production slices.
 | M2 native billed-swallow siblings (SORA/VEO/LTX/OMNI) | — | defect verified thrice (M1 implementer Rule #13, money-gate NIT, lane-v corroboration + orchestrator source check) | Implementer dispatched (`wf_a64283dc`) |
 | R2 optimizer coercion threading | — | defect verified thrice (2b-A quality MINOR, R1 implementer Rule #13, orchestrator source check of `prompt_optimizer.py:633`) | Implementer dispatched (`wf_a64283dc`) |
 
+### Wave-1 round-1 verdicts (wf_dec8ec5e, resumed post-limit)
+
+I2 **GO** (NIT: Map/Set-typed imports over-included — disclosed trade). R3
+**NITS** (one of four new tests vacuous via predicate mock-bleed; sibling spy
+covers the plumbing — fixup dispatched). S3 money **NITS** + lane-v **NITS**
++ quality **FAIL** (IMPORTANT: ARCHITECTURE.md §9 still called GEMINI_OMNI
+known-broken in 3 regions — fixed by orchestrator doc-sync in this commit;
+MINORs: two terminal tests lack on_billed asserts, KLING_LIPSYPC_2 comment
+says KNOWN_BROKEN vs actual NOT_IMPLEMENTED — fixup dispatched). S2C lane-v
+**GO** + quality **FAIL** (CRITICAL: project-disabling a cascade toggle
+permanently hides the row — `videoEngines()` filter keys on `selectable`;
+fixup dispatched with the missing disabled-not-in-use test shape). S7
+**NITS**x2 — recorded follow-ups: continuity chaining history
+(`record_generated`) is DEAD in production (temporal chaining never wired —
+candidate for a dedicated slice), and optimizer `image_prompt`/
+`negative_constraints` still merge unconditionally (canonical-wins guards
+identity_anchor only; widening is a product decision, not a defect).
+
 ### Wave-1 round-1 landings (2026-07-31)
 
 | Slice | Commit | State |

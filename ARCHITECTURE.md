@@ -1095,10 +1095,11 @@ pinned False by `test_capability_scorecard.py`); the comments still naming it
 in `workflow_selector.py`/`cinema/context.py` are archaeology, not a live import.
 
 These values are **historical order seeds, not executable truth**.
-`GEMINI_OMNI` remains at the head for compatibility/evidence, but the typed
-catalog marks it known-broken, so
+`GEMINI_OMNI` sits at the head and — since its Slice 3 repair/re-admission
+(catalog `LIMITED`, dispatchable/selectable, aspect 16:9|9:16) — is
+executable again when google credentials + `google.genai` are present;
 `filter_dispatch_candidates` ([domain/video_engine_policy.py:292](domain/video_engine_policy.py:292))
-always rejects it. `ShotController.generate_motion_take` prepends a cached
+now gates it on runtime availability only. `ShotController.generate_motion_take` prepends a cached
 optimizer suggestion when present, filters the whole ordered seed once using
 the current UTC date, symbolic runtime snapshot, project `api_engines`, and
 aspect ratio, then prices only the first admitted engine. A concrete persisted
@@ -1134,8 +1135,10 @@ Generated/reviewed shot batches are re-evaluated at their terminal write
 boundary so an upstream policy pass cannot authorize a later-mutated target.
 
 Dialogue AUTO routing prepends the ranked native-audio seed before the
-template. Thus known-broken Gemini is retained as rejection evidence while a
-ready `VEO_NATIVE` becomes the executable native-audio head. Native voice mode
+template. Since the Slice 3 re-admission, a google-credentialed runtime makes
+`GEMINI_OMNI` the executable native-audio head (dialogue primary restored);
+without those credentials it is rejected as runtime-unavailable and a ready
+`VEO_NATIVE` leads. Native voice mode
 keeps only that native-audio seed; overlay mode retains the admitted silent
 fallbacks for the mandatory downstream TTS/lipsync pass. `SORA_NATIVE` may
 remain an admitted fallback before 2026-09-24 and is date-retired on that UTC
@@ -1199,7 +1202,7 @@ for compatibility archaeology but are unreachable through executable dispatch.
 | `KLING_NATIVE` | :501 | `kling_native.KlingNativeAPI` (legacy `kling-v1-6` defaults; fallback-only since 2026-07-11) | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
 | `SORA_NATIVE` | :545 | `sora_native.SoraNativeAPI`; admitted only before its 2026-09-24 sunset | OPENAI_API_KEY |
 | `VEO_NATIVE` | :594 | `veo_native.VeoNativeAPI` | Vertex AI or GOOGLE_API_KEY |
-| `GEMINI_OMNI` | :1234 | legacy `gemini_omni_native.GeminiOmniAPI` payload; **unreachable (known-broken)** | GOOGLE_API_KEY or GEMINI_API_KEY |
+| `GEMINI_OMNI` | :1234 | `gemini_omni_native.GeminiOmniAPI` — repaired + re-admitted (Slice 3): inline base64 decode, `files/<id>` polling, terminal classification, atomic publication; runtime-gated | GOOGLE_API_KEY or GEMINI_API_KEY |
 | `LTX` | :636 | `ltx_native.LTXVideoAPI`; rejected for `9:16` by current dispatch-wiring policy | LTX_API_KEY OR FAL_KEY |
 | `RUNWAY_GEN4` | :685 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
 | `SORA_2` | :746 | legacy inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")`; **unreachable (retired)** | FAL_KEY |
