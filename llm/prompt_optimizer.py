@@ -405,6 +405,8 @@ def _fallback_optimize(
     *,
     runtime_snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> dict:
     """Deterministic fallback — runs without an LLM. Produces a reasonable spec
     using heuristics + the user's own input as the seed prompt. Lower quality
@@ -574,18 +576,30 @@ def _fallback_optimize(
         if hidream_status == "live":
             img_api = "HIDREAM_I1"
 
+    # Run the ranking pick through the same project-disabled/aspect-
+    # incompatible coercion _coerce_to_valid_keys applies to the LLM path, so
+    # a heuristic top-ranked engine that isn't actually usable for this
+    # project is coerced to AUTO here too instead of reaching take metadata.
+    video_target_decision = evaluate_shot_target(
+        _top_live_api_for_purpose(
+            purpose,
+            "video",
+            snapshot=runtime_snapshot,
+            on_date=on_date,
+        ),
+        snapshot=runtime_snapshot,
+        on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
+    )
+
     return {
         "image_prompt": image_prompt,
         "video_prompt": video_prompt,
         "purpose": purpose,
         "shot_type": shot_type,
         "suggested_image_api": img_api,
-        "suggested_video_api": _top_live_api_for_purpose(
-            purpose,
-            "video",
-            snapshot=runtime_snapshot,
-            on_date=on_date,
-        ),
+        "suggested_video_api": video_target_decision.target,
         "suggested_lipsync": (
             _top_live_api_for_purpose(
                 purpose,
@@ -752,6 +766,8 @@ def optimize_shot_prompt(
                 intent_notes=intent_notes,
                 runtime_snapshot=policy_snapshot,
                 on_date=on_date,
+                api_engines=api_engines,
+                aspect_ratio=aspect_ratio,
             )
 
     char_lines = []
@@ -847,6 +863,8 @@ def optimize_shot_prompt(
             intent_notes=intent_notes,
             runtime_snapshot=policy_snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )["image_prompt"]
         normalized_fallback = _normalize_structured_image_prompt(fallback_prompt)
         if normalized_fallback is None:
@@ -861,6 +879,8 @@ def optimize_shot_prompt(
             intent_notes=intent_notes,
             runtime_snapshot=policy_snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
 
 

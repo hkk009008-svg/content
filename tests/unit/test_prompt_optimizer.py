@@ -747,7 +747,10 @@ def test_optimizer_prompt_keeps_auto_when_no_concrete_engine_is_ready():
 @pytest.mark.parametrize(
     ("suggestion", "reason"),
     [
-        ("GEMINI_OMNI", "unsupported"),
+        # Slice 3 re-admitted GEMINI_OMNI: under _fal_snapshot() (no google
+        # credential/module) the truthful denial is runtime availability,
+        # not product support (invariant 4).
+        ("GEMINI_OMNI", "runtime_unavailable"),
         ("SORA_2", "retired"),
         ("SORA_NATIVE", "not_selectable"),
         ("RUNWAY_ACT_ONE", "non_video"),
@@ -928,3 +931,122 @@ def test_optimizer_llm_path_uses_same_injected_enum_and_write_fence():
     assert result["suggested_video_api"] == "AUTO"
     assert "retired" in result["reasoning"]
     ensemble.competitive_generate.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# FIX SLICE R3 — the no-LLM fallback path (_fallback_optimize) must see the
+# same project-disabled/aspect-incompatible state R2 threaded into the LLM
+# path's _coerce_to_valid_keys -> evaluate_shot_target boundary. Before this
+# fix, _fallback_optimize picked suggested_video_api via
+# _top_live_api_for_purpose alone (no api_engines/aspect_ratio), so a
+# heuristic top-ranked engine that was disabled for the project or
+# aspect-incompatible could reach take metadata un-coerced whenever the LLM
+# ensemble was unavailable or raised.
+# ---------------------------------------------------------------------------
+
+def test_fallback_disabled_top_ranked_engine_not_suggested():
+    """A project-disabled top-ranked engine must not reach the fallback
+    spec's suggested_video_api."""
+    from llm.prompt_optimizer import _fallback_optimize, _top_live_api_for_purpose
+
+    # Confirm the un-coerced ranking pick really would have been KLING_3_0
+    # under this runtime state, so the assertion below actually exercises
+    # coercion rather than a ranking accident.
+    uncoerced = _top_live_api_for_purpose(
+        "static_portrait", "video",
+        snapshot=_fal_snapshot(), on_date=PRE_SUNSET,
+    )
+    assert uncoerced == "KLING_3_0"
+
+    result = _fallback_optimize(
+        user_input="a woman stands in a corridor",
+        characters=[{"id": "c1", "name": "A"}],
+        location={},
+        global_settings={},
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={"KLING_3_0": {"enabled": False}},
+    )
+    assert result["purpose"] == "static_portrait"
+    assert result["suggested_video_api"] != "KLING_3_0"
+    assert result["suggested_video_api"] == "AUTO"
+
+
+def test_fallback_aspect_incompatible_engine_not_suggested(monkeypatch):
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, _aspect: False,
+    )
+    from llm.prompt_optimizer import _fallback_optimize
+
+    result = _fallback_optimize(
+        user_input="a woman stands in a corridor",
+        characters=[{"id": "c1", "name": "A"}],
+        location={},
+        global_settings={},
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        aspect_ratio="9:16",
+    )
+    assert result["suggested_video_api"] == "AUTO"
+
+
+def test_fallback_without_project_state_still_accepts_live_target():
+    # Regression guard for the new optional parameters: omitting
+    # api_engines/aspect_ratio must not change the existing fallback
+    # suggestion for an already-eligible target.
+    from llm.prompt_optimizer import _fallback_optimize
+
+    result = _fallback_optimize(
+        user_input="a woman stands in a corridor",
+        characters=[{"id": "c1", "name": "A"}],
+        location={},
+        global_settings={},
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert result["suggested_video_api"] == "KLING_3_0"
+
+
+def test_fallback_path_threads_engine_context_into_video_suggestion(monkeypatch):
+    """Entry-point proof for the no-LLM path: optimize_shot_prompt() must
+    carry api_engines/aspect_ratio from global_settings into the
+    evaluate_shot_target call _fallback_optimize now applies to its
+    ranked suggested_video_api pick — mirroring R2's LLM-path proof
+    (test_optimize_shot_prompt_threads_engine_context_into_coercion_boundary)
+    for the fallback path the LLM ensemble raising exercises.
+    """
+    import llm.prompt_optimizer as prompt_optimizer
+
+    captured = {}
+    real_evaluate_shot_target = prompt_optimizer.evaluate_shot_target
+
+    def _spy(*args, **kwargs):
+        captured["api_engines"] = kwargs.get("api_engines")
+        captured["aspect_ratio"] = kwargs.get("aspect_ratio")
+        return real_evaluate_shot_target(*args, **kwargs)
+
+    monkeypatch.setattr(prompt_optimizer, "evaluate_shot_target", _spy)
+
+    failing_ensemble = MagicMock()
+    failing_ensemble.competitive_generate.side_effect = RuntimeError("timeout")
+    global_settings = {
+        "api_engines": {"KLING_3_0": {"enabled": False}},
+        "aspect_ratio": "9:16",
+    }
+
+    result = prompt_optimizer.optimize_shot_prompt(
+        user_input="a woman stands in a corridor",
+        characters=[{"id": "c1", "name": "A"}],
+        global_settings=global_settings,
+        ensemble=failing_ensemble,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert captured["api_engines"] == {"KLING_3_0": {"enabled": False}}
+    assert captured["aspect_ratio"] == "9:16"
+    assert result["suggested_video_api"] != "KLING_3_0"
