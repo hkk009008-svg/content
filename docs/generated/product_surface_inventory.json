@@ -286,6 +286,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "usePage",
+      "id": "frontend-operation:2d16901f52775de8",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 25,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "id": "frontend-operation:314029e29cd78efc",
       "kind": "direct_transport",
       "method": "PUT",
@@ -483,6 +499,22 @@
       },
       "transport_id": "frontend-transport:aaaec1e51b89b676",
       "url_template": "/api/projects/{1}/shots/{2}/keyframes/generate"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "usePage",
+      "id": "frontend-operation:44f0df306d4dd07a",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pages/EditPage.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -832,6 +864,22 @@
       },
       "transport_id": "frontend-transport:2d89c53d8127f23c",
       "url_template": "/api/projects/{1}/scenes/reorder"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "usePage",
+      "id": "frontend-operation:72f0fac97aab1d3d",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 143,
+        "path": "web/src/components/AppShell.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
     },
     {
       "backend_route_ids": [],
@@ -1682,6 +1730,22 @@
       "source": {
         "line": 36,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "usePage",
+      "id": "frontend-operation:ebc07488854d9829",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 42,
+        "path": "web/src/components/setup/SceneCueSheet.tsx"
       },
       "transport_id": null,
       "url_template": null
@@ -3852,6 +3916,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:2ddcf358df3ef199",
+      "kind": "unknown_wrapper_call",
+      "owner": "usePage",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/pages/EditPage.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "e.key",
       "id": "unresolved:326a6d1003a3f4ee",
       "kind": "unknown_wrapper_call",
@@ -3931,6 +4007,18 @@
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
         "line": 174,
+        "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:719df80ed1d8692d",
+      "kind": "unknown_wrapper_call",
+      "owner": "usePage",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 25,
         "path": "web/src/App.tsx"
       }
     },
@@ -4260,6 +4348,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:cf08a54d60a6bb7c",
+      "kind": "unknown_wrapper_call",
+      "owner": "usePage",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 143,
+        "path": "web/src/components/AppShell.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "liveShot",
       "id": "unresolved:cff5accffa8dc380",
       "kind": "unknown_wrapper_call",
@@ -4388,6 +4488,18 @@
       "source": {
         "line": 479,
         "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:ffd392b5a4ea58ec",
+      "kind": "unknown_wrapper_call",
+      "owner": "usePage",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 42,
+        "path": "web/src/components/setup/SceneCueSheet.tsx"
       }
     }
   ]

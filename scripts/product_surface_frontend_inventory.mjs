@@ -90,6 +90,31 @@ function propertyName(node) {
       ts.isStringLiteralLike(value.argumentExpression)) return value.argumentExpression.text;
   return undefined;
 }
+// A call whose callee is a member access (`client.request(id)`,
+// `client['request'](id)`) never resolves through symbol()'s identifier-only
+// lookup, so a callSymbol-keyed map (imports/wrappers) can never find it --
+// the object being a project-local namespace import is a fact about the
+// *object* expression, not the call expression itself. Surface that fact
+// separately so a namespace-import call site is not silently invisible to
+// the same opaque-import taxonomy plain `imported()` calls already get.
+function namespaceMemberAccess(checker, node) {
+  const value = unwrap(node);
+  if (!value) return undefined;
+  let member;
+  let objectNode;
+  if (ts.isPropertyAccessExpression(value)) {
+    member = value.name.text;
+    objectNode = value.expression;
+  } else if (ts.isElementAccessExpression(value) && value.argumentExpression &&
+      ts.isStringLiteralLike(value.argumentExpression)) {
+    member = value.argumentExpression.text;
+    objectNode = value.expression;
+  } else {
+    return undefined;
+  }
+  const objectSymbol = symbol(checker, objectNode);
+  return objectSymbol ? { objectSymbol, member } : undefined;
+}
 function declaredName(node) {
   if (!node) return undefined;
   if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) {
@@ -314,6 +339,16 @@ function moduleFacts(checker, file) {
   // scoped to project-owned code without touching the existing literal-URL
   // classification, which never needed the distinction.
   const localImports = new Set();
+  // A namespace import (`import * as client from './client'`) is the only
+  // import shape where a property-access callee (`client.request(id)`) is
+  // itself the call site of an unresolvable module member. A named import
+  // of an ordinary value (`import { MICRO_LABEL } from './index'`) binds a
+  // string/object whose OWN methods (`.replace`, `.map`, ...) are not calls
+  // into the imported module at all; treating every local-import identifier
+  // the same way for member-access calls would misclassify built-in method
+  // calls on an imported constant as opaque wrapper calls. Tracked
+  // separately from `localImports` so that distinction survives.
+  const namespaceImports = new Set();
   for (const statement of file.statements) {
     if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
       for (const item of statement.declarationList.declarations) {
@@ -327,10 +362,13 @@ function moduleFacts(checker, file) {
     if (!ts.isImportDeclaration(statement) || !statement.importClause) continue;
     const clause = statement.importClause;
     const names = [];
+    const namespaceNames = new Set();
     if (clause.name) names.push(clause.name);
     if (clause.namedBindings) {
-      if (ts.isNamespaceImport(clause.namedBindings)) names.push(clause.namedBindings.name);
-      else names.push(...clause.namedBindings.elements.map((item) => item.name));
+      if (ts.isNamespaceImport(clause.namedBindings)) {
+        names.push(clause.namedBindings.name);
+        namespaceNames.add(clause.namedBindings.name);
+      } else names.push(...clause.namedBindings.elements.map((item) => item.name));
     }
     const specifier = ts.isStringLiteralLike(statement.moduleSpecifier)
       ? statement.moduleSpecifier.text
@@ -341,9 +379,10 @@ function moduleFacts(checker, file) {
       const importSymbol = checker.getSymbolAtLocation(name);
       imports.set(importSymbol, name.text);
       if (isLocal) localImports.add(importSymbol);
+      if (isLocal && namespaceNames.has(name)) namespaceImports.add(importSymbol);
     }
   }
-  return { constants, imports, localImports };
+  return { constants, imports, localImports, namespaceImports };
 }
 function unknown(root, file, node, kind, reason, expression, owner) {
   const row = { domain: "frontend", kind, reason,
@@ -374,7 +413,7 @@ function transportTarget(checker, expression, aliases, callKind) {
   return undefined;
 }
 function analyzeFile(root, file, checker) {
-  const { constants, imports, localImports } = moduleFacts(checker, file);
+  const { constants, imports, localImports, namespaceImports } = moduleFacts(checker, file);
   const functions = functionFacts(checker, file);
   const aliases = new Map();
   const unresolved = [];
@@ -869,6 +908,43 @@ function analyzeFile(root, file, checker) {
       url_template: transport.row.url_template,
     });
   }
+  // A call through a project-local import we cannot see into (the wrapper's
+  // own file is analyzed separately, symbol-by-symbol, so its classification
+  // never crosses files) is opaque by construction -- there is no local
+  // fact that ever turns it "safe". Emitting nothing here used to be the
+  // failure mode in three shapes: a missing first argument (`logout()`, no
+  // urlNode at all), a non-literal first argument (parameter passthrough,
+  // a computed expression -- resolveUrl returns null), and a first argument
+  // that is itself a callback (`request(() => {...}, '/api/x')`, where
+  // argument 0 is never the URL). The first two still get an operations row
+  // (method/url_template null when nothing resolves); a callback-first call
+  // cannot be represented as "the call whose argument 0 is its URL" without
+  // fabricating a false url_template/method shape, so it degrades to
+  // unresolved-only -- noise control, never invisibility: every opaque call
+  // through a local import leaves at least one row behind.
+  function emitOpaqueImportedCall(node, wrapperName) {
+    const urlNode = node.arguments[0];
+    const urlValue = urlNode ? unwrap(urlNode) : undefined;
+    const isCallbackArgument = urlValue !== undefined &&
+      (ts.isArrowFunction(urlValue) || ts.isFunctionExpression(urlValue));
+    if (!isCallbackArgument) {
+      const urlTemplate = resolveUrl(checker, constants, urlNode);
+      const looksLikeUrl = urlTemplate !== null &&
+        (urlTemplate.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(urlTemplate));
+      operations.push({
+        expanded_wrapper: wrapperName,
+        kind: "unknown_wrapper_call",
+        method: null,
+        source: source(root, file, node),
+        _transport_ref: null,
+        url_template: looksLikeUrl ? urlTemplate : null,
+      });
+    }
+    unresolved.push(unknown(
+      root, file, node, "unknown_wrapper_call", "imported wrapper call",
+      text(file, urlNode), wrapperName,
+    ));
+  }
   function wrapperCalls(node) {
     if (ts.isCallExpression(node)) {
       const callSymbol = symbol(checker, node.expression);
@@ -913,36 +989,26 @@ function analyzeFile(root, file, checker) {
         imported && !suspiciousNodes.has(node) && !aliases.has(callSymbol) &&
         localImports.has(callSymbol)
       ) {
-        // A call through a project-local import we cannot see into (the
-        // wrapper's own file is analyzed separately, symbol-by-symbol, so
-        // its classification never crosses files) used to land here only
-        // when the URL argument was a literal that happened to look like a
-        // path or a scheme. A non-literal argument (parameter passthrough,
-        // a computed expression) made resolveUrl return null and the call
-        // site vanished from both operations and unresolved -- the live
-        // network call disappeared instead of surfacing as unresolved.
-        // Emit the same taxonomy row regardless of whether the URL resolved
-        // to something path-shaped; only the populated url_template differs.
-        const urlNode = node.arguments[0];
-        const urlValue = urlNode ? unwrap(urlNode) : undefined;
-        const isCallbackArgument = urlValue !== undefined &&
-          (ts.isArrowFunction(urlValue) || ts.isFunctionExpression(urlValue));
-        if (urlNode && !isCallbackArgument) {
-          const urlTemplate = resolveUrl(checker, constants, urlNode);
-          const looksLikeUrl = urlTemplate !== null &&
-            (urlTemplate.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(urlTemplate));
-          operations.push({
-            expanded_wrapper: imported,
-            kind: "unknown_wrapper_call",
-            method: null,
-            source: source(root, file, node),
-            _transport_ref: null,
-            url_template: looksLikeUrl ? urlTemplate : null,
-          });
-          unresolved.push(unknown(
-            root, file, node, "unknown_wrapper_call", "imported wrapper call",
-            text(file, urlNode), imported,
-          ));
+        emitOpaqueImportedCall(node, imported);
+      } else if (!callSymbol && !suspiciousNodes.has(node)) {
+        // node.expression didn't resolve to a plain identifier symbol at
+        // all -- the callee may still be an opaque call through a local
+        // namespace import reached via member access (`client.request(id)`
+        // where `import * as client from './client'`). symbol()/imports/
+        // wrappers are all keyed by the call's own identifier symbol, which
+        // a PropertyAccessExpression callee never has, so this case fell
+        // through every branch above and vanished. Recognize it separately
+        // by resolving the *object* expression's symbol instead of the
+        // call's -- scoped to namespaceImports (not the broader
+        // localImports) so a built-in method call on an imported constant
+        // (`MICRO_LABEL.replace(...)`) is never misread as a wrapper call.
+        const access = namespaceMemberAccess(checker, node.expression);
+        const namespaceName = access ? imports.get(access.objectSymbol) : undefined;
+        if (
+          access && namespaceName && namespaceImports.has(access.objectSymbol) &&
+          !aliases.has(access.objectSymbol)
+        ) {
+          emitOpaqueImportedCall(node, `${namespaceName}.${access.member}`);
         }
       }
     }

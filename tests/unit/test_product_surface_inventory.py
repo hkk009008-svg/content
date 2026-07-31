@@ -605,6 +605,132 @@ export function run(id: string) {
     assert imported_rows[0]["expression"] == "id"
 
 
+def test_imported_wrapper_zero_argument_call_still_lands_in_unresolved(
+    tmp_path: Path,
+) -> None:
+    """A zero-argument call through a project-local import must not vanish.
+
+    Before the fix, the imported-wrapper branch gated its only push on
+    `node.arguments[0]` (`if (urlNode && !isCallbackArgument)`); with zero
+    arguments `urlNode` is undefined and the whole condition is false, so a
+    live `logout()` call disappeared from both operations and unresolved
+    instead of surfacing as an opaque, unclassifiable call.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "zero-argument-wrapper.ts",
+        """
+import { logout } from './client'
+
+export function run() {
+  logout()
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in unknown} == {"logout"}
+    logout_op = unknown[0]
+    assert logout_op["method"] is None
+    assert logout_op["url_template"] is None
+
+    reasons = {row["reason"] for row in result["unresolved"]}
+    assert "imported wrapper call" in reasons
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["owner"] == "logout"
+    assert imported_rows[0]["expression"] == ""
+
+
+def test_imported_wrapper_callback_first_argument_degrades_to_unresolved_only(
+    tmp_path: Path,
+) -> None:
+    """A callback-first network wrapper must surface, never vanish silently.
+
+    Before the fix, `isCallbackArgument` guarded the single push that
+    produced both the operations row and the unresolved row, so a genuine
+    `request(() => {...}, '/api/x')`-shaped wrapper -- callback first,
+    URL second -- disappeared entirely. Noise control (not mistaking a
+    callback for a URL) must not mean invisibility: the fix keeps the call
+    out of `operations` (its URL argument position is not argument 0, so an
+    operations row would misrepresent it) but still emits the unresolved
+    row -- unresolved-only degradation, not a silent drop.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "callback-first-wrapper.ts",
+        """
+import { request } from './client'
+
+export function run() {
+  request(() => {}, '/api/callback-first')
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert unknown == []
+    reasons = {row["reason"] for row in result["unresolved"]}
+    assert "imported wrapper call" in reasons
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["owner"] == "request"
+
+
+def test_namespace_access_imported_wrapper_call_lands_in_unresolved(
+    tmp_path: Path,
+) -> None:
+    """A call through a namespace-imported local module must not vanish silently.
+
+    `import * as client from './client'; client.request(id)` calls through
+    a PropertyAccessExpression callee. The identifier-only `symbol()` /
+    `imports.get(callSymbol)` lookup used by the plain-imported-call branch
+    cannot resolve a property access, so the call disappeared from both
+    operations and unresolved. Fixed by also recognizing a call whose callee
+    is `<local-imported-namespace>.<member>`.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "namespace-wrapper.ts",
+        """
+import * as client from './client'
+
+export function run(id: string) {
+  client.request(id)
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in unknown} == {"client.request"}
+    reasons = {row["reason"] for row in result["unresolved"]}
+    assert "imported wrapper call" in reasons
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["owner"] == "client.request"
+
+
 def test_cross_file_opaque_wrapper_call_and_its_own_definition_both_surface(
     tmp_path: Path,
 ) -> None:
