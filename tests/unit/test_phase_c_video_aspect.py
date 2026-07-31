@@ -61,6 +61,7 @@ class TestVeoNativeAspect:
         # phase_c_ffmpeg lazy-imports 'from veo_native import VeoNativeAPI' inside the
         # VEO_NATIVE branch — patch sys.modules so it picks up our stub.
         # Force reimport since phase_c_ffmpeg may already be cached.
+        _saved_veo = sys.modules.pop("veo_native", None)
         sys.modules.pop("phase_c_ffmpeg", None)
         sys.modules["veo_native"] = mock_veo_native_mod
 
@@ -82,7 +83,15 @@ class TestVeoNativeAspect:
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
-            sys.modules.pop("veo_native", None)
+            # Restore, not just pop. A sibling that did `from veo_native import ...`
+            # at collection time holds functions closed over the ORIGINAL module's
+            # globals; popping makes a later patch("veo_native.<attr>") re-import a
+            # DIFFERENT object and patch the wrong one, so the real value leaks
+            # through and the failure names the innocent sibling.
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
 
         return mock_inst
 
@@ -120,6 +129,7 @@ class TestGeminiOmniAspect:
         mock_omni_mod = MagicMock()
         mock_omni_mod.GeminiOmniAPI.return_value = mock_inst
 
+        _saved_omni = sys.modules.pop("gemini_omni_native", None)
         sys.modules.pop("phase_c_ffmpeg", None)
         sys.modules["gemini_omni_native"] = mock_omni_mod
 
@@ -141,7 +151,14 @@ class TestGeminiOmniAspect:
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
-            sys.modules.pop("gemini_omni_native", None)
+            # Restore, not just pop -- test_gemini_omni_native.py:22 does
+            # `from gemini_omni_native import ...` at collection time, so popping
+            # makes its patch("gemini_omni_native.settings") land on a freshly
+            # re-imported module the already-bound functions never consult.
+            if _saved_omni is not None:
+                sys.modules["gemini_omni_native"] = _saved_omni
+            else:
+                sys.modules.pop("gemini_omni_native", None)
 
         return mock_inst
 
