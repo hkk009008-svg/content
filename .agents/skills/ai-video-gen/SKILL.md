@@ -56,10 +56,13 @@ Runway's engine migrated from Act-One (retired — no longer constructible on
 the Runway API) to **Act-Two** (`performance/act_two.py`). The routing engine
 name stays `ACT_ONE` / catalog key `RUNWAY_ACT_ONE` for backward-compat with
 existing cost/routing data, but it dispatches the live `act_two` model over
-the same `RUNWAYML_API_SECRET` credential. **Viggle is contained as
-KNOWN_BROKEN** in the provider catalog — its adapter (`performance/viggle.py`)
-targets the wrong subdomain/path/field names versus the real `apis.viggle.ai`
-contract; do not route new work to it pending a dedicated repair slice.
+the same `RUNWAYML_API_SECRET` credential. **Viggle is uncontained as of
+2026-08-01 (ADR-082)** — its adapter (`performance/viggle.py`) was rewritten to
+the official `apis.viggle.ai/v1/renders` contract and `domain/performance.py`
+rule 3 now routes action-without-dialogue shots to `ENGINE_VIGGLE`. Catalog
+state is `LIMITED`, not `SUPPORTED`: contract-correct and unit-tested, never
+exercised against the live API, so treat the first real render as the
+verification run.
 
 **Cascade logic**: Try primary → on failure, next in chain → if all exhausted, wait 30s for quota refresh → retry 1 additional full cycle by default (`MAX_CASCADE_RETRIES = 1` in `phase_c_ffmpeg.py`; the `cascade_retry_limit` UI knob raises it per project).
 
@@ -177,7 +180,7 @@ This is appended to every image generation prompt via the Style Director.
 | Veo API | `veo_native.py` |
 | Gemini Omni API (Google-first primary) | `gemini_omni_native.py` |
 | LTX API | `ltx_native.py` |
-| Performance capture (Act-Two, LivePortrait, Viggle) | `performance/` package: `performance/act_two.py` (Runway, migrated from Act-One), `performance/live_portrait.py`, `performance/viggle.py` (KNOWN_BROKEN); dispatched by `performance/_router.py` |
+| Performance capture (Act-Two, LivePortrait, Viggle) | `performance/` package: `performance/act_two.py` (Runway, migrated from Act-One), `performance/live_portrait.py`, `performance/viggle.py` (LIMITED — see ADR-082); dispatched by `performance/_router.py` |
 | ComfyUI workflows | `pulid.json` (production, 22 nodes) — the only image tier since the max tier was retired (WS1; DECISIONS.md ADR-065) |
 
 ## Common Failure Modes

@@ -117,7 +117,7 @@ Authoritative list (every variable consumed by the pipeline):
 | `CARTESIA_API_KEY` | Optional | Cartesia TTS path (Sonic 3.5 since 2026-08-01; routing key stays `CARTESIA_SONIC_2`) |
 | `STABILITY_API_KEY` | Optional | Stable Audio 2 foley generator (currently dormant in audio/ — see DECISIONS.md) |
 | `SUNO_API_KEY` (+ `SUNO_API_BASE`) | Optional | Suno V5 BGM (defaults to FAL Stable Audio) |
-| `VIGGLE_API_KEY` | Optional | Viggle performance capture (Mode A only). **Contained since Slice 6c (2026-07-31):** the live adapter (`performance/viggle.py`) mismatches Viggle's now-official API (wrong subdomain/path/polling shape/field names), so the catalog marks it `KNOWN_BROKEN` and `domain.performance.route_performance_engine` never auto-selects it (the action-without-dialogue case that used to route here now returns `SKIP`) — setting this key alone will not produce a working Viggle capture until the adapter-repair slice lands. |
+| `VIGGLE_API_KEY` | Optional | Viggle performance capture (Mode A only). **Uncontained 2026-08-01 (ADR-082):** the adapter was rewritten to the official `apis.viggle.ai/v1/renders` contract and `domain.performance.route_performance_engine` auto-selects it again for action-without-dialogue shots. Catalog state is `LIMITED`, not `SUPPORTED` — contract-correct and unit-tested, but never exercised against the live API, so your first render is also the first live verification. Those shots now need a driving video (Mode-B synthesis or an operator upload). |
 
 ### Google Cloud / Vertex AI
 

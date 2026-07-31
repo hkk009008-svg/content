@@ -54,23 +54,29 @@ def test_catalog_exactly_covers_legacy_registry_plus_fal_svd_mutation_pin() -> N
     assert CATALOG["VIGGLE"].legacy_visible is False
 
 
-def test_viggle_is_known_broken_and_fails_closed() -> None:
-    """Slice 6c3 found Viggle's adapter (performance/viggle.py) targeted
-    api.viggle.ai/v1/motion-transfer with files={character_image,
-    motion_video} while the official developer API at docs.viggle.ai is
-    apis.viggle.ai/v1/renders with fields {image, motion_video}. The
-    adapter-repair slice has since rewritten performance/viggle.py to that
-    official contract, but this entry's product_support intentionally
-    stays KNOWN_BROKEN — flipping it requires a coordinated update to
-    scripts/check_provider_catalog_claims.py, .env.example, and both
-    ai-video-gen/SKILL.md copies that is out of that slice's owned
-    pathspec (see domain/provider_catalog.py's VIGGLE entry comment).
-    KNOWN_BROKEN must fail closed (selectable/dispatchable/spendable all
-    False), same shape as the RUNWAY_ACT_ONE precedent, and must cite the
-    real docs URL as its source.
+def test_viggle_is_limited_and_not_a_selectable_video_engine() -> None:
+    """Slice 6c3 found Viggle's adapter targeted api.viggle.ai/v1/motion-transfer
+    with files={character_image, motion_video} while the official developer API
+    at docs.viggle.ai is apis.viggle.ai/v1/renders with fields {image,
+    motion_video}. The adapter was rewritten to that official contract and
+    uncontained 2026-08-01 (ADR-082).
+
+    product_support is LIMITED, deliberately NOT SUPPORTED: the adapter is
+    contract-correct and unit-tested but has never been exercised against the
+    live Viggle API, and SUPPORTED would assert an end-to-end result nobody has
+    observed. LIMITED is outside both denied-support sets, so it genuinely
+    enables dispatch instead of merely relabelling a blocked entry.
+
+    The flags stay all-False, and that is NOT leftover containment: Viggle is a
+    Mode-A performance-capture engine, not a selectable video engine. It has no
+    row in domain.scene_decomposer.API_REGISTRY and legacy_visible=False.
+    LIMITED lifts the fail-closed CONSTRAINT on these flags; it does not mean
+    they should be set. domain/performance.py rule 3 is what actually selects
+    ENGINE_VIGGLE, and performance/_router.py dispatches it without consulting
+    this catalog at all.
     """
     entry = CATALOG["VIGGLE"]
-    assert entry.product_support is ProductSupport.KNOWN_BROKEN
+    assert entry.product_support is ProductSupport.LIMITED
     assert entry.selectable is False
     assert entry.dispatchable is False
     assert entry.spendable is False

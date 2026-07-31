@@ -15,7 +15,8 @@ Checked claims (the exact drift Slice 14a found and fixed):
   - SORA_2 is fully retired        (Lifecycle.RETIRED + ProductSupport.UNSUPPORTED)
   - RUNWAY_ACT_ONE is retired      (migrated to Act-Two; catalog key kept for
                                      compat — Lifecycle.RETIRED + KNOWN_BROKEN)
-  - VIGGLE is KNOWN_BROKEN         (contained pending a dedicated repair slice)
+  - VIGGLE is LIMITED              (uncontained ADR-082; contract-correct,
+                                     not live-verified)
   - LTX duration is exactly {6, 8, 10} seconds
 
 This is a narrow, hand-picked fact set, not a general doc-claim parser — it
@@ -106,12 +107,14 @@ def check(repo_root: Path = ROOT) -> list[str]:
             f"re-verify that migration note is still accurate"
         )
 
-    viggle = _entry_or_missing("VIGGLE", "it is a contained, KNOWN_BROKEN entry")
-    if viggle is not None and viggle.product_support is not ProductSupport.KNOWN_BROKEN:
+    viggle = _entry_or_missing("VIGGLE", "it is an uncontained, LIMITED entry")
+    if viggle is not None and viggle.product_support is not ProductSupport.LIMITED:
         messages.append(
             f"VIGGLE product_support is {viggle.product_support}, not "
-            f"KNOWN_BROKEN — the ai-video-gen SKILL.md and .env.example claim "
-            f"it is contained/broken pending a dedicated repair slice"
+            f"LIMITED — the ai-video-gen SKILL.md and .env.example describe an "
+            f"uncontained adapter that is contract-correct but not "
+            f"live-verified (ADR-082). SUPPORTED would over-claim; "
+            f"KNOWN_BROKEN would contradict domain/performance.py rule 3"
         )
 
     ltx = _entry_or_missing("LTX", "it has a duration ParameterConstraint of {6, 8, 10}")

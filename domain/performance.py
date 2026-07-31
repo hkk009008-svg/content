@@ -10,7 +10,7 @@ Routing matrix (from PERFORMANCE_CAPTURE_HANDOFF.md §3):
   |--------------------------------------------------|---------------|
   | dialogue + (portrait|medium)                     | ACT_ONE       |
   | dialogue + close-up + budget priority            | LIVE_PORTRAIT |
-  | no dialogue + action shot type                   | SKIP (VIGGLE contained, Slice 6c) |
+  | no dialogue + action shot type                   | VIGGLE        |
   | wide / landscape (face sub-100px)                | SKIP          |
   | no characters                                    | SKIP          |
 
@@ -114,11 +114,8 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
       1. SKIP — no characters, or shot too wide for face to matter
       2. ACT_ONE — dialogue + (portrait | medium)
       3. LIVE_PORTRAIT — dialogue + close-up + explicit budget signal
-      4. action shot type, no dialogue — SKIP while Viggle stays contained
-         (catalog KNOWN_BROKEN, Slice 6c); performance/viggle.py itself has
-         since been repaired to the official contract, but this branch
-         still returns ENGINE_SKIP rather than ENGINE_VIGGLE — see the
-         comment on this branch below for why
+      4. VIGGLE — action shot type, no dialogue (uncontained 2026-08-01,
+         ADR-082; catalog product_support=LIMITED)
       5. Default — ACT_ONE if dialogue, else SKIP
 
     `scene` is reserved for future scene-level routing signals; today only
@@ -142,28 +139,23 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
         return ENGINE_ACT_ONE
 
     # 3. VIGGLE — action without dialogue, full-body motion.
-    # CONTAINED (Slice 6c, then re-verified in the adapter-repair slice):
-    # performance/viggle.py has been rewritten to the official
+    # UNCONTAINED 2026-08-01 (ADR-082), the coordinated flip the containment
+    # comment here used to call for: this branch, domain/provider_catalog.py's
+    # VIGGLE entry, scripts/check_provider_catalog_claims.py's hard-coded
+    # claim, .env.example, and BOTH ai-video-gen/SKILL.md copies moved in one
+    # commit, so no two of them can tell contradictory stories.
+    #
+    # performance/viggle.py was rewritten to the official
     # apis.viggle.ai/v1/renders contract (endpoint, field names,
-    # background_mode enum, and ready|failed|cancelled polling — see that
-    # module's docstring) and no longer mismatches docs.viggle.ai. This
-    # branch still returns ENGINE_SKIP rather than ENGINE_VIGGLE anyway,
-    # deliberately kept in lockstep with domain/provider_catalog.py's
-    # VIGGLE entry, which ALSO still reads product_support=KNOWN_BROKEN —
-    # not because the adapter is broken, but because flipping either one
-    # alone would leave this module and the catalog telling contradictory
-    # stories, and flipping the catalog entry requires updating
-    # scripts/check_provider_catalog_claims.py's hard-coded VIGGLE claim
-    # plus .env.example plus both ai-video-gen/SKILL.md copies in the same
-    # breath (verified: dataclasses.replace(entry, product_support=SUPPORTED)
-    # + a rerun of that checker's check() reports a drift) — none of which
-    # are in the adapter-repair slice's owned pathspec. Action motion comes
-    # from the video engines natively in the meantime; flip this branch to
-    # ENGINE_VIGGLE (and update TestViggleRouting's two containment-pinning
-    # tests below) only alongside that coordinated catalog+docs+checker
-    # update.
+    # background_mode enum, ready|failed|cancelled polling) with per-failure
+    # -mode classification. The catalog now reads product_support=LIMITED,
+    # NOT SUPPORTED: the adapter is contract-correct and unit-tested, but has
+    # never been exercised against the live Viggle API. LIMITED is outside
+    # both denied-support sets (domain/provider_catalog.py:259,
+    # domain/video_engine_policy.py:105) so dispatch is genuinely enabled,
+    # while the catalog stops short of claiming a live-verified engine.
     if not has_dlg and st == SHOT_TYPE_ACTION:
-        return ENGINE_SKIP
+        return ENGINE_VIGGLE
 
     # 4. Dialogue in any other framing still benefits from ACT_ONE
     if has_dlg:

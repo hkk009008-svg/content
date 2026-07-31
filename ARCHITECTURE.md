@@ -1510,7 +1510,7 @@ Remaining §9 claims last verified: 2026-06-13.*
 |---|---|---|
 | `ACT_ONE` | `Semaphore(1)` | **Required by dispatch time** — routes to Runway Act-Two (`performance/act_two.py`), which has no audio-only mode; `domain.performance.precondition_error` accepts `audio_path` alone at the pre-check (enables Mode-B synth before dispatch), but `act_two.py`'s own runtime check rejects a call that reaches it with neither a driving video nor Mode-B output |
 | `LIVE_PORTRAIT` | `Semaphore(2)` | **Required** — bails to None if absent |
-| `VIGGLE` | `Semaphore(1)` | **Required** — Mode A only (no autopilot); see the containment note below |
+| `VIGGLE` | `Semaphore(1)` | **Required** — Mode A only (no autopilot); live again at catalog LIMITED, see the note below |
 | `SKIP` / empty | (bypass) | early `return None` |
 
 Limits declared at [performance/_router.py:21-25](performance/_router.py:21).
@@ -1518,29 +1518,37 @@ No timeout on semaphore acquisition — callers block indefinitely. Per-adapter
 poll timeouts bound the overall hold time (300s in act_two/live_portrait/viggle,
 240s in driving_video helpers).
 
-**Viggle is contained, not reachable (Slice 6c, 2026-07-31).** The catalog
-now carries `VIGGLE` as `ProductSupport.KNOWN_BROKEN`
-([domain/provider_catalog.py](domain/provider_catalog.py)) — the live adapter
-(`performance/viggle.py`) targets a pre-official endpoint shape
-(`api.viggle.ai`, `files={"character_image", "motion_video"}`) that provably
-mismatches Viggle's now-official developer API (`docs.viggle.ai`:
-`apis.viggle.ai`, differently-named JSON fields, a different polling path).
-Containment happens at the **routing-decision layer, not `_router.py`
-itself**: `domain.performance.route_performance_engine`
-([domain/performance.py:110](domain/performance.py:110)) is the ONLY
-function that produces the `engine` value `generate_performance_take`
-dispatches, and its action-without-dialogue branch — which used to return
-`ENGINE_VIGGLE` — now returns `ENGINE_SKIP` instead; `performance/_router.py`
-itself has NO catalog-aware gate of its own — it still calls
+**Viggle is live again (ADR-082, 2026-08-01).** Slice 6c contained it because
+the adapter targeted a pre-official endpoint shape (`api.viggle.ai`,
+`files={"character_image", "motion_video"}`) that mismatched Viggle's official
+developer API. `performance/viggle.py` was rewritten to that official contract
+(`apis.viggle.ai/v1/renders`, `{image, motion_video}`, `background_mode` enum,
+`ready|failed|cancelled` polling, per-failure-mode classification), and the
+containment was lifted across all eight sites in one commit.
+
+The catalog carries `VIGGLE` as `ProductSupport.LIMITED`
+([domain/provider_catalog.py](domain/provider_catalog.py)) — deliberately not
+`SUPPORTED`. The adapter is contract-correct and unit-tested but has never been
+exercised against the live Viggle API, so the first production render is also
+the first live verification. `LIMITED` sits outside both denied-support sets,
+so it enables dispatch rather than merely relabelling a blocked entry.
+
+Routing happens at the **routing-decision layer, not `_router.py` itself**:
+`domain.performance.route_performance_engine`
+([domain/performance.py:110](domain/performance.py:110)) is the ONLY function
+that produces the `engine` value `generate_performance_take` dispatches, and
+its action-without-dialogue branch returns `ENGINE_VIGGLE` again. Consequence:
+those shots now require a driving video (Mode-B synthesis or an operator
+upload) where containment previously produced nothing.
+
+`performance/_router.py` has NO catalog-aware gate of its own — it calls
 `generate_viggle_performance()` whenever `engine == ENGINE_VIGGLE` and a
-driving video is present — but nothing in the live pipeline ever produces
-that engine value anymore, so the broken call site is unreachable in
-practice, not structurally disabled. (The catalog row's own comment records the converse
-explicitly: `domain/performance.py` and `performance/_router.py` do not
-import `domain.provider_catalog` at all, so the KNOWN_BROKEN entry does not
-itself gate anything — it is the routing-function edit above that closes the
-path.) Re-enabling Viggle requires a dedicated adapter-repair slice against
-the official contract, not just flipping the catalog status.
+driving video is present. Neither it nor `domain/performance.py` imports
+`domain.provider_catalog`, so the catalog row does not gate anything; the
+routing function is the sole control. Because those two are hand-maintained in
+parallel rather than derived from each other,
+`TestViggleRouting::test_viggle_catalog_entry_agrees_with_the_route` fails the
+build if they ever disagree again.
 
 ### 10.2 Mode A vs Mode B
 
@@ -1667,7 +1675,7 @@ Assembler dedup: `cinema_pipeline.py:_build_scene_packages` (`:709`) counts both
 
 Set via `project.global_settings.dialogue_voice_mode` (see OPERATIONS.md §8).
 
-*Last verified: 2026-06-13 (§10.1 Viggle containment + §10.6 lipsync cascade
+*Last verified: 2026-08-01 (§10.1 Viggle uncontained ADR-082; §10.6 lipsync cascade
 engine counts re-verified 2026-08-01 — generation cascade is 2 engines, not
 4: Hedra removed WS4 2026-07-18, Kling's lipsync endpoint dropped Task 12
 2026-07-19)*

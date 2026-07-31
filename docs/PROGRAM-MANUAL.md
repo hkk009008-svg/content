@@ -594,7 +594,7 @@ A naming hazard that used to recur throughout is now gone: the second, unrelated
 
 | Name | file:line | What it does |
 |---|---|---|
-| `route_performance_engine` | `domain/performance.py:110` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → SKIP (action no-dialogue — VIGGLE contained as KNOWN_BROKEN, Slice 6c) → ACT_ONE (remaining dialogue) → SKIP. |
+| `route_performance_engine` | `domain/performance.py:110` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → VIGGLE (action no-dialogue; uncontained ADR-082, catalog LIMITED) → ACT_ONE (remaining dialogue) → SKIP. |
 | `should_capture` | `domain/performance.py:72` | Pure gate (skip no-chars/landscape/wide-no-dialogue). |
 | `shot_needs_driving_video` | `domain/performance.py:94` | Whether the shot needs a driving video (all real engines do; only SKIP doesn't). |
 | `driving_video_source` | `domain/performance.py:160` | Driving-video source (`upload`/`tts_auto`/`none`). |
@@ -859,7 +859,7 @@ Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/aut
 |---|---|
 | no characters / wide-no-dialogue / landscape | `SKIP` |
 | dialogue + face-readable (`close_up`/`portrait`/`medium`) | `ACT_ONE` (or `LIVE_PORTRAIT` if `performance_budget_mode="budget"`) |
-| action, no dialogue | `SKIP` (VIGGLE contained — KNOWN_BROKEN, Slice 6c) |
+| action, no dialogue | `VIGGLE` (uncontained ADR-082; catalog `LIMITED` — needs a driving video) |
 | any remaining dialogue | `ACT_ONE` |
 
 Driving-video mode (`driving_video_source`, `domain/performance.py:160`): `"upload"` when `driving_video_path` set; `"tts_auto"` when engine ≠ SKIP with dialogue; else `"none"`. ACT_ONE (Runway Act-Two, `performance/act_two.py`) requires a driving video by dispatch time — `precondition_error` accepts audio_path alone at this pre-check since Mode-B can still synthesize one from it before dispatch; LIVE_PORTRAIT/VIGGLE require an explicit driving video.
@@ -1776,7 +1776,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `STABILITY_API_KEY` | Optional | — | Stable Audio foley/BGM |
 | `SUNO_API_KEY` (alias `SUNO_TOKEN`) | Optional | — | Suno V5 BGM (`config/settings.py:117`) |
 | `SUNO_API_BASE` | Optional | `https://api.suno.ai/v1` | Suno endpoint override |
-| `VIGGLE_API_KEY` | Optional | — | Viggle Mode-A retarget (currently cataloged `KNOWN_BROKEN`, Slice 6c — action-shot routing falls straight to SKIP until the adapter is repaired). `HEDRA_API_KEY` was removed: Hedra has zero remaining consumers post-WS4. |
+| `VIGGLE_API_KEY` | Optional | — | Viggle Mode-A retarget. Uncontained 2026-08-01 (ADR-082); cataloged `LIMITED` — contract-correct, not live-verified. Action-shot routing selects it again. `HEDRA_API_KEY` was removed: Hedra has zero remaining consumers post-WS4. |
 | `GOOGLE_CLOUD_PROJECT` | Req. for Veo/Vertex | — | Vertex AI project ID |
 | `GOOGLE_CLOUD_LOCATION` | Optional | `us-central1` | Vertex AI region |
 | `TAVILY_API_KEY` / `FIRECRAWL_API_KEY` | Optional | — | Web research / scraping (Pexels config removed — unwired, Slice 6c) |

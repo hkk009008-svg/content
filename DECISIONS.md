@@ -4112,3 +4112,84 @@ Cross-ref: `ARCHITECTURE.md` §4.8 + §15 (§15.9 removed);
 `cinema/phases/__init__.py`; `cinema/phases/base.py`;
 `docs/PROGRAM-MANUAL.md`; `docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md`
 (slice 15a); `docs/AUDIT-product-unification-2026-07-30.md`.
+
+## ADR-082 — Uncontain Viggle at ProductSupport.LIMITED, not SUPPORTED
+
+Date: 2026-08-01
+
+Status: Accepted. Closes the containment opened by Slice 6c3 and deferred by
+the adapter-repair slice.
+
+Context. Slice 6c3 found `performance/viggle.py` targeting
+`api.viggle.ai/v1/motion-transfer` with `files={character_image, motion_video}`
+while the official developer API is `apis.viggle.ai/v1/renders` with fields
+`{image, motion_video}`. The adapter was contained two ways: the catalog entry
+went `KNOWN_BROKEN`, and `domain/performance.py` rule 3 returned `ENGINE_SKIP`
+for action-without-dialogue instead of `ENGINE_VIGGLE`. A later slice rewrote
+the adapter to the official contract (endpoint, field names, `background_mode`
+enum, `ready|failed|cancelled` polling, per-failure-mode classification) but
+deliberately did NOT flip either containment, because the flip spans files
+outside any one slice's owned pathspec and a half-flip leaves the router and
+the catalog telling contradictory stories.
+
+Decision — LIMITED, not SUPPORTED. This is the substance of the ADR, not a
+detail. The evidence available is: the adapter matches the published contract,
+and unit tests cover it. The adapter has NEVER been exercised against the live
+Viggle API. `SUPPORTED` would assert an end-to-end result no one has observed.
+`LIMITED` is outside both denied-support sets — `__post_init__`'s fail-closed
+set (`domain/provider_catalog.py:259`) and
+`domain/video_engine_policy.py:105`'s `_UNSUPPORTED_PRODUCT_STATES` — so it
+genuinely enables dispatch rather than merely relabelling a blocked entry. It
+is an established state here, not one invented for this ADR (13 other catalog
+entries already use it).
+
+`flags` stay `(False, False, False)`. That is not leftover containment: Viggle
+is a Mode-A performance-capture engine, not a selectable video engine — no row
+in `domain.scene_decomposer.API_REGISTRY`, `legacy_visible=False`. LIMITED
+lifts the fail-closed CONSTRAINT on those flags; it does not mean they should
+be set. `performance/_router.py` dispatches Viggle without consulting the
+catalog at all.
+
+Scope — eight sites in one commit, because any subset is a contradiction:
+  1. `domain/provider_catalog.py`      VIGGLE entry -> ProductSupport.LIMITED
+  2. `domain/performance.py`           rule 3 -> ENGINE_VIGGLE
+  3. `domain/performance.py`           routing-matrix table + docstring
+  4. `scripts/check_provider_catalog_claims.py`  asserts LIMITED
+  5. `.env.example`                    VIGGLE_API_KEY guidance
+  6. `.claude/skills/ai-video-gen/SKILL.md`
+  7. `.agents/skills/ai-video-gen/SKILL.md`  (body byte-copied — ADR-077's
+     twin-parity gate fails the build otherwise)
+  8. three containment-pinning tests, in TWO files
+
+The containment comment predicted SEVEN sites and TWO pinning tests. It was
+wrong by one file and one test: `tests/unit/test_provider_catalog.py::
+test_viggle_is_known_broken_and_fails_closed` was not on the list, and the
+suite is what found it. A hand-maintained "everything that must move together"
+list drifts exactly like a hand-maintained line-number anchor — which is why
+the replacement is a TEST, not a longer comment:
+`TestViggleRouting::test_viggle_catalog_entry_agrees_with_the_route` fails if
+the catalog and rule 3 ever disagree again. These two are hand-maintained in
+parallel, not derived from each other, so nothing else stops the drift.
+
+Evidence — every guard proven able to FAIL, by mutating the catalog back to
+KNOWN_BROKEN while leaving rule 3 routing to VIGGLE (the exact contradiction
+this ADR closes):
+  $ pytest -k catalog_entry_agrees   -> 1 failed   (restored: 38 passed)
+  $ pytest tests/unit/test_provider_catalog.py -> 1 failed, 60 passed
+                                                  (restored: all pass)
+  $ scripts/check_provider_catalog_claims.py -> exit 1  (restored: exit 0)
+  $ scripts/check_skill_twin_parity.py       -> both dirs PASS
+An earlier attempt at this mutation used a perl one-liner that silently did
+not substitute; the "pass" it produced was recorded as meaningless and redone
+in Python with an assertion on the anchor. A mutation test that does not
+mutate proves nothing.
+
+Consequence — action shots without dialogue now route to a real engine and
+therefore need a driving video (Mode-B synthesis or an operator upload), where
+they previously produced nothing. The first production render is also the
+first live verification of the adapter; if the contract is wrong after all,
+the per-failure-mode classification added in the repair slice is what will say
+so, rather than a blanket catch-all.
+
+Cross-ref: ADR-077 (skill-twin parity); `performance/viggle.py`;
+`performance/_router.py:78-83`; `domain/performance.py` rule 3.

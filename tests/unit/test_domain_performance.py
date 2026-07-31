@@ -75,17 +75,24 @@ class TestLivePortraitRouting:
 
 
 class TestViggleRouting:
-    def test_action_no_dialogue_skips_while_viggle_contained(self):
-        # Slice 6c containment: performance/viggle.py has since been
-        # repaired to the official apis.viggle.ai contract (the
-        # adapter-repair slice), but this route still returns SKIP —
-        # domain/provider_catalog.py's VIGGLE entry stays KNOWN_BROKEN
-        # until a follow-up slice updates scripts/check_provider_catalog_claims.py,
-        # .env.example, and both ai-video-gen/SKILL.md copies alongside the
-        # flip (see domain/performance.py's rule-3 comment). Flips back to
-        # ENGINE_VIGGLE when that coordinated update lands.
+    def test_action_no_dialogue_routes_viggle(self):
+        # Uncontained 2026-08-01 (ADR-082). This assertion was the Slice-6c
+        # containment pin (== ENGINE_SKIP) and is now the live-routing pin.
         shot = _shot(shot_type="action", dialogue="")
-        assert route_performance_engine(shot, None) == ENGINE_SKIP
+        assert route_performance_engine(shot, None) == ENGINE_VIGGLE
+
+    def test_viggle_catalog_entry_agrees_with_the_route(self):
+        # The containment was a SEVEN-file agreement, and two of those files
+        # (this router and the catalog) are hand-maintained in parallel rather
+        # than derived from each other — so nothing but a test stops them
+        # drifting back into contradiction. KNOWN_BROKEN here while rule 3
+        # returns ENGINE_VIGGLE is exactly the state ADR-082 closed.
+        from domain.provider_catalog import CATALOG, ProductSupport
+        assert CATALOG["VIGGLE"].product_support is ProductSupport.LIMITED, (
+            "catalog says VIGGLE is "
+            f"{CATALOG['VIGGLE'].product_support}, but domain/performance.py "
+            "rule 3 routes action/no-dialogue shots to it"
+        )
 
     def test_action_with_dialogue_routes_act_one(self):
         shot = _shot(shot_type="action", dialogue="Charge!")
@@ -115,15 +122,13 @@ class TestShotNeedsDrivingVideo:
         shot = _shot(shot_type="portrait", performance_budget_mode="cheap")
         assert shot_needs_driving_video(shot) is True
 
-    def test_contained_viggle_route_needs_no_driving_video(self):
-        # Slice 6c containment: action/no-dialogue routes SKIP (see
-        # TestViggleRouting), so no Mode-B driving video is synthesized for
-        # it. This is a routing-containment fact, not an adapter one — the
-        # Viggle adapter itself has already been repaired (see
-        # performance/viggle.py); this flips back once the coordinated
-        # catalog+docs+checker update in that test's comment lands.
+    def test_viggle_route_needs_a_driving_video(self):
+        # Uncontained 2026-08-01 (ADR-082). While contained this asserted
+        # False, because SKIP needs no driving video. Now the route selects
+        # ENGINE_VIGGLE, which has always required one — so Mode-B synthesis
+        # (or an operator upload) must fire for action/no-dialogue shots.
         shot = _shot(shot_type="action", dialogue="")
-        assert shot_needs_driving_video(shot) is False
+        assert shot_needs_driving_video(shot) is True
 
     def test_skip_does_not_need_driving_video(self):
         assert shot_needs_driving_video(_shot(characters_in_frame=[])) is False
