@@ -736,6 +736,7 @@ class TestPerLinePathIsContentKeyed:
              patch("subprocess.run", side_effect=fake_subprocess_run), \
              patch("audio.dialogue._resolve_tts_provider", return_value="CARTESIA_SONIC_2"), \
              patch("audio.dialogue._resolve_cartesia_voice", return_value="fake-uuid-1234-5678-abcd-ef0123456789"), \
+             patch("audio.dialogue._maybe_save_alignment", return_value=None), \
              patch("audio.dialogue.settings") as mock_settings:
             mock_settings.cartesia_api_key = "test_key"
             generate_dialogue_voiceover(

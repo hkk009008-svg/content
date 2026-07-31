@@ -229,7 +229,7 @@ def generate_cartesia(
 # TTS provider language router
 # ---------------------------------------------------------------------------
 
-def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
+def _resolve_tts_provider(scene: dict, character: dict, settings_obj, tts_override: Optional[str] = None) -> str:
     """Decide which TTS provider to use for this scene-character pair.
 
     Inspects ``scene["language"]`` first; falls back to
@@ -253,12 +253,37 @@ def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
         settings_obj: the project settings instance (must expose
             ``cartesia_api_key``; may also expose ``language_pref`` as
             project-wide fallback when scene/character lack ``language``)
+        tts_override: the project's explicitly stored ``tts_provider``
+            setting (``get_project_setting(ctx, "tts_provider")``), or
+            None. Closes the gap where VoiceSection's "Dialogue TTS
+            provider" picker persisted a choice the router never
+            consulted — an explicit ``"CARTESIA_SONIC_2"`` selection now
+            wins over the language auto-route (still gated on the API key
+            being present, same as the auto-route below; no key means the
+            call would fail anyway, so it falls through instead). Any
+            other value — including the picker's own default,
+            ``"ELEVENLABS_V3"`` — leaves the language-based auto-routing
+            untouched, since ElevenLabs is already that auto-route's
+            non-Korean result.
 
     Returns:
-        ``"CARTESIA_SONIC_2"`` for Korean+key-set; ``"ELEVENLABS"`` otherwise.
+        ``"CARTESIA_SONIC_2"`` for an explicit override (key permitting) or
+        Korean+key-set; ``"ELEVENLABS"`` otherwise.
     """
     scene = scene or {}
     character = character or {}
+
+    def _cartesia_key_present() -> bool:
+        if getattr(settings_obj, "cartesia_api_key", "") and settings_obj.cartesia_api_key:
+            return True
+        # Dict-shaped settings (e.g. project["global_settings"]) — same key access shape.
+        if isinstance(settings_obj, dict) and settings_obj.get("cartesia_api_key"):
+            return True
+        return False
+
+    if tts_override == "CARTESIA_SONIC_2" and _cartesia_key_present():
+        return "CARTESIA_SONIC_2"
+
     # Settings-level project-wide fallback: read .language_pref (attr) or
     # ["language_pref"] (dict) when scene/character don't specify a language.
     settings_lang = ""
@@ -276,10 +301,7 @@ def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
     )
     lang = str(raw_lang).lower().strip()
     is_korean = lang.startswith("ko")
-    if is_korean and getattr(settings_obj, "cartesia_api_key", "") and settings_obj.cartesia_api_key:
-        return "CARTESIA_SONIC_2"
-    # Dict-shaped settings (e.g. project["global_settings"]) — same key access shape.
-    if is_korean and isinstance(settings_obj, dict) and settings_obj.get("cartesia_api_key"):
+    if is_korean and _cartesia_key_present():
         return "CARTESIA_SONIC_2"
     return "ELEVENLABS"
 
@@ -351,6 +373,14 @@ def _try_dialogue_mode(
     if not get_project_setting(ctx, "dialogue_mode_enabled", True):
         return None
 
+    # An explicit Cartesia preference must actually route to Cartesia (the
+    # bug this closes: this ElevenLabs-only endpoint ran FIRST whenever 2+
+    # speakers were present, so a stored `tts_provider="CARTESIA_SONIC_2"`
+    # never got a chance — PATH 2's per-line dispatcher is the only path
+    # that honors the override). Skip so the caller falls through to it.
+    if get_project_setting(ctx, "tts_provider", None) == "CARTESIA_SONIC_2":
+        return None
+
     # Need at least 2 distinct speakers for dialogue mode to make sense
     distinct_speakers = {ln.get("character_id") for ln in dialogue_lines if ln.get("text", "").strip()}
     if len(distinct_speakers) < 2:
@@ -415,6 +445,15 @@ def _maybe_save_alignment(
     on `ctx`. Returns the JSON path on success, None when disabled or
     alignment fails.
 
+    Default is True when the key is absent — matching VoiceSection's
+    "Forced alignment (WhisperX)" toggle (`checked={s.forced_alignment_enabled
+    !== false}`, i.e. defaults ON) and every entry in
+    domain/language_defaults.py (all languages ship `forced_alignment_enabled:
+    True`). This gate previously defaulted to False, so a project that had
+    never explicitly written the key showed the toggle ON in the UI while the
+    runtime silently skipped alignment — the display/default/consumer
+    three-way disagreement slice 9c closes.
+
     NOTE (2026-06-13, capacity audit wf_6be2ee18-f4b): the sidecar is currently
     WRITE-ONLY — load_alignment_json has zero callers (the SRT writer was deleted;
     lip_sync has no alignment imports). Compute runs for no current output. Wire it
@@ -425,7 +464,7 @@ def _maybe_save_alignment(
     `language` setting. Critical for Korean/Japanese/Chinese — whisper
     drifts badly on these languages without an explicit hint.
     """
-    if not get_project_setting(ctx, "forced_alignment_enabled", False):
+    if not get_project_setting(ctx, "forced_alignment_enabled", True):
         return None
     if language is None:
         language = get_project_setting(ctx, "language", "English") or "English"
@@ -598,6 +637,11 @@ def generate_dialogue_voiceover(
     )
     scene_for_router = {"language": project_lang}
 
+    # The project's explicitly stored TTS provider choice (VoiceSection's
+    # "Dialogue TTS provider" picker) — read once, passed to every line's
+    # _resolve_tts_provider call below as tts_override.
+    tts_override = get_project_setting(ctx, "tts_provider", None)
+
     print(f"🎙️ [CINEMA] Generating multi-character dialogue ({len(dialogue_lines)} lines)...")
 
     # Log Cartesia-skip once per invocation (not per line) to avoid log spam.
@@ -610,29 +654,40 @@ def generate_dialogue_voiceover(
             continue
 
         voice_id = char_voices.get(cid, "")
+        char_record = char_by_id.get(cid, {})
+        char_gender = (char_record.get("gender") or "").lower()
+        _is_male = char_gender in {"male", "m", "man"}
         if not voice_id:
             # Fallback chain (closes VG-B1 — prior code hardcoded
             # "pNInz6obpgDQGcFmaJgB" = Adam English-male; produced wrong-
             # gendered + wrong-language audio for projects where
             # character.voice_id was never assigned at create-time):
             #   1. Any other character's assigned voice in this project
-            #   2. Language + gender-aware default from language_defaults
+            #   2. The project's OWN configured default_male_voice /
+            #      default_female_voice (VoiceSection's "Default male/female
+            #      voice" pickers) — the operator's explicit gender-matched
+            #      choice; previously stored in global_settings but never
+            #      read here (this fallback chain read only the per-language
+            #      static table below, which happens to reuse the same two
+            #      field names for an unrelated purpose).
+            #   3. Language + gender-aware default from language_defaults
             #      (Korean female → 안나 Anna; Korean male → 준호 Junho;
             #       English → Rachel / Adam; unknown language → English
             #       fallback per get_language_defaults("_default"))
-            #   3. Adam (legacy hardcode) — only when import fails
+            #   4. Adam (legacy hardcode) — only when import fails
             voice_id = next((v for v in char_voices.values() if v), "")
+            if not voice_id:
+                _default_key = "default_male_voice" if _is_male else "default_female_voice"
+                voice_id = get_project_setting(ctx, _default_key, "") or ""
             if not voice_id:
                 try:
                     from domain.language_defaults import get_language_defaults
-                    char_record = char_by_id.get(cid, {})
-                    char_gender = (char_record.get("gender") or "").lower()
                     lang_defaults = get_language_defaults(project_lang)
                     # Default to female voice unless character has explicit
                     # male gender hint. Female default is closer to common
                     # narrative cinema use than the prior unconditional
                     # male hardcode.
-                    if char_gender in {"male", "m", "man"}:
+                    if _is_male:
                         voice_id = lang_defaults.get("default_male_voice", "")
                     else:
                         voice_id = lang_defaults.get("default_female_voice", "")
@@ -656,11 +711,11 @@ def generate_dialogue_voiceover(
         _out_dir = os.path.dirname(output_filename) or "."
         temp_path = os.path.join(_out_dir, f"dialogue_line_{_line_key}.mp3")
 
-        # Route per-line: language-aware provider selection. Korean +
+        # Route per-line: explicit tts_provider override (when dispatchable)
+        # wins; otherwise language-aware auto-selection. Korean +
         # CARTESIA_API_KEY set → Cartesia Sonic 2 (native prosody, low
         # latency). Everything else → ElevenLabs (unchanged path).
-        char_record = char_by_id.get(cid, {})
-        provider = _resolve_tts_provider(scene_for_router, char_record, settings)
+        provider = _resolve_tts_provider(scene_for_router, char_record, settings, tts_override=tts_override)
         cartesia_ok = False
         cartesia_voice = None  # init outside the branch — a hoisted guard must never NameError (T-A quality fold)
         if provider == "CARTESIA_SONIC_2":

@@ -1088,6 +1088,10 @@ class TestApplyCorrectionFaceSwapReason:
             ]
             project["characters"][0]["id"] = "char_a"
             project["characters"][0]["reference_images"] = ["/ref_alice.jpg"]
+            # face_swap_enabled now defaults False (fail-closed, slice 9b) —
+            # this test is about the cascade-returns-None reason surfacing,
+            # not the enabled gate, so opt in explicitly.
+            project["global_settings"]["face_swap_enabled"] = True
 
             # Write fake motion-take asset to disk
             project_dir = pm.get_project_dir(project["id"])

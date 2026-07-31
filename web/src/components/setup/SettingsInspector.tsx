@@ -48,7 +48,7 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
       <VideoSection s={s} config={config} update={update} />
       <ImageSection s={s} config={config} update={update} />
       <IdentitySection s={s} update={update} />
-      <VoiceSection s={s} config={config} update={update} />
+      <VoiceSection s={s} config={config} update={update} projectId={project.id} onRefresh={onRefresh} />
       <BudgetSection s={s} update={update} />
     </div>
   )
