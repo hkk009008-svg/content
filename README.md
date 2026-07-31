@@ -56,14 +56,14 @@ For pod setup (ComfyUI workflows, models), see [OPERATIONS.md](OPERATIONS.md).
 
 ## Stack at a glance
 
-- **Backend:** Python 3.13, Flask + SSE, ~17 cloud API providers
-- **Frontend:** React 19 + Vite 6 + Tailwind 3, no router (3-mode `useState`)
-- **Image generation:** ComfyUI + PuLID (production) / N=8 adaptive best-of (max tier)
-- **Video generation:** 9-engine cascade (Kling / Sora / Veo / LTX / Runway / SEEDANCE / …)
+- **Backend:** Python 3.13, Flask + SSE (per-subscriber broadcast bus with replay), ~17 cloud API providers
+- **Frontend:** React 19 + Vite 6 + Tailwind 3, no router (4-mode `useState`: Setup / Edit / Run / Capability)
+- **Image generation:** Gemini 3.1 Flash Image ("Nano Banana 2") is the default primary; ComfyUI + PuLID is the reference-conditioned fallback. Single production tier — the old max tier (N=8 adaptive best-of) was retired.
+- **Video generation:** Gemini Omni Flash (native audio) is the default primary; a typed 9-engine fallback cascade follows (Kling / Veo / LTX / Runway / SEEDANCE / …). Sora is a dated pre-sunset fallback only (retires 2026-09-24).
 - **Identity:** GhostFaceNet via DeepFace, process-singleton, 4-way access converge
 - **LLMs:** Anthropic + OpenAI parallel quorum + judge (Gemini opt-in)
 - **Audio:** ElevenLabs (TTS) + FAL Stable Audio (BGM) + Pedalboard (DSP)
-- **Lipsync:** 4-engine overlay cascade + 4-engine generation cascade, all FAL
+- **Lipsync:** 4-engine overlay cascade + 2-engine generation cascade, all FAL
 
 ---
 
@@ -80,8 +80,11 @@ For pod setup (ComfyUI workflows, models), see [OPERATIONS.md](OPERATIONS.md).
 
 ## Status
 
-The post-pivot codebase is stable and shipping. There is no active migration.
-Strategic direction and open work are tracked in
+The post-pivot codebase is stable and shipping. A comprehensive product-
+unification pass is in progress (provider-contract repair, project-scoped
+state authority, portable media, documentation truth) — see
+`docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md` for
+the live task board. Prior strategic direction is tracked in
 [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md).
 
 **CI:** Three jobs run on every push to `main` and every pull request —

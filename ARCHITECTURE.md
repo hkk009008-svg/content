@@ -143,7 +143,7 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:379](web_server.py:379) |
+| `_progress_queues: dict[pid, _ProjectEventBus]` (broadcast bus w/ replay, §3.3 — not a raw `Queue` since Slice 11a) | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:371](web_server.py:371) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:379](web_server.py:379) |
 | `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:409](web_server.py:409) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
@@ -154,21 +154,58 @@ spawned by `POST /generate` ([web_server.py:2107](web_server.py:2107)).
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
 
-### 3.3 SSE wiring
+### 3.3 SSE wiring — per-subscriber broadcast bus with replay (Slice 11a)
 
-- `_ensure_progress_queue(pid)` creates a `queue.Queue` keyed by project.
-- Pipeline thread builds a callback via
-  `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
-- `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2981](web_server.py:2981)) does
-  `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
-  emits END and breaks.
-- Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:2105](web_server.py:2105)) after success or error.
-- **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
-  the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
-  after sending the `None` sentinel, gated on identity-check to avoid racing
-  a concurrent `/generate` that already replaced the entry.
+`_progress_queues: dict[str, _ProjectEventBus]` ([web_server.py:371](web_server.py:371))
+replaced the pre-11a design where every project had exactly one
+`queue.Queue`: a plain `Queue` hands each item to exactly one getter, so two
+concurrent `/stream` listeners competed for the same events instead of each
+observing every one, and a reconnecting client could recover nothing it
+missed while disconnected.
+
+- `_ProjectEventBus` ([web_server.py:191](web_server.py:191)) is a per-project
+  broadcast fan-out with a bounded, replayable event log. `publish()`/`put()`
+  assigns a monotonically increasing id (scoped to one bus — i.e. one
+  `/generate` run's lifetime), appends it to a capped FIFO replay buffer
+  (`_EVENT_REPLAY_CAP = 500`), and fans it out to every currently-attached
+  subscriber. Delivery (`_deliver`) always happens OUTSIDE the bus lock and
+  is non-blocking, so one slow or abandoned subscriber can never stall
+  `publish()`, `close()`, or any other subscriber.
+- Each subscriber's own live-delivery inbox is separately bounded
+  (`_SUBSCRIBER_INBOX_CAP = 500`) — a client that opens `/stream` and never
+  reads the response can no longer grow server memory without limit; an
+  overflowing inbox drops its own oldest undelivered entry and records a
+  coalescing gap (`_record_gap`/`pop_gap`) instead of silently losing it.
+- `bus.subscribe(last_event_id)` ([web_server.py:332](web_server.py:332))
+  returns an `_EventSubscription` (private inbox, replay backlog, optional
+  gap, `closed` flag for a bus that already finished before this subscriber
+  attached); `bus.unsubscribe()` ([web_server.py:360](web_server.py:360))
+  detaches it.
+- **Resume contract**, read via the standard `Last-Event-ID` header or a
+  `?last_event_id=` query fallback: a still-buffered id replays every event
+  newer than it (each tagged `"replayed": true`) before live delivery; an
+  id older than the buffer's floor emits one
+  `{"stage": "GAP", "gap_from", "gap_to"}` frame naming the lost range first;
+  no known id (a fresh subscriber) replays one snapshot of the single latest
+  event, if any, so a late joiner renders current truth without replaying
+  the whole run. The id is emitted both as the SSE `id:` framing line and
+  inlined into the JSON `data:` body, since `hooks/useSSE.ts` manages its own
+  reconnection rather than relying on the browser's native EventSource
+  last-event-id bookkeeping (§14.4).
+- `GET /api/projects/<pid>/stream` → `api_stream`
+  ([web_server.py:2981](web_server.py:2981)): yields any gap, then the
+  backlog, then blocks on `sub.inbox.get(timeout=30)` — HEARTBEAT on
+  timeout, the buffered event otherwise, END on the bus's terminal
+  sentinel — and always calls `bus.unsubscribe()` in `finally` regardless of
+  how the generator exits.
+- Pipeline thread builds a callback via `web_services.make_progress_callback(q)`
+  (the bus exposes a `queue.Queue`-compatible `.put()` alias, so this needed no
+  change) and passes it into `CinemaPipeline`. The daemon's `finally` block,
+  under `_pipelines_lock`, first pops `_progress_queues[pid]` — gated on an
+  `is bus` identity check so a concurrent `/generate` that already replaced
+  the entry is left alone — then calls `bus.close()` OUTSIDE that lock
+  (`close()` only touches the bus's own lock/subscriber set), broadcasting
+  the terminal sentinel to every subscriber still attached at that point.
 
 ### 3.4 CORS / auth
 
@@ -209,7 +246,112 @@ the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
 
-*Last verified: 2026-07-30*
+### 3.7 Pipeline-state action authority (Slice 8a/11c)
+
+`GET /api/projects/<pid>/pipeline-state` → `api_pipeline_state`
+([web_server.py:3589](web_server.py:3589)) is additive to the legacy response
+shape: every response for a real project also carries server-derived
+`running: bool` and `allowed_actions: list[str]` (subset of `{"start",
+"resume_checkpoint", "cancel", "pause", "resume"}`), so the UI never has to
+infer legality from transport state.
+
+`_pipeline_action_authority(pid)` ([web_server.py:669](web_server.py:669))
+derives both from the SAME `_running_pipelines`/`_PIPELINE_PENDING` registry
+that gates `/generate`, `/cancel`, `/pause`, `/resume` — **never** from
+`_progress_queues`/SSE subscriber state, since a client can disconnect from
+`/stream` while generation keeps running and vice versa:
+
+| State | `running` | `allowed_actions` |
+|---|---|---|
+| idle, no resumable checkpoint | False | `["start"]` |
+| idle, resumable checkpoint (a prior run crashed/was cancelled/the process restarted before its checkpoint cleared) | False | `["start", "resume_checkpoint"]` |
+| pending-start (`_PIPELINE_PENDING` sentinel — constructing, not yet registered) | True | `[]` — a start would still 409; cancel/pause/resume all 404 |
+| running, not parked at a review gate | True | `["cancel", "pause"]` |
+| running, parked at a review-gate stage | True | `["cancel"]` only — `pause` is withheld: `ThreadedLifecycle.wait_for_gate` never consults `check_pause()`, so pausing while gate-blocked would be legal-but-inert |
+| paused | True | `["cancel", "resume"]` |
+
+`"start"` and `"resume_checkpoint"` dispatch through the SAME `POST
+/generate` endpoint, distinguished only by the request body's `resume` flag
+— `"start"` always sends `resume=False`, `"resume_checkpoint"` always sends
+`resume=True`; neither silently performs the other's job. A run that
+finishes successfully clears its own checkpoint
+(`CheckpointStore._clear_checkpoint`) before the terminal `COMPLETE` event,
+so a completed project reports only `["start"]`, identically to a project
+that never ran. Slice 11c additionally threads a `checkpoint` object (the
+same shape `GET /checkpoint` returns) onto the disk-snapshot (no-live-
+pipeline) branch only — a checkpoint is only actionable while idle, and
+`"resume_checkpoint"` only ever appears there too.
+
+### 3.8 Settings write contract — revision-guarded PATCH/PUT (Slice 8a/9a)
+
+`PUT /api/projects/<pid>` → `api_update_project`
+([web_server.py:1388](web_server.py:1388)) and `PATCH /api/projects/<pid>` →
+`api_patch_project_settings` ([web_server.py:1472](web_server.py:1472)) both
+guard `global_settings` writes with an integer `revision` counter
+(`_current_settings_revision`/`_settings_revision_established`,
+[web_server.py:1155](web_server.py:1155)) so two overlapping editors — or a
+stale UI tab — cannot silently clobber a newer write with a 200 and no
+error:
+
+- **PATCH is strict.** `global_settings.revision` is REQUIRED on every call;
+  a missing/non-integer value 400s before touching the project, and a value
+  that doesn't match the current counter 409s with a
+  `settings_revision_conflict` payload naming the current revision — no
+  mutation either way. On success the stored revision increments.
+- **PUT is fail-closed once a revision is ESTABLISHED, not opt-in forever.**
+  A project's very first settings write (before any revision has ever been
+  stamped) may PUT without a `revision` key. Once ANY write — PUT or PATCH —
+  has stamped a real revision, every subsequent PUT MUST echo a matching
+  one; omitting `revision` no longer opts a caller back out of the check.
+  (A bare whole-object PUT with no `revision` key silently clobbering newer
+  revision-guarded state is exactly the bug this closes.)
+- Both endpoints return the same `_settings_revision_conflict_payload`
+  ([web_server.py:1191](web_server.py:1191)) shape on conflict, so the
+  frontend has one 409-handling path regardless of which verb it used.
+
+### 3.9 Portable media path resolution (Slice 10, Product invariant #6)
+
+New take/shot/character/location output is persisted as a
+**project-relative path**, never a repo-location-dependent absolute path.
+`ShotController._to_project_relative`
+([cinema/shots/controller.py:654](cinema/shots/controller.py:654)) is the
+canonical write-side helper (falls back to the original string unchanged for
+empty/already-relative/cross-drive/outside-project-dir input);
+`domain/character_manager.py` and `domain/location_manager.py` each define a
+thin same-named wrapper that delegates to it rather than reimplementing the
+logic.
+
+Two read-side chokepoints resolve a stored path back to a real, directly
+openable filesystem path, both handling the SAME two persistence shapes
+(current project-relative form; a legacy absolute path baked in before this
+fix or before a repo move):
+
+- **Internal consumers** (identity validation, ffmpeg/RIFE/lip-sync inputs,
+  coherence checks, scene-preview assembly) route through
+  `ShotController._resolve_stored_media_path`
+  ([cinema/shots/controller.py:680](cinema/shots/controller.py:680)) — every
+  other module's same-named function (`character_manager`, `location_manager`,
+  `ReviewController._resolve_stored_media_path`) is a thin delegate to this
+  one canonical implementation.
+- **The `/file` HTTP endpoint**, for browser/preview requests — `GET
+  /api/projects/<pid>/file` → `api_serve_file`
+  ([web_server.py:3083](web_server.py:3083)).
+
+Both resolve a legacy absolute path the same way when it no longer exists
+under the CURRENT project directory: find this project's own `/<pid>/`
+directory-segment anchor within the stored string, take the remainder from
+there onward, and re-root it under the current `project_dir`. Every
+candidate — relative-joined, as-given absolute, or migrated — is
+realpath-resolved and RE-CHECKED for containment within the project
+directory before being served or opened, so accepting the extra legacy/
+migrated shapes never weakens the existing traversal/root guard: a path that
+isn't genuinely this project's own (however spelled, including a crafted
+"legacy-looking" prefix followed by `..` components) still fails closed. A
+project relocated to a new repo root therefore still serves and reads its
+own prior media instead of going dark behind the (correctly firing) root
+guard.
+
+*Last verified: 2026-08-01*
 
 ---
 
@@ -1298,9 +1440,45 @@ falls back to a plain hard-cut concat. Mixed audio-presence inputs (some scenes
 with embedded audio, some without) pad the silent legs with `anullsrc` + normalize
 every leg, preserving embedded audio across the stitch (Lane V #25 M1, fixed).
 
+### 9.8 LTX duration contract and duration-true billing (2026-07-30 repair)
+
+`LTXVideoAPI.DURATION_SECONDS = (6, 8, 10)`
+([ltx_native.py:107](ltx_native.py:107)), default 6 — both the native
+`api.ltx.video` endpoint (`model="ltx-2-3-pro"`) and the FAL proxy
+(`fal-ai/ltx-2.3/image-to-video`, the same pro-equivalent schema) accept ONLY
+these three values at every resolution; the `ltx-2-3-fast` profile's wider
+range (up to 20s at 1080p/25fps) is a DIFFERENT contract this adapter does
+not select.
+`generate_video` raises `LTXContractViolation` — a local request-construction
+error, never routed through the native→FAL fallback path — before any
+network call when `duration` is out of enum; callers snap an arbitrary
+requested duration up to the nearest allowed value via
+`LTXVideoAPI.nearest_supported_duration`.
+
+**Duration-true billing.** `API_COST_USD["LTX"]` is a FLOOR ESTIMATE assuming
+the 6s enum minimum, but the dispatcher's shared default duration is 8s
+(`phase_c_ffmpeg.generate_ai_video(duration="8s")`), so the flat figure
+under-records ~33% on default shots (money-gate finding 2026-07-30). Fix: the
+LTX dispatch branch surfaces the TRUE dispatched duration into
+`_cascade_out["cascade_metadata"]["duration_s"]`
+([phase_c_ffmpeg.py:844](phase_c_ffmpeg.py:844)); on the winner path,
+`ShotController._motion_cost_kwargs`
+([cinema/shots/controller.py:1631](cinema/shots/controller.py:1631)) reads
+that value and returns `{"duration_seconds": ...}`, which
+`cost_tracker.record_api_call` uses to compute `rate * duration_seconds` from
+`API_COST_PER_SECOND_USD["LTX"]` ($0.06/s) instead of the flat table entry.
+Billed-but-rejected attempts (no recorded dispatch duration) keep the
+conservative flat floor. The same `_motion_cost_kwargs` helper applies an
+analogous per-second correction for SEEDANCE (shot-type-dependent duration
+table) and a video-probe-based correction for GEMINI_OMNI (ffprobe the
+downloaded mp4, since that API's duration is prompt-inferred rather than a
+structured request parameter); both fail open to the flat `API_COST_USD`
+estimate on any error.
+
 *Typed dispatch fence, payload-branch anchors, default seed, quota anchors,
-helper count, and storyboard split contract verified: 2026-07-30. Remaining
-§9 claims last verified: 2026-06-13.*
+helper count, and storyboard split contract verified: 2026-07-30. LTX
+duration contract and duration-true billing (§9.8) verified: 2026-08-01.
+Remaining §9 claims last verified: 2026-06-13.*
 
 ---
 
@@ -1312,13 +1490,37 @@ helper count, and storyboard split contract verified: 2026-07-30. Remaining
 |---|---|---|
 | `ACT_ONE` | `Semaphore(1)` | **Required by dispatch time** — routes to Runway Act-Two (`performance/act_two.py`), which has no audio-only mode; `domain.performance.precondition_error` accepts `audio_path` alone at the pre-check (enables Mode-B synth before dispatch), but `act_two.py`'s own runtime check rejects a call that reaches it with neither a driving video nor Mode-B output |
 | `LIVE_PORTRAIT` | `Semaphore(2)` | **Required** — bails to None if absent |
-| `VIGGLE` | `Semaphore(1)` | **Required** — Mode A only (no autopilot) |
+| `VIGGLE` | `Semaphore(1)` | **Required** — Mode A only (no autopilot); see the containment note below |
 | `SKIP` / empty | (bypass) | early `return None` |
 
 Limits declared at [performance/_router.py:21-25](performance/_router.py:21).
 No timeout on semaphore acquisition — callers block indefinitely. Per-adapter
 poll timeouts bound the overall hold time (300s in act_two/live_portrait/viggle,
 240s in driving_video helpers).
+
+**Viggle is contained, not reachable (Slice 6c, 2026-07-31).** The catalog
+now carries `VIGGLE` as `ProductSupport.KNOWN_BROKEN`
+([domain/provider_catalog.py](domain/provider_catalog.py)) — the live adapter
+(`performance/viggle.py`) targets a pre-official endpoint shape
+(`api.viggle.ai`, `files={"character_image", "motion_video"}`) that provably
+mismatches Viggle's now-official developer API (`docs.viggle.ai`:
+`apis.viggle.ai`, differently-named JSON fields, a different polling path).
+Containment happens at the **routing-decision layer, not `_router.py`
+itself**: `domain.performance.route_performance_engine`
+([domain/performance.py:110](domain/performance.py:110)) is the ONLY
+function that produces the `engine` value `generate_performance_take`
+dispatches, and its action-without-dialogue branch — which used to return
+`ENGINE_VIGGLE` — now returns `ENGINE_SKIP` instead; `performance/_router.py`
+itself has NO catalog-aware gate of its own — it still calls
+`generate_viggle_performance()` whenever `engine == ENGINE_VIGGLE` and a
+driving video is present — but nothing in the live pipeline ever produces
+that engine value anymore, so the broken call site is unreachable in
+practice, not structurally disabled. (The catalog row's own comment records the converse
+explicitly: `domain/performance.py` and `performance/_router.py` do not
+import `domain.provider_catalog` at all, so the KNOWN_BROKEN entry does not
+itself gate anything — it is the routing-function edit above that closes the
+path.) Re-enabling Viggle requires a dedicated adapter-repair slice against
+the official contract, not just flipping the catalog status.
 
 ### 10.2 Mode A vs Mode B
 
@@ -1445,7 +1647,10 @@ Assembler dedup: `cinema_pipeline.py:_build_scene_packages` (`:709`) counts both
 
 Set via `project.global_settings.dialogue_voice_mode` (see OPERATIONS.md §8).
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-06-13 (§10.1 Viggle containment + §10.6 lipsync cascade
+engine counts re-verified 2026-08-01 — generation cascade is 2 engines, not
+4: Hedra removed WS4 2026-07-18, Kling's lipsync endpoint dropped Task 12
+2026-07-19)*
 
 ---
 
@@ -1546,20 +1751,38 @@ interpolates from `mode` to `lenient` over retries.
 Project-wide `identity_strictness` setting (default 0.60) overrides per-shot
 defaults at [cinema/shots/controller.py:960](cinema/shots/controller.py:960).
 
-### 11.5 Rolling-stats update sites (4 sites total)
+### 11.5 Rolling-stats update sites (3 LIVE + 1 dormant/unreachable)
 
 `IdentityValidator.history` accumulates from:
 
 1. **Keyframe validation** — `cinema/shots/controller.py:967` and `:1008`
-2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
-3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
+2. ~~**N=8 best-of grading** — `face_validator_gate._arcface_score` →
+   `validate_image(threshold=0.0)`~~ **DORMANT/UNREACHABLE (re-verified
+   2026-08-01):** `face_validator_gate.score_candidate` (the public wrapper
+   around `_arcface_score`) has no reachable production caller. Its only
+   in-repo callers are `prep/lora_quality.py` (imported by
+   `train_character_lora_gated`, itself only reachable from
+   `api_train_lora`, which returns the dormant-LoRA 409 UNCONDITIONALLY on
+   its very first line — the `from prep.lora_quality import
+   train_character_lora_gated` a few lines below is dead code, per §1's
+   fail-closed policy) and standalone `scripts/_fal_lora_production.py` /
+   `scripts/_prod_multiscene.py` / `scripts/_synth_test.py` manual pod
+   scripts, not `web_server.py` → `cinema_pipeline.py` production dispatch.
+   The function this row describes was the max-tier N=8 best-of loop's own
+   scorer; that loop's only caller (`quality_max.py`) was deleted in WS1
+   Task 4, and nothing replaced it as a live caller of this scoring path.
+3. **Performance gate scoring** — `performance/identity_gate._arcface_score`
+   → `validate_image(threshold=0.0)`, called from
+   `cinema/shots/controller.py:1445-1446`'s live
+   `generate_performance_take` flow.
 4. **Continuity video validation** — `domain/continuity_engine.py:630` → `validate_video`
 
 Consumer: `workflow_selector.get_adaptive_pulid_weight` reads
 `identity_validator.get_rolling_stats(character_id)` and adjusts PuLID weight
-±0.10. Three return paths all return a float — no None bug.
+±0.10. Three return paths all return a float — no None bug. That consumer
+itself only sees history entries from the 3 LIVE sites in practice.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-06-13 (site count corrected 2026-08-01 — see item 2)*
 
 ---
 
@@ -2164,10 +2387,22 @@ to these tokens (brass→acc, curtain→fail, ivory→tx, ink→app, ready→ok,
 
 ### 14.4 SSE consumption
 
-`hooks/useSSE.ts` opens a single `EventSource('/api/projects/${pid}/stream')`,
-parses JSON events, closes on `stage==='END'`. Exponential-backoff reconnect:
-up to 10 attempts, 1 s → 30 s cap (Bundle-C 3.1). A clean `END` event or
-`stop()` call disables retry.
+`hooks/useSSE.ts` opens an `EventSource` against
+`/api/projects/${pid}/stream`, parses JSON events, closes on `stage==='END'`.
+Exponential-backoff reconnect: up to 10 attempts, 1 s → 30 s cap (Bundle-C
+3.1). A clean `END` event or `stop()` call disables retry.
+
+**Replay-aware reconnect (Slice 11a, consumes §3.3's broadcast-bus wire
+contract).** The hook tracks the last-seen numeric `id` from each parsed
+event in a ref (`lastEventIdRef`; control frames — GAP/HEARTBEAT/END — never
+carry one, so they never advance it) and threads it into the NEXT
+reconnect's URL as `?last_event_id=...`. This hook manages its own
+reconnection by closing and constructing a brand-new `EventSource` on
+backoff — which does NOT preserve the browser's native `EventSource.
+lastEventId` bookkeeping — so it reads the id back out of the parsed
+`data:` JSON body rather than relying on that native mechanism. A fresh
+`/generate` run resets `lastEventIdRef` to null before opening the stream, so
+a new run never replays a stale prior run's ids.
 
 `hooks/usePipelineState.ts` is the event router:
 - `PAUSED`/`RESUMED` → `setIsPaused`
@@ -2223,7 +2458,7 @@ expansion to gate the `/api/cost-estimate` fetch, which `Section`'s uncontrolled
 
 `web_server.py` serves `web/dist/` as its static folder.
 
-*Last verified: 2026-06-13 (§14.6 re-verified 2026-08-01)*
+*Last verified: 2026-06-13 (§14.4 and §14.6 re-verified 2026-08-01)*
 
 ---
 
@@ -2272,10 +2507,15 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state: **~1896 test methods** in `tests/unit/` (excluding
+> Test suite state: **3518 test methods** in `tests/unit/` (excluding
 > `test_check_doc_claims.py`), verified via
 > `grep -rc 'def test_' tests/unit/ | grep -v 'test_check_doc_claims.py' | awk -F: '{sum+=$2} END {print sum}'`
-> → 1896 as of 2026-06-14. Run `.venv/bin/python -m pytest tests/unit/
+> → 3518 as of 2026-08-01 (up from the 2026-06-14 snapshot of 1896 — this
+> counts distinct `def test_...` methods, which is smaller than pytest's
+> collected-test count once parametrization/subtests are counted:
+> `.venv/bin/python -m pytest tests/unit -q --collect-only` →
+> **4622 tests collected**, 2026-08-01, directly re-run this session). Run
+> `.venv/bin/python -m pytest tests/unit/
 > --ignore=tests/unit/test_check_doc_claims.py -q` for live pass/fail.
 
 | Severity | Issue | Location |
@@ -2284,7 +2524,7 @@ script, the local check + CI move together.
 | Cosmetic | BGM duration hard-coded to 47s — the `47` magic number has no rationale comment. | `cinema_pipeline.py:632` |
 | ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py`~~ |
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-06-13 (test-count blockquote re-verified 2026-08-01)*
 
 ---
 
@@ -2337,13 +2577,13 @@ section above; this is a flat lookup table for quick reference.
 | **HC3 LOCATION_LOCK / HC4 LIGHTING_LOCK / HC5 FACE_DIRECTION** | Same-scene shots use identical location + lighting; character must face the camera. |
 | **PuLID** | "Pure and Lightning ID Customization" — face-locking adapter for diffusion. Per-shot weight (`pulid_weight`) is adaptive via rolling-stats feedback (§11.5). |
 | **ArcFace** (loss) vs **GhostFaceNet** (model) | Identity validation uses DeepFace's GhostFaceNet model, trained with ArcFace loss. The codebase says "ArcFace" in many comments; the actual model is GhostFaceNet. |
-| **N=8 best-of** | Max-tier image generation strategy: produce up to 8 candidates with different seeds, score each via composite (0.6·ArcFace + 0.4·Aesthetic v2), halt early when threshold met. §8.3 |
-| **Composite score** | `0.6 × arc + 0.4 × aesthetic`. The selection metric for N=8 best-of. |
-| **FreeU** | Training-free U-Net feature rescaling (skip-connection + backbone). Improves detail. §8.3 |
-| **SLG** | Skip-Layer Guidance for Diffusion Transformers — amplifies detail by skipping specific layers in the guided path. §8.3 |
-| **DetailDaemon** | Sampler wrapper injecting controlled noise during denoising to surface micro-detail. §8.3 |
-| **SUPIR** | "Scaling Up Image Restoration" V2 — final post-pass quality lift, used before 4K downsample. §8.3 |
-| **Redux** | FLUX style-reference adapter — accepts image refs to lock style (separate from PuLID identity). §8.3 |
+| **N=8 best-of** | **(RETIRED WS1 Task 4 — archaeology only)** Max-tier image generation strategy: produce up to 8 candidates with different seeds, score each via composite (0.6·ArcFace + 0.4·Aesthetic v2), halt early when threshold met. No production consumer today — see §8.3. |
+| **Composite score** | **(RETIRED, same as N=8 best-of)** `0.6 × arc + 0.4 × aesthetic`. Was the selection metric for N=8 best-of. §8.3 |
+| **FreeU** | **(RETIRED, max-tier-only)** Training-free U-Net feature rescaling (skip-connection + backbone). §8.3 |
+| **SLG** | **(RETIRED, max-tier-only)** Skip-Layer Guidance for Diffusion Transformers — amplifies detail by skipping specific layers in the guided path. §8.3 |
+| **DetailDaemon** | **(RETIRED, max-tier-only)** Sampler wrapper injecting controlled noise during denoising to surface micro-detail. §8.3 |
+| **SUPIR** | **(RETIRED, max-tier-only)** "Scaling Up Image Restoration" V2 — final post-pass quality lift, used before 4K downsample. No live dispatch path (the catalog's separate `SUPIR_V0Q` upscale-purpose row is likewise catalog-only, never wired to a real caller). §8.3 |
+| **Redux** | **(RETIRED, max-tier-only)** FLUX style-reference adapter — accepted image refs to lock style (separate from PuLID identity). §8.3 |
 | **Mode A vs Mode B** (performance) | Mode A: operator pre-uploads a driving video. Mode B: orchestrator synthesizes a driving video from TTS audio via SadTalker. §10.2-10.3 |
 | **Overlay vs Generation** (lipsync) | Overlay: take existing video + audio, lip-sync over the mouth (preserves cinematography). Generation: take still + audio, create talking-head from scratch. §10.6 |
 | **Predicate-poll** | Gate model where the worker thread polls disk-state every 500ms via a predicate function. State survives crashes + SSE disconnects. ADR-002, §6. |
@@ -2354,7 +2594,7 @@ section above; this is a flat lookup table for quick reference.
 | **ChiefDirector** | LLM validator (Anthropic by default, OpenAI fallback). Pre-gen: returns APPROVED / REJECTED / MODIFIED for shot prompts. Post-gen: returns RETRY / ACCEPT_LENIENT / FAIL with mutation focus. §13.4 |
 | **StyleDirector** | GPT-4o only. Generates `style_rules` (cinematography, lighting, color, sound, photorealism, composition) once per project; injected into every decompose prompt. §13.5 |
 | **CineDecompose** | The system persona for scene decomposition: a strict cinematic shot decomposition engine with 5 HardConstraints + 4 Tripwires. The prompt is now in `_build_cinedecompose_system_prompt` (§7.4). |
-| **Cascade** | Ordered fallback chain. Video has a default 9-engine cascade; lipsync has 4-engine overlay + 3-engine generation; performance has SadTalker; image gen has ComfyUI → FAL FLUX → schnell → Pollinations. |
+| **Cascade** | Ordered fallback chain. Video: `GEMINI_OMNI` (default `target_api` primary, native-audio, runtime-gated on Google credentials) heads a typed pre-spend filter over a 9-engine `DEFAULT_VIDEO_CASCADE` fallback seed (§9.5); lipsync has 4-engine overlay + 2-engine generation (Omnihuman v1.5 → Creatify Aurora — down from 4 since Hedra was removed WS4 2026-07-18 and Kling's endpoint was dropped 2026-07-19, §10.6); performance has SadTalker (Mode-B autopilot only); image gen is Gemini 3.1 Flash Image (default primary for character shots) → ComfyUI+PuLID → FAL FLUX Kontext → FLUX-Pro → FLUX-schnell → Pollinations (§8.2; the former max-tier N=8 best-of fork was retired, §8.3). |
 | **SyncNet** | Lipsync quality scorer (mouth-audio sync). Used as the gate threshold in `lip_sync.py` cascade decisions. Falls back to duration-match heuristic or neutral 1.0 if scorer not installed. |
 | **Take** | A single attempt at a stage's output. Each shot has `keyframe_takes[]`, `performance_takes[]`, `motion_takes[]`, `postprocess_variants[]` — operators approve one of each. |
 | **Postprocess variant** | A take derived from another take via `apply_correction` (face_swap, lip_sync, rife, upscale, color_grade, speed). Has `source_take_id` linking back to its parent. |
@@ -2389,4 +2629,11 @@ the corrected GhostFaceNet identity label; §8.2's `cinema/capability_scorecard.
 anchor corrected from `:166` to `:164` (drifted by an unrelated import
 cleanup in the same slice — a markdown-link anchor, one of the doc-checker's
 known ungated forms per the same-line-only anchor gate); scoped to those
-citations only, not a whole-file re-verify.*
+citations only, not a whole-file re-verify. **Cascade** entry corrected
+2026-08-01 (Slice 14b): named the current `GEMINI_OMNI` video primary and
+Gemini-image primary (previously undocumented here), fixed the lipsync
+generation-cascade count (2 engines, not 3 — already stale against §10.6's
+own table before this pass). **N=8 best-of** / **Composite score** / **FreeU**
+/ **SLG** / **DetailDaemon** / **SUPIR** / **Redux** entries tagged
+`(RETIRED)` 2026-08-01 — all max-tier-only, no production consumer since WS1
+Task 4; scoped to those 8 rows only, not a whole-glossary re-verify.*

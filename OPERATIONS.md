@@ -30,9 +30,9 @@ How to install, run, configure, and troubleshoot the Content cinema pipeline.
 | **Node 20+ / npm** | Vite 6 dev server + TypeScript 5.7 |
 | **macOS or Linux** | `audio/effects.py` uses macOS AU plugins where available; Linux falls back to FFmpeg. Pedalboard works on both. |
 | **ffmpeg** in PATH | Stitching, color grade, two-pass loudnorm, frame extraction. `brew install ffmpeg`. |
-| **RunPod or Railway ComfyUI pod** | Image generation (production tier + max tier both call ComfyUI). LivePortrait + SadTalker also run on this pod. |
+| **RunPod or Railway ComfyUI pod** | Image-generation FALLBACK — Gemini 3.1 Flash Image ("Nano Banana 2") is the default primary; ComfyUI + PuLID (`pulid.json`, single production tier — the old max tier was retired) is the reference-conditioned fallback. Also runs LivePortrait + SadTalker performance-capture paths. Not strictly required for a Gemini/FAL-only happy path (see §3 "Minimal viable config"), but recommended for the strongest face-lock fallback. |
 | **Cloud API keys** (~17 providers) | See §3 |
-| **Disk space** | ~50GB for cache + projects + exports. ArcFace weights are auto-downloaded by DeepFace (~700MB). |
+| **Disk space** | ~50GB for cache + projects + exports. DeepFace auto-downloads the identity model's weights on first run — currently **GhostFaceNet** (~16MB measured locally; everything in the codebase that says "ArcFace" — including the historical estimate this line used to carry — actually runs GhostFaceNet, see ARCHITECTURE.md §11.1). |
 
 ---
 
@@ -97,7 +97,7 @@ Authoritative list (every variable consumed by the pipeline):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (primary creative LLM) | LLMEnsemble, ChiefDirector, scene decomposition |
 | `OPENAI_API_KEY` | Yes (primary judge / GPT-4o-only paths) | LLMEnsemble, style director, dialogue writer, scene decomposer fallback |
-| `GEMINI_API_KEY` | Optional | Opt-in Gemini dispatch via `models=["gemini-3.1-pro-preview", ...]`; also `gemini_omni_native.GeminiOmniAPI` (video, WS2 `GEMINI_OMNI` — the `target_api` PRIMARY for all shot types) and `gemini_image_native.GeminiImageAPI` (image, WS3 Nano Banana — the image PRIMARY for all projects). Both accept either this or `GOOGLE_API_KEY` (`settings.google_api_key or settings.gemini_api_key`). |
+| `GEMINI_API_KEY` | Optional | Opt-in Gemini dispatch via `models=["gemini-3.1-pro-preview", ...]`; also `gemini_omni_native.GeminiOmniAPI` (video, WS2 `GEMINI_OMNI` — the `target_api` PRIMARY for all shot types) and `gemini_image_native.GeminiImageAPI` (image, WS3 Nano Banana 2 — the image PRIMARY by default policy, gated per-shot on a character reference being present; a project sets `identity_backend="pod"` to opt out). Both accept either this or `GOOGLE_API_KEY` (`settings.google_api_key or settings.gemini_api_key`). |
 | `GOOGLE_API_KEY` | Optional | Veo direct API path (falls back to Vertex AI if absent); also `gemini_omni_native.GeminiOmniAPI` (video) and `gemini_image_native.GeminiImageAPI` (image) — same either-key contract as `GEMINI_API_KEY` above. |
 
 ### Video generation
@@ -105,7 +105,7 @@ Authoritative list (every variable consumed by the pipeline):
 | Var | Required? | Used by |
 |---|---|---|
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional (legacy fallback) | KLING_NATIVE — legacy kling-v1-6 JWT route (fallback + storyboard mode; primary Kling is fal KLING_3_0 via FAL_KEY since 2026-07-11) |
-| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback |
+| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback. (The FAL-hosted `SORA_2` route is catalogued RETIRED/unreachable — see §10; `SORA_NATIVE`, the surviving pre-sunset Sora fallback, is billed through `OPENAI_API_KEY` instead.) |
 | `LTX_API_KEY` | Optional | LTX_NATIVE direct (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-Two performance |
 
@@ -117,7 +117,7 @@ Authoritative list (every variable consumed by the pipeline):
 | `CARTESIA_API_KEY` | Optional | Cartesia Sonic 2 TTS path |
 | `STABILITY_API_KEY` | Optional | Stable Audio 2 foley generator (currently dormant in audio/ — see DECISIONS.md) |
 | `SUNO_API_KEY` (+ `SUNO_API_BASE`) | Optional | Suno V5 BGM (defaults to FAL Stable Audio) |
-| `VIGGLE_API_KEY` | Optional | Viggle performance capture (Mode A only) |
+| `VIGGLE_API_KEY` | Optional | Viggle performance capture (Mode A only). **Contained since Slice 6c (2026-07-31):** the live adapter (`performance/viggle.py`) mismatches Viggle's now-official API (wrong subdomain/path/polling shape/field names), so the catalog marks it `KNOWN_BROKEN` and `domain.performance.route_performance_engine` never auto-selects it (the action-without-dialogue case that used to route here now returns `SKIP`) — setting this key alone will not produce a working Viggle capture until the adapter-repair slice lands. |
 
 ### Google Cloud / Vertex AI
 
@@ -149,11 +149,17 @@ Authoritative list (every variable consumed by the pipeline):
 
 For a working "happy path" run you need:
 - `ANTHROPIC_API_KEY` + `OPENAI_API_KEY` (LLM)
-- `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` OR `FAL_KEY` (video — at least one cascade path live)
+- `GEMINI_API_KEY` OR `GOOGLE_API_KEY` (video — Gemini Omni is the default primary for every shot type; also image-gen primary for character shots) — OR `KLING_ACCESS_KEY`+`KLING_SECRET_KEY`/`FAL_KEY` (video fallback cascade)
 - `ELEVENLABS_API_KEY` (TTS — audio path)
-- `COMFYUI_SERVER_URL` pointing at a working pod (image gen)
+- `FAL_KEY` (image-gen fallback chain: FLUX Kontext/Pro/Schnell, no pod needed) OR `COMFYUI_SERVER_URL` pointing at a working pod (reference-conditioned image-gen fallback)
 
-Everything else expands capability or adds fallback paths.
+A ComfyUI pod is no longer strictly required for a happy-path run — Gemini
+image is the default primary for character shots and `phase_c_assembly.py`
+falls through to the FAL FLUX chain (and, worst case, the free Pollinations
+last resort) on any pod error or absent `COMFYUI_SERVER_URL`/`pulid.json`; the
+pod remains the strongest identity-lock fallback and is still needed for
+LivePortrait/SadTalker performance-capture paths. Everything else expands
+capability or adds fallback paths.
 
 ---
 
@@ -197,8 +203,11 @@ curl -X POST http://localhost:8080/api/projects/<pid>/cancel
 
 ## 5. Pod setup — RunPod / Railway ComfyUI
 
-The pipeline needs a ComfyUI pod for image generation (production tier,
-`pulid.json`) and certain performance capture paths (LivePortrait, SadTalker).
+A ComfyUI pod is the reference-conditioned **fallback** for image generation
+(production tier, `pulid.json` — Gemini 3.1 Flash Image is the default
+primary, see §3) and is used for certain performance-capture paths
+(LivePortrait, SadTalker). Set it up for the strongest face-lock path and for
+LivePortrait/SadTalker; a Gemini+FAL-only config runs without it.
 
 ### Recommended pod spec
 
@@ -257,31 +266,47 @@ torch 2.11.0 is cu130-only).
 
 ### Required custom nodes
 
-The pruning logic in `quality_max.py:_probe_node_availability` removes any
-node not on the pod. The full max-tier capability needs:
+`quality_max.py` (the node-pruning driver referenced by older docs/handoffs)
+was **deleted** in WS1 Task 4 along with `pulid_max.json` — there is no
+max-tier node-availability probe anymore. `scripts/setup_runpod.sh` installs
+what the single production tier (`pulid.json` + the dynamic ControlNet/
+IP-Adapter injection in `phase_c_assembly.py`) actually consumes:
 
-- PuLID-FLUX (`ApplyPulidFlux`, `PulidFluxModelLoader`, `PulidFluxInsightFaceLoader`)
-- FLUX Union ControlNet Pro (Shakker-Labs)
-- FLUX Redux (`StyleModelApplyAdvanced`)
-- `SkipLayerGuidanceDiT`, `FreeU_V2`, `DifferentialDiffusion`
-- `AlignYourStepsScheduler`, `DetailDaemonSamplerNode`
-- `LatentBlend`, `LatentUpscaleBy`
-- `DepthAnythingV2Preprocessor`, `DWPreprocessor`, `CannyEdgePreprocessor`
-- `FaceDetailer` (Impact Pack)
-- `SUPIR_model_loader_v2`, `SUPIR_sample`, `SUPIR_decode`
+- **ComfyUI-PuLID-Flux** (balazik) — `ApplyPulidFlux`, `PulidFluxModelLoader`,
+  `PulidFluxEvaClipLoader` (the production identity nodes `pulid.json` uses).
+- **ComfyUI-PuLID** (cubiq) — kept specifically for its `PulidInsightFaceLoader`
+  class, which `pulid.json`'s face loader node names (balazik's own loader is
+  the differently-named `PulidFluxInsightFaceLoader`, which `pulid.json` does
+  NOT use); dropping this pack breaks the face-loader node.
+- **ComfyUI_IPAdapter_plus** (cubiq) — `IPAdapterUnifiedLoader` /
+  `IPAdapterAdvanced`, injected by `phase_c_assembly.py`'s IP-Adapter mode.
+- **InsightFace runtime** (`insightface`, `onnxruntime-gpu`, `facexlib` — pip,
+  not a ComfyUI node pack) — required for either PuLID pack's nodes to
+  register at all; ComfyUI silently drops every node in a pack that fails to
+  import.
+- `DepthAnythingV2Preprocessor` (a `comfyui_controlnet_aux`-family pack, not
+  installed by `setup_runpod.sh`) — used by `phase_c_assembly.py`'s optional
+  ControlNet-depth spatial-lock mode (img2img only); best-effort, catches its
+  own exception and skips the depth pass if the node isn't registered.
 - `LivePortraitProcess` (Kijai's port, for LivePortrait performance capture)
 - `SadTalker` (for Mode-B driving-video synthesis)
 
-Missing nodes degrade gracefully — production tier strips them and runs
-`pulid.json`; max tier falls back to production if `pulid_max.json` can't
-load.
+The former max-tier-only nodes (FLUX Union ControlNet Pro, FLUX Redux/
+`StyleModelApplyAdvanced`, `SkipLayerGuidanceDiT`, `FreeU_V2`,
+`DifferentialDiffusion`, `AlignYourStepsScheduler`, `DetailDaemonSamplerNode`,
+`LatentBlend`/`LatentUpscaleBy`, `DWPreprocessor`/`CannyEdgePreprocessor`,
+`FaceDetailer` (Impact Pack), and the three `SUPIR_*` nodes) have no
+production consumer anymore — `pulid_max.json` was deleted with them. Missing
+optional nodes degrade gracefully (production tier just runs without the
+ControlNet-depth pass).
 
 ### Cost control
 
 ComfyUI pods bill by the second. Idle pods cost real money. Options:
 - Run on RunPod's autoscale tier
 - Manually stop the pod when not actively generating
-- For development, use FAL-only paths (skip max tier; bypass PuLID workflow)
+- For development, use the Gemini/FAL-only paths (bypass the ComfyUI/PuLID
+  workflow entirely — see §3 "Minimal viable config")
 
 ---
 
@@ -515,16 +540,22 @@ alive. Check `ps aux | grep web_server` and kill stale processes.
 
 ## 10. Costs at a glance
 
-Rough order-of-magnitude per shot (current 2026-05 prices, will drift):
+Rough order-of-magnitude per ~5s shot, sourced from `cost_tracker.API_COST_USD`
+(provider pages read through 2026-07-31; treat as ±30% estimates and
+calibrate against your own invoices — will drift):
 
 | Provider | Per shot (typical) | Notes |
 |---|---|---|
 | Anthropic (Sonnet) | $0.01–0.05 | Several calls per scene (chief director, decomposer, optimizer) |
 | OpenAI (GPT-4o) | $0.02–0.10 | Parallel-quorum competitor in LLM ensemble; doubles cost when `competitive_generation=True` |
-| Kling Native | $0.10–0.30 | 5s video, image-to-video |
-| Sora 2 (via FAL) | $0.30–0.60 | Action cascades hit this; longer if 8s+ |
-| Runway Gen4 | $0.30–0.40 | Premium fallback |
-| LTX | $0.05–0.15 | Cheapest video provider |
+| Gemini Omni Flash | ~$0.56 | Default `target_api` PRIMARY for every shot type (native audio); actual duration is prompt-inferred/variable, so this is a flat-estimate figure, not duration-true like LTX below |
+| Gemini Image (Nano Banana 2) | $0.067/image | Default image-gen PRIMARY for character shots (`GEMINI_IMAGE`); exact published 1K-resolution price |
+| Kling v3 Pro (FAL) | ~$0.56 | Portrait/medium primary FALLBACK since 2026-07-11 (`KLING_3_0`) |
+| Kling Native | ~$0.50 | Legacy kling-v1-6 fallback (pre-v3 estimate) |
+| Seedance (FAL) | ~$1.51 | Action-shot primary fallback — notably the priciest engine; action-heavy projects should budget for this, not the older Sora figure below |
+| Sora (native, via OpenAI) | ~$0.80 | `SORA_NATIVE` — action-cascade fallback only, and only until its 2026-09-24 sunset. The FAL-hosted `SORA_2` route is retired/unreachable; do not budget for it. |
+| Runway Gen4 | ~$0.50 | Premium fallback |
+| LTX | $0.36 floor (6s) – ~$0.48 (8s, the dispatcher's shared default) | Cheapest native video provider; billed duration-true off the actual dispatched length (6/8/10s only), not a flat per-clip guess |
 | SadTalker | ~$0.045/5s shot (GPU-time estimate) | Mode-B driving-video synthesis (cached) |
 | Act-Two performance | ~$0.25/shot (5s @ $0.05/s) | Per-shot, semaphore-limited; cost_tracker's `ACT_ONE` key name is legacy, retargeted to Act-Two |
 | ElevenLabs TTS | $0.005–0.02/shot | Per dialogue line |
@@ -532,10 +563,12 @@ Rough order-of-magnitude per shot (current 2026-05 prices, will drift):
 | Lipsync (overlay) | $0.03–0.15 | Per shot; cascade tries up to 4 engines |
 | RunPod ComfyUI pod | $0.30/hour ÷ throughput | Idle billing hurts; quota-watch is on you |
 
-For a 20-shot project with max tier + lipsync, expect **$10–30 in cloud
-costs** plus pod time. Budget control is via `global_settings.budget_limit_usd`
-on the project — when exceeded, `ShotController.generate_motion_take`
-calls `lifecycle.pause()` to halt at the next checkpoint.
+For a 20-shot project with dialogue + lipsync, expect **$10–30 in cloud
+costs** (single production tier — there is no separate "max tier" spend
+anymore) plus pod time if you use the ComfyUI fallback. Budget control is via
+`global_settings.budget_limit_usd` on the project — when exceeded,
+`ShotController.generate_motion_take` calls `lifecycle.pause()` to halt at the
+next checkpoint.
 
 ---
 
