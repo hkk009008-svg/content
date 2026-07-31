@@ -16,13 +16,17 @@ ensures all components are aligned.
 | Wide / establishing / 24mm / full shot | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then LTX for cheap 4K depth-aware environments | Veo 3.1 Native → LTX → Kling → Runway |
 | Action / tracking / chase / dynamic | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then Seedance (#1 arena i2v, 2026-07; multi-reference ≤9 images binds multi-character action; Sora retires 2026-09-24) | Veo 3.1 Native → Seedance → Sora → Kling → Runway → LTX |
 | Landscape / aerial / drone / panoramic | GEMINI_OMNI | Google-first primary (WS2) — falls back to Veo 3.1 native, then LTX (4K, no face needed, lowest cost) | Veo 3.1 Native → LTX → Kling |
-| Dialogue close-up / speaker to camera | GEMINI_OMNI | Google-first primary (WS2), native audio; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Veo 3.1 Native → Kling → Seedance (silent) → overlay |
+| Dialogue close-up / speaker to camera | GEMINI_OMNI | Google-first primary (WS2), native audio; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Veo 3.1 Native → Kling v3 Pro → Kling Native (legacy) → Runway Gen-4 → Seedance (all silent past Veo; TTS overlay applies regardless of which one wins) |
 
 CAMERA MOTION GUIDANCE:
+- GEMINI_OMNI: prompt-driven motion only — no structured camera_motion kwarg;
+  duration/resolution/motion are all prompt-inferred, so describe the move in
+  the prompt text itself (same pattern as Seedance below)
 - KLING_3_0 / KLING_NATIVE: zoom_in_slow, dolly_in_rapid (face-focused motions)
 - SEEDANCE: prompt-driven motion — tracking, chase, multi-character dynamics
 - SORA_NATIVE: pan_right, pan_left, tracking shots (dynamic motion; retires 2026-09-24)
-- LTX: 15 native camera_motion params — any complex camera move
+- LTX: 15 native camera_motion params; 6/8/10s clips only (6s default) — any
+  complex camera move, but do not write a duration outside that set
 - VEO_NATIVE: static or slow motions ONLY (cleanest lip-sync — overlay or native)
 - RUNWAY_GEN4: zoom_in_slow, static_drone (style-lock motions)
 
@@ -40,18 +44,26 @@ mouth. The older "native lip-sync only / overlay disabled" guidance is obsolete.
 
 OVERLAY FLOW (default):
   Video generated (silent) → per-shot TTS synthesized → lip-sync overlay applied
-  - Base video engine: VEO_NATIVE primary (best realism; static/slow motion).
-    If Veo's RAI filter blocks the face, the base video falls through to the
-    silent cascade (Kling → Seedance → …); the overlay still fires on whatever
-    silent video was produced.
+  - Base video engine: GEMINI_OMNI primary (Google-first, native audio —
+    repaired and re-admitted 2026-07-30 under Google credentials). VEO_NATIVE
+    is the next native-audio fallback (best realism; static/slow motion; its
+    RAI filter can block the face). The pipeline walks the dialogue engine
+    ranking for the first live engine with native audio, so whichever of
+    these two is actually credentialed/available wins. If neither is
+    available, the base video falls through to the silent cascade (Kling →
+    Seedance → …); the overlay still fires on whatever silent video was
+    produced.
   - Overlay engines are live (MuseTalk, LatentSync, sync.so v3); the pipeline
     selects one at runtime — you do not choose it.
 
 NATIVE MODE (opt-in escape hatch — dialogue_voice_mode="native"):
-  VEO_NATIVE generates video WITH embedded audio in a single pass (no overlay),
-  and video fallbacks are disabled so the embedded voice is never lost to a
-  non-native fallback. Veo's RAI filter can block photorealistic faces — which
-  is why overlay (tolerant of a silent-video fallback) is the default.
+  The same native-audio engine that OVERLAY FLOW would pick (GEMINI_OMNI
+  primary, VEO_NATIVE fallback) generates video WITH embedded audio in a
+  single pass (no overlay), and video fallbacks are disabled so the embedded
+  voice is never lost to a non-native fallback. Either engine can still fail
+  a take outright (Veo's RAI filter on faces; Gemini Omni's own failed/empty
+  terminal states) — which is why overlay (tolerant of a silent-video
+  fallback) is the default.
 
 WHICH SHOTS GET LIP-SYNC:
   ✅ Portrait/close-up shots in scenes with dialogue (speaker visible, front-facing)
@@ -75,11 +87,17 @@ DIALOGUE SHOT REQUIREMENTS:
 3. ASSEMBLY — how shots become a final video
 ═══════════════════════════════════════════════════════════════
 
-HARD CUTS ONLY:
-- All shots within a scene are concatenated with hard cuts — NO dissolves.
-- All scenes are concatenated with hard cuts — NO AI-generated transition clips.
-- Wan FLF2V transition clips are DISABLED (produced artifacts and disrupted pacing).
-- Each shot must be visually self-contained. Do NOT rely on transitions.
+CUTS AND TRANSITIONS:
+- Shots within a scene are ALWAYS concatenated with hard cuts — no dissolves,
+  no AI-generated transition clips. Each shot must be visually self-contained;
+  do NOT rely on an in-scene transition to bridge two shots.
+- Between scenes, hard cuts are still the default. An operator can opt in to a
+  cross-dissolve at scene boundaries only (project setting `scene_transitions`,
+  default off; `transition_duration` seconds, default 0.5) — this is a plain
+  FFmpeg xfade/acrossfade, not an AI-generated clip, and silently falls back
+  to a hard cut if the dissolve render fails.
+- There is no first/last-frame ("FLF2V") AI transition-clip generator in the
+  current pipeline — that idea is not implemented, not a disabled leftover.
 
 BGM (Background Music):
 - Plays ONCE. No looping. No aloop. No infinite repeat.
@@ -96,11 +114,17 @@ COLOR GRADING:
 PuLID WEIGHTS BY SHOT TYPE:
 | Shot Type | PuLID Weight | start_at | end_at | Denoise |
 |-----------|-------------|----------|--------|---------|
-| Portrait  | 1.0         | 0.20     | 1.0    | 0.25    |
-| Medium    | 0.9         | 0.25     | 1.0    | 0.35    |
-| Wide      | 0.65        | 0.35     | 0.9    | 0.45    |
-| Action    | 0.8         | 0.30     | 1.0    | 0.40    |
-| Landscape | 0.0 (skip)  | —        | —      | 0.55    |
+| Portrait  | 1.0         | 0.0      | 1.0    | 0.25    |
+| Medium    | 0.9         | 0.0      | 1.0    | 0.35    |
+| Wide      | 0.65        | 0.0      | 0.9    | 0.45    |
+| Action    | 0.8         | 0.0      | 1.0    | 0.40    |
+| Landscape | 0.0 (skip)  | 0.0      | 0.0    | 0.55    |
+
+start_at = 0.0 across every shot type — the FLUX coarse-identity window (bind
+from step 0). The old SDXL-era values (portrait 0.20 / medium 0.25 / wide 0.35
+/ action 0.30) were a structural no-op on the current FLUX-native graph and
+are retired; do not reintroduce them (ADR-025; workflow_selector.py
+WORKFLOW_TEMPLATES is the source of truth).
 
 IDENTITY VALIDATION THRESHOLDS (DeepFace similarity):
 | Shot Type | Standard | Lenient |
@@ -125,12 +149,16 @@ ALWAYS USE:
 - PAG scale: 3.0 for portraits, 2.0 for action, 3.5 for landscape
 
 TEMPORAL DENOISE (img2img chaining between consecutive shots):
-| Context                        | Denoise | Why |
-|-------------------------------|---------|-----|
-| First shot of scene            | 0.55    | Maximum creative freedom |
-| Same location, consecutive     | 0.30    | Tightest consistency |
-| Same location, time skip       | 0.40    | Allow some change |
-| Location change within scene   | 0.50    | New environment, keep style |
+| Context                          | Denoise | Why |
+|-----------------------------------|---------|-----|
+| First shot of scene, no anchor    | 0.55    | Maximum creative freedom |
+| Location change within scene      | 0.50    | New environment, keep style |
+| Same location, shot index 0–1     | 0.40    | Early shots get slight creative room |
+| Same location, shot index 2+      | 0.30    | Tightest consistency |
+
+Driven by shot POSITION within the scene, not elapsed story time — there is no
+time-skip detection (domain/continuity_engine.py TemporalConsistencyManager
+.get_denoise_strength).
 
 ═══════════════════════════════════════════════════════════════
 6. PROMPT STRUCTURE — every generation prompt uses this format

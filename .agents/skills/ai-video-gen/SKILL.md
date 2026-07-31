@@ -1,6 +1,6 @@
 ---
 name: "ai-video-gen"
-description: "Use when working on AI video generation, cinema pipeline, shot routing, video API selection (Kling, Sora, Veo, LTX, Runway), character consistency, identity validation, continuity systems, prompt engineering for video, lip sync, face swap, post-processing, or any work involving the cinematic video production pipeline."
+description: "Use when working on AI video generation, cinema pipeline, shot routing, video API selection (Gemini Omni, Kling, Sora, Veo, LTX, Runway), character consistency, identity validation, continuity systems, prompt engineering for video, lip sync, face swap, post-processing, or any work involving the cinematic video production pipeline."
 ---
 
 # AI Video Generation Expert
@@ -9,7 +9,7 @@ This pipeline transforms scripts into photorealistic cinematic video through a m
 
 ```
 Scene Decomposition → Continuity Enhancement → Image Gen (FLUX+PuLID)
-    → Video Gen (5 APIs) → Identity Validation → Face Swap (if needed)
+    → Video Gen (6 APIs) → Identity Validation → Face Swap (if needed)
     → Lip Sync → Frame Interpolation (RIFE) → Upscale (SeedVR2)
     → FFmpeg Assembly (color grade + audio + subtitles)
 ```
@@ -20,13 +20,46 @@ Choose the primary API based on shot type. Each has an ordered fallback cascade:
 
 | Shot Type | Primary API | Why | Fallback Chain |
 |-----------|------------|-----|----------------|
-| **Portrait** | KLING_3_0 (fal Kling v3 Pro) | Best-ranked Kling (#11 AA i2v arena); `elements` identity binding (frontal + ≤3 refs) | Kling Native (legacy v1.6) → Runway Gen-4 → Seedance |
-| **Medium** | KLING_3_0 (fal Kling v3 Pro) | Good face + scene balance, `elements` binding | Kling Native → Runway Gen-4 → Seedance → LTX |
-| **Wide** | LTX | 4K, depth-aware, cheapest | Veo → Kling v3 Pro → Runway |
-| **Action** | SEEDANCE | #1 AA i2v arena (2026-07); multi-reference (≤9 images) binds multi-character action | Sora → Kling v3 Pro → Runway → LTX |
-| **Landscape** | LTX | No face needed, 4K, lowest cost | Veo → Kling v3 Pro |
+| **Portrait** | GEMINI_OMNI | Google-first primary (WS2) — native audio, repaired + re-admitted 2026-07-30 | VEO_NATIVE → KLING_3_0 (fal Kling v3 Pro, `elements` identity binding) → KLING_NATIVE (legacy v1.6) → RUNWAY_GEN4 → SEEDANCE |
+| **Medium** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → KLING_3_0 → KLING_NATIVE → RUNWAY_GEN4 → SEEDANCE → LTX |
+| **Wide** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → LTX (4K, depth-aware, cheapest) → KLING_3_0 → RUNWAY_GEN4 |
+| **Action** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → SEEDANCE (#1 AA i2v arena, 2026-07; multi-reference ≤9 images binds multi-character action) → SORA_NATIVE (deprecated, pre-sunset fallback only) → KLING_3_0 → RUNWAY_GEN4 → LTX |
+| **Landscape** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → LTX (no face needed, 4K, lowest cost) → KLING_3_0 |
 
-Seedance became the action primary in the 2026-07-11 Sora-sunset migration (OpenAI retires Sora 2 + the Videos API on 2026-09-24; Sora stays first action fallback until then). The Seedance dispatch is fal-based: `bytedance/seedance-2.0/image-to-video`, or `.../reference-to-video` (keyframe first, ≤9 images) when multi-angle refs exist (`phase_c_ffmpeg.py`, `workflow_selector.py`).
+GEMINI_OMNI (Gemini Omni Flash, Preview tier) became the primary for every shot
+type in the Google-first migration (WS2), then was repaired and re-admitted
+2026-07-30 (Slice 3: inline-base64 decoding, URI/Files-API polling+download,
+and failed/empty-terminal handling fixed in `gemini_omni_native.py`) — it
+needs `GOOGLE_API_KEY` or `GEMINI_API_KEY`; without either it is
+runtime-unavailable and the cascade starts at VEO_NATIVE. VEO_NATIVE is the
+shared first fallback everywhere (also native-audio; see dialogue routing
+below). SEEDANCE remains the action purpose's strongest non-Google fallback
+(still #1 AA i2v arena, 2026-07; multi-reference up to 9 images binds
+multi-character action). The Seedance dispatch is fal-based:
+`bytedance/seedance-2.0/image-to-video`, or `.../reference-to-video` (keyframe
+first, ≤9 images) when multi-angle refs exist (`phase_c_ffmpeg.py`,
+`workflow_selector.py`). SORA_NATIVE is a deprecated, date-gated fallback
+through the 2026-09-24 OpenAI Sora sunset, then becomes non-dispatchable
+automatically; the FAL-proxied **SORA_2 is already fully RETIRED/UNSUPPORTED**
+(not selectable, not dispatchable, not spendable) — do not route new work to
+it, in code or in prompts.
+
+LTX (`ltx_native.py`, native `ltx-2-3-pro` profile) accepts only 6/8/10-second
+clips (6s default) — snap or reject any other requested duration before the
+network call (`LTXVideoAPI.nearest_supported_duration` / `DURATION_SECONDS`);
+its FAL fallback profile is audio-off (silent) by contract.
+
+**Performance capture** (talking-head driving-video transfer — a separate axis
+from base video generation above; `domain/performance.py`'s ENGINE_ACT_ONE /
+ENGINE_LIVE_PORTRAIT / ENGINE_VIGGLE, dispatched by `performance/_router.py`):
+Runway's engine migrated from Act-One (retired — no longer constructible on
+the Runway API) to **Act-Two** (`performance/act_two.py`). The routing engine
+name stays `ACT_ONE` / catalog key `RUNWAY_ACT_ONE` for backward-compat with
+existing cost/routing data, but it dispatches the live `act_two` model over
+the same `RUNWAYML_API_SECRET` credential. **Viggle is contained as
+KNOWN_BROKEN** in the provider catalog — its adapter (`performance/viggle.py`)
+targets the wrong subdomain/path/field names versus the real `apis.viggle.ai`
+contract; do not route new work to it pending a dedicated repair slice.
 
 **Cascade logic**: Try primary → on failure, next in chain → if all exhausted, wait 30s for quota refresh → retry 1 additional full cycle by default (`MAX_CASCADE_RETRIES = 1` in `phase_c_ffmpeg.py`; the `cascade_retry_limit` UI knob raises it per project).
 
@@ -126,6 +159,7 @@ This is appended to every image generation prompt via the Style Director.
 | Pipeline orchestrator | `cinema_pipeline.py` |
 | Video generation + cascade | `phase_c_ffmpeg.py` |
 | Shot-type routing + workflow params | `workflow_selector.py` |
+| Typed provider/engine catalog (lifecycle, product support, runtime gates) | `domain/provider_catalog.py`, `domain/video_engine_policy.py` |
 | Scene → shots breakdown | `domain/scene_decomposer.py` (root `scene_decomposer.py` is a re-export shim) |
 | Continuity (4 subsystems) | `domain/continuity_engine.py` (root file is a shim) |
 | Character management | `domain/character_manager.py` (root file is a shim) |
@@ -141,7 +175,9 @@ This is appended to every image generation prompt via the Style Director.
 | Kling API | `kling_native.py` |
 | Sora API | `sora_native.py` |
 | Veo API | `veo_native.py` |
+| Gemini Omni API (Google-first primary) | `gemini_omni_native.py` |
 | LTX API | `ltx_native.py` |
+| Performance capture (Act-Two, LivePortrait, Viggle) | `performance/` package: `performance/act_two.py` (Runway, migrated from Act-One), `performance/live_portrait.py`, `performance/viggle.py` (KNOWN_BROKEN); dispatched by `performance/_router.py` |
 | ComfyUI workflows | `pulid.json` (production, 22 nodes) — the only image tier since the max tier was retired (WS1; DECISIONS.md ADR-065) |
 
 ## Common Failure Modes
