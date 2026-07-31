@@ -300,7 +300,8 @@ function ObjectFormFields({
           placeholder="gold 'Aurora' wordmark, embossed wave pattern, neck logo medallion"
           className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-tx" />
         <p className="text-eyebrow-sm text-mut mt-0.5">
-          The features that MUST be preserved across every shot. Drives the negative_constraints — anything missing here triggers regen.
+          The features that MUST be preserved across every shot. Included in the generation
+          prompt as the object's identity anchor, alongside brand and material.
         </p>
       </div>
 
@@ -313,13 +314,24 @@ function ObjectFormFields({
           className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-tx" />
       </div>
 
-      {/* Scale */}
+      {/* Scale — stored but has no production consumer today (audit
+          2026-07-30, slice 9d): unlike material_traits/surface_type/
+          branding_constraints/texture_anchor above, nothing reads
+          scale_reference back out of the object record. Read-only (rather
+          than a silently-inert editable field) so the operator isn't misled
+          into thinking it shapes composition or camera choice. */}
       <div>
-        <label className="text-eyebrow text-tx block mb-0.5 uppercase tracking-wider">Scale Reference</label>
+        <label className="text-eyebrow text-tx block mb-0.5 uppercase tracking-wider">
+          Scale Reference <span className="text-dim normal-case tracking-normal">(read-only)</span>
+        </label>
         <input type="text" value={form.scale_reference}
-          onChange={e => update('scale_reference', e.target.value)}
+          readOnly
           placeholder="fits in adult hand, ~24cm tall, hand-sized"
-          className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-tx" />
+          className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-dim cursor-not-allowed" />
+        <p className="text-eyebrow-sm text-mut mt-0.5">
+          Stored for reference only — not currently read by the generation prompt or camera
+          framing, unlike the fields above.
+        </p>
       </div>
 
       {/* Reference images — multi-angle ideal */}

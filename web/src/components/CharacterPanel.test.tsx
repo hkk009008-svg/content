@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import CharacterPanel from './CharacterPanel'
 import type { Project } from '../types/project'
@@ -245,5 +245,76 @@ describe('CharacterPanel dormant LoRA history', () => {
     expect(screen.getByText('Historical status: done')).toBeInTheDocument()
     expect(screen.queryByText('Historical status: failed')).toBeNull()
     expect(screen.queryByText(/stale private error|stale\/path/i)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ip_adapter_weight (PuLID face-lock strength) is stored but has no
+// production consumer (audit 2026-07-30; plan slice 9d). generate_ai_broll's
+// PuLID node weight comes from workflow_selector's shot-type template or the
+// adaptive_pulid gate — never from Character.ip_adapter_weight. Rather than
+// leave a slider that silently does nothing, the control is removed and the
+// stored value is surfaced read-only with the reason, mirroring this file's
+// existing dormant-LoRA pattern.
+// ---------------------------------------------------------------------------
+describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
+  it('shows the stored PuLID value as read-only text with an explanatory reason', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={vi.fn()} />)
+
+    expect(screen.getByText('PuLID stored: 0.85')).toBeInTheDocument()
+    expect(screen.getByText(
+      'PuLID strength · not used by production — generation applies the shot-type '
+      + 'PuLID template and the adaptive face-lock gate instead.',
+    )).toBeInTheDocument()
+
+    // Flush the LoRA-status GET this component always issues on mount so its
+    // state update lands inside act() instead of after the test returns.
+    await act(async () => { await Promise.resolve() })
+  })
+
+  it('offers no slider or other editable control for ip_adapter_weight in the add form', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
+    const project = makeProject()
+    project.characters = []
+
+    render(<CharacterPanel project={project} config={null} onRefresh={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Character' }))
+
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect(document.querySelector('input[type="range"]')).toBeNull()
+    expect(screen.queryByText(/PuLID/i)).toBeNull()
+  })
+
+  it('offers no slider or other editable control for ip_adapter_weight in the inline edit form', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={vi.fn()} />)
+    fireEvent.click(screen.getByText('Edit'))
+
+    expect(screen.queryByRole('slider')).toBeNull()
+    expect(document.querySelector('input[type="range"]')).toBeNull()
+
+    await act(async () => { await Promise.resolve() })
+  })
+
+  it('resubmits the unchanged stored value on save rather than a UI-driven edit', async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => response(historyPayload()),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={vi.fn()} />)
+    fireEvent.click(screen.getByText('Edit'))
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true)
+    })
+
+    const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!
+    const body = JSON.parse(putCall[1]!.body as string)
+    expect(body.ip_adapter_weight).toBe(0.85)
   })
 })
