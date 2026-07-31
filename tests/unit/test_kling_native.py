@@ -860,3 +860,75 @@ def test_phase_c_ffmpeg_kling_native_branch_notes_billed_on_post_billing_failure
         "A billed-but-failed KLING_NATIVE attempt must be noted in "
         f"_cascade_out['billed_attempts']; got {cascade!r}"
     )
+
+
+def test_phase_c_ffmpeg_kling_native_branch_billed_and_succeeded_notes_billed_once(
+    monkeypatch, tmp_path
+):
+    """RED->GREEN idempotency-guard target: the REAL provider success shape
+    fires the `on_billed` hook (the provider returned a playable video) AND
+    ALSO returns a truthy result from that SAME kling.generate_video call.
+    That reaches BOTH billing sites in the KLING_NATIVE branch of
+    phase_c_ffmpeg._execute_admitted_video_chain — the `on_billed` hook
+    (`_note_kling_billed`) itself, and the post-`if result:` compat call a
+    few lines later — so only the `_kling_billed_noted` idempotency guard
+    keeps `billed_attempts` appended exactly once instead of twice. A double
+    append would corrupt controller._record_billed_rejects' winner-subtraction
+    (it assumes each real attempt contributes at most one entry). No prior
+    test drove both sites from a single call: the companion
+    post-billing-failure test above invokes on_billed but returns None (hook
+    site only, cascades away before the `if result:` compat call can fire).
+
+    Uses a landscape ctx (aspect_ratio="16:9") so `_accept_or_reject` is a
+    no-op (always True) and never needs to probe the (non-real) output file.
+    """
+    import phase_c_ffmpeg
+    from cinema.context import PipelineContext
+
+    output = str(tmp_path / "winner.mp4")
+
+    kling_instance = MagicMock()
+
+    def _billed_then_succeed(**kwargs):
+        kwargs["on_billed"]()
+        return kwargs["output_path"]
+
+    kling_instance.generate_video.side_effect = _billed_then_succeed
+    kling_module = types.ModuleType("kling_native")
+    kling_module.KlingNativeAPI = MagicMock(return_value=kling_instance)
+    monkeypatch.setitem(sys.modules, "kling_native", kling_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _kling_native_runtime_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_current_date",
+        lambda: date(2026, 9, 23),
+    )
+
+    cascade: dict = {}
+    ctx = PipelineContext(
+        global_settings={"aspect_ratio": "16:9", "cascade_retry_limit": 0}
+    )
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "KLING_NATIVE",
+        output,
+        video_fallbacks=["KLING_NATIVE"],
+        shot_type="medium",
+        ctx=ctx,
+        _cascade_out=cascade,
+    )
+
+    assert result == output
+    kling_module.KlingNativeAPI.assert_called_once_with()
+    assert cascade.get("billed_attempts") == ["KLING_NATIVE"], (
+        "A double append (one from the on_billed hook, one from the "
+        "post-result compat call) would corrupt "
+        "controller._record_billed_rejects' winner-subtraction; got "
+        f"{cascade!r}"
+    )

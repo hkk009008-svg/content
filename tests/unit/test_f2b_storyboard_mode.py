@@ -759,6 +759,67 @@ class TestStoryboardHappyPath:
             f"All record_api_call invocations: {gen.cost_tracker.record_api_call.call_args_list}"
         )
 
+    def test_billed_and_succeeded_records_cost_exactly_once(self, tmp_path):
+        """RED->GREEN idempotency-guard target: the REAL provider success shape
+        fires the on_billed hook (the provider returned a playable video) AND
+        ALSO returns a truthy combined path from that SAME generate_storyboard
+        call. That drives BOTH cost-recording sites in one invocation — the
+        on_billed hook itself, and the post-`if not combined_path` compat call
+        (`_record_storyboard_batch_cost()`) a few lines later — so only the
+        `billed_recorded` idempotency guard keeps the batch cost recorded
+        exactly once instead of twice. No prior test drove both sites from a
+        single call: the existing happy-path tests return a truthy path
+        without ever invoking on_billed (compat site only), and
+        test_billed_but_failed_storyboard_records_cost_once invokes on_billed
+        but returns None (hook site only, short-circuits before the compat
+        call via `if not combined_path: return`).
+        """
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        n = 3
+        shots = [_make_shot(f"s1_{i}") for i in range(n)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            _write_nonempty(p)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        storyboard_path = str(tmp_path / "combined.mp4")
+        open(storyboard_path, "w").close()
+        seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
+        for p in seg_paths:
+            _write_nonempty(p)
+
+        def _bill_then_succeed(**kwargs):
+            kwargs["on_billed"]()
+            return storyboard_path
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.side_effect = _bill_then_succeed
+            mock_kling_cls.return_value = mock_kling
+
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                mock_split.side_effect = _write_owned_segments
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                result = phase.run(_make_lifecycle())
+
+        batch_cost_calls = [
+            c for c in gen.cost_tracker.record_api_call.call_args_list
+            if c.args and c.args[0] == "KLING_NATIVE"
+            and c.kwargs.get("operation") == "storyboard_generation"
+        ]
+        assert len(batch_cost_calls) == 1, (
+            "on_billed firing AND a truthy return from the SAME "
+            "generate_storyboard call must record the batch cost exactly "
+            f"once (not once per code path); got {len(batch_cost_calls)}: "
+            f"{gen.cost_tracker.record_api_call.call_args_list}"
+        )
+        assert result.ok is True
+
     def test_batch_cost_records_against_real_tracker(self, tmp_path):
         """The storyboard batch cost must record against the REAL CostTracker
         signature — not merely a MagicMock that accepts any kwarg.
