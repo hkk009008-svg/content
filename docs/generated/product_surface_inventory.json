@@ -2,22 +2,6 @@
   "frontend_operations": [
     {
       "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:0062a33bc781ed10",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 179,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
       "expanded_wrapper": "getShotTemplate",
       "id": "frontend-operation:02016cdf6cd91715",
       "kind": "unknown_wrapper_call",
@@ -26,7 +10,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 37,
+        "line": 39,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -75,46 +59,11 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 30,
+        "line": 31,
         "path": "web/src/hooks/usePipelineState.ts"
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_diagnose_shot:52eedf96237f2859"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:058d3afbff58ab41",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 206,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/diagnose"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_cancel:3ec4c1004cf6ceeb"
-      ],
-      "id": "frontend-operation:062cd119e6147936",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/cancel",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 80,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:b7908258403a5ebe",
-      "url_template": "/api/projects/{1}/cancel"
     },
     {
       "backend_route_ids": [
@@ -132,42 +81,6 @@
       },
       "transport_id": "frontend-transport:117011303ba31daa",
       "url_template": "/api/projects/{1}/locations/{2}"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_restart_shot:479db05ce2dadfe4"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:0e7bca670982bef9",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/restart",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 176,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/restart"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_approve_final_take:ba0ab0b0f1e34a72"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:0ee66577031517b4",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 196,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/final/{3}/approve"
     },
     {
       "backend_route_ids": [],
@@ -260,7 +173,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 25,
+        "line": 26,
         "path": "web/src/App.tsx"
       },
       "transport_id": null,
@@ -282,23 +195,6 @@
       "url_template": "{1}/projects/{2}/characters/{3}"
     },
     {
-      "backend_route_ids": [
-        "route:api_iterate_take:6e4f2103391bdce5"
-      ],
-      "id": "frontend-operation:3510e947b2a79972",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 248,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:6730f319788be67c",
-      "url_template": "/api/projects/{1}/shots/{2}/takes/{3}/iterate"
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "handleDelete",
       "id": "frontend-operation:357aaa1e21794bf9",
@@ -313,40 +209,6 @@
       },
       "transport_id": "frontend-transport:0b66216fb9f21a98",
       "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:38b3a9a6d212790f",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 187,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_generate_motion:e33ce408c66615c2"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:3975414da0245344",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 191,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/motion/generate"
     },
     {
       "backend_route_ids": [
@@ -366,57 +228,6 @@
       "url_template": "/api/projects/{1}/stream"
     },
     {
-      "backend_route_ids": [
-        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
-      ],
-      "id": "frontend-operation:3a84580411ba8920",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 28,
-        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
-      },
-      "transport_id": "frontend-transport:5f1c44406ad30a78",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_regenerate_shot:ae30ef4f457b584d"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:3a9285053f499947",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 150,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/regenerate"
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:3aac459544615f04",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 185,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "parsePromptSections",
       "id": "frontend-operation:3c905828c2e1305b",
@@ -426,7 +237,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 17,
+        "line": 18,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -442,29 +253,11 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 37,
+        "line": 48,
         "path": "web/src/App.tsx"
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_generate_keyframe:ccfc0fb03f450e57"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:3faeac1cc762d7bb",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 168,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/keyframes/generate"
     },
     {
       "backend_route_ids": [],
@@ -613,21 +406,36 @@
       "url_template": "/api/projects/{1}/cost-live"
     },
     {
-      "backend_route_ids": [
-        "route:api_generate:6b91ac9b453dfc46"
-      ],
-      "id": "frontend-operation:584a371a6b5af032",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/generate",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:54a3814e90c47eff",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/cancel",
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 74,
+        "line": 124,
         "path": "web/src/App.tsx"
       },
-      "transport_id": "frontend-transport:b8037d3236d9c0c4",
-      "url_template": "/api/projects/{1}/generate"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/cancel"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:578fe9517e590f67",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 24,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
     },
     {
       "backend_route_ids": [
@@ -661,42 +469,6 @@
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:5ae65cad4fd492eb",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 160,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_proceed_assembly:c53146735ec0f336"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:5d63332291fb116f",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/assemble",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 211,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/assemble"
     },
     {
       "backend_route_ids": [
@@ -749,21 +521,20 @@
       "url_template": "/api/projects/{1}/shots/{2}"
     },
     {
-      "backend_route_ids": [
-        "route:api_approve_shot_plan:ea420a69c80424a2"
-      ],
-      "id": "frontend-operation:67c5c76a95efd9af",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPut",
+      "id": "frontend-operation:6616aea7f4dc33d4",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/shots/{2}",
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 21,
-        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+        "line": 46,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
-      "transport_id": "frontend-transport:9d484910b711a2ff",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/shots/{2}"
     },
     {
       "backend_route_ids": [],
@@ -775,62 +546,11 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 36,
+        "line": 38,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:6a129be78a1fa429",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 184,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "refreshProject",
-      "id": "frontend-operation:6acecac0b36050f5",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 114,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "id": "frontend-operation:6c671f14e82a31fc",
-      "kind": "direct_transport",
-      "method": "GET",
-      "path_shape": "/api/config",
-      "query_keys": [
-        "project_id"
-      ],
-      "route_match": "matched",
-      "source": {
-        "line": 47,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:92a09f59cc3a0b53",
-      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [
@@ -932,70 +652,52 @@
       "url_template": null
     },
     {
-      "backend_route_ids": [
-        "route:api_approve_shot_plan:ea420a69c80424a2"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:8044a17fda05828c",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:825a21ed8ef3d997",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 155,
+        "line": 102,
+        "path": "web/src/lib/api.ts"
+      },
+      "transport_id": "frontend-transport:9a075367a8152fae",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:88622554f2498c18",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/pause",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 217,
         "path": "web/src/hooks/usePipelineState.ts"
       },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/pause"
     },
     {
       "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:8412595da2de908e",
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:891cdbd26496d56d",
       "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
+      "method": null,
+      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 183,
-        "path": "web/src/App.tsx"
+        "line": 33,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
       },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:84649298fc4d97b2",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 189,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:88ef7a2e590ff84c",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 186,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
     },
     {
       "backend_route_ids": [],
@@ -1046,6 +748,22 @@
       },
       "transport_id": "frontend-transport:df693d9bb9dfa9a8",
       "url_template": "/api/projects/{1}/objects/{2}"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiGet",
+      "id": "frontend-operation:8c607dc738a4c39b",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/pipeline-state",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 91,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/pipeline-state"
     },
     {
       "backend_route_ids": [],
@@ -1113,6 +831,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:9288b5f9eebfce2d",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 237,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "humanizeEngineReason",
       "id": "frontend-operation:9469b56cb3fcbf46",
       "kind": "unknown_wrapper_call",
@@ -1126,6 +860,22 @@
       },
       "transport_id": null,
       "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:98905ffe1fe2e5cb",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/resume",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 223,
+        "path": "web/src/hooks/usePipelineState.ts"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/resume"
     },
     {
       "backend_route_ids": [],
@@ -1153,7 +903,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 116,
+        "line": 123,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -1177,22 +927,6 @@
     },
     {
       "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:9dfc98d5b1607809",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 191,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
       "expanded_wrapper": "stageTone",
       "id": "frontend-operation:a16fd646a7000e23",
       "kind": "unknown_wrapper_call",
@@ -1205,22 +939,6 @@
         "path": "web/src/components/console/Notes.tsx"
       },
       "transport_id": null,
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:a2bf35fa45798925",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 181,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
       "url_template": null
     },
     {
@@ -1239,6 +957,22 @@
       },
       "transport_id": "frontend-transport:762c39ae3109f0e4",
       "url_template": "/api/cost-estimate"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:a5b7640490106f83",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 106,
+        "path": "web/src/lib/api.ts"
+      },
+      "transport_id": "frontend-transport:9a075367a8152fae",
+      "url_template": null
     },
     {
       "backend_route_ids": [],
@@ -1322,21 +1056,22 @@
       "url_template": null
     },
     {
-      "backend_route_ids": [
-        "route:api_assemble_reassemble:d842ab3e789607e7"
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiGet",
+      "id": "frontend-operation:b38571fbd5e89b15",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
       ],
-      "id": "frontend-operation:b3a2ba5c79ca1c02",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/assemble/re-assemble",
-      "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 285,
-        "path": "web/src/hooks/usePipelineState.ts"
+        "line": 89,
+        "path": "web/src/App.tsx"
       },
-      "transport_id": "frontend-transport:1ffb7550b1b55d48",
-      "url_template": "/api/projects/{1}/assemble/re-assemble"
+      "transport_id": null,
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [],
@@ -1422,6 +1157,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:ba28f5a036ca490e",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 110,
+        "path": "web/src/lib/api.ts"
+      },
+      "transport_id": "frontend-transport:9a075367a8152fae",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "handleDelete",
       "id": "frontend-operation:ba678ef9fdaede9d",
       "kind": "unknown_wrapper_call",
@@ -1451,24 +1202,6 @@
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_approve_performance_take:b3a30ccdbdace785"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:bd55421e10f18047",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 186,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/performance/{3}/approve"
     },
     {
       "backend_route_ids": [
@@ -1505,23 +1238,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_screening_approve:0d6bea47da8aa8e7"
-      ],
-      "id": "frontend-operation:be5e1fe595520e5f",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/screening/approve",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 264,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:a4d268f35367f819",
-      "url_template": "/api/projects/{1}/screening/approve"
-    },
-    {
-      "backend_route_ids": [
         "route:get_config:f8c39cee070cf94b"
       ],
       "id": "frontend-operation:bf850c41bdcb0c94",
@@ -1533,28 +1249,43 @@
       ],
       "route_match": "matched",
       "source": {
-        "line": 31,
+        "line": 33,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": "frontend-transport:53f8b91ea681a5b0",
       "url_template": "/api/config?project_id={1}"
     },
     {
-      "backend_route_ids": [
-        "route:api_resume:d10d681a881accc6"
-      ],
-      "id": "frontend-operation:c6307fc67e3d09c5",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/resume",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:c5327ec7d7900f82",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/generate",
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 132,
-        "path": "web/src/hooks/usePipelineState.ts"
+        "line": 110,
+        "path": "web/src/App.tsx"
       },
-      "transport_id": "frontend-transport:37cc22c82bc200ac",
-      "url_template": "/api/projects/{1}/resume"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/generate"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:c5e2f06dc456d9a9",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 114,
+        "path": "web/src/lib/api.ts"
+      },
+      "transport_id": "frontend-transport:9a075367a8152fae",
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -1572,24 +1303,6 @@
       },
       "transport_id": "frontend-transport:e715b122db4102a3",
       "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_correct_shot:d9f2bc6e2b66cdf5"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:cd681b32a08d756d",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/correct",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 201,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/correct"
     },
     {
       "backend_route_ids": [],
@@ -1621,22 +1334,6 @@
         "path": "web/src/components/edit/ShotInspector.tsx"
       },
       "transport_id": null,
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:d847bc7e5731d4f3",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 182,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
       "url_template": null
     },
     {
@@ -1675,22 +1372,6 @@
     },
     {
       "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:dc2dda155c1ec185",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 178,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
       "expanded_wrapper": "getSceneGuidance",
       "id": "frontend-operation:dd9784c65f743e24",
       "kind": "unknown_wrapper_call",
@@ -1722,22 +1403,6 @@
     },
     {
       "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:e03abee4672f1aca",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 194,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
       "expanded_wrapper": "assemblePromptSections",
       "id": "frontend-operation:e1fde5aa5623a846",
       "kind": "unknown_wrapper_call",
@@ -1746,7 +1411,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 34,
+        "line": 36,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -1785,23 +1450,6 @@
       "url_template": null
     },
     {
-      "backend_route_ids": [
-        "route:api_pause:8c962297a6515f7b"
-      ],
-      "id": "frontend-operation:e829b14ae1258960",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/pause",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 126,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "transport_id": "frontend-transport:9d7c8fd84a1b706d",
-      "url_template": "/api/projects/{1}/pause"
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "videoEngines",
       "id": "frontend-operation:e8ba6403ef9b8fe0",
@@ -1811,7 +1459,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 39,
+        "line": 41,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -1852,22 +1500,6 @@
       "url_template": "/api/projects"
     },
     {
-      "backend_route_ids": [],
-      "expanded_wrapper": "withRefresh",
-      "id": "frontend-operation:ee2f71c98a697283",
-      "kind": "unknown_wrapper_call",
-      "method": "GET",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 180,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:66e55f0bf775368e",
-      "url_template": null
-    },
-    {
       "backend_route_ids": [
         "route:api_add_object:71dcf96c26e1c758"
       ],
@@ -1904,39 +1536,20 @@
       "url_template": "/api/config?project_id={1}"
     },
     {
-      "backend_route_ids": [
-        "route:api_approve_keyframe_take:dafbed73f936b983"
-      ],
-      "expanded_wrapper": "postJson",
-      "id": "frontend-operation:f3d71dc7f96584a8",
-      "kind": "one_hop_wrapper_call",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiGet",
+      "id": "frontend-operation:f6a4b4321457ae91",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}",
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 181,
-        "path": "web/src/hooks/usePipelineState.ts"
+        "line": 97,
+        "path": "web/src/App.tsx"
       },
-      "transport_id": "frontend-transport:aaaec1e51b89b676",
-      "url_template": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_update_shot:60b130964b1fd219"
-      ],
-      "id": "frontend-operation:f6198d9a687b2ce5",
-      "kind": "direct_transport",
-      "method": "PUT",
-      "path_shape": "/api/projects/{1}/shots/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 43,
-        "path": "web/src/components/pipeline/PromptEditor.tsx"
-      },
-      "transport_id": "frontend-transport:70f7e53e4fb41635",
-      "url_template": "/api/projects/{1}/shots/{2}"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}"
     },
     {
       "backend_route_ids": [
@@ -2156,26 +1769,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_assemble_reassemble:d842ab3e789607e7"
-      ],
-      "enclosing_function": "reassembleProject",
-      "id": "frontend-transport:1ffb7550b1b55d48",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/assemble/re-assemble",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 285,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "`/api/projects/${projectId}/assemble/re-assemble`",
-      "url_template": "/api/projects/{1}/assemble/re-assemble"
-    },
-    {
-      "backend_route_ids": [
         "route:api_upload_driving_video:b6345fd3bcc0aa51"
       ],
       "enclosing_function": "ClipCard",
@@ -2213,26 +1806,6 @@
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/reorder`",
       "url_template": "/api/projects/{1}/scenes/reorder"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_resume:d10d681a881accc6"
-      ],
-      "enclosing_function": "resume",
-      "id": "frontend-transport:37cc22c82bc200ac",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/resume",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 132,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "`/api/projects/${projectId}/resume`",
-      "url_template": "/api/projects/{1}/resume"
     },
     {
       "backend_route_ids": [
@@ -2328,7 +1901,7 @@
       ],
       "route_match": "matched",
       "source": {
-        "line": 31,
+        "line": 33,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "url_expression": "`/api/config?project_id=${encodeURIComponent(projectId)}`",
@@ -2376,26 +1949,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_reject_shot_plan:5baec6f4d6cc0b75"
-      ],
-      "enclosing_function": "handleReject",
-      "id": "frontend-transport:5f1c44406ad30a78",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 28,
-        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
-      },
-      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/plan/reject`",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/reject"
-    },
-    {
-      "backend_route_ids": [
         "route:api_create_project:bd55971731373044"
       ],
       "enclosing_function": "handleCreate",
@@ -2413,66 +1966,6 @@
       },
       "url_expression": "`${API}/projects`",
       "url_template": "/api/projects"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_get_project:8a94a524be403d69"
-      ],
-      "enclosing_function": "loadProject",
-      "id": "frontend-transport:66e55f0bf775368e",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 51,
-        "path": "web/src/App.tsx"
-      },
-      "url_expression": "`${API}/projects/${id}`",
-      "url_template": "/api/projects/{1}"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_iterate_take:6e4f2103391bdce5"
-      ],
-      "enclosing_function": "iterateTake",
-      "id": "frontend-transport:6730f319788be67c",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "not_observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 248,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`",
-      "url_template": "/api/projects/{1}/shots/{2}/takes/{3}/iterate"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_update_shot:60b130964b1fd219"
-      ],
-      "enclosing_function": "handleSave",
-      "id": "frontend-transport:70f7e53e4fb41635",
-      "kind": "fetch",
-      "method": "PUT",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/shots/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 43,
-        "path": "web/src/components/pipeline/PromptEditor.tsx"
-      },
-      "url_expression": "`/api/projects/${projectId}/shots/${shotId}`",
-      "url_template": "/api/projects/{1}/shots/{2}"
     },
     {
       "backend_route_ids": [
@@ -2576,28 +2069,6 @@
     },
     {
       "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "enclosing_function": "AppInner",
-      "id": "frontend-transport:92a09f59cc3a0b53",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/config",
-      "query_keys": [
-        "project_id"
-      ],
-      "route_match": "matched",
-      "source": {
-        "line": 47,
-        "path": "web/src/App.tsx"
-      },
-      "url_expression": "`${API}/config?project_id=${encodeURIComponent(project.id)}`",
-      "url_template": "/api/config?project_id={1}"
-    },
-    {
-      "backend_route_ids": [
         "route:api_update_location:4c4e5e22465a2b60"
       ],
       "enclosing_function": "handleSaveEdit",
@@ -2617,44 +2088,22 @@
       "url_template": "/api/projects/{1}/locations/{2}"
     },
     {
-      "backend_route_ids": [
-        "route:api_approve_shot_plan:ea420a69c80424a2"
-      ],
-      "enclosing_function": "handleApprove",
-      "id": "frontend-transport:9d484910b711a2ff",
+      "backend_route_ids": [],
+      "enclosing_function": "apiRequest",
+      "id": "frontend-transport:9a075367a8152fae",
       "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
+      "method": null,
+      "non_2xx_observation": "observed",
       "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
+      "path_shape": null,
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 21,
-        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+        "line": 80,
+        "path": "web/src/lib/api.ts"
       },
-      "url_expression": "`/api/projects/${projectId}/shots/${shotId}/plan/approve`",
-      "url_template": "/api/projects/{1}/shots/{2}/plan/approve"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_pause:8c962297a6515f7b"
-      ],
-      "enclosing_function": "pause",
-      "id": "frontend-transport:9d7c8fd84a1b706d",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/pause",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 126,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "`/api/projects/${projectId}/pause`",
-      "url_template": "/api/projects/{1}/pause"
+      "url_expression": "input",
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -2697,44 +2146,6 @@
       "url_template": "/api/projects/{1}/scenes/{2}"
     },
     {
-      "backend_route_ids": [
-        "route:api_screening_approve:0d6bea47da8aa8e7"
-      ],
-      "enclosing_function": "approveScreening",
-      "id": "frontend-transport:a4d268f35367f819",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "not_observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/screening/approve",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 264,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "`/api/projects/${projectId}/screening/approve`",
-      "url_template": "/api/projects/{1}/screening/approve"
-    },
-    {
-      "backend_route_ids": [],
-      "enclosing_function": "postJson",
-      "id": "frontend-transport:aaaec1e51b89b676",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "not_observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 137,
-        "path": "web/src/hooks/usePipelineState.ts"
-      },
-      "url_expression": "path",
-      "url_template": null
-    },
-    {
       "backend_route_ids": [],
       "enclosing_function": "handleSubmit",
       "id": "frontend-transport:ad9b8cf5110bd5d9",
@@ -2751,46 +2162,6 @@
       },
       "url_expression": "`${apiBase}/projects/${projectId}/shots/${shotId}/reject-auto-approve`",
       "url_template": "{1}/projects/{2}/shots/{3}/reject-auto-approve"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_cancel:3ec4c1004cf6ceeb"
-      ],
-      "enclosing_function": "handleCancel",
-      "id": "frontend-transport:b7908258403a5ebe",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/cancel",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 80,
-        "path": "web/src/App.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/cancel`",
-      "url_template": "/api/projects/{1}/cancel"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_generate:6b91ac9b453dfc46"
-      ],
-      "enclosing_function": "handleGenerate",
-      "id": "frontend-transport:b8037d3236d9c0c4",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/generate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 74,
-        "path": "web/src/App.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/generate`",
-      "url_template": "/api/projects/{1}/generate"
     },
     {
       "backend_route_ids": [
@@ -3060,7 +2431,7 @@
       "path_shape": "/",
       "rule": "/",
       "source": {
-        "line": 398,
+        "line": 446,
         "path": "web_server.py"
       }
     },
@@ -3072,7 +2443,7 @@
       "path_shape": "/api/cleanup-all",
       "rule": "/api/cleanup-all",
       "source": {
-        "line": 3159,
+        "line": 3503,
         "path": "web_server.py"
       }
     },
@@ -3084,7 +2455,7 @@
       "path_shape": "/api/config",
       "rule": "/api/config",
       "source": {
-        "line": 559,
+        "line": 607,
         "path": "web_server.py"
       }
     },
@@ -3096,7 +2467,7 @@
       "path_shape": "/api/cost-estimate",
       "rule": "/api/cost-estimate",
       "source": {
-        "line": 699,
+        "line": 747,
         "path": "web_server.py"
       }
     },
@@ -3108,7 +2479,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 717,
+        "line": 765,
         "path": "web_server.py"
       }
     },
@@ -3120,7 +2491,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 722,
+        "line": 770,
         "path": "web_server.py"
       }
     },
@@ -3132,7 +2503,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 794,
+        "line": 1118,
         "path": "web_server.py"
       }
     },
@@ -3144,7 +2515,19 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 730,
+        "line": 778,
+        "path": "web_server.py"
+      }
+    },
+    {
+      "handler": "api_patch_project_settings",
+      "id": "route:api_patch_project_settings:82aaca4319f811a8",
+      "kind": "flask_route",
+      "method": "PATCH",
+      "path_shape": "/api/projects/{1}",
+      "rule": "/api/projects/<pid>",
+      "source": {
+        "line": 1028,
         "path": "web_server.py"
       }
     },
@@ -3156,7 +2539,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 748,
+        "line": 958,
         "path": "web_server.py"
       }
     },
@@ -3168,7 +2551,7 @@
       "path_shape": "/api/projects/{1}/apply-language-defaults",
       "rule": "/api/projects/<pid>/apply-language-defaults",
       "source": {
-        "line": 635,
+        "line": 683,
         "path": "web_server.py"
       }
     },
@@ -3180,7 +2563,7 @@
       "path_shape": "/api/projects/{1}/assemble",
       "rule": "/api/projects/<pid>/assemble",
       "source": {
-        "line": 2726,
+        "line": 3070,
         "path": "web_server.py"
       }
     },
@@ -3192,7 +2575,7 @@
       "path_shape": "/api/projects/{1}/assemble/re-assemble",
       "rule": "/api/projects/<pid>/assemble/re-assemble",
       "source": {
-        "line": 2923,
+        "line": 3267,
         "path": "web_server.py"
       }
     },
@@ -3204,7 +2587,7 @@
       "path_shape": "/api/projects/{1}/assemble/screen",
       "rule": "/api/projects/<pid>/assemble/screen",
       "source": {
-        "line": 2748,
+        "line": 3092,
         "path": "web_server.py"
       }
     },
@@ -3216,7 +2599,7 @@
       "path_shape": "/api/projects/{1}/cancel",
       "rule": "/api/projects/<pid>/cancel",
       "source": {
-        "line": 2104,
+        "line": 2428,
         "path": "web_server.py"
       }
     },
@@ -3228,7 +2611,7 @@
       "path_shape": "/api/projects/{1}/capability-scorecard",
       "rule": "/api/projects/<pid>/capability-scorecard",
       "source": {
-        "line": 738,
+        "line": 786,
         "path": "web_server.py"
       }
     },
@@ -3240,7 +2623,7 @@
       "path_shape": "/api/projects/{1}/characters",
       "rule": "/api/projects/<pid>/characters",
       "source": {
-        "line": 810,
+        "line": 1134,
         "path": "web_server.py"
       }
     },
@@ -3252,7 +2635,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 987,
+        "line": 1311,
         "path": "web_server.py"
       }
     },
@@ -3264,7 +2647,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 861,
+        "line": 1185,
         "path": "web_server.py"
       }
     },
@@ -3276,7 +2659,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
       "rule": "/api/projects/<pid>/characters/<cid>/lora-status",
       "source": {
-        "line": 1130,
+        "line": 1454,
         "path": "web_server.py"
       }
     },
@@ -3288,7 +2671,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/train-lora",
       "rule": "/api/projects/<pid>/characters/<cid>/train-lora",
       "source": {
-        "line": 1018,
+        "line": 1342,
         "path": "web_server.py"
       }
     },
@@ -3300,7 +2683,7 @@
       "path_shape": "/api/projects/{1}/checkpoint",
       "rule": "/api/projects/<pid>/checkpoint",
       "source": {
-        "line": 2071,
+        "line": 2395,
         "path": "web_server.py"
       }
     },
@@ -3312,7 +2695,7 @@
       "path_shape": "/api/projects/{1}/cleanup",
       "rule": "/api/projects/<pid>/cleanup",
       "source": {
-        "line": 3111,
+        "line": 3455,
         "path": "web_server.py"
       }
     },
@@ -3324,7 +2707,7 @@
       "path_shape": "/api/projects/{1}/cost-live",
       "rule": "/api/projects/<pid>/cost-live",
       "source": {
-        "line": 3133,
+        "line": 3477,
         "path": "web_server.py"
       }
     },
@@ -3336,7 +2719,7 @@
       "path_shape": "/api/projects/{1}/disk-usage",
       "rule": "/api/projects/<pid>/disk-usage",
       "source": {
-        "line": 3126,
+        "line": 3470,
         "path": "web_server.py"
       }
     },
@@ -3348,7 +2731,7 @@
       "path_shape": "/api/projects/{1}/export",
       "rule": "/api/projects/<pid>/export",
       "source": {
-        "line": 3171,
+        "line": 3515,
         "path": "web_server.py"
       }
     },
@@ -3360,7 +2743,7 @@
       "path_shape": "/api/projects/{1}/file",
       "rule": "/api/projects/<pid>/file",
       "source": {
-        "line": 2117,
+        "line": 2441,
         "path": "web_server.py"
       }
     },
@@ -3372,7 +2755,7 @@
       "path_shape": "/api/projects/{1}/generate",
       "rule": "/api/projects/<pid>/generate",
       "source": {
-        "line": 2014,
+        "line": 2338,
         "path": "web_server.py"
       }
     },
@@ -3384,7 +2767,7 @@
       "path_shape": "/api/projects/{1}/locations",
       "rule": "/api/projects/<pid>/locations",
       "source": {
-        "line": 1481,
+        "line": 1805,
         "path": "web_server.py"
       }
     },
@@ -3396,7 +2779,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 1603,
+        "line": 1927,
         "path": "web_server.py"
       }
     },
@@ -3408,7 +2791,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 1528,
+        "line": 1852,
         "path": "web_server.py"
       }
     },
@@ -3420,7 +2803,7 @@
       "path_shape": "/api/projects/{1}/objects",
       "rule": "/api/projects/<pid>/objects",
       "source": {
-        "line": 1306,
+        "line": 1630,
         "path": "web_server.py"
       }
     },
@@ -3432,7 +2815,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 1461,
+        "line": 1785,
         "path": "web_server.py"
       }
     },
@@ -3444,7 +2827,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 1376,
+        "line": 1700,
         "path": "web_server.py"
       }
     },
@@ -3456,7 +2839,7 @@
       "path_shape": "/api/projects/{1}/pause",
       "rule": "/api/projects/<pid>/pause",
       "source": {
-        "line": 2552,
+        "line": 2876,
         "path": "web_server.py"
       }
     },
@@ -3468,7 +2851,7 @@
       "path_shape": "/api/projects/{1}/pipeline-state",
       "rule": "/api/projects/<pid>/pipeline-state",
       "source": {
-        "line": 2572,
+        "line": 2896,
         "path": "web_server.py"
       }
     },
@@ -3480,7 +2863,7 @@
       "path_shape": "/api/projects/{1}/preview/{2}",
       "rule": "/api/projects/<pid>/preview/<sid>",
       "source": {
-        "line": 3180,
+        "line": 3524,
         "path": "web_server.py"
       }
     },
@@ -3492,7 +2875,7 @@
       "path_shape": "/api/projects/{1}/proceed-assembly",
       "rule": "/api/projects/<pid>/proceed-assembly",
       "source": {
-        "line": 2727,
+        "line": 3071,
         "path": "web_server.py"
       }
     },
@@ -3504,7 +2887,7 @@
       "path_shape": "/api/projects/{1}/resume",
       "rule": "/api/projects/<pid>/resume",
       "source": {
-        "line": 2562,
+        "line": 2886,
         "path": "web_server.py"
       }
     },
@@ -3516,7 +2899,7 @@
       "path_shape": "/api/projects/{1}/scenes",
       "rule": "/api/projects/<pid>/scenes",
       "source": {
-        "line": 1622,
+        "line": 1946,
         "path": "web_server.py"
       }
     },
@@ -3528,7 +2911,7 @@
       "path_shape": "/api/projects/{1}/scenes/reorder",
       "rule": "/api/projects/<pid>/scenes/reorder",
       "source": {
-        "line": 1841,
+        "line": 2165,
         "path": "web_server.py"
       }
     },
@@ -3540,7 +2923,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 1826,
+        "line": 2150,
         "path": "web_server.py"
       }
     },
@@ -3552,7 +2935,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 1648,
+        "line": 1972,
         "path": "web_server.py"
       }
     },
@@ -3564,7 +2947,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
       "rule": "/api/projects/<pid>/scenes/<sid>/decompose",
       "source": {
-        "line": 1897,
+        "line": 2221,
         "path": "web_server.py"
       }
     },
@@ -3576,7 +2959,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
       "rule": "/api/projects/<pid>/scenes/<sid>/generate-dialogue",
       "source": {
-        "line": 1861,
+        "line": 2185,
         "path": "web_server.py"
       }
     },
@@ -3588,7 +2971,7 @@
       "path_shape": "/api/projects/{1}/screening/approve",
       "rule": "/api/projects/<pid>/screening/approve",
       "source": {
-        "line": 2834,
+        "line": 3178,
         "path": "web_server.py"
       }
     },
@@ -3600,7 +2983,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}",
       "rule": "/api/projects/<pid>/shots/<shot_id>",
       "source": {
-        "line": 2455,
+        "line": 2779,
         "path": "web_server.py"
       }
     },
@@ -3612,7 +2995,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/correct",
       "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
       "source": {
-        "line": 2693,
+        "line": 3037,
         "path": "web_server.py"
       }
     },
@@ -3624,7 +3007,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
       "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
       "source": {
-        "line": 2713,
+        "line": 3057,
         "path": "web_server.py"
       }
     },
@@ -3636,7 +3019,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
       "source": {
-        "line": 2232,
+        "line": 2556,
         "path": "web_server.py"
       }
     },
@@ -3648,7 +3031,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
       "source": {
-        "line": 2159,
+        "line": 2483,
         "path": "web_server.py"
       }
     },
@@ -3660,7 +3043,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
       "source": {
-        "line": 2184,
+        "line": 2508,
         "path": "web_server.py"
       }
     },
@@ -3672,7 +3055,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
       "source": {
-        "line": 2213,
+        "line": 2537,
         "path": "web_server.py"
       }
     },
@@ -3684,7 +3067,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance",
       "rule": "/api/projects/<pid>/shots/<sid>/performance",
       "source": {
-        "line": 1211,
+        "line": 1535,
         "path": "web_server.py"
       }
     },
@@ -3696,7 +3079,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
       "source": {
-        "line": 2195,
+        "line": 2519,
         "path": "web_server.py"
       }
     },
@@ -3708,7 +3091,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
       "source": {
-        "line": 2134,
+        "line": 2458,
         "path": "web_server.py"
       }
     },
@@ -3720,7 +3103,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
       "source": {
-        "line": 2146,
+        "line": 2470,
         "path": "web_server.py"
       }
     },
@@ -3732,7 +3115,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/prompt",
       "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
       "source": {
-        "line": 2418,
+        "line": 2742,
         "path": "web_server.py"
       }
     },
@@ -3744,7 +3127,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
       "source": {
-        "line": 2634,
+        "line": 2978,
         "path": "web_server.py"
       }
     },
@@ -3756,7 +3139,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
       "source": {
-        "line": 2346,
+        "line": 2670,
         "path": "web_server.py"
       }
     },
@@ -3768,7 +3151,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/restart",
       "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
       "source": {
-        "line": 2586,
+        "line": 2930,
         "path": "web_server.py"
       }
     },
@@ -3780,7 +3163,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
       "source": {
-        "line": 2243,
+        "line": 2567,
         "path": "web_server.py"
       }
     },
@@ -3792,7 +3175,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
       "rule": "/api/projects/<pid>/shots/<sid>/upload-driving-video",
       "source": {
-        "line": 1141,
+        "line": 1465,
         "path": "web_server.py"
       }
     },
@@ -3804,7 +3187,7 @@
       "path_shape": "/api/projects/{1}/stream",
       "rule": "/api/projects/<pid>/stream",
       "source": {
-        "line": 2083,
+        "line": 2407,
         "path": "web_server.py"
       }
     },
@@ -3816,7 +3199,7 @@
       "path_shape": "/api/projects/{1}/style-board",
       "rule": "/api/projects/<pid>/style-board",
       "source": {
-        "line": 1253,
+        "line": 1577,
         "path": "web_server.py"
       }
     },
@@ -3828,7 +3211,7 @@
       "path_shape": "/api/projects/{1}/style-rules",
       "rule": "/api/projects/<pid>/style-rules",
       "source": {
-        "line": 1954,
+        "line": 2278,
         "path": "web_server.py"
       }
     },
@@ -3840,7 +3223,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:path>",
       "source": {
-        "line": 403,
+        "line": 451,
         "path": "web_server.py"
       }
     },
@@ -3922,7 +3305,7 @@
       "owner": "videoEngines",
       "reason": "imported wrapper call",
       "source": {
-        "line": 39,
+        "line": 41,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -3934,8 +3317,20 @@
       "owner": "humanizeEngineReason",
       "reason": "imported wrapper call",
       "source": {
-        "line": 116,
+        "line": 123,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:085d22fe64054547",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "fetch options is not an inline object literal",
+      "source": {
+        "line": 102,
+        "path": "web/src/lib/api.ts"
       }
     },
     {
@@ -3952,14 +3347,38 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:0dd8af3f3a049db0",
+      "expression": "`/api/projects/${projectId}/shots/${shotId}/plan/approve`",
+      "id": "unresolved:12306b2ed7ab72c3",
       "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 184,
-        "path": "web/src/App.tsx"
+        "line": 24,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "input",
+      "id": "unresolved:126967698ed0aa16",
+      "kind": "dynamic_transport_url",
+      "owner": "apiRequest",
+      "reason": "transport URL is not a string, template, or module literal constant",
+      "source": {
+        "line": 80,
+        "path": "web/src/lib/api.ts"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "`/api/projects/${projectId}/shots/${shotId}/plan/reject`",
+      "id": "unresolved:1ab8e518843ff65c",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 33,
+        "path": "web/src/components/pipeline/ShotApprovalControls.tsx"
       }
     },
     {
@@ -4036,6 +3455,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "`/api/projects/${pid}/pipeline-state`",
+      "id": "unresolved:2d77ce61086a5d3f",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiGet",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 91,
+        "path": "web/src/hooks/usePipelineState.ts"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:2d8076145984df35",
       "kind": "unknown_wrapper_call",
@@ -4084,18 +3515,6 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:3673fc07dee26f26",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 186,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
       "expression": "apiBase",
       "id": "unresolved:3ab20f3c89b5905d",
       "kind": "unknown_wrapper_call",
@@ -4104,6 +3523,18 @@
       "source": {
         "line": 167,
         "path": "web/src/components/shared/Filmstrip.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "`${API}/projects/${project.id}/generate`",
+      "id": "unresolved:3dadf387ce293569",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 110,
+        "path": "web/src/App.tsx"
       }
     },
     {
@@ -4157,24 +3588,12 @@
     {
       "domain": "frontend",
       "expression": "",
-      "id": "unresolved:656ea925b8eaf5e7",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 180,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
       "id": "unresolved:719df80ed1d8692d",
       "kind": "unknown_wrapper_call",
       "owner": "usePage",
       "reason": "imported wrapper call",
       "source": {
-        "line": 25,
+        "line": 26,
         "path": "web/src/App.tsx"
       }
     },
@@ -4193,18 +3612,6 @@
     {
       "domain": "frontend",
       "expression": "",
-      "id": "unresolved:73bc95fc0d51af16",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 182,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
       "id": "unresolved:76b3fefa06aacc5d",
       "kind": "unknown_wrapper_call",
       "owner": "handleUpdate",
@@ -4216,14 +3623,14 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:797def11a85178de",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "expression": "init",
+      "id": "unresolved:7e568e7dac699126",
+      "kind": "dynamic_fetch_method",
+      "owner": "apiRequest",
+      "reason": "fetch options is not an inline object literal",
       "source": {
-        "line": 181,
-        "path": "web/src/App.tsx"
+        "line": 80,
+        "path": "web/src/lib/api.ts"
       }
     },
     {
@@ -4240,6 +3647,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:80a3f61b0516de37",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "fetch options is not an inline object literal",
+      "source": {
+        "line": 114,
+        "path": "web/src/lib/api.ts"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "e.stage",
       "id": "unresolved:82a5846eafab2d3f",
       "kind": "unknown_wrapper_call",
@@ -4252,14 +3671,14 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:864b1f5ad1a60c38",
+      "expression": "path",
+      "id": "unresolved:8647361b359fcc2c",
       "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 191,
-        "path": "web/src/App.tsx"
+        "line": 237,
+        "path": "web/src/hooks/usePipelineState.ts"
       }
     },
     {
@@ -4272,18 +3691,6 @@
       "source": {
         "line": 291,
         "path": "web/src/components/ScenePanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:8b2864382f4419bf",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 187,
-        "path": "web/src/App.tsx"
       }
     },
     {
@@ -4306,7 +3713,7 @@
       "owner": "parsePromptSections",
       "reason": "imported wrapper call",
       "source": {
-        "line": 17,
+        "line": 18,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4320,18 +3727,6 @@
       "source": {
         "line": 170,
         "path": "web/src/components/pipeline/ShotRow.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:90c757c49be5af0c",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 185,
-        "path": "web/src/App.tsx"
       }
     },
     {
@@ -4396,14 +3791,26 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:9bfaa2885e791ec3",
+      "expression": "`/api/projects/${projectId}/resume`",
+      "id": "unresolved:9afa944c044e31f0",
       "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 183,
-        "path": "web/src/App.tsx"
+        "line": 223,
+        "path": "web/src/hooks/usePipelineState.ts"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:9f65c8b7ddc74c80",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "fetch options is not an inline object literal",
+      "source": {
+        "line": 106,
+        "path": "web/src/lib/api.ts"
       }
     },
     {
@@ -4426,43 +3833,19 @@
       "owner": "usePipelineState",
       "reason": "imported wrapper call",
       "source": {
-        "line": 37,
+        "line": 48,
         "path": "web/src/App.tsx"
       }
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:b04bad8584065e60",
+      "expression": "`${API}/projects/${project.id}/cancel`",
+      "id": "unresolved:b9172d9dd00310f7",
       "kind": "unknown_wrapper_call",
-      "owner": "refreshProject",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 114,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:b75a5dce786af512",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 194,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:b78d5461bc9d7b25",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 179,
+        "line": 124,
         "path": "web/src/App.tsx"
       }
     },
@@ -4486,8 +3869,20 @@
       "owner": "assemblePromptSections",
       "reason": "imported wrapper call",
       "source": {
-        "line": 34,
+        "line": 36,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:c514a8a2d3d272cc",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "fetch options is not an inline object literal",
+      "source": {
+        "line": 110,
+        "path": "web/src/lib/api.ts"
       }
     },
     {
@@ -4534,7 +3929,7 @@
       "owner": "classifyShotType",
       "reason": "imported wrapper call",
       "source": {
-        "line": 36,
+        "line": 38,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4564,14 +3959,14 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:d5b24c7447ff2997",
+      "expression": "`/api/projects/${projectId}/shots/${shotId}`",
+      "id": "unresolved:d5a0f1815db8aa59",
       "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
+      "owner": "apiPut",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 189,
-        "path": "web/src/App.tsx"
+        "line": 46,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
     {
@@ -4594,7 +3989,7 @@
       "owner": "useSSE",
       "reason": "imported wrapper call",
       "source": {
-        "line": 30,
+        "line": 31,
         "path": "web/src/hooks/usePipelineState.ts"
       }
     },
@@ -4606,7 +4001,7 @@
       "owner": "getShotTemplate",
       "reason": "imported wrapper call",
       "source": {
-        "line": 37,
+        "line": 39,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4624,18 +4019,6 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:e89ef46eb6a039e1",
-      "kind": "unknown_wrapper_call",
-      "owner": "withRefresh",
-      "reason": "wrapper reaches transport through another local wrapper",
-      "source": {
-        "line": 178,
-        "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
       "expression": "config",
       "id": "unresolved:eea6109b809c7b7b",
       "kind": "unknown_wrapper_call",
@@ -4648,13 +4031,37 @@
     },
     {
       "domain": "frontend",
-      "expression": "path",
-      "id": "unresolved:f91c3db5f298fde3",
-      "kind": "dynamic_transport_url",
-      "owner": "postJson",
-      "reason": "transport URL is not a string, template, or module literal constant",
+      "expression": "`${API}/projects/${id}`",
+      "id": "unresolved:f68dd4a2802d7e0f",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiGet",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 137,
+        "line": 97,
+        "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "`${API}/config?project_id=${encodeURIComponent(pid)}`",
+      "id": "unresolved:f8ef9f05d54683fb",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiGet",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 89,
+        "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "`/api/projects/${projectId}/pause`",
+      "id": "unresolved:fc66671828c33375",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 217,
         "path": "web/src/hooks/usePipelineState.ts"
       }
     },
