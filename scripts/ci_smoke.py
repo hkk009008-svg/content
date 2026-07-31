@@ -33,6 +33,12 @@ Invariants NOT covered by this script (the prose §15 list also includes):
   - §15.9  `cinema/pipeline.py:CinemaPipeline` has zero production callers
            — static check, not runtime.
 
+Repo-hygiene gates also ride along (see the inline comments in main() for
+each one's severity split): doc-anchor drift (check_doc_claims), coordination
+state (check_coordination), verification ceremony (check_no_ceremony, ADR-028),
+reviewer-result schema (consume_reviewer_result, ADR-032), and skill-twin
+body-parity (check_skill_twin_parity, ADR-077).
+
 Usage:
     .venv/bin/python scripts/ci_smoke.py    # local
     python scripts/ci_smoke.py              # CI (after pip install)
@@ -173,6 +179,22 @@ def main() -> int:
     _ceremony_exit = _cnc.main()
     if _ceremony_exit:
         return _ceremony_exit
+
+    # ADR-077: skill-twin body-parity — the .agents/skills Codex twins of the
+    # R-SKILL project-knowledge skills must stay body-identical to the
+    # maintained .claude/skills copies (frontmatter exempt; seat-doctrine forks
+    # exempt). Hard-fail locally AND in CI: unlike anchor drift, twin drift only
+    # arises from a skill edit that skipped the sync, and the fix is a same-
+    # commit cp — no false-positive pressure.
+    import check_skill_twin_parity as _cstp
+
+    _twin_issues = _cstp.run(Path(_REPO_ROOT))
+    if _twin_issues:
+        print(f"SKILL-TWIN DRIFT: {len(_twin_issues)} issue(s)")
+        for _t in _twin_issues:
+            print(f"  {_t}")
+        print("\nRun: .venv/bin/python scripts/check_skill_twin_parity.py")
+        return 1
 
     # ADR-032: consume any reviewer-result/1 blocks present in the mailbox. This is the
     # SCHEMA-VALIDATION half only — it never re-runs pytest (re-running a historical
