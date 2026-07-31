@@ -490,6 +490,31 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### 6b landed + reviewed; 6a DECIDED (HOLD); 6c dispatched
+
+6b `3c7714e4` + review-fix `96966171` (quality caught the exact published
+1K per-image price $0.067 vs the $0.077 token-estimate; OPERATIONS example
+synced): lane-v **GO** (live-verified all three successor pages, 5-file
+blob-swap RED, full suite 4419 green) + quality **NITS**.
+
+**6a decision — HOLD, recorded 2026-07-31 (`wf_5593be54` research):**
+gpt-4o has NO lifecycle forcing function (its own model page: no
+deprecation, no retirement — provider claim, fetched). All 7 call sites are
+Chat-Completions-shaped (tools loop, vision, response_format); a
+gpt-5.6/Responses migration is a re-architecture justified only by MEASURED
+product benefit (R-MEASURE instruments + logs) — surfaced to the
+user-principal as a fundable evaluation, not silently undertaken. Unused
+pricing-row ids (gpt-4.1*, o4-mini) need no action; o4-mini flagged
+soft-superseded by GPT-5 mini if ever promoted.
+
+**6c dispositions (`wf_5593be54`):** Cartesia header 2024-06-10 -> current
+(production, in flight `wf_b8dab3ae`); Viggle: audit premise STALE — an
+OFFICIAL API now exists and the adapter provably mismatches it -> catalog
+KNOWN_BROKEN now, dedicated repair slice queued; Suno proxy disclosure
+already in typed catalog (seed text checked); Stable Audio
+confirm-and-close (projection already live); Pexels dead config removed;
+OPENAI_AUDIO confirmed correctly fail-closed at the consumed layer.
+
 ### Wave 2 opened — 6b research recorded (wf_e8552836)
 
 Exposed IDs (inventory, all sites file:line-mapped): `gemini-2.5-flash-image`
