@@ -9,8 +9,9 @@ import math
 import mimetypes
 import os
 import warnings
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from functools import wraps
 
 # Suppress noisy warnings from google/urllib3 libraries
@@ -81,8 +82,177 @@ app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # use cases via WEB_CORS_ORIGINS=http://localhost:8080,http://<lan-ip>:8080.
 CORS(app, origins=list(env_settings.web_cors_origins))
 
-# SSE progress queues per project
-_progress_queues: dict[str, queue.Queue] = {}
+# ---------------------------------------------------------------------------
+# Broadcast-safe SSE event fan-out with replay (Slice 11a)
+# ---------------------------------------------------------------------------
+#
+# Replaces the pre-11a design where every project had exactly ONE
+# queue.Queue and every /stream subscriber called .get() on it directly:
+# since a queue.Queue hands each item to exactly one getter, two concurrent
+# listeners competed for the same events (one "steals" what the other
+# should also have seen) instead of each observing every event, and there
+# was no event history at all, so a reconnecting client could not recover
+# anything it missed while disconnected.
+#
+# Wire contract (also consumed by web/src/hooks/useSSE.ts and future
+# 11b/11c reconnect/resume work):
+#
+#   * Every published event is assigned a monotonically increasing integer
+#     id, scoped to one _ProjectEventBus instance -- i.e. one /generate
+#     run's lifetime. A fresh run gets a fresh bus and fresh id numbering,
+#     exactly like today's fresh-queue-per-run; ids are NOT durable across
+#     separate runs of the same project.
+#   * The id is emitted twice on the wire: as the standard SSE `id:` framing
+#     line (so `EventSource.lastEventId` / a browser's own silent automatic
+#     reconnect keeps working) AND inlined as `"id"` in the JSON `data:`
+#     body, for a client that only reads `data:` and manages reconnection
+#     itself -- which is what today's useSSE.ts does (it closes and
+#     constructs a brand-new EventSource on backoff, which does NOT
+#     preserve the browser's own last-event-id bookkeeping). Control
+#     frames (GAP/END/HEARTBEAT) carry no id -- they are wire-only
+#     notices, never stored or replayed, so they must never advance a
+#     client's replay position.
+#   * A subscriber resumes from a specific point via the standard
+#     `Last-Event-ID` request header (case-insensitive; read through
+#     Werkzeug's header mapping) or, as a fallback for a manually
+#     reconnecting client that cannot rely on the browser's own header, a
+#     `?last_event_id=` query parameter. The header wins if both are
+#     present. Malformed/absent input is treated as "no known position"
+#     (the snapshot path below) rather than a 400 -- a client with a
+#     garbled id still deserves a stream, just without replay.
+#   * Known position still inside the replay buffer: every buffered event
+#     with id > N replays, in order, each tagged `"replayed": true`, then
+#     live delivery continues. No duplicates, nothing silently dropped.
+#   * Known position OLDER than the oldest buffered id (evicted by the
+#     cap): one `{"stage": "GAP", "gap_from": ..., "gap_to": ...}` event
+#     emits first, naming the lost id range, THEN every still-buffered
+#     event newer than N replays as above. Data that aged out is reported,
+#     never silently skipped.
+#   * No known position (fresh subscriber -- first visit, or a client that
+#     never persisted an id): one snapshot event sends -- a verbatim
+#     replay of the single latest published event (if any yet exist),
+#     tagged `"replayed": true` and carrying its real id -- so a late
+#     joiner can render current truth immediately without replaying the
+#     whole run from event 1. Reconnecting later with that id as
+#     Last-Event-ID replays nothing further unless newer events have since
+#     landed.
+#   * The replay buffer is capped at _EVENT_REPLAY_CAP entries per project
+#     (bounded memory); older entries are evicted first (FIFO via
+#     `deque(maxlen=...)`).
+
+_EVENT_REPLAY_CAP = 500  # ~500 small JSON dicts/project; bounded, documented.
+
+
+@dataclass(frozen=True)
+class _EventSubscription:
+    """One /stream subscriber's attachment to a _ProjectEventBus.
+
+    sub_id:  opaque handle passed back to unsubscribe().
+    inbox:   this subscriber's PRIVATE queue -- future publishes land here
+             (never shared with any other subscriber).
+    backlog: [(id, event), ...] to replay, in order, before live delivery;
+             empty when there's nothing to replay.
+    gap:     (first_lost_id, last_lost_id) inclusive, or None -- set when
+             the requested resume point aged out of the replay buffer.
+    closed:  True if the bus was already closed at subscribe time -- the
+             route must emit backlog/gap then immediately end the stream
+             rather than block on `inbox` (the close() broadcast already
+             ran and will never wake a subscriber that attached after it).
+    """
+
+    sub_id: int
+    inbox: "queue.Queue"
+    backlog: list[tuple[int, dict]]
+    gap: tuple[int, int] | None
+    closed: bool
+
+
+class _ProjectEventBus:
+    """Per-project broadcast fan-out with a bounded, replayable event log.
+
+    Thread-safety: one lock guards `_buffer`, `_next_id`, `_subscribers`,
+    and `closed`. Delivery (`queue.Queue.put`) always happens OUTSIDE the
+    lock so a slow or already-abandoned subscriber queue can never block a
+    publish, a subscribe, or an unsubscribe on another thread.
+    """
+
+    def __init__(self, cap: int = _EVENT_REPLAY_CAP):
+        self._lock = threading.Lock()
+        self._buffer: deque[tuple[int, dict]] = deque(maxlen=cap)
+        self._next_id = 1
+        self._subscribers: dict[int, queue.Queue] = {}
+        self._next_sub_id = 1
+        self.closed = False
+
+    def publish(self, event: dict) -> int:
+        """Assign the next id, retain it in the replay buffer, and fan it
+        out to every currently-attached subscriber. Returns the id."""
+        with self._lock:
+            event_id = self._next_id
+            self._next_id += 1
+            self._buffer.append((event_id, event))
+            targets = list(self._subscribers.values())
+        for inbox in targets:
+            inbox.put(("event", event_id, event))
+        return event_id
+
+    def put(self, event: dict) -> None:
+        """queue.Queue-compatible alias so web_services.make_progress_callback
+        (which only ever calls ``.put(event)``) needs no change for the
+        broadcast/replay upgrade."""
+        self.publish(event)
+
+    def close(self) -> None:
+        """Mark the bus closed and wake every currently-attached subscriber
+        with the terminal sentinel. Idempotent -- safe to call more than
+        once (only the first call has any effect)."""
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            targets = list(self._subscribers.values())
+        for inbox in targets:
+            inbox.put(("end", None, None))
+
+    def subscribe(self, last_event_id: int | None) -> _EventSubscription:
+        """Attach a new subscriber. See the module comment above this
+        class for the full backlog/gap/snapshot contract. ``last_event_id
+        is None`` means "no known position" (the snapshot path); an int
+        means "replay everything after this id, and tell me if part of
+        that range already aged out of the buffer." """
+        with self._lock:
+            sub_id = self._next_sub_id
+            self._next_sub_id += 1
+            inbox: queue.Queue = queue.Queue()
+            self._subscribers[sub_id] = inbox
+
+            oldest_id = self._buffer[0][0] if self._buffer else None
+            gap: tuple[int, int] | None = None
+            if last_event_id is None:
+                # Fresh subscriber: a one-event snapshot of current truth,
+                # not the whole history -- the known-id branch below is
+                # what replays a bounded backlog for a real reconnect.
+                backlog = [self._buffer[-1]] if self._buffer else []
+            else:
+                if oldest_id is not None and last_event_id < oldest_id - 1:
+                    gap = (last_event_id + 1, oldest_id - 1)
+                backlog = [
+                    (eid, evt) for eid, evt in self._buffer if eid > last_event_id
+                ]
+            closed = self.closed
+        return _EventSubscription(sub_id, inbox, backlog, gap, closed)
+
+    def unsubscribe(self, sub_id: int) -> None:
+        """Detach a subscriber (disconnect). Safe to call even if the
+        subscriber was never attached or already removed."""
+        with self._lock:
+            self._subscribers.pop(sub_id, None)
+
+
+# SSE event buses per project (Slice 11a: was a single queue.Queue per
+# project; now a _ProjectEventBus so N concurrent /stream subscribers each
+# see every event, with a bounded replay log for reconnects).
+_progress_queues: dict[str, _ProjectEventBus] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
 
 # Guards _running_pipelines and _progress_queues. The construct-window
@@ -256,26 +426,35 @@ def _get_running_pipeline(pid: str):
     return pipeline
 
 
-def _ensure_progress_queue(pid: str) -> queue.Queue:
+def _ensure_progress_queue(pid: str) -> _ProjectEventBus:
+    """Return pid's event bus, creating one if absent OR if the existing
+    entry was already closed by a finished run. The closed-bus branch is
+    defensive: under the normal lock discipline (see run_pipeline's
+    finally block below) a closed bus is popped from _progress_queues
+    before close() runs, so it should not be reachable in practice -- but
+    a stale/closed bus must never be silently reused for a fresh run's
+    events (its subscribe() would report `closed=True` and truncate the
+    new run's stream immediately).
+    """
     with _pipelines_lock:
-        q = _progress_queues.get(pid)
-        if q is None:
-            q = queue.Queue()
-            _progress_queues[pid] = q
-        return q
+        bus = _progress_queues.get(pid)
+        if bus is None or bus.closed:
+            bus = _ProjectEventBus()
+            _progress_queues[pid] = bus
+        return bus
 
 
-def _make_progress_cb(pid: str, q: queue.Queue | None = None):
+def _make_progress_cb(pid: str, bus: "_ProjectEventBus | None" = None):
     """Per-project SSE progress callback. Thin wrapper around web_services.
 
-    Resolves the queue (explicit arg or module-state lookup), then
+    Resolves the event bus (explicit arg or module-state lookup), then
     delegates to ``web_services.make_progress_callback`` which contains
-    the actual SSE-event-shaping logic. Keeping this resolver in
-    web_server.py preserves the module-state contract used by other
-    endpoints; the pure builder is reusable.
+    the actual SSE-event-shaping logic. ``_ProjectEventBus.put()`` is a
+    queue.Queue-compatible alias for ``.publish()`` (Slice 11a), so the
+    builder itself needed no change for the broadcast/replay upgrade.
     """
-    progress_queue = q or _progress_queues.get(pid)
-    return make_progress_callback(progress_queue)
+    event_bus = bus or _progress_queues.get(pid)
+    return make_progress_callback(event_bus)
 
 
 def _get_stage_pipeline(pid: str) -> CinemaPipeline:
@@ -382,12 +561,28 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
 
     ``allowed_actions`` mirrors each control endpoint's own real gate
     instead of being hardcoded, so the response tells the UI exactly
-    which of {"start", "cancel", "pause", "resume"} would currently
-    succeed:
+    which of {"start", "resume_checkpoint", "cancel", "pause", "resume"}
+    would currently succeed:
 
-      - idle (pid absent from ``_running_pipelines``): running=False;
-        only "start" is legal — ``api_generate``'s
-        ``if pid in _running_pipelines`` check is the sole gate.
+      - idle (pid absent from ``_running_pipelines``), no resumable
+        on-disk checkpoint: running=False; only "start" is legal —
+        ``api_generate``'s ``if pid in _running_pipelines`` check is the
+        sole gate.
+      - idle WITH a resumable checkpoint (Slice 11c —
+        ``cinema.services.checkpoint_info`` reports ``resumable=True``
+        because a prior run crashed, was cancelled, or the process
+        restarted before ``temp/pipeline_state.json`` was cleared):
+        running=False; "start" AND "resume_checkpoint" are both legal.
+        Both dispatch through the SAME ``POST /generate`` endpoint,
+        distinguished only by the request body's ``resume`` flag —
+        "start" always sends ``resume=False`` (a fresh run; it does NOT
+        silently continue the checkpoint) and "resume_checkpoint" always
+        sends ``resume=True`` (it does NOT silently discard the
+        checkpoint). A run that finishes successfully clears its own
+        checkpoint (``CheckpointStore._clear_checkpoint``, called right
+        before the terminal ``COMPLETE`` progress event) so a completed
+        project reports only "start", identically to a project that
+        never ran.
       - pending-start (``_PIPELINE_PENDING`` sentinel present —
         ``CinemaPipeline.__init__`` is constructing but hasn't registered
         the real object yet): running=True; NO action is currently legal
@@ -396,13 +591,28 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
         (``_get_running_pipeline`` returns None for the sentinel).
         Reported as running so the UI does not repaint a start-again
         affordance during this brief construction window.
-      - running (real pipeline object, not paused): running=True;
-        "cancel" and "pause" are legal.
+      - running (real pipeline object, not paused), NOT parked at a
+        review-gate stage (``_GATE_STAGES``): running=True; "cancel" and
+        "pause" are legal.
+      - running (real pipeline object, not paused), parked at a
+        review-gate stage (Slice 11c, via ``_pipeline_at_gate_stage``):
+        running=True; only "cancel" is legal. "pause" is deliberately
+        withheld here — the gate-wait loop
+        (``ThreadedLifecycle.wait_for_gate``) never consults
+        ``check_pause()``, so pausing while blocked on operator review
+        has NO observable effect until the gate itself clears, which
+        would make "pause" a legal-but-inert action. "cancel" DOES take
+        effect immediately: ``ThreadedLifecycle.cancel`` explicitly
+        signals every gate ``Event``, so a blocked ``wait_for_gate``
+        wakes and returns ``False`` right away.
       - paused (real pipeline object, paused): running=True; "cancel"
         and "resume" are legal.
     """
     if pid not in _running_pipelines:
-        return False, ["start"]
+        actions = ["start"]
+        if checkpoint_info(pid).get("resumable"):
+            actions.append("resume_checkpoint")
+        return False, actions
     pipeline = _get_running_pipeline(pid)
     if pipeline is None:
         return True, []
@@ -416,6 +626,8 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
         paused = False
     if paused:
         return True, ["cancel", "resume"]
+    if _pipeline_at_gate_stage(pid):
+        return True, ["cancel"]
     return True, ["cancel", "pause"]
 
 
@@ -2428,6 +2640,24 @@ def api_generate_style_rules(pid):
 
 @app.route("/api/projects/<pid>/generate", methods=["POST"])
 def api_generate(pid):
+    """Start a generation run — the ONLY dispatch point for both the
+    "start" and "resume_checkpoint" actions ``_pipeline_action_authority``
+    reports (Slice 11c). The two are distinguished purely by the request
+    body's ``resume`` flag, read below: omitted/false begins a fresh run
+    (does NOT silently continue an on-disk checkpoint); ``{"resume":
+    true}`` continues from ``temp/pipeline_state.json`` via
+    ``CinemaPipeline.generate(resume=True)`` (does NOT silently discard
+    it — see ``cinema.checkpoint.CheckpointStore._restore_from_checkpoint``).
+
+    A stale click (the pid is already running by the time this request
+    lands — another client already started/resumed it, or this is a
+    double-submit) returns 409 with machine-readable refresh guidance
+    (``code``/``retryable``, the same shape ``_project_conflict_response``
+    already uses for ``project_busy`` elsewhere in this module) rather
+    than silently no-opping — the caller is expected to re-fetch
+    ``GET /pipeline-state`` and re-render from that truth instead of
+    assuming its own click had any effect.
+    """
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -2439,12 +2669,15 @@ def api_generate(pid):
     # Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md Finding #1
     with _pipelines_lock:
         if pid in _running_pipelines:
-            return jsonify({"error": "Generation already in progress"}), 409
+            return _project_conflict_response(
+                "generation_in_progress",
+                "Generation already in progress. Refresh to see the current state.",
+            )
         _running_pipelines[pid] = _PIPELINE_PENDING
 
-    # Create progress queue for SSE (lock released before this call)
-    q = _ensure_progress_queue(pid)
-    progress_cb = _make_progress_cb(pid, q)
+    # Create the event bus for SSE (lock released before this call)
+    bus = _ensure_progress_queue(pid)
+    progress_cb = _make_progress_cb(pid, bus)
 
     resume = request.json.get("resume", False) if request.is_json else False
 
@@ -2454,28 +2687,34 @@ def api_generate(pid):
             with _pipelines_lock:
                 _running_pipelines[pid] = pipeline  # replace sentinel with real pipeline
             result = pipeline.generate(resume=resume)
-            q.put({"stage": "DONE", "detail": result or "Failed", "percent": 100})
+            bus.publish({"stage": "DONE", "detail": result or "Failed", "percent": 100})
         except Exception as e:
             import traceback
             traceback.print_exc()
-            q.put({"stage": "ERROR", "detail": str(e), "percent": 0})
+            bus.publish({"stage": "ERROR", "detail": str(e), "percent": 0})
         finally:
             # Session 9 review fix: cleanup of BOTH dicts under the same
             # lock that _ensure_progress_queue takes. Since both surfaces
-            # now share _pipelines_lock, leaving queue-cleanup unguarded
+            # now share _pipelines_lock, leaving bus-cleanup unguarded
             # re-opens the race the lock was added to close (a concurrent
-            # _ensure_progress_queue could see the queue mid-pop and return
+            # _ensure_progress_queue could see the entry mid-pop and return
             # a popped reference).
             with _pipelines_lock:
                 _running_pipelines.pop(pid, None)
-                # Bundle-C 3.2 (2026-05-24): release the queue so we don't
+                # Bundle-C 3.2 (2026-05-24): release the bus so we don't
                 # grow _progress_queues unboundedly across runs. Drop only
-                # this run's queue; if another /generate raced and replaced
-                # the entry, leave it. The `is q` identity check is preserved
-                # — it correctly does nothing if a replacement landed.
-                if _progress_queues.get(pid) is q:
+                # this run's bus; if another /generate raced and replaced
+                # the entry, leave it. The `is bus` identity check is
+                # preserved — it correctly does nothing if a replacement
+                # landed.
+                if _progress_queues.get(pid) is bus:
                     _progress_queues.pop(pid, None)
-            q.put(None)  # Signal end of stream (intentionally outside the lock — q.put doesn't touch shared dicts)
+            # Slice 11a: bus.close() wakes every subscriber CURRENTLY
+            # attached (each has its own inbox queue, fed under the bus's
+            # own lock) with the terminal sentinel — intentionally outside
+            # _pipelines_lock, since close() only touches the bus's own
+            # lock/subscriber set, never the shared dicts.
+            bus.close()
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
     thread.start()
@@ -2485,7 +2724,15 @@ def api_generate(pid):
 
 @app.route("/api/projects/<pid>/checkpoint")
 def api_checkpoint(pid):
-    """Check if a resumable checkpoint exists for this project."""
+    """Check if a resumable checkpoint exists for this project.
+
+    Same helper (``cinema.services.checkpoint_info``) and response shape
+    as the ``checkpoint`` object ``GET /pipeline-state`` now threads onto
+    its idle branch (Slice 11c) — this route stays as the standalone,
+    directly-pollable entry point; ``pipeline-state`` is the one the
+    action-authority ("resume_checkpoint" in ``allowed_actions``) is
+    actually derived from.
+    """
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -2495,23 +2742,114 @@ def api_checkpoint(pid):
     return jsonify(checkpoint_info(pid))
 
 
+def _parse_last_event_id() -> int | None:
+    """Resolve the client's replay position for GET /stream.
+
+    Prefers the standard ``Last-Event-ID`` HTTP header — what a browser
+    EventSource sends automatically on ITS OWN silent reconnect (read via
+    Werkzeug's header mapping, so lookup is case-insensitive). Falls back
+    to a ``?last_event_id=`` query parameter for a caller that manages its
+    own reconnection and constructs a brand-new EventSource each time —
+    today's web/src/hooks/useSSE.ts backoff-reconnect does exactly that,
+    so the browser never gets a chance to attach the header itself; a
+    future slice can thread the last-seen id through as a query param to
+    resume across a manual reconnect. Missing/unparseable input is treated
+    as "no known position" (the snapshot path) rather than a 400 — a
+    client with a garbled id still deserves a stream, just without replay.
+    """
+    raw = request.headers.get("Last-Event-ID")
+    if raw is None:
+        raw = request.args.get("last_event_id")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def _sse_format(event: dict, *, event_id: int | None, replayed: bool = False) -> str:
+    """Render one SSE wire frame.
+
+    When ``event_id`` is not None: emits the standard ``id:`` framing line
+    (so ``EventSource.lastEventId`` / a browser's own automatic reconnect
+    keeps working) AND inlines ``"id"`` into the JSON body for a client
+    that only reads ``data:`` — today's web/src/hooks/useSSE.ts. Control
+    frames (GAP/END/HEARTBEAT) pass ``event_id=None`` — they are wire-only
+    notices, never stored/replayed, so they must never advance a client's
+    replay position. ``replayed=True`` additionally inlines
+    ``"replayed": true`` so a client can distinguish a resend (snapshot or
+    reconnect backlog) from a fresh live occurrence; omitted when False to
+    keep live events exactly as lean as before this slice.
+    """
+    body = dict(event)
+    if event_id is not None:
+        body["id"] = event_id
+    if replayed:
+        body["replayed"] = True
+    frame = f"data: {json.dumps(body)}\n\n"
+    if event_id is not None:
+        frame = f"id: {event_id}\n{frame}"
+    return frame
+
+
 @app.route("/api/projects/<pid>/stream")
 def api_stream(pid):
-    """SSE endpoint for real-time generation progress."""
-    q = _progress_queues.get(pid)
-    if not q:
+    """SSE endpoint for real-time generation progress.
+
+    Broadcast-safe fan-out with replay (Slice 11a): every subscriber gets
+    its own private inbox fed by the project's ``_ProjectEventBus``, so N
+    concurrent listeners each see every event instead of competing for one
+    shared queue. See the module comment above ``_ProjectEventBus`` (near
+    ``_progress_queues``) for the full id/replay/gap/snapshot wire
+    contract; ``_parse_last_event_id`` and ``_sse_format`` above implement
+    the HTTP/SSE framing halves of that contract.
+    """
+    bus = _progress_queues.get(pid)
+    if not bus:
         return jsonify({"error": "No generation in progress"}), 404
 
+    last_event_id = _parse_last_event_id()
+    sub = bus.subscribe(last_event_id)
+
     def event_stream():
-        while True:
-            try:
-                msg = q.get(timeout=30)
-                if msg is None:
-                    yield f"data: {json.dumps({'stage': 'END', 'detail': 'Stream closed', 'percent': 100})}\n\n"
-                    break
-                yield f"data: {json.dumps(msg)}\n\n"
-            except queue.Empty:
-                yield f"data: {json.dumps({'stage': 'HEARTBEAT', 'detail': 'waiting', 'percent': -1})}\n\n"
+        try:
+            if sub.gap is not None:
+                gap_from, gap_to = sub.gap
+                yield _sse_format(
+                    {
+                        "stage": "GAP",
+                        "detail": f"Missed events {gap_from}-{gap_to} (replay buffer cap exceeded)",
+                        "percent": -1,
+                        "gap_from": gap_from,
+                        "gap_to": gap_to,
+                    },
+                    event_id=None,
+                )
+            for buffered_id, buffered_event in sub.backlog:
+                yield _sse_format(buffered_event, event_id=buffered_id, replayed=True)
+            if sub.closed:
+                # The bus finished (and broadcast its own terminal sentinel
+                # to whoever was attached at the time) before this
+                # subscriber attached — nothing further will ever arrive
+                # on `sub.inbox`. End the stream now instead of blocking.
+                yield _sse_format({"stage": "END", "detail": "Stream closed", "percent": 100}, event_id=None)
+                return
+            while True:
+                try:
+                    kind, event_id, event = sub.inbox.get(timeout=30)
+                    if kind == "end":
+                        yield _sse_format({"stage": "END", "detail": "Stream closed", "percent": 100}, event_id=None)
+                        break
+                    yield _sse_format(event, event_id=event_id)
+                except queue.Empty:
+                    yield _sse_format({"stage": "HEARTBEAT", "detail": "waiting", "percent": -1}, event_id=None)
+        finally:
+            # Disconnect (client close, generator GC, or normal END/return
+            # above) always removes this subscriber — mirrors the daemon's
+            # own _progress_queues[pid] cleanup discipline, one level down.
+            bus.unsubscribe(sub.sub_id)
 
     return Response(event_stream(), content_type="text/event-stream")
 
@@ -3063,8 +3401,19 @@ def api_pipeline_state(pid):
     UI never has to guess —
 
       running: bool             -- see _pipeline_action_authority.
-      allowed_actions: list[str] -- subset of {"start","cancel","pause",
-                                     "resume"} currently legal for pid.
+      allowed_actions: list[str] -- subset of {"start", "resume_checkpoint",
+                                     "cancel", "pause", "resume"} currently
+                                     legal for pid.
+
+    Slice 11c additionally threads a ``checkpoint`` object (the exact
+    shape ``GET /checkpoint`` returns — see
+    ``cinema.services.checkpoint_info``) onto the disk-snapshot
+    (no-live-pipeline) branch ONLY. A checkpoint is only actionable while
+    idle — "resume_checkpoint" only ever appears in ``allowed_actions``
+    there too (see ``_pipeline_action_authority``) — so a live pipeline's
+    response is left exactly as Slice 8a shipped it rather than layering a
+    second, potentially-stale on-disk read on top of its own real
+    ``current_stage``/progress.
 
     The 404 "Project not found" shape is intentionally left unchanged —
     there is no pid-scoped authority to report for a project that does
@@ -3085,6 +3434,7 @@ def api_pipeline_state(pid):
     state = state_snapshot(pid)
     state["running"] = running
     state["allowed_actions"] = allowed_actions
+    state["checkpoint"] = checkpoint_info(pid)
     return jsonify(state)
 
 
