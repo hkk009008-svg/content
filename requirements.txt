@@ -33,7 +33,23 @@ runwayml>=4.0
 
 # --- Identity validation (face recognition for shot continuity) ---
 deepface>=0.0.93
-opencv-python>=4.10
+# opencv-python <5: 5.x removed the Haar cascade API outright — cv2.CascadeClassifier
+# is gone (no cv2.objdetect submodule either) and cv2/data ships 0 cascade XML files.
+# Verified against a real 5.0.0.93 install, 2026-08-01. Two independent consumers
+# still need the 4.x API, so this is a hard floor for the whole face stack:
+#   1. lip_sync._score_mouth_energy (haarcascade_smile.xml) — under 5.x it raises
+#      inside its own try/except and fail-opens to None, silently demoting the
+#      Provider-1.5 lip-sync quality gate to the duration heuristic / neutral 1.0.
+#   2. deepface's DEFAULT detector_backend="opencv" (deepface/models/face_detection/
+#      OpenCv.py) — identity/validator.py calls DeepFace.represent/extract_faces
+#      without overriding it, so binding scores, character registration and face
+#      counting all raise:
+#        AttributeError: module 'cv2' has no attribute 'CascadeClassifier'
+# deepface declares an equally unbounded opencv-python>=4.5.5.64, so migrating only
+# our own detector would NOT make the repo 5.x-clean. Lifting this cap requires
+# deepface itself to move off Haar first. Note <5 is not a freeze: it resolves to
+# 4.14.0.94, a LATER build than 5.0.0.93.
+opencv-python>=4.10,<5
 Pillow>=11.0
 numpy>=1.26,<3
 torch>=2.5

@@ -30,7 +30,7 @@ class ImageGenResult(NamedTuple):
     ``billed_rejects`` (WS3 money-loss close-out, mirrors
     ``cinema/shots/controller.py::_record_billed_rejects`` on the video side):
     engines that BILLED for a real generation this call incurred but did NOT
-    win (currently only ``"GEMINI_IMAGE"`` — Nano Banana bills on generation,
+    win (currently only ``"GEMINI_IMAGE"`` — Nano Banana 2 bills on generation,
     independent of the later identity check). Defaults to ``()`` so existing
     2-positional-arg construction (``ImageGenResult(path, api_name)``) stays
     valid. The caller (``cinema/shots/controller.py``) records each entry
@@ -113,7 +113,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        quality_tier="production",
                        # char_lora_path/strength/trigger, style_reference, shot_hint:
                        # reserved — dormant, kept for a possible future FLUX.2 A/B (a
-                       # separate, deferred track — NOT WS3, which shipped Nano Banana
+                       # separate, deferred track — NOT WS3, which shipped Nano Banana 2
                        # / gemini_multiref instead and binds identity via reference
                        # images, not LoRA). Threaded from the controller
                        # (cinema/shots/controller.py) but unconsumed now that the
@@ -132,7 +132,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     Generates a cinematic image with face-identity preservation.
 
     Priority chain (production — the only tier since WS1's max-tier retirement):
-    0. Gemini 2.5 Flash Image (Nano Banana) — PRIMARY for all projects (WS3,
+    0. Gemini 3.1 Flash Image (Nano Banana 2) — PRIMARY for all projects (WS3,
        user-confirmed); set identity_backend='pod' to opt OUT.
     1. ComfyUI + PuLID (pod) — arc-gate fallback
     2. FLUX Kontext
@@ -186,7 +186,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
 
     # WS3 money-loss close-out (mirrors cinema/shots/controller.py's
     # _record_billed_rejects on the video side): Gemini can BILL a real
-    # image (Nano Banana, $0.03) that then fails identity and falls through
+    # image (Nano Banana 2, $0.067) that then fails identity and falls through
     # to the pod/FAL cascade below — a billed engine that never becomes the
     # winner. Track it here and thread it onto whichever ImageGenResult this
     # call finally returns, so the caller's cost_tracker sees the spend even
@@ -203,8 +203,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             return result._replace(billed_rejects=tuple(billed_rejects))
         return result
 
-    # ----- PRIORITY 0: Gemini 2.5 Flash Image (Nano Banana, WS3) -----
-    # Google-first overhaul: Nano Banana is the image PRIMARY for all
+    # ----- PRIORITY 0: Gemini 3.1 Flash Image (Nano Banana 2, WS3) -----
+    # Google-first overhaul: Nano Banana 2 is the image PRIMARY for all
     # projects (WS3, user-confirmed decision — "Nano Banana as image
     # PRIMARY, pod demoted to first fallback"); a project sets
     # identity_backend='pod' to opt OUT. The pod remains the arc-gate
@@ -243,13 +243,14 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                     threshold=get_project_setting(ctx, "identity_strictness", None),
                 )
                 if id_result.passed:
-                    print(f"   [PHASE C] Gemini 2.5 Flash Image (Nano Banana) passed identity "
+                    print(f"   [PHASE C] Gemini 3.1 Flash Image (Nano Banana 2) passed identity "
                           f"check (score={id_result.overall_score}): '{prompt[:60]}...'")
                     return ImageGenResult(output_filename, "GEMINI_IMAGE")
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
                       f"falling back to the pod/FAL cascade")
-                # Google already billed this frame ($0.03) even though it
-                # lost the identity check — record it so the eventual
+                # Google already billed this frame ($0.067, the authoritative
+                # figure in cost_tracker.API_COST_USD["GEMINI_IMAGE"]) even
+                # though it lost the identity check — record it so the eventual
                 # winner's cost record doesn't make it invisible spend.
                 billed_rejects.append("GEMINI_IMAGE")
                 try:
