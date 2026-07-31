@@ -177,5 +177,12 @@ class TestPutCollisionDataLoss:
         rec = _char_record(pid, cid)
         assert len(rec["reference_images"]) == 1
         assert rec["reference_images"][0].endswith("newref.jpg")
-        # the moved file actually exists on disk
-        assert os.path.exists(rec["reference_images"][0])
+        # FIX-REFWRITE: the stored path is now project-relative (Product
+        # invariant #6 -- portable persistence), so it must be re-joined
+        # onto the project directory before checking existence; a bare
+        # os.path.exists() on a relative string resolves against the
+        # process CWD, not the project dir.
+        assert not os.path.isabs(rec["reference_images"][0])
+        from domain import project_manager as pm
+        full_path = os.path.join(pm._project_dir(pid), rec["reference_images"][0])
+        assert os.path.exists(full_path)

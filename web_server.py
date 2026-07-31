@@ -55,6 +55,7 @@ from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
 from domain.models import DirectorialIntent, Project, Shot
+from domain.character_manager import _to_project_relative
 from domain.optimizer_cache import optimizer_cache_is_valid
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
@@ -1708,6 +1709,15 @@ def api_update_character(pid, cid):
                 dst = os.path.join(char_dir, safe_name)
                 shutil.move(tmp_path, dst)
                 saved_paths.append(dst)
+            # FIX-REFWRITE: persist project-relative (Product invariant #6)
+            # via the SAME chokepoint create_character_with_images already
+            # uses on the create path -- domain.character_manager's readers
+            # (get_reference_image / get_character_embedding /
+            # get_multi_angle_refs) resolve through
+            # _resolve_stored_media_path, which accepts both this relative
+            # shape and a legacy absolute path, so this is a pure write-side
+            # fix with no reader change required.
+            saved_paths = [_to_project_relative(project_dir, p) for p in saved_paths]
 
     def _mutate_project(latest_project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
@@ -2129,6 +2139,11 @@ def api_add_object(pid):
                 path = os.path.join(obj_dir, fname)
                 img.save(path)
                 image_paths.append(path)
+        # FIX-REFWRITE: persist project-relative (Product invariant #6) --
+        # objects are the same class of project-owned reference-image
+        # output as characters/locations; reuses the SAME chokepoint
+        # create_character_with_images / create_location_with_images use.
+        image_paths = [_to_project_relative(project_dir, p) for p in image_paths]
 
     if image_paths:
         obj["reference_images"] = image_paths
@@ -2184,6 +2199,9 @@ def api_update_object(pid, oid):
                 save_path = os.path.join(obj_dir, safe_name)
                 f.save(save_path)
                 saved_paths.append(save_path)
+        # FIX-REFWRITE: persist project-relative (Product invariant #6) --
+        # same chokepoint as api_add_object's create path above.
+        saved_paths = [_to_project_relative(project_dir, p) for p in saved_paths]
 
     def _mutate_project(latest_project: dict):
         # P1-3 part 12 (Variant 1 full, remove_object deviation): inner
@@ -2327,6 +2345,12 @@ def api_update_location(pid, lid):
                 save_path = os.path.join(loc_dir, safe_name)
                 f.save(save_path)
                 saved_paths.append(save_path)
+        # FIX-REFWRITE: persist project-relative (Product invariant #6) --
+        # mirrors create_location_with_images's create-path fix via the
+        # SAME chokepoint (domain.location_manager's readers resolve
+        # through _resolve_stored_media_path, which already accepts both
+        # this relative shape and a legacy absolute path).
+        saved_paths = [_to_project_relative(project_dir, p) for p in saved_paths]
 
     def _mutate_project(latest_project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
