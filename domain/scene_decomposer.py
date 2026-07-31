@@ -732,7 +732,7 @@ def _build_cinedecompose_system_prompt(
     research_ctx: str,
     global_settings: dict,
 ) -> str:
-    """Build the CineDecompose v1.0 system prompt.
+    """Build the CineDecompose v2.0 system prompt.
 
     Bundle-B 2.3 (2026-05-24): extracted to a single source of truth.
     Previously this 75-line f-string template was duplicated verbatim in
@@ -753,7 +753,7 @@ def _build_cinedecompose_system_prompt(
     _aspect = global_settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
     _aspect_orientation = "vertical (portrait)" if is_portrait(_aspect) else "widescreen"
     return f"""<SYSTEM_PERSONA>
-You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
+You are "CineDecompose v2.0". You operate as a strict cinematic shot decomposition engine.
 Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
 You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
 TONE: Strictly technical. Zero creative flourish. Output structured data only.

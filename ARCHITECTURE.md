@@ -99,7 +99,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Phases | [cinema/phases/](cinema/phases/) — `base.py`, `keyframe_render.py`, `performance.py`, `motion_render.py` | Phase protocol + 3 thin shot-iterating phases. |
 | Shot work | [cinema/shots/controller.py](cinema/shots/controller.py) (3037 LOC; `wc -l cinema/shots/controller.py` → 3037, 2026-07-30) | `generate_keyframe_take`, `generate_performance_take`, `generate_motion_take`, `regenerate_shot`, `restart_shot`, `diagnose_clip`, `apply_correction`, `generate_scene_preview`. |
 | Review/gates | [cinema/review/controller.py](cinema/review/controller.py) | Gate predicate-poll. **`PERFORMANCE_REVIEW`** satisfied when engine=SKIP, no approved keyframe, or take explicitly approved. |
-| Story prep | [domain/](domain/) — `scene_decomposer.py`, `dialogue_writer.py`, `continuity_engine.py`, `character_manager.py`, `location_manager.py`, `project_manager.py`, `language_defaults.py`, `shot_types.py`, `performance.py` | Filelock-guarded JSON CRUD (10s). LLM persona "CineDecompose v1.0" with 5 HardConstraints + 4 Tripwires. |
+| Story prep | [domain/](domain/) — `scene_decomposer.py`, `dialogue_writer.py`, `continuity_engine.py`, `character_manager.py`, `location_manager.py`, `project_manager.py`, `language_defaults.py`, `shot_types.py`, `performance.py` | Filelock-guarded JSON CRUD (10s). LLM persona "CineDecompose v2.0" with 5 HardConstraints + 4 Tripwires. |
 | LLM | [llm/](llm/) — `ensemble.py`, `chief_director.py`, `style_director.py`, `prompt_optimizer.py`, `negative_prompts.py` | Parallel quorum (not fallback), then a judge picks. Anthropic + OpenAI + **Gemini opt-in**. |
 | Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
 | Image gen | [phase_c_assembly.py](phase_c_assembly.py), [gemini_image_native.py](gemini_image_native.py), [pulid.json](pulid.json) | Single production tier: Gemini multi-reference is the default primary; RunPodComfyUI + PuLID is the first reference-conditioned fallback. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
@@ -725,7 +725,7 @@ redirecting `_save_project_unlocked`.
 | `decompose_scene` ([domain/scene_decomposer.py:836](domain/scene_decomposer.py:836)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
 | `competitive_decompose_scene` ([domain/scene_decomposer.py:984](domain/scene_decomposer.py:984)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
-**Persona:** CineDecompose v1.0 with 5 hard constraints:
+**Persona:** CineDecompose v2.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
   (those come from PuLID reference injection downstream)
 - HC2 SCHEMA_LOCK
