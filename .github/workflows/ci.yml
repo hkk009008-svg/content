@@ -11,6 +11,40 @@
 # ([tool.pytest.ini_options] pythonpath = ["."]), not in this file. Action
 # majors bumped to Node-24 runtimes ahead of GitHub's 2026-06-16 forcing.
 #
+# 2026-08-01 (FIX-CI): the pytest-unit AND smoke jobs were nondeterministically
+# SIGILL-crashing on `main` (6 of 8 sampled runs; exit 132, "Fatal Python
+# error: Illegal instruction") — NOT a test regression. Root cause:
+# audio/effects.py hard-imports Spotify's `pedalboard` package (by its own
+# documented design — no graceful fallback); pedalboard's published Linux
+# wheel bakes in `-march=native` from whichever GH Actions host built it,
+# with NO runtime CPU dispatch (pedalboard's own CMakeLists.txt ~L203-216;
+# open upstream issue github.com/spotify/pedalboard#454). On a runner host
+# whose CPU lacks that exact instruction set, `from pedalboard_native
+# import *` SIGILLs the whole interpreter before collection (pytest-unit)
+# or the §15 checks (smoke) can run. PyPI ships wheels only — no sdist for
+# any recent release — so we can't rebuild from source with a safe
+# baseline, and no env var helps on the CONSUMING side (the bad ISA is
+# baked into the binary at Spotify's build time, not selected at our
+# runtime). Fix is containment, not an upstream fix, in two pieces:
+#   - pytest-unit: tests/conftest.py probes the import in a disposable
+#     child process (a SIGILL there can't take down pytest) and shims
+#     sys.modules['pedalboard'] before any test module is collected, ONLY
+#     when the probe shows the real import is fatal on this host.
+#   - smoke: this job's own step below does the same probe and shims an
+#     inert `pedalboard` package onto PYTHONPATH before invoking
+#     scripts/ci_smoke.py (conftest.py's mechanism is pytest-only, so it
+#     can't reach a bare `python scripts/ci_smoke.py` invocation).
+# Both are complete no-ops on a healthy host — real pedalboard runs
+# untouched there, exactly as before. Verified no test in tests/unit/
+# exercises real pedalboard DSP (test_effects.py mocks
+# apply_pedalboard_chain itself, or drives inputs that early-return before
+# touching a real Pedalboard/Reverb/etc. object), so this changes no
+# test's behavior, only removes the host-CPU crash. Downgrading the
+# pedalboard version was considered and rejected: the crashing wheel
+# (0.9.24) was byte-identical across every sampled crashing AND clean run —
+# it's the runtime host that varies, not the wheel, so an older 0.9.x
+# would carry the same unconditional -march=native baked in.
+#
 # Scope intentionally NOT included (per the 2026-05-24 Session 1 brief):
 #   - Linting (ruff, eslint)
 #   - Deployment workflows
@@ -36,6 +70,11 @@
 #     group key, which is the canonical GitHub pattern; ref is not used in
 #     any shell command.
 #   - No reference to github.event.*, github.head_ref, or commit messages.
+#   - The 2026-08-01 pedalboard-stub heredoc (smoke job) is 100% static
+#     text — no `${{ }}` GitHub-context expression is interpolated into it
+#     or into any shell command in that step; the only runtime values used
+#     are $RUNNER_TEMP (a GH-controlled path) and $PYTHONPATH (appended
+#     to, never executed).
 
 name: CI
 
@@ -105,7 +144,72 @@ jobs:
         # Single source of truth: scripts/ci_smoke.py.
         # If invariants change, update that script + ARCHITECTURE.md §15's
         # prose list together — no other file inlines the smoke block.
-        run: python scripts/ci_smoke.py
+        #
+        # ci_smoke.py's main() does `import cinema_pipeline` (§15.2), which
+        # transitively imports audio.music -> audio.effects -> pedalboard.
+        # Spotify's published Linux wheel bakes in `-march=native` from
+        # whichever GH Actions host built it, with no runtime CPU dispatch
+        # (spotify/pedalboard CMakeLists.txt ~L203-216; upstream issue
+        # github.com/spotify/pedalboard#454, open/unresolved) — so on a
+        # runner host whose CPU lacks that exact instruction set, the import
+        # SIGILLs the whole process before ci_smoke.py's own checks can run
+        # (measured: 6 of 8 sampled `main` CI runs died this way, always on
+        # the same pedalboard==0.9.24 — the runtime host varies, not the
+        # wheel; PyPI ships wheels only, no sdist, so we can't rebuild from
+        # source with a safe baseline either). Full reasoning + the
+        # pytest-suite half of this same fix (which shims sys.modules
+        # in-process instead, since a SIGILL can't be try/excepted):
+        # tests/conftest.py.
+        #
+        # Probe the import in a disposable child process first — a SIGILL
+        # there can't take down this step — and only shim an inert
+        # `pedalboard` package onto PYTHONPATH when the real import is
+        # actually fatal on this host. A no-op whenever the real import is
+        # fine, so this never changes behavior on a healthy runner.
+        run: |
+          if ! python -c "import pedalboard" >/dev/null 2>&1; then
+            echo "pedalboard's native extension SIGILLs on this host's CPU (known upstream issue spotify/pedalboard#454) -- using an inert stub for this run."
+            python - "$RUNNER_TEMP/pedalboard_ci_stub/pedalboard" <<'PYEOF'
+          import sys
+          from pathlib import Path
+
+          pkg_dir = Path(sys.argv[1])
+          pkg_dir.mkdir(parents=True, exist_ok=True)
+
+          init_py = '''class _Unusable:
+              def __init__(self, *a, **k):
+                  raise RuntimeError(
+                      "pedalboard's native extension does not load on this CI "
+                      "runner's CPU (upstream spotify/pedalboard#454) -- this is "
+                      "a CI stub, not the real library."
+                  )
+
+
+          Pedalboard = Reverb = Compressor = Gain = Delay = _Unusable
+          HighpassFilter = LowpassFilter = Chorus = Distortion = _Unusable
+
+
+          def load_plugin(*a, **k):
+              raise RuntimeError(
+                  "pedalboard.load_plugin is unavailable on this CI stub "
+                  "(native extension does not load on this host's CPU)."
+              )
+          '''
+
+          io_py = '''class AudioFile:
+              def __init__(self, *a, **k):
+                  raise RuntimeError(
+                      "pedalboard.io does not load on this CI runner's CPU "
+                      "(upstream spotify/pedalboard#454) -- this is a CI stub."
+                  )
+          '''
+
+          (pkg_dir / "__init__.py").write_text(init_py)
+          (pkg_dir / "io.py").write_text(io_py)
+          PYEOF
+            export PYTHONPATH="$RUNNER_TEMP/pedalboard_ci_stub:$PYTHONPATH"
+          fi
+          python scripts/ci_smoke.py
 
   pytest-unit:
     name: pytest tests/unit/
