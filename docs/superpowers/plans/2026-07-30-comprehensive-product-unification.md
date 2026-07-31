@@ -511,6 +511,24 @@ intact (the commits are already reviewed); this entry is the durable record.
 Process fix for later waves: assemble commits per FILE-OWNER, and re-read the
 actual staged diff before writing the message.
 
+**CORRECTION 2 — slice 9d's substance never landed (found 2026-08-01).** The
+correction above concludes "the substance is present, tested and reviewed —
+only the attribution is wrong." For 9d that is false, and the roster on the
+line above lists it as landed. `_SETTINGS_KEY_VALIDATORS` held 17 entries at
+`7ba2a5f8` (9a), jumped to 35 in `a2ac5e89` (the undisclosed extension — the
+VoiceSection/VideoSection families, i.e. 9c's work), then stayed at 35 through
+`6eeb4bd1`, `45b289fd`, `1cb40224`, `6e7477a0` and `d37182b3`. No commit on any
+ref ever added 9d's own six keys — `git log --all -S'"identity_retry_max":
+_validate' -- web_server.py` returns nothing, and likewise for
+coherence_threshold / flux_guidance / identity_backend / comfyui_sampler /
+comfyui_steps. The gap was found from web_server.py's own comment above the
+table, which still named all six as "still NOT covered here". Landed for real
+by the commit carrying this note (table 35 -> 41, six entries + a RED->GREEN
+backend test). Lesson: the attribution defect did not merely mis-title
+commits — it concealed a slice recorded as done that was never done. When a
+commit trail is known-corrupted, re-derive each slice's substance from the
+code, not from the roster.
+
 **Process defects recorded, not hidden:** (1) 11b and 11c were dispatched as
 "disjoint" but shared `usePipelineState.ts`/`AppShell.tsx` — R-ORCH forbids
 this; no lost update occurred (both feature sets verified present and

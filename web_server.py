@@ -1277,11 +1277,17 @@ def _validate_string_list_setting(value):
 # the lipsync cascade cluster, dialogue pace/mix, video-cascade + post-
 # process controls) are covered below — slice 9c wired both components into
 # the Setup page before this table caught up, so the new strict PATCH 400ed
-# on every key either section writes (a 9a<->9c integration gap). Fields
-# still NOT covered here (a different section's pathspec — not touched by
-# that gap fix): IdentitySection.tsx's identity_retry_max /
-# coherence_threshold, ImageSection.tsx's identity_backend / comfyui_sampler
-# / comfyui_steps / flux_guidance.
+# on every key either section writes (a 9a<->9c integration gap).
+#
+# Slice 9d closed the same gap one pathspec over: IdentitySection.tsx
+# (identity_retry_max, flux_guidance, coherence_threshold) and
+# ImageSection.tsx (identity_backend, comfyui_sampler, comfyui_steps) are
+# now covered below too. Each of those six has a live runtime consumer —
+# controller.py (identity_retry_max, coherence_threshold, identity_backend),
+# capability_scorecard.py (coherence_threshold), workflow_selector.py
+# (flux_guidance, comfyui_sampler, comfyui_steps), phase_c_assembly.py
+# (identity_backend) — so that was a registry omission, not the
+# decorative-setting case the first paragraph describes.
 #
 # The three char_lora_* registry fields (prep.lora_policy.PROTECTED_LORA_FIELDS,
 # ADR-065 dormant-LoRA containment) are deliberately absent: PATCH simply
@@ -1332,6 +1338,23 @@ _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     "scene_transitions": _validate_bool_setting,
     "transition_duration": _validate_nonneg_number_setting,
     "face_swap_enabled": _validate_bool_setting,
+    # IdentitySection.tsx — retry budget, FLUX guidance, coherence floor.
+    # The validators enforce the type/domain invariant each consumer needs,
+    # not the narrower slider bounds (retry 1-5, guidance 2.0-5.0, coherence
+    # 0.3-1.0) — same latitude cascade_retry_limit above already takes.
+    "identity_retry_max": _validate_int_setting,
+    "flux_guidance": _validate_nonneg_number_setting,
+    "coherence_threshold": _validate_unit_interval_setting,
+    # ImageSection.tsx — identity backend + its pod-only sampler controls.
+    # identity_backend is an enum ('gemini_multiref' | 'pod') checked as a
+    # plain string, matching this table's other enums (lip_sync_mode,
+    # dialogue_voice_mode): both consumers compare against the literals
+    # (controller.py `== "gemini_multiref"`, phase_c_assembly.py `!= "pod"`),
+    # so an unrecognized string falls to the cloud default rather than
+    # silently activating the pod.
+    "identity_backend": _validate_string_setting,
+    "comfyui_sampler": _validate_string_setting,
+    "comfyui_steps": _validate_int_setting,
 }
 
 

@@ -802,3 +802,102 @@ def test_patch_accepts_postprocess_color_settings_videosection_family(client, tm
     )
     assert invalid.status_code == 400
     assert "transition_duration" in invalid.get_json()["invalid_keys"]
+
+
+def test_patch_accepts_identity_settings_identitysection_family(client, tmp_path, monkeypatch):
+    """IdentitySection.tsx's retry budget, FLUX guidance, and coherence floor."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "identity_retry_max": 5,
+                "flux_guidance": 4.0,
+                "coherence_threshold": 0.75,
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["identity_retry_max"] == 5
+    assert settings["flux_guidance"] == 4.0
+    assert settings["coherence_threshold"] == 0.75
+
+    persisted = _load(pid)["global_settings"]
+    assert persisted["identity_retry_max"] == 5
+    assert persisted["flux_guidance"] == 4.0
+    assert persisted["coherence_threshold"] == 0.75
+
+
+def test_patch_accepts_image_backend_settings_imagesection_family(client, tmp_path, monkeypatch):
+    """ImageSection.tsx's identity backend + its pod-only sampler controls."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "identity_backend": "pod",
+                "comfyui_sampler": "dpmpp_2m_sde",
+                "comfyui_steps": 28,
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["identity_backend"] == "pod"
+    assert settings["comfyui_sampler"] == "dpmpp_2m_sde"
+    assert settings["comfyui_steps"] == 28
+
+    persisted = _load(pid)["global_settings"]
+    assert persisted["identity_backend"] == "pod"
+    assert persisted["comfyui_sampler"] == "dpmpp_2m_sde"
+    assert persisted["comfyui_steps"] == 28
+
+
+@pytest.mark.parametrize(
+    "key,bad_value",
+    [
+        ("identity_retry_max", 2.5),        # not an int
+        ("flux_guidance", -0.1),            # negative
+        ("coherence_threshold", 1.5),       # outside [0, 1]
+        ("identity_backend", 123),          # not a string
+        ("comfyui_sampler", 123),           # not a string
+        ("comfyui_steps", 20.5),            # not an int
+    ],
+)
+def test_patch_slice_9d_keys_are_registered_and_validated(
+    client, tmp_path, monkeypatch, key, bad_value
+):
+    """Each slice-9d key is REGISTERED (invalid_keys), not rejected as unknown.
+
+    This is the exact regression slice 9d closes: before the registry entries
+    existed, IdentitySection.tsx / ImageSection.tsx writes 400ed with the key
+    in ``unknown_keys``. Landing in ``invalid_keys`` instead proves the key
+    now resolves to a validator AND that the validator rejects a wrong-typed
+    value rather than waving it through.
+    """
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 0, key: bad_value}},
+    )
+
+    assert resp.status_code == 400
+    body = resp.get_json()
+    # The route omits "unknown_keys" entirely when nothing was unknown
+    # (web_server.py `if exc.unknown_keys:`), so its ABSENCE is the proof
+    # the key resolved to a validator.
+    assert "unknown_keys" not in body
+    assert key in body["invalid_keys"]
+
+    # Fail-closed: the rejected patch mutated nothing, revision unbumped.
+    persisted = _load(pid)["global_settings"]
+    assert key not in persisted
+    assert persisted.get("revision", 0) == 0
