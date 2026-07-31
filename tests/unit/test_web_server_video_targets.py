@@ -2024,6 +2024,11 @@ def test_generated_shot_validation_calls_the_same_policy_evaluator(
         "LEGACY_GENERATED",
         snapshot=_fal_runtime(),
         on_date=_POLICY_DATE,
+        # R1: the authoring boundary now threads engine/aspect state exactly
+        # like the terminal update_scene_shots boundary; None here because no
+        # global_settings context is supplied in this direct call.
+        api_engines=None,
+        aspect_ratio=None,
     )
     assert validated["target_api"] == "AUTO"
     assert validated["_target_api_policy_reason"] == "unknown"

@@ -9,7 +9,7 @@ import json
 import os
 import re
 from datetime import date, datetime, timezone
-from typing import Any, Optional, List
+from typing import Any, Mapping, Optional, List
 from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.provider_catalog import RuntimeSnapshot, project_legacy_registry
@@ -385,7 +385,7 @@ def rank_apis_for_purpose(
         cost = info.get("per_shot_cost", 0.0)
         if max_per_shot_cost is not None and cost > max_per_shot_cost:
             continue
-        out.append((key, copy.deepcopy(info) if eligible_video_keys is None else info))
+        out.append((key, copy.deepcopy(info)))
     return out
 
 # Music moods
@@ -523,18 +523,45 @@ def _extract_shots_list(parsed: Any) -> list:
     )
 
 
+def _project_video_engine_context(
+    global_settings: Any,
+) -> tuple[Mapping[str, object], object]:
+    """Extract ``(api_engines, aspect_ratio)`` from a project's global settings.
+
+    Mirrors the sourcing ``update_scene_shots`` uses at the terminal write
+    boundary, so an LLM-authored shot naming a project-disabled or aspect-
+    incompatible engine is coerced the same way at authoring time as it would
+    be at the final lock-held write.
+    """
+    api_engines = (
+        global_settings.get("api_engines", {})
+        if isinstance(global_settings, dict)
+        else {}
+    )
+    aspect_ratio = (
+        global_settings.get("aspect_ratio")
+        if isinstance(global_settings, dict)
+        else None
+    )
+    return api_engines, aspect_ratio
+
+
 def _validate_raw_shot(
     shot: Any,
     *,
     index: int,
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> dict:
     """Validate one shot and fence its newly authored video target.
 
     Structural contract breaches still raise.  An explicit unsafe video-engine
-    suggestion is instead coerced to ``AUTO`` with a stable policy reason, so
-    fallback is deterministic and never invents a different provider.
+    suggestion — including one naming a project-disabled or aspect-
+    incompatible engine — is instead coerced to ``AUTO`` with a stable policy
+    reason, so fallback is deterministic and never invents a different
+    provider.
     """
     if not isinstance(shot, dict):
         raise ValueError(f"shot[{index}] must be an object, got {type(shot).__name__}")
@@ -567,6 +594,8 @@ def _validate_raw_shot(
         shot["target_api"],
         snapshot=snapshot,
         on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
     )
     shot["target_api"] = target_decision.target
     if target_decision.reason is not None:
@@ -610,11 +639,14 @@ def _enrich_validated_shots(
     ensemble_meta: Optional[dict] = None,
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
 ) -> List[dict]:
     """Validate shot count + fields, then build make_shot records.
 
     Missing fields and structural enum/prompt violations raise.  Unsafe
-    ``target_api`` values are explicitly fenced to ``AUTO`` with a reason.
+    ``target_api`` values — including a project-disabled or aspect-
+    incompatible engine — are explicitly fenced to ``AUTO`` with a reason.
     """
     if not (_CINEDECOMPOSE_MIN_SHOTS <= len(shots) <= _CINEDECOMPOSE_MAX_SHOTS):
         raise ValueError(
@@ -634,6 +666,8 @@ def _enrich_validated_shots(
             index=i,
             snapshot=snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
         char_ids = shot["characters_in_frame"] or default_char_ids
         shot_record = make_shot(
@@ -913,6 +947,7 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
             cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
         )
         shots = _parse_decomposition_payload(raw)
+        api_engines, aspect_ratio = _project_video_engine_context(global_settings)
         validated = _enrich_validated_shots(
             shots,
             scene=scene,
@@ -920,6 +955,8 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
             target_shots=target_shots,
             snapshot=runtime_snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
 
         print(f"   ✅ Decomposed scene '{scene.get('title')}' into {len(validated)} shots")
@@ -1080,6 +1117,7 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
         # 8. Parse + validate via the shared executable contract
         # ------------------------------------------------------------------
         shots = _parse_decomposition_payload(winning_raw)
+        api_engines, aspect_ratio = _project_video_engine_context(global_settings)
         validated = _enrich_validated_shots(
             shots,
             scene=scene,
@@ -1091,6 +1129,8 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
             },
             snapshot=runtime_snapshot,
             on_date=on_date,
+            api_engines=api_engines,
+            aspect_ratio=aspect_ratio,
         )
 
         print(

@@ -1,7 +1,10 @@
 """Typed compatibility and purpose-ranking tests for scene decomposition."""
 from __future__ import annotations
 
+import json
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import domain.scene_decomposer as sd
 from domain.provider_catalog import RuntimeSnapshot
@@ -15,6 +18,25 @@ def _fal_snapshot() -> RuntimeSnapshot:
         credentials={"fal_key"},
         modules={"fal_client"},
     )
+
+
+def _veo_snapshot() -> RuntimeSnapshot:
+    return RuntimeSnapshot(
+        credentials={"google_api_key"},
+        modules={"google.genai"},
+    )
+
+
+def _valid_shot(target_api: str = "AUTO") -> dict:
+    return {
+        "prompt": "[SHOT] test [SCENE] room [ACTION] walk [OUTFIT] coat [QUALITY] film",
+        "camera": sd.CAMERA_MOTIONS[0],
+        "visual_effect": sd.VISUAL_EFFECTS[0],
+        "target_api": target_api,
+        "scene_foley": "room tone",
+        "characters_in_frame": ["char_a"],
+        "action_context": "walking",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -337,3 +359,229 @@ def test_nonvideo_status_filter_uses_legacy_planned_rows():
         )
         assert [key for key, _info in ranked] == expected_keys
         assert all(info["status"] == "planned" for _key, info in ranked)
+
+
+def test_video_authoring_ranking_rows_are_deeply_isolated_from_registry():
+    # Same-file MINOR (review companion to FIX SLICE R1): rank_apis_for_purpose
+    # used to deepcopy `info` only on the eligible_video_keys-is-None (legacy
+    # non-video) branch, so a video-authoring ranking row aliased the live
+    # API_REGISTRY entry — a caller mutating a returned row would corrupt
+    # module-level registry state for every later purpose lookup.
+    ranked = dict(
+        sd.rank_apis_for_purpose(
+            "action_motion",
+            snapshot=_fal_snapshot(),
+            on_date=PRE_SUNSET,
+        )
+    )
+    row = ranked["SEEDANCE"]
+    assert row is not sd.API_REGISTRY["SEEDANCE"]
+    original_label = sd.API_REGISTRY["SEEDANCE"]["label"]
+
+    row["label"] = "mutated by caller"
+
+    assert sd.API_REGISTRY["SEEDANCE"]["label"] == original_label
+
+
+# ---------------------------------------------------------------------------
+# FIX SLICE R1 — the LLM-authoring boundary (_validate_raw_shot /
+# _enrich_validated_shots) must see project-disabled/aspect state, mirroring
+# the terminal update_scene_shots() write boundary (commit f414e8a2). Before
+# this fix, evaluate_shot_target() was called without api_engines/
+# aspect_ratio at this boundary — an LLM-authored shot naming a project-
+# disabled or aspect-incompatible engine was accepted un-coerced.
+# ---------------------------------------------------------------------------
+
+def test_validate_raw_shot_coerces_project_disabled_engine_to_auto():
+    # Live-repro seed from the review: VEO_NATIVE is runtime-available but
+    # the project has disabled it via global_settings.api_engines.
+    raw = _valid_shot("VEO_NATIVE")
+    validated = sd._validate_raw_shot(
+        raw,
+        index=0,
+        snapshot=_veo_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={"VEO_NATIVE": {"enabled": False}},
+    )
+    assert validated["target_api"] == "AUTO"
+    assert validated["_target_api_policy_reason"] == "project_disabled"
+
+
+def test_validate_raw_shot_coerces_aspect_incompatible_engine_to_auto(monkeypatch):
+    import domain.video_engine_policy as video_engine_policy
+
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, _aspect: False,
+    )
+    raw = _valid_shot("KLING_3_0")
+    validated = sd._validate_raw_shot(
+        raw,
+        index=0,
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        aspect_ratio="9:16",
+    )
+    assert validated["target_api"] == "AUTO"
+    assert validated["_target_api_policy_reason"] == "aspect_incompatible"
+
+
+def test_validate_raw_shot_without_project_state_still_accepts_live_target():
+    # Regression guard for the new optional parameters: omitting
+    # api_engines/aspect_ratio must not change behavior for an
+    # already-eligible target (both default to policy-neutral).
+    raw = _valid_shot("KLING_3_0")
+    validated = sd._validate_raw_shot(
+        raw,
+        index=0,
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+    assert validated["target_api"] == "KLING_3_0"
+    assert "_target_api_policy_reason" not in validated
+
+
+def test_enrich_validated_shots_threads_project_disabled_state_into_records():
+    shots = [_valid_shot("VEO_NATIVE"), _valid_shot("VEO_NATIVE")]
+    records = sd._enrich_validated_shots(
+        shots,
+        scene={"id": "scene_policy", "action": "walk"},
+        characters=[{"id": "char_a", "name": "Alice"}],
+        target_shots=2,
+        snapshot=_veo_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines={"VEO_NATIVE": {"enabled": False}},
+    )
+    assert [record["target_api"] for record in records] == ["AUTO", "AUTO"]
+    assert [record["target_api_policy_reason"] for record in records] == [
+        "project_disabled",
+        "project_disabled",
+    ]
+
+
+def test_project_video_engine_context_extracts_settings_dict_shape():
+    api_engines, aspect_ratio = sd._project_video_engine_context(
+        {"api_engines": {"KLING_3_0": {"enabled": False}}, "aspect_ratio": "9:16"}
+    )
+    assert api_engines == {"KLING_3_0": {"enabled": False}}
+    assert aspect_ratio == "9:16"
+
+
+def test_project_video_engine_context_defaults_on_non_dict_settings():
+    api_engines, aspect_ratio = sd._project_video_engine_context(None)
+    assert api_engines == {}
+    assert aspect_ratio is None
+
+
+def _mock_llm_scaffolding(monkeypatch):
+    """Shared decompose_scene()/competitive_decompose_scene() network mocks."""
+    import openai
+    import research_engine
+
+    monkeypatch.setattr(
+        research_engine, "research_cinematography", lambda *a, **k: None
+    )
+    monkeypatch.setattr(sd, "settings", SimpleNamespace(openai_api_key="test-key"))
+    monkeypatch.setattr(openai, "OpenAI", MagicMock(return_value=MagicMock()))
+
+
+def test_decompose_scene_threads_project_disabled_state_from_global_settings(
+    monkeypatch,
+):
+    # Entry-point proof: decompose_scene() must source api_engines/
+    # aspect_ratio from its `global_settings` param (the same source
+    # update_scene_shots() reads at the terminal write boundary) and carry
+    # them all the way to the persisted shot record.
+    import web_research
+
+    _mock_llm_scaffolding(monkeypatch)
+    scene = {
+        "id": "scene_a",
+        "title": "A Scene",
+        "action": "Alice walks.",
+        "duration_seconds": 5,  # target_shots == 2
+    }
+    characters = [{"id": "char_a", "name": "Alice"}]
+    location = {"description": "a room"}
+    global_settings = {
+        "aspect_ratio": "16:9",
+        "api_engines": {"VEO_NATIVE": {"enabled": False}},
+    }
+
+    monkeypatch.setattr(
+        web_research,
+        "run_with_tools",
+        lambda *a, **k: json.dumps(
+            {"shots": [_valid_shot("VEO_NATIVE"), _valid_shot("VEO_NATIVE")]}
+        ),
+    )
+
+    shots = sd.decompose_scene(
+        scene,
+        characters,
+        location,
+        global_settings,
+        runtime_snapshot=_veo_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert len(shots) == 2
+    assert all(shot["target_api"] == "AUTO" for shot in shots)
+    assert all(
+        shot["target_api_policy_reason"] == "project_disabled" for shot in shots
+    )
+
+
+def test_competitive_decompose_scene_threads_aspect_state_from_global_settings(
+    monkeypatch,
+):
+    import domain.video_engine_policy as video_engine_policy
+
+    _mock_llm_scaffolding(monkeypatch)
+    monkeypatch.setattr(
+        video_engine_policy,
+        "is_video_aspect_compatible",
+        lambda _key, _aspect: False,
+    )
+    scene = {
+        "id": "scene_b",
+        "title": "B Scene",
+        "action": "Bob runs.",
+        "duration_seconds": 5,  # target_shots == 2
+    }
+    characters = [{"id": "char_b", "name": "Bob"}]
+    location = {"description": "a street"}
+    global_settings = {"aspect_ratio": "9:16"}
+
+    class FixedEnsemble:
+        def __init__(self, **kwargs):
+            pass
+
+        def competitive_generate(self, **kwargs):
+            return SimpleNamespace(
+                winner_index=0,
+                winner_content={
+                    "shots": [_valid_shot("KLING_3_0"), _valid_shot("KLING_3_0")]
+                },
+                scores=[1.0],
+                reasoning="best",
+                models_used=["gpt-4o"],
+            )
+
+    monkeypatch.setattr(sd, "LLMEnsemble", FixedEnsemble)
+
+    shots = sd.competitive_decompose_scene(
+        scene,
+        characters,
+        location,
+        global_settings,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert len(shots) == 2
+    assert all(shot["target_api"] == "AUTO" for shot in shots)
+    assert all(
+        shot["target_api_policy_reason"] == "aspect_incompatible" for shot in shots
+    )
