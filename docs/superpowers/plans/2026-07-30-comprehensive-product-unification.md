@@ -706,22 +706,32 @@ offline (fixture-based) except 13d's real-local-server no-spend journey.
 - **Wave 8 — evidence-led pruning:** 15a–15g, each gated on the caller-evidence
   requirements already listed; only after the full contract matrix is green.
 
-#### Wave-boundary surface-inventory regeneration
+#### Wave-boundary derived-state refresh (inventory + doc anchors)
 
-Once every slice in a wave is committed — **not before** — regenerate the
-generated artifact and land it as its own commit:
+Two artifacts are derived from source line positions and go stale on any edit,
+whether or not behaviour changed: `docs/generated/product_surface_inventory.json`
+and the `file:line` anchors in `ARCHITECTURE.md`. Once every slice in a wave is
+committed — **not before** — refresh both and land them as one commit:
 
 ```
 .venv/bin/python scripts/product_surface_inventory.py --root . \
   --output docs/generated/product_surface_inventory.json
+.venv/bin/python scripts/check_doc_claims.py --fix
 .venv/bin/python -m pytest \
   tests/unit/test_product_surface_inventory.py::test_repository_artifact_is_current -q
+.venv/bin/python scripts/ci_smoke.py
 ```
 
 Precedent: `3ad04f6c` (wave 3), `b10ac746` (wave 4), `ce391c00` (wave 5) —
-each a standalone `chore(audit):` commit. Never fold the regenerated JSON into
-a feature commit: it is derived state, and mixing it hides which source change
-moved the surface.
+each a standalone `chore(audit): refresh inventory + anchors` commit touching
+exactly `ARCHITECTURE.md` + the generated JSON. Never fold either into a
+feature commit: both are derived state, and mixing them hides which source
+change moved the surface.
+
+The two fail differently, so check both. A stale inventory fails
+`test_repository_artifact_is_current` (pytest only). Stale `ARCHITECTURE.md`
+anchors fail `ci_smoke.py` as `DOC-ANCHOR DRIFT` — a hard gate, unlike the
+advisory drift reported for other docs.
 
 **A red `test_repository_artifact_is_current` mid-wave is expected, not a
 defect to chase.** The artifact records `source.line` for every frontend
