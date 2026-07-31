@@ -3695,3 +3695,65 @@ Evidence:
   claims, all of which documented `global_settings["mood"]` as the live
   selector and were corrected in the same change);
   `cinema/shots/controller.py:2980` (the mirrored path).
+
+## ADR-075 — opencv-python is capped below 5.x because the whole face stack needs the Haar API
+
+- **Date:** 2026-08-01
+- **Status:** Accepted. Cap is a floor for the face stack, not a preference —
+  revisit only when the lifting condition below is met.
+- **Context.** `requirements.txt` pinned `opencv-python>=4.10` with no upper
+  bound. opencv-python 5.0.0.93 is now the PyPI latest, so a fresh
+  `pip install -r requirements.txt` resolved to it. 5.x **removes the Haar
+  cascade API outright**: `cv2.CascadeClassifier` is gone, there is no
+  `cv2.objdetect` submodule to import it from, and `cv2/data/` still exists as
+  a directory but ships **0** cascade XML files. Measured against a real
+  5.0.0.93 install — of the 34 distinct `cv2.*` symbols this repo uses,
+  5.0.0 is missing exactly one, `CascadeClassifier`; 4.14.0.94 is missing none.
+  Two independent consumers need it, and only one of them is ours:
+  - `lip_sync._score_mouth_energy` (`lip_sync.py:473-474`,
+    `haarcascade_smile.xml`). Under 5.x the `AttributeError` is raised inside
+    the scorer's own `try:` and caught by its outer handler, so it fail-opens
+    to `None` — the Provider-1.5 lip-sync quality gate silently demotes to the
+    duration heuristic / neutral 1.0. This is the ADR-027-adjacent
+    silent-gate-degradation shape, and it is *not* what the 3 red tests report;
+    they die earlier, at `monkeypatch.setattr(cv2, "CascadeClassifier", ...)`.
+  - **deepface's default `detector_backend="opencv"`** (third-party, in the
+    installed package: `models/face_detection/OpenCv.py`, `__build_cascade`).
+    `identity/validator.py`
+    calls `DeepFace.represent` (`:166`) and `DeepFace.extract_faces` (`:1090`)
+    without overriding the backend, so binding scores, character registration
+    and face counting all raise the same `AttributeError`.
+- **Decision.** Cap at `opencv-python>=4.10,<5`.
+- **Alternative rejected — migrate our detector off Haar and keep the floor
+  open.** This was the more attractive-sounding option and it does not work.
+  deepface declares an equally unbounded `opencv-python>=4.5.5.64` and calls
+  `cv2.CascadeClassifier` itself, so migrating `_score_mouth_energy` alone
+  would have fixed 3 tests while leaving the *identity* subsystem — the more
+  load-bearing of the two — broken under the same resolve. "Keep the floor
+  open" is only meaningful if something can stand on 5.x; nothing in this
+  stack can.
+- **Consequences.**
+  - Not a freeze. `>=4.10,<5` resolves to **4.14.0.94** — a *later* build than
+    5.0.0.93 (upstream still ships the 4.x line), so the cap tracks its head
+    rather than pinning something stale.
+  - The known-open D2 defect (the scorer uses the *smile* cascade, which
+    underdetects a neutral speaking mouth — see
+    `tests/unit/test_mouth_energy_scorer_defects.py`) is **untouched** by this
+    change. Fixing D2 is a detector-quality question with its own calibration
+    risk (D3: the `final_min_lipsync=0.8` bar needs raw Pearson ≥ 0.6, and a
+    different detector moves the score distribution). It is deliberately not
+    bundled into a dependency-cap fix.
+  - **Lifting condition:** deepface must move off Haar for its default
+    backend — or `identity/validator.py` must pin a non-`opencv`
+    `detector_backend` *and* `_score_mouth_energy` must move off
+    `CascadeClassifier`. Both, not either.
+- **Evidence.** Real 5.0.0.93 and 4.14.0.94 installs probed side by side:
+  `CascadeClassifier` `False`/`True`, cascade-XML count `0`/`17`.
+  `pip install --dry-run` against the amended `requirements.txt` resolves
+  `opencv-python 4.14.0.94`. Production impact measured directly under a 5.x
+  posture: `_score_mouth_energy` returned `None` (logging
+  `"unexpected failure — fail-open"`), and
+  `modeling.build_model(task="face_detector", model_name="opencv")` raised
+  `AttributeError: module 'cv2' has no attribute 'CascadeClassifier'`.
+- **Cross-ref:** `requirements.txt:36-52` (the pin and its comment);
+  `requirements-lock-py39.txt:92` (already `==4.13.0.92`, inside the cap).
