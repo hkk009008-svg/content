@@ -21,6 +21,8 @@ sys.modules.pop("kling_native", None)
 
 import dataclasses
 import os
+import types
+from datetime import date
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -330,6 +332,132 @@ def test_generate_video_timeout_override_reaches_poll_task(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# generate_video — on_billed fires exactly at the provider's billed-URL
+# boundary (money-gate 2026-07-11: a post-billing download failure must
+# still be distinguishable from a pre-billing failure to the caller).
+# ---------------------------------------------------------------------------
+
+def test_generate_video_pre_billing_failure_does_not_call_on_billed(tmp_path):
+    """No videos in the poll result => the provider never returned a video
+    => never billed => on_billed must NOT fire."""
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    with (
+        patch.object(api, "create_image_to_video", return_value="task-no-video"),
+        patch.object(api, "poll_task", return_value={"task_result": {"videos": []}}),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="no video in result",
+            output_path=out_path,
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_generate_video_post_billing_download_failure_still_notes_billed(tmp_path):
+    """RED->GREEN target: a download failure AFTER the provider returned a
+    video URL must still fire on_billed. Pre-fix, download_video's failure
+    fell into the blanket `except Exception: return None`, indistinguishable
+    from a pre-billing failure and losing the spend to the caller's budget
+    gate. on_billed must fire BEFORE the download attempt, not after.
+    """
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    def _failing_download(*args, **kwargs):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing download failure")
+
+    with (
+        patch.object(api, "create_image_to_video", return_value="task-billed-fail"),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/video.mp4"}]}
+        }),
+        patch.object(api, "download_video", side_effect=_failing_download),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="billed then download fails",
+            output_path=out_path,
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the download attempt so a caller's spend "
+        f"record is never lost to a post-billing download failure; got {call_order!r}"
+    )
+
+
+def test_generate_video_success_fires_on_billed_exactly_once(tmp_path):
+    """The happy path also bills — on_billed must fire exactly once, before
+    download, even when the download subsequently succeeds."""
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    with (
+        patch.object(api, "create_image_to_video", return_value="task-ok"),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/video.mp4"}]}
+        }),
+        patch.object(api, "download_video", return_value=out_path),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="success",
+            output_path=out_path,
+            on_billed=on_billed,
+        )
+
+    assert result == out_path
+    on_billed.assert_called_once()
+
+
+def test_generate_video_on_billed_exception_does_not_abort_download(tmp_path):
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    with (
+        patch.object(api, "create_image_to_video", return_value="task-ok2"),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/video.mp4"}]}
+        }),
+        patch.object(api, "download_video", return_value=out_path),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="callback bug",
+            output_path=out_path,
+            on_billed=_bad_callback,
+        )
+
+    assert result == out_path, (
+        "A broken on_billed callback must not abort an otherwise-successful download"
+    )
+
+
+# ---------------------------------------------------------------------------
 # generate_storyboard — one canonical provider-capped duration allocation
 # ---------------------------------------------------------------------------
 
@@ -396,6 +524,76 @@ def test_storyboard_payload_stays_within_provider_cap_after_minimums(
     assert float(body["duration"]) == sum(expected_durations)
     assert sum(payload_durations) <= 15.0
     assert min(payload_durations) >= 1.0
+
+
+# ---------------------------------------------------------------------------
+# generate_storyboard — on_billed mirrors generate_video's billed-URL boundary
+# ---------------------------------------------------------------------------
+
+def test_generate_storyboard_post_billing_download_failure_still_notes_billed(tmp_path):
+    """A download failure AFTER the provider returned a storyboard video URL
+    must still fire on_billed, mirroring generate_video's contract — a
+    billed-but-failed storyboard batch must not be invisible to the
+    caller's cost accounting."""
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "storyboard.mp4")
+    shots = [
+        {"prompt": "shot one", "duration": 5.0},
+        {"prompt": "shot two", "duration": 5.0},
+    ]
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    def _failing_download(*args, **kwargs):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing download failure")
+
+    with (
+        patch.object(kling_native.requests, "post", return_value=_ok_post_response()),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/storyboard.mp4"}]},
+        }),
+        patch.object(api, "download_video", side_effect=_failing_download),
+    ):
+        result = api.generate_storyboard(
+            image_path=img_path,
+            shots=shots,
+            output_path=out_path,
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the download attempt; got "
+        f"{call_order!r}"
+    )
+
+
+def test_generate_storyboard_pre_billing_failure_does_not_call_on_billed(tmp_path):
+    """No videos in the poll result => never billed => on_billed must NOT
+    fire."""
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "storyboard.mp4")
+    shots = [{"prompt": "shot one", "duration": 5.0}]
+    on_billed = MagicMock()
+
+    with (
+        patch.object(kling_native.requests, "post", return_value=_ok_post_response()),
+        patch.object(api, "poll_task", return_value={"task_result": {"videos": []}}),
+    ):
+        result = api.generate_storyboard(
+            image_path=img_path,
+            shots=shots,
+            output_path=out_path,
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -582,3 +780,83 @@ def test_poll_task_never_completes_raises_timeouterror():
     assert mock_sleep.call_count >= 1
     # And it never slept longer than the cap while spinning.
     assert max(c.args[0] for c in mock_sleep.call_args_list) <= 15
+
+
+# ---------------------------------------------------------------------------
+# phase_c_ffmpeg wiring — the legacy KLING_NATIVE cascade branch must pass
+# its own on_billed hook into generate_video, so a post-billing failure
+# still reaches _cascade_out["billed_attempts"] (money-gate 2026-07-11: this
+# is what controller._record_billed_rejects reads to bill a rejected/failed
+# attempt that the provider had already charged for).
+# ---------------------------------------------------------------------------
+
+def _kling_native_runtime_snapshot():
+    from domain.provider_catalog import RuntimeSnapshot
+
+    return RuntimeSnapshot(
+        credentials={"kling_access_key", "kling_secret_key"},
+        modules={"jwt"},
+    )
+
+
+def test_phase_c_ffmpeg_kling_native_branch_notes_billed_on_post_billing_failure(
+    monkeypatch, tmp_path
+):
+    """RED->GREEN target for defect #3: the legacy KLING_NATIVE branch in
+    phase_c_ffmpeg._execute_admitted_video_chain must note a billed attempt
+    even when kling.generate_video billed the provider and then still
+    returned None (e.g. a download failure after the video URL arrived).
+
+    Drives phase_c_ffmpeg.generate_ai_video directly (its public
+    _cascade_out param) with no fallback candidates and cascade_retry_limit=0
+    so the cascade terminates immediately after the single KLING_NATIVE
+    attempt, and inspects the resulting billed_attempts list.
+    """
+    import phase_c_ffmpeg
+    from cinema.context import PipelineContext
+
+    output = str(tmp_path / "winner.mp4")
+
+    kling_instance = MagicMock()
+
+    def _billed_then_fail(**kwargs):
+        kwargs["on_billed"]()
+        return None
+
+    kling_instance.generate_video.side_effect = _billed_then_fail
+    kling_module = types.ModuleType("kling_native")
+    kling_module.KlingNativeAPI = MagicMock(return_value=kling_instance)
+    monkeypatch.setitem(sys.modules, "kling_native", kling_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _kling_native_runtime_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_current_date",
+        lambda: date(2026, 9, 23),
+    )
+
+    cascade: dict = {}
+    ctx = PipelineContext(
+        global_settings={"aspect_ratio": "16:9", "cascade_retry_limit": 0}
+    )
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "KLING_NATIVE",
+        output,
+        video_fallbacks=["KLING_NATIVE"],
+        shot_type="medium",
+        ctx=ctx,
+        _cascade_out=cascade,
+    )
+
+    assert result is None
+    kling_module.KlingNativeAPI.assert_called_once_with()
+    assert cascade.get("billed_attempts") == ["KLING_NATIVE"], (
+        "A billed-but-failed KLING_NATIVE attempt must be noted in "
+        f"_cascade_out['billed_attempts']; got {cascade!r}"
+    )

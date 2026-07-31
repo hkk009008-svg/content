@@ -1077,6 +1077,14 @@ class TestStoryboardFallback:
         assert result.ok is True
 
     def test_none_result_does_not_record_batch_cost(self, tmp_path):
+        """PRE-billing None: generate_storyboard never billed (never invoked
+        the on_billed hook it is passed — e.g. task creation/poll failed
+        before the provider returned a video) => no batch cost recorded.
+
+        Companion: test_billed_but_failed_storyboard_records_cost_once below
+        covers the POST-billing None case (on_billed fires, THEN the call
+        still returns None), which must record the cost exactly once.
+        """
         from cinema.phases.motion_render import MotionRenderPhase
 
         shots = [_make_shot("s1_0"), _make_shot("s1_1")]
@@ -1103,6 +1111,55 @@ class TestStoryboardFallback:
             if c.kwargs.get("operation") == "storyboard_generation"
         ]
         assert len(batch_cost_calls) == 0
+        assert gen.generate_motion_take.call_count == 2
+        assert result.ok is True
+
+    def test_billed_but_failed_storyboard_records_cost_once(self, tmp_path):
+        """POST-billing None: the provider returned a video (generate_storyboard
+        invokes the on_billed hook it was passed, mirroring the real
+        implementation's billed-URL boundary) but the call still returns
+        None (e.g. the download that followed failed). The batch cost MUST
+        be recorded exactly once before falling back to the per-shot path —
+        a billed-but-failed batch must never be invisible to
+        cost_tracker.spent_usd (money-gate finding), and the fallback must
+        not be double-billed either.
+        """
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            _write_nonempty(p)
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+
+        def _bill_then_fail(**kwargs):
+            # Simulate generate_storyboard's real contract: fire the caller's
+            # on_billed hook (provider returned a video) and then still fail
+            # (e.g. the post-billing download raised).
+            kwargs["on_billed"]()
+            return None
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.side_effect = _bill_then_fail
+            mock_kling_cls.return_value = mock_kling
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(_make_lifecycle())
+
+        batch_cost_calls = [
+            c for c in gen.cost_tracker.record_api_call.call_args_list
+            if c.kwargs.get("operation") == "storyboard_generation"
+        ]
+        assert len(batch_cost_calls) == 1
+        # Fell back to per-shot for both unfinalized shots (no double-gen,
+        # no lost shots — the batch cost was already recorded above).
+        assert gen.generate_motion_take.call_count == 2
+        assert result.ok is True
 
     def test_split_failure_falls_back_to_per_shot(self, tmp_path):
         from cinema.phases.motion_render import MotionRenderPhase

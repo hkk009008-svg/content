@@ -227,15 +227,63 @@ class MotionRenderPhase:
             scene_id, num_shots, anchor_kf,
         )
 
+        # Record ONE batch cost for the whole scene (closes Tier F NEW-2:
+        # kling_native previously had no call-site cost tracking) — and do
+        # so for a BILLED-but-failed generation too, not just a successful
+        # one. generate_storyboard's on_billed hook fires the moment the
+        # provider returns a playable video, which is the repo's billed bar
+        # (phase_c_ffmpeg._note_billed_attempt) — before the download that
+        # can still fail and make generate_storyboard return None. Without
+        # this, a billed-but-failed batch never reached
+        # cost_tracker.spent_usd (the ONE accumulator the budget gate
+        # reads), and the per-shot fallback below then spent again on top
+        # of the invisible spend (money-gate finding).
+        #
+        # `billed_recorded` makes the record idempotent: it is invoked from
+        # up to two places — the on_billed hook itself (real post-billing
+        # path), and the compat call after a truthy return below (covers
+        # stubs/mocks that hand back a result without ever calling
+        # on_billed). Whichever fires first wins; the guard stops a real
+        # success from being counted twice.
+        billed_recorded = False
+
+        def _record_storyboard_batch_cost() -> None:
+            nonlocal billed_recorded
+            if billed_recorded:
+                return
+            billed_recorded = True
+            try:
+                self._gen.cost_tracker.record_api_call(
+                    "KLING_NATIVE",
+                    operation="storyboard_generation",
+                    # A storyboard BATCH has no single shot, so shot_id is left empty
+                    # (a scene_id here would pollute get_video_cost()'s shot_count —
+                    # one phantom 'shot' per batch). operation="storyboard_generation"
+                    # + video_id already attribute the cost to the scene batch.
+                    shot_id="",
+                    video_id=self._project.get("id", ""),
+                )
+            except Exception:
+                logger.warning(
+                    "storyboard batch: cost record skipped for BILLED scene=%s "
+                    "— spend will not appear in cost_tracker.spent_usd",
+                    scene_id,
+                    exc_info=True,
+                )
+
         kling = KlingNativeAPI()
         combined_path = kling.generate_storyboard(
             image_path=anchor_kf,
             shots=shots_for_storyboard,
             output_path=storyboard_output_path,
             image_references=image_refs or None,
+            on_billed=_record_storyboard_batch_cost,
         )
 
         if not combined_path:
+            # If the provider billed before failing, on_billed already
+            # recorded the cost above — a billed-but-failed call must not
+            # lose the spend just because there is no video left to split.
             logger.warning(
                 "storyboard batch: generate_storyboard returned None for scene=%s; "
                 "falling through to per-shot",
@@ -243,24 +291,10 @@ class MotionRenderPhase:
             )
             return ok_count, fail_count, False
 
-        # Record ONE batch cost for the whole scene (closes Tier F NEW-2:
-        # kling_native previously had no call-site cost tracking).
-        try:
-            self._gen.cost_tracker.record_api_call(
-                "KLING_NATIVE",
-                operation="storyboard_generation",
-                # A storyboard BATCH has no single shot, so shot_id is left empty
-                # (a scene_id here would pollute get_video_cost()'s shot_count —
-                # one phantom 'shot' per batch). operation="storyboard_generation"
-                # + video_id already attribute the cost to the scene batch.
-                shot_id="",
-                video_id=self._project.get("id", ""),
-            )
-        except Exception:
-            logger.warning(
-                "storyboard batch: cost record skipped",
-                exc_info=True,
-            )
+        # Compat path: record the batch cost if on_billed did not already
+        # fire (a test double / stub returning a truthy result directly).
+        # No-op when the real on_billed hook already recorded it above.
+        _record_storyboard_batch_cost()
 
         # Split the combined output back into per-shot segments.  Use a unique
         # directory so ownership is exact: a rejected split can clean only

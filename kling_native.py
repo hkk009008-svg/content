@@ -22,6 +22,8 @@ from __future__ import annotations
 import os
 import time
 import base64
+from typing import Callable
+
 import jwt
 import requests
 from cinema.storyboard import (
@@ -283,6 +285,7 @@ class KlingNativeAPI:
         image_path: str,
         prompt: str,
         output_path: str,
+        on_billed: Callable[[], None] | None = None,
         **kwargs,
     ) -> str | None:
         """High-level convenience: create task, poll, download.
@@ -291,12 +294,27 @@ class KlingNativeAPI:
             image_path: Path to the source image.
             prompt: Motion/action prompt for the video.
             output_path: Where to save the resulting video file.
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the provider has returned a playable video URL — the
+                repo's billed bar (a provider that RETURNED a video is
+                billed regardless of what happens next; see
+                phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the
+                download attempt so a caller can record the spend even when
+                the download that follows fails and this method still
+                returns None (money-gate 2026-07-11: post-billing failures
+                were previously indistinguishable from pre-billing ones).
+                Exceptions raised by the callback are logged and swallowed
+                — a broken accounting hook must never abort a download that
+                would otherwise succeed.
             **kwargs: Additional arguments passed to create_image_to_video
                 (negative_prompt, duration, mode, model_name, cfg_scale,
                 face_consistency, image_references).
 
         Returns:
-            The output_path on success, None on failure.
+            The output_path on success, None on failure — either
+            pre-billing (task creation/poll error, no video returned) or
+            post-billing (the provider returned a video but the download
+            that followed failed).
         """
         try:
             # Pop timeout BEFORE create_image_to_video — it has a fixed signature with no
@@ -319,6 +337,19 @@ class KlingNativeAPI:
                 print("[KLING-NATIVE] Error: No URL in video result")
                 return None
 
+            # Provider returned a playable video URL — billed regardless of
+            # what happens next. Notify the caller BEFORE the download
+            # attempt so a subsequent download failure below still reaches
+            # the caller's spend accounting, even though this call goes on
+            # to return None.
+            if on_billed is not None:
+                try:
+                    on_billed()
+                except Exception as callback_exc:
+                    print(
+                        f"[KLING-NATIVE] Warning: on_billed callback raised: {callback_exc}"
+                    )
+
             path = self.download_video(video_url, output_path)
             print(f"[KLING-NATIVE] Success: {path}")
             return path
@@ -333,6 +364,7 @@ class KlingNativeAPI:
         shots: list,
         output_path: str,
         image_references: list = None,
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """Generate a multi-shot storyboard video using Kling's 6-shot mode.
 
@@ -347,9 +379,16 @@ class KlingNativeAPI:
             output_path: Where to save the resulting storyboard video.
             image_references: Optional list of reference image paths for
                 character/style consistency across shots.
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the provider has returned a playable storyboard video
+                URL (billed regardless of what happens next). Fires BEFORE
+                the download attempt — see generate_video's on_billed doc
+                for the full rationale. Callback exceptions are logged and
+                swallowed.
 
         Returns:
-            The output_path on success, None on failure.
+            The output_path on success, None on failure — either
+            pre-billing or post-billing (see generate_video).
         """
         try:
             if not shots:
@@ -460,6 +499,16 @@ class KlingNativeAPI:
             if not video_url:
                 print("[KLING-NATIVE] Error: No URL in storyboard result")
                 return None
+
+            # Provider returned a playable storyboard video URL — billed
+            # regardless of what happens next (mirrors generate_video).
+            if on_billed is not None:
+                try:
+                    on_billed()
+                except Exception as callback_exc:
+                    print(
+                        f"[KLING-NATIVE] Warning: on_billed callback raised: {callback_exc}"
+                    )
 
             path = self.download_video(video_url, output_path)
             print(f"[KLING-NATIVE] Storyboard success: {path}")

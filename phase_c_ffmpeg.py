@@ -505,6 +505,27 @@ def _execute_admitted_video_chain(
         # LEGACY native Kling (kling-v1-6) — JWT auth; fallback-only since
         # 2026-07-11 (primary = KLING_3_0 fal v3 Pro). Sends v1.6-era
         # subject-binding params; see kling_native.py's module docstring.
+        #
+        # _kling_billed_noted makes _note_billed_attempt idempotent for this
+        # attempt: generate_video's on_billed hook fires the moment the
+        # provider returns a playable video URL (covers a post-billing
+        # download failure that still returns None — money-gate 2026-07-11),
+        # AND the post-call `if result:` compat path below fires for any
+        # caller (test double / stub) that hands back a truthy result
+        # without ever invoking on_billed. Whichever fires first wins; the
+        # guard stops a real success from appending "KLING_NATIVE" to
+        # billed_attempts twice, which would otherwise survive the
+        # winner-subtraction in controller._record_billed_rejects and get
+        # double-billed as a reject.
+        _kling_billed_noted = False
+
+        def _note_kling_billed() -> None:
+            nonlocal _kling_billed_noted
+            if _kling_billed_noted:
+                return
+            _kling_billed_noted = True
+            _note_billed_attempt(target_api.upper())
+
         try:
             from kling_native import KlingNativeAPI
             kling = KlingNativeAPI()
@@ -524,11 +545,13 @@ def _execute_admitted_video_chain(
                 image_references=multi_angle_refs,
                 duration="5",
                 mode="pro",
+                on_billed=_note_kling_billed,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
-                _note_billed_attempt(target_api.upper())
+                # No-op when the real on_billed hook already fired above.
+                _note_kling_billed()
                 # Aspect backstop (also at the other 10 cascade success sites): probe output_mp4 —
                 # the file the provider wrote (result==output_mp4 for native branches; see the
                 # _accept_or_reject caller contract). Wrong orientation → cascade; no-op for landscape.
@@ -540,6 +563,9 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
+            # result is None here whether or not the provider billed before
+            # failing (on_billed already noted it in the billed case) —
+            # cascade to the next engine either way.
             return try_next_api()
         except Exception as e:
             logger.warning("Kling Native error", extra={"engine": "KLING_NATIVE", "error": str(e)})
