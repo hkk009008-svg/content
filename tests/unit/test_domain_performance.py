@@ -14,6 +14,7 @@ from domain.performance import (
     should_capture,
     shot_needs_driving_video,
     driving_video_source,
+    precondition_error,
 )
 
 
@@ -95,8 +96,12 @@ class TestShouldCapture:
 
 
 class TestShotNeedsDrivingVideo:
-    def test_act_one_does_not_need_driving_video(self):
-        assert shot_needs_driving_video(_shot(shot_type="portrait")) is False
+    def test_act_one_needs_driving_video(self):
+        # ACT_ONE now routes to Runway Act-Two (performance/act_two.py),
+        # which has no audio-only generation mode — unlike the retired
+        # Act-One, it always needs an actual driving video (Mode-B synth or
+        # a direct upload) by dispatch time.
+        assert shot_needs_driving_video(_shot(shot_type="portrait")) is True
 
     def test_live_portrait_needs_driving_video(self):
         shot = _shot(shot_type="portrait", performance_budget_mode="cheap")
@@ -122,3 +127,49 @@ class TestDrivingVideoSource:
         # No dialogue + non-action + non-landscape shot type → rule 5 fall-through
         # in route_performance_engine returns SKIP → driving_video_source returns "none"
         assert driving_video_source(_shot(dialogue="", shot_type="medium")) == "none"
+
+
+class TestPreconditionErrorActOne:
+    """ACT_ONE now routes to Runway Act-Two (performance/act_two.py), which
+    has no audio-only mode. precondition_error runs BEFORE controller.py's
+    Mode-B synth step (cinema/shots/controller.py), so audio_path alone
+    must still satisfy the pre-check — it is what lets Mode-B produce a
+    driving video before the actual engine call. Only "neither present" is
+    a real, unrecoverable precondition failure."""
+
+    def test_neither_audio_nor_driving_video_fails_and_names_driving_video(self):
+        err = precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="")
+        assert err is not None
+        assert "driving video" in err.lower()
+
+    def test_none_inputs_also_fail(self):
+        assert precondition_error(ENGINE_ACT_ONE, audio_path=None, driving_video_path=None) is not None
+
+    def test_audio_only_passes_because_mode_b_can_still_synthesize(self):
+        # Audio alone is not a valid Act-Two dispatch input, but it IS
+        # sufficient for this pre-check, since Mode-B hasn't run yet.
+        assert precondition_error(ENGINE_ACT_ONE, audio_path="/tmp/a.wav", driving_video_path="") is None
+
+    def test_driving_video_only_passes(self):
+        # Fixes the old Act-One-shaped bug: a shot with an uploaded driving
+        # video but no dialogue/audio used to be incorrectly rejected here,
+        # even though Act-Two never needed audio at all.
+        assert precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="/tmp/d.mp4") is None
+
+    def test_both_present_passes(self):
+        assert precondition_error(
+            ENGINE_ACT_ONE, audio_path="/tmp/a.wav", driving_video_path="/tmp/d.mp4"
+        ) is None
+
+
+class TestPreconditionErrorOtherEngines:
+    def test_live_portrait_requires_driving_video_regardless_of_audio(self):
+        err = precondition_error(ENGINE_LIVE_PORTRAIT, audio_path="/tmp/a.wav", driving_video_path="")
+        assert err is not None and "driving" in err.lower()
+
+    def test_viggle_requires_driving_video(self):
+        err = precondition_error(ENGINE_VIGGLE, audio_path="", driving_video_path="")
+        assert err is not None and "driving" in err.lower()
+
+    def test_skip_never_fails(self):
+        assert precondition_error(ENGINE_SKIP, audio_path="", driving_video_path="") is None

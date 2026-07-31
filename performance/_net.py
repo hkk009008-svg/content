@@ -2,7 +2,7 @@
 
 WHY THIS EXISTS
 ---------------
-Several adapters in this package (act_one, viggle, live_portrait, driving_video)
+Several adapters in this package (act_two, viggle, live_portrait, driving_video)
 download generated artifacts from URLs returned by external APIs (Runway,
 Viggle) or from the internal ComfyUI pod. The original code used
 `urllib.request.urlretrieve(url, path)` which:

@@ -31,6 +31,14 @@ Verified against the installed ``runwayml`` SDK (v4.14.0) — see
   - Optional knobs the endpoint DOES offer but this adapter does not yet
     wire: ``body_control`` (bool), ``content_moderation``,
     ``expression_intensity`` (1-5 int), ``seed``.
+  - ``uri`` for both ``character`` and ``reference`` is a LOCAL FILESYSTEM
+    PATH at the call sites in this module (``keyframe_path`` /
+    ``driving_video_path``) — Runway obviously cannot fetch a path off this
+    machine's disk. This adapter encodes each local file as an RFC 2397
+    ``data:<mime>;base64,<...>`` URI (see ``_to_data_uri`` below) rather than
+    passing the path through, since the SDK's own type stubs document `uri`
+    as "A HTTPS URL." with no separate local-file/upload parameter on
+    ``character_performance.create()``.
 
 API surface:
   - POST https://api.dev.runwayml.com/v1/character_performance
@@ -42,6 +50,8 @@ the existing Runway Gen-4 integration).
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 import os
 from typing import Optional
 
@@ -53,6 +63,18 @@ from performance._poll import poll_task
 _POLL_INTERVAL_S = 3
 _MODEL = "act_two"
 _RUNWAY_API_VERSION = "2024-11-06"
+
+# Conservative pre-encode size cap for inline data-URI payloads. The installed
+# runwayml SDK (v4.14.0) does NOT document a data-URI byte limit anywhere —
+# `character_performance_create_params.py` types `uri` only as "A HTTPS URL.",
+# and grepping the SDK's types/, resources/, and dist-info METADATA for
+# "data:", "base64", or a size figure turns up nothing. This cap is therefore
+# THIS ADAPTER's own safety bound, not a documented Runway limit: base64
+# inflates a payload by ~4/3, and `reference` videos can run up to 30s, so an
+# unbounded inline encode risks a multi-hundred-MB JSON request body. Fail
+# loudly before sending rather than hang on an oversized request or have an
+# intermediate proxy silently truncate it.
+_MAX_INLINE_BYTES = 15 * 1024 * 1024  # 15 MB pre-encode (~20 MB after base64)
 
 
 def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:
@@ -79,7 +101,6 @@ def generate_act_two_performance(
     *,
     driving_video_path: Optional[str] = None,
     duration_s: float = 5.0,
-    character_id: str = "",
     shot_id: str = "",
     video_id: str = "",
     poll_timeout_s: int = 300,
@@ -105,7 +126,7 @@ def generate_act_two_performance(
         duration_s:    used ONLY for the cost-tracker estimate ($/s);
             never sent to Runway — character_performance.create() has no
             duration parameter.
-        character_id / shot_id / video_id: telemetry only
+        shot_id / video_id: telemetry only
 
     Returns the output path on success, None on any failure.
     """
@@ -156,11 +177,18 @@ def generate_act_two_performance(
         )
 
     try:
+        character_uri = _to_data_uri(keyframe_path)
+        reference_uri = _to_data_uri(driving_video_path)
+    except (OSError, ValueError) as e:
+        print(f"   [ACT-TWO] failed to encode input as a data URI: {e}")
+        return None
+
+    try:
         client = RunwayML(api_key=api_key)
         kwargs = {
             "model": _MODEL,
-            "character": {"type": "image", "uri": _to_data_uri_or_path(keyframe_path)},
-            "reference": {"type": "video", "uri": _to_data_uri_or_path(driving_video_path)},
+            "character": {"type": "image", "uri": character_uri},
+            "reference": {"type": "video", "uri": reference_uri},
             "ratio": "1280:720",
         }
         task = client.character_performance.create(**kwargs)
@@ -213,18 +241,33 @@ def generate_act_two_performance(
         return None
 
 
-def _to_data_uri_or_path(path: str) -> str:
-    """Pass-through. Newer Runway SDK versions accept a file path for the `uri`
-    field directly; on older SDKs this would need conversion to a data URI or
-    pre-uploaded HTTPS URL. Kept as a seam in case the SDK behavior changes —
-    the call falls through to REST on any SDK incompatibility.
+def _to_data_uri(path: str) -> str:
+    """Encode a local file as an RFC 2397 ``data:<mime>;base64,<...>`` URI.
 
-    NOTE: the SDK's typed params document ``uri`` as "A HTTPS URL." — passing
-    a bare local filesystem path is a known pre-existing gap (predates this
-    Act-Two migration), not something newly introduced here. Fixing it
-    requires an upload/asset step this adapter does not yet have.
+    Used for both ``character.uri`` and ``reference.uri`` — the SDK's typed
+    params document ``uri`` as "A HTTPS URL." with no separate local-file
+    parameter, and this adapter has no asset-upload step, so a real data URI
+    (not a bare filesystem path, which Runway's servers cannot dereference)
+    is the only way to hand Runway a local keyframe/driving-video file.
+
+    Raises:
+        OSError: the file cannot be stat'd or read (missing/permissions).
+        ValueError: the file exceeds ``_MAX_INLINE_BYTES`` — callers must
+            fail the request loudly rather than attempt an inline payload
+            this large (see ``_MAX_INLINE_BYTES`` for why the cap exists).
     """
-    return path
+    size = os.path.getsize(path)
+    if size > _MAX_INLINE_BYTES:
+        raise ValueError(
+            f"{path} is {size} bytes, over the {_MAX_INLINE_BYTES}-byte "
+            f"inline data-URI cap for Act-Two requests"
+        )
+    mime, _ = mimetypes.guess_type(path)
+    if not mime:
+        mime = "application/octet-stream"
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
 
 
 def _raw_rest_call(
@@ -242,18 +285,20 @@ def _raw_rest_call(
 
     Returns None on any failure — graceful for the cascade.
     """
-    import base64
     import requests
 
-    def _b64(p: str) -> str:
-        with open(p, "rb") as f:
-            return "data:application/octet-stream;base64," + base64.b64encode(f.read()).decode()
+    try:
+        character_uri = _to_data_uri(keyframe_path)
+        reference_uri = _to_data_uri(reference_video_path)
+    except (OSError, ValueError) as e:
+        print(f"   [ACT-TWO/REST] failed to encode input as a data URI: {e}")
+        return None
 
     try:
         body = {
             "model": _MODEL,
-            "character": {"type": "image", "uri": _b64(keyframe_path)},
-            "reference": {"type": "video", "uri": _b64(reference_video_path)},
+            "character": {"type": "image", "uri": character_uri},
+            "reference": {"type": "video", "uri": reference_uri},
             "ratio": "1280:720",
         }
 

@@ -93,11 +93,18 @@ def should_capture(shot: dict, scene: Optional[dict] = None) -> bool:
 
 def shot_needs_driving_video(shot: dict) -> bool:
     """True when the chosen engine requires a driving video as input.
-    Used to decide whether Mode B (synth from TTS+keyframe) should fire."""
+    Used to decide whether Mode B (synth from TTS+keyframe) should fire.
+
+    All three real engines need one. ACT_ONE now routes to Runway Act-Two
+    (performance/act_two.py) — the retired Act-One could auto-generate a
+    performance from dialogue audio alone, but Act-Two cannot; it always
+    needs an actual reference/driving video, whether that's Mode-B synthesis
+    (TTS audio + keyframe, via performance/driving_video.py) or an
+    operator-supplied upload. LIVE_PORTRAIT and VIGGLE already needed an
+    explicit driving video. Only SKIP needs none.
+    """
     engine = route_performance_engine(shot, None)
-    # ACT_ONE can auto-generate from audio (no driving video needed)
-    # LIVE_PORTRAIT and VIGGLE need an explicit driving video
-    return engine in (ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE)
+    return engine in (ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE)
 
 
 def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
@@ -167,18 +174,40 @@ def precondition_error(
 ) -> Optional[str]:
     """Return an error string if the engine's inputs are missing, else None.
 
-    Called from cinema/shots/controller.py before allocating a take so we
-    don't leave orphan take metadata when we know the dispatch will fail.
+    Called from cinema/shots/controller.py BEFORE Mode-B driving-video synth
+    runs and before allocating a take, so we don't leave orphan take metadata
+    when we already know the dispatch will fail.
 
     Rules:
-      - ACT_ONE requires audio_path. (It can optionally take a driving video
-        as reference, but it still uses audio for lip-sync timing.)
-      - LIVE_PORTRAIT and VIGGLE require a driving_video_path.
+      - ACT_ONE now routes to Runway Act-Two (performance/act_two.py), which
+        has NO audio-only generation mode — the retired Act-One could
+        synthesize a performance from dialogue audio alone, Act-Two cannot;
+        it always needs an actual reference/driving video by dispatch time.
+        Audio alone is NOT a valid Act-Two input, but audio alone DOES
+        satisfy this pre-check, because it is exactly what lets the caller's
+        Mode-B step (SadTalker, performance/driving_video.py) synthesize a
+        driving video from audio + keyframe before the engine call happens
+        — this function only runs BEFORE that synth attempt, so rejecting
+        audio-only shots here would kill the Mode-B autopilot path entirely
+        (see cinema_pipeline.py's PERFORMANCE CAPTURE PHASE comment: "The
+        autopilot path uses Mode B ... when no operator upload is
+        provided"). The precondition only fails when NEITHER a
+        driving_video_path NOR an audio_path is present — nothing exists or
+        could come to exist for the engine to consume. If Mode-B synthesis
+        is later attempted and fails, act_two.py's own runtime check (not
+        this function) catches the still-empty driving video and returns
+        None with a clear "driving/reference video" log line.
+      - LIVE_PORTRAIT and VIGGLE require an explicit driving_video_path —
+        unchanged; they have no Act-Two-style audio-enabled synth path here.
       - SKIP has no preconditions.
     """
     if engine == ENGINE_ACT_ONE:
-        if not (audio_path or "").strip():
-            return "ACT_ONE requires audio_path; got empty"
+        if not (driving_video_path or "").strip() and not (audio_path or "").strip():
+            return (
+                "ACT_ONE (Runway Act-Two) requires a driving video — "
+                "supply driving_video_path directly, or audio_path so "
+                "Mode-B synthesis can produce one; got neither"
+            )
     if engine in (ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE):
         if not (driving_video_path or "").strip():
             return f"{engine} requires driving_video_path; got empty"

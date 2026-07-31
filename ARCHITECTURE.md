@@ -104,7 +104,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
 | Image gen | [phase_c_assembly.py](phase_c_assembly.py), [gemini_image_native.py](gemini_image_native.py), [pulid.json](pulid.json) | Single production tier: Gemini multi-reference is the default primary; RunPodComfyUI + PuLID is the first reference-conditioned fallback. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
 | Video gen | [workflow_selector.py](workflow_selector.py), [domain/video_engine_policy.py](domain/video_engine_policy.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 historical shot-type order seeds feed a typed pre-spend dispatch fence; 12 legacy payload branches remain, but known-broken/retired/unready/project-disabled/aspect-incompatible entries are unreachable. Runway + Seedance dispatch inline (no adapter file). |
-| Performance | [performance/](performance/) — `_router.py`, `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
+| Performance | [performance/](performance/) — `_router.py`, `act_two.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
 | Lipsync | [lip_sync.py](lip_sync.py) | Overlay cascade (4 cloud engines) vs generation cascade (2 cloud engines). SyncNet quality gate. |
 | Audio | [audio/](audio/) — `voiceover.py`, `dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `_client.py` | ElevenLabs SDK singleton. Pedalboard hard dep. WhisperX forced alignment. |
 | Frontend | [web/src/](web/src/) | React 19 + Vite 6 + Tailwind 3. 4-mode `useState` (no router). Two strict palettes. |
@@ -580,8 +580,8 @@ redirecting `_save_project_unlocked`.
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:824](domain/scene_decomposer.py:824)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:972](domain/scene_decomposer.py:972)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:836](domain/scene_decomposer.py:836)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:984](domain/scene_decomposer.py:984)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1249,7 +1249,7 @@ The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:35](phase_c_ffmpeg.py:35))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:36](phase_c_ffmpeg.py:36))
-- Check: `_veo_quota_blocked()` ([:77-83](phase_c_ffmpeg.py:77))
+- Check: `_veo_quota_blocked()` ([:100-106](phase_c_ffmpeg.py:100))
 - Set on 429/quota error ([:881-885](phase_c_ffmpeg.py:881))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
@@ -1310,14 +1310,14 @@ helper count, and storyboard split contract verified: 2026-07-30. Remaining
 
 | Engine | Semaphore | Driving video |
 |---|---|---|
-| `ACT_ONE` | `Semaphore(1)` | Optional (Mode A override of audio-only) |
+| `ACT_ONE` | `Semaphore(1)` | **Required by dispatch time** — routes to Runway Act-Two (`performance/act_two.py`), which has no audio-only mode; `domain.performance.precondition_error` accepts `audio_path` alone at the pre-check (enables Mode-B synth before dispatch), but `act_two.py`'s own runtime check rejects a call that reaches it with neither a driving video nor Mode-B output |
 | `LIVE_PORTRAIT` | `Semaphore(2)` | **Required** — bails to None if absent |
 | `VIGGLE` | `Semaphore(1)` | **Required** — Mode A only (no autopilot) |
 | `SKIP` / empty | (bypass) | early `return None` |
 
 Limits declared at [performance/_router.py:21-25](performance/_router.py:21).
 No timeout on semaphore acquisition — callers block indefinitely. Per-adapter
-poll timeouts bound the overall hold time (300s in act_one/live_portrait/viggle,
+poll timeouts bound the overall hold time (300s in act_two/live_portrait/viggle,
 240s in driving_video helpers).
 
 ### 10.2 Mode A vs Mode B

@@ -107,7 +107,7 @@ Authoritative list (every variable consumed by the pipeline):
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional (legacy fallback) | KLING_NATIVE — legacy kling-v1-6 JWT route (fallback + storyboard mode; primary Kling is fal KLING_3_0 via FAL_KEY since 2026-07-11) |
 | `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | LTX_NATIVE direct (preferred over FAL proxy) |
-| `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-One performance |
+| `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-Two performance |
 
 ### Audio + performance capture
 
@@ -527,7 +527,7 @@ Rough order-of-magnitude per shot (current 2026-05 prices, will drift):
 | Runway Gen4 | $0.30–0.40 | Premium fallback |
 | LTX | $0.05–0.15 | Cheapest video provider |
 | SadTalker | ~$0.045/5s shot (GPU-time estimate) | Mode-B driving-video synthesis (cached) |
-| Act-One performance | ~$0.10/shot | Per-shot, semaphore-limited |
+| Act-Two performance | ~$0.25/shot (5s @ $0.05/s) | Per-shot, semaphore-limited; cost_tracker's `ACT_ONE` key name is legacy, retargeted to Act-Two |
 | ElevenLabs TTS | $0.005–0.02/shot | Per dialogue line |
 | FAL Stable Audio BGM | $0.05/project | Once per project, 47s loop |
 | Lipsync (overlay) | $0.03–0.15 | Per shot; cascade tries up to 4 engines |

@@ -87,7 +87,19 @@ _LEGACY_API_REGISTRY_SEED = {
     "PIXVERSE_LS2":  {"label": "PixVerse Lip Sync v2", "category": "lipsync",   "description": "PixVerse — quick fallback, average quality", "modality": "lipsync", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.07, "quality_score": 0.75, "latency_s": 35, "status": "planned"},
     "REACT_1":       {"label": "sync.so react-1",       "category": "lipsync",   "description": "Full-face performance re-direction from audio — emotion-promptable (angry/sad/happy...), not just mouth; fal-ai/sync-lipsync/react-1, $0.133-0.167/s, 15s input cap (verified 2026-07-11). NOT YET WIRED.", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.84, "quality_score": 0.90, "latency_s": 60, "status": "planned"},
     "KLING_AVATAR_V2":{"label": "Kling AI Avatar v2",  "category": "lipsync",   "description": "Image+audio talking head via fal (fal-ai/kling-video/ai-avatar/v2): Standard $0.0562/s undercuts OmniHuman ~65% (verified 2026-07-11). NOT YET WIRED.", "modality": "lipsync", "best_for": ["talking_head_full"], "per_shot_cost": 0.28, "quality_score": 0.85, "latency_s": 90, "status": "planned"},
-    "RUNWAY_ACT_ONE":{"label": "Runway Act-One",       "category": "lipsync",   "description": "Driver video transfers BOTH performance and lip sync to character", "modality": "lipsync", "best_for": ["talking_head_full", "dialogue_close_up"], "per_shot_cost": 0.40, "quality_score": 0.91, "latency_s": 100, "status": "live"},
+    # RETIRED 2026-07-30 (slice 5b): Act-One is gone from the Runway API;
+    # migrated to Act-Two (performance/act_two.py). "description" below is
+    # NOT overridden by project_legacy_registry() (unlike "status", which
+    # IS overridden — see that function in domain/provider_catalog.py — so
+    # this row's "status": "live" is inert/historical and stays as-is by
+    # the established seed-vs-projection pattern), so it must itself stay
+    # truthful: it reaches API_REGISTRY and web_server.py's `/api/...`
+    # response unchanged. CATALOG marks the key Lifecycle.RETIRED /
+    # ProductSupport.KNOWN_BROKEN (domain/provider_catalog.py, ~line 900);
+    # the key stays "RUNWAY_ACT_ONE" (not renamed) only because it must
+    # keep mirroring domain.scene_decomposer.API_REGISTRY's key set — see
+    # that same CATALOG entry's comment.
+    "RUNWAY_ACT_ONE":{"label": "Runway Act-One",       "category": "lipsync",   "description": "RETIRED — no longer constructible on the Runway API; migrated to Act-Two (performance/act_two.py). Historically: driver video transferred BOTH performance and lip sync to character.", "modality": "lipsync", "best_for": ["talking_head_full", "dialogue_close_up"], "per_shot_cost": 0.40, "quality_score": 0.91, "latency_s": 100, "status": "live"},
 
     # --- TTS / DIALOGUE VOICE ---
     "ELEVENLABS_V3": {"label": "ElevenLabs v3",        "category": "tts",       "description": "Current production TTS — multi-voice, 40 delivery styles, voice cloning", "modality": "tts", "best_for": ["dialogue_close_up", "talking_head_full", "narration"], "per_shot_cost": 0.01, "quality_score": 0.92, "latency_s": 3, "status": "live"},

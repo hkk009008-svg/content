@@ -15,6 +15,7 @@ see performance/act_two.py's module docstring):
 """
 from __future__ import annotations
 
+import base64
 import os
 import sys
 from types import SimpleNamespace
@@ -199,8 +200,16 @@ class TestSdkRequestContract:
         assert sent is not None
         assert sent["model"] == "act_two"
         assert "duration" not in sent, "Act-Two's create() has no duration parameter — it must not be sent"
-        assert sent["character"] == {"type": "image", "uri": kf}
-        assert sent["reference"] == {"type": "video", "uri": driving}
+        # The `uri` fields must be real data URIs, not a bare local path —
+        # Runway's servers cannot dereference this machine's filesystem.
+        assert sent["character"]["type"] == "image"
+        assert sent["character"]["uri"].startswith("data:image/jpeg;base64,")
+        assert sent["reference"]["type"] == "video"
+        assert sent["reference"]["uri"].startswith("data:video/mp4;base64,")
+        with open(kf, "rb") as f:
+            assert base64.b64decode(sent["character"]["uri"].split(",", 1)[1]) == f.read()
+        with open(driving, "rb") as f:
+            assert base64.b64decode(sent["reference"]["uri"].split(",", 1)[1]) == f.read()
 
     def test_cost_log_tags_model_act_two(self, monkeypatch, tmp_path):
         kf, driving, out = _make_files(tmp_path)
@@ -378,6 +387,8 @@ class TestRestFallback:
         assert "duration" not in body
         assert body["reference"]["type"] == "video"
         assert body["character"]["type"] == "image"
+        assert body["character"]["uri"].startswith("data:image/jpeg;base64,")
+        assert body["reference"]["uri"].startswith("data:video/mp4;base64,")
 
     def test_rest_http_error_status_returns_none(self, monkeypatch, tmp_path):
         self._force_sdk_import_error(monkeypatch)
@@ -409,8 +420,66 @@ class TestRestFallback:
 
 
 # ---------------------------------------------------------------------------
-# Misc
+# _to_data_uri — real base64 encoding, correct MIME, size-aware cap
 # ---------------------------------------------------------------------------
 
-def test_to_data_uri_or_path_is_a_passthrough():
-    assert act_two._to_data_uri_or_path("/tmp/whatever.jpg") == "/tmp/whatever.jpg"
+class TestToDataUri:
+    def test_encodes_tiny_mp4_as_data_uri_with_correct_mime_and_bytes(self, tmp_path):
+        p = tmp_path / "clip.mp4"
+        raw = b"tiny-real-mp4-bytes"
+        p.write_bytes(raw)
+
+        uri = act_two._to_data_uri(str(p))
+
+        assert uri.startswith("data:video/mp4;base64,")
+        assert base64.b64decode(uri.split(",", 1)[1]) == raw
+
+    def test_encodes_jpeg_keyframe_with_image_mime(self, tmp_path):
+        p = tmp_path / "keyframe.jpg"
+        raw = b"tiny-real-jpeg-bytes"
+        p.write_bytes(raw)
+
+        uri = act_two._to_data_uri(str(p))
+
+        assert uri.startswith("data:image/jpeg;base64,")
+        assert base64.b64decode(uri.split(",", 1)[1]) == raw
+
+    def test_unknown_extension_falls_back_to_octet_stream(self, tmp_path):
+        p = tmp_path / "mystery.bin"
+        p.write_bytes(b"???")
+
+        uri = act_two._to_data_uri(str(p))
+
+        assert uri.startswith("data:application/octet-stream;base64,")
+
+    def test_oversized_file_raises_value_error_before_reading_full_content(self, tmp_path):
+        # Sparse file: only the last byte is materialized, so this doesn't
+        # actually allocate _MAX_INLINE_BYTES of disk — but os.path.getsize()
+        # reports the full logical size, which is what the cap checks.
+        p = tmp_path / "huge.mp4"
+        with open(p, "wb") as f:
+            f.seek(act_two._MAX_INLINE_BYTES)
+            f.write(b"\0")
+
+        with pytest.raises(ValueError, match="cap"):
+            act_two._to_data_uri(str(p))
+
+    def test_missing_file_raises_oserror(self, tmp_path):
+        with pytest.raises(OSError):
+            act_two._to_data_uri(str(tmp_path / "nope.mp4"))
+
+
+class TestDataUriSizeCapEndToEnd:
+    def test_oversized_input_fails_loudly_before_any_sdk_call(self, monkeypatch, tmp_path, capsys):
+        """A file over the inline cap must refuse BEFORE dispatch — never
+        reach client.character_performance.create()."""
+        kf, driving, out = _make_files(tmp_path)
+        cp = _install_fake_runwayml(monkeypatch)
+        monkeypatch.setattr(act_two, "_MAX_INLINE_BYTES", 1)  # force both tiny fixtures over cap
+
+        result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=driving)
+
+        assert result is None
+        assert cp.received_kwargs is None
+        message = capsys.readouterr().out.lower()
+        assert "cap" in message or "exceeds" in message or "over the" in message

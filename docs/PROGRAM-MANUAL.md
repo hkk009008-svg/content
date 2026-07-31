@@ -541,7 +541,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 ### 3.9 Image / keyframe generation (single production tier)
 
-**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). Post-WS3 the image **primary** is Gemini 2.5 Flash Image (Nano Banana) via `gemini_image_native.GeminiImageAPI` (PRIORITY-0 in `generate_ai_broll`); the FLUX-Dev-on-RunPod-ComfyUI tier with PuLID face-lock (`pulid.json`) + FAL fallback cascade is the demoted first fallback — reached when Nano Banana is keyless, errors, or fails the identity gate, or when `identity_backend='pod'`. (A heavier **max** tier — N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, SUPIR 4K — was retired in WS1 Task 4; see the retirement note below.) Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
+**Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). Post-WS3 the image **primary** is Gemini 2.5 Flash Image (Nano Banana) via `gemini_image_native.GeminiImageAPI` (PRIORITY-0 in `generate_ai_broll`); the FLUX-Dev-on-RunPod-ComfyUI tier with PuLID face-lock (`pulid.json`) + FAL fallback cascade is the demoted first fallback — reached when Nano Banana is keyless, errors, or fails the identity gate, or when `identity_backend='pod'`. (A heavier **max** tier — N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, SUPIR 4K — was retired in WS1 Task 4; see the retirement note below.) Performance capture (Act-Two/LivePortrait/Viggle) lives alongside.
 
 **Canonical modules:** `phase_c_assembly.py` (846 LOC, the image generator — despite the "assembly" name), the WS3 image primary `gemini_image_native.py`, `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py`, plus the `performance/` package and the production ComfyUI graph `pulid.json`. (The max-tier driver `quality_max.py` and its `pulid_max.json` graph were deleted in WS1 Task 4.)
 
@@ -591,19 +591,19 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 ### 3.11 Performance capture (engine routing + execution)
 
-**Role:** retargets a still keyframe into a performance clip (lip-readable acting) for dialogue/face-readable shots, routing per shot to Act-One, LivePortrait, Viggle, or SKIP, with a post-gen identity/motion gate.
+**Role:** retargets a still keyframe into a performance clip (lip-readable acting) for dialogue/face-readable shots, routing per shot to Act-Two (engine key still `ACT_ONE`), LivePortrait, Viggle, or SKIP, with a post-gen identity/motion gate.
 
-**Canonical modules:** `domain/performance.py` (185 LOC, pure routing), `performance/_router.py` (dispatch), and per-engine modules `act_one.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, plus the gates `motion_gate.py`, `identity_gate.py`.
+**Canonical modules:** `domain/performance.py` (214 LOC, pure routing), `performance/_router.py` (dispatch), and per-engine modules `act_two.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, plus the gates `motion_gate.py`, `identity_gate.py`.
 
 | Name | file:line | What it does |
 |---|---|---|
-| `route_performance_engine` | `domain/performance.py:103` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → VIGGLE (action no-dialogue) → ACT_ONE (remaining dialogue) → SKIP. |
+| `route_performance_engine` | `domain/performance.py:110` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → VIGGLE (action no-dialogue) → ACT_ONE (remaining dialogue) → SKIP. |
 | `should_capture` | `domain/performance.py:72` | Pure gate (skip no-chars/landscape/wide-no-dialogue). |
-| `shot_needs_driving_video` | `domain/performance.py:94` | Whether the shot needs a driving video. |
-| `driving_video_source` | `domain/performance.py:145` | Driving-video source (`upload`/`tts_auto`/`none`). |
-| `precondition_error` | `domain/performance.py:163` | Pre-allocation guard (ACT_ONE needs audio; LP/VIGGLE need driving video). |
+| `shot_needs_driving_video` | `domain/performance.py:94` | Whether the shot needs a driving video (all real engines do; only SKIP doesn't). |
+| `driving_video_source` | `domain/performance.py:152` | Driving-video source (`upload`/`tts_auto`/`none`). |
+| `precondition_error` | `domain/performance.py:170` | Pre-allocation guard, runs BEFORE Mode-B synth (ACT_ONE needs driving_video_path OR audio_path — audio alone still satisfies this pre-check since Mode-B can synth from it; LP/VIGGLE need an explicit driving video). |
 | `dispatch` | `performance/_router.py:93` | The single engine entry called by `cinema/shots/controller.py:921`; routes to the per-engine `generate_*` based on the resolved engine. |
-| `generate_act_one_performance` | `performance/act_one.py:46` | Runway Act-One via REST; identity comes from the keyframe + driving audio. |
+| `generate_act_two_performance` | `performance/act_two.py:97` | Runway Act-Two via SDK (REST fallback if the `runwayml` package is missing); identity comes from the keyframe + a required driving/reference video (no audio-only mode). |
 | `generate_live_portrait_performance` / `generate_viggle_performance` | `performance/live_portrait.py:43` / `viggle.py:42` | LivePortrait (driving video) and Viggle Mode-A motion retargeting. |
 | `score_motion_fidelity` | `performance/motion_gate.py:141` | Optical-flow motion-fidelity score (sample count from `MOTION_GATE_SAMPLES`, read once at module load). |
 | `needs_remotion` | `performance/motion_gate.py:184` | Remotion advisory. |
@@ -851,13 +851,13 @@ Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/aut
 
 ### Stage 3 — Performance capture
 
-**INPUTS:** Shots with an approved keyframe. Per shot: `performance_engine` (routed earlier by `route_performance_engine`, `domain/performance.py:103`), optional `driving_video_path`, dialogue/audio.
+**INPUTS:** Shots with an approved keyframe. Per shot: `performance_engine` (routed earlier by `route_performance_engine`, `domain/performance.py:110`), optional `driving_video_path`, dialogue/audio.
 
 **PROCESSING** (`PerformanceCapturePhase.run`, `cinema/phases/performance.py:35` → `generate_performance_take`): iterate shots, calling the performance engine for each that needs one. Three skip conditions per shot (`cinema/phases/performance.py:63-72`): (1) already has `approved_performance_take_id`; (2) `performance_engine == "SKIP"`; (3) no `approved_keyframe_take_id` (no anchor → motion would also skip). A take can also self-report `result.get("skipped")`.
 
-**KEY FUNCTIONS:** `route_performance_engine` (`domain/performance.py:103`); `precondition_error` (`domain/performance.py:163`); `validate_performance_take` (`performance/identity_gate.py:95`, single-frame ArcFace at 1s, floor 0.70).
+**KEY FUNCTIONS:** `route_performance_engine` (`domain/performance.py:110`); `precondition_error` (`domain/performance.py:170`); `validate_performance_take` (`performance/identity_gate.py:95`, single-frame ArcFace at 1s, floor 0.70).
 
-**DECISION POINTS — engine routing** (`domain/performance.py:103`):
+**DECISION POINTS — engine routing** (`domain/performance.py:110`):
 
 | Condition | Engine |
 |---|---|
@@ -866,7 +866,7 @@ Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/aut
 | action, no dialogue | `VIGGLE` |
 | any remaining dialogue | `ACT_ONE` |
 
-Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"upload"` when `driving_video_path` set; `"tts_auto"` when engine ≠ SKIP with dialogue; else `"none"`. ACT_ONE requires an audio path; LIVE_PORTRAIT/VIGGLE require a driving video (`precondition_error`).
+Driving-video mode (`driving_video_source`, `domain/performance.py:152`): `"upload"` when `driving_video_path` set; `"tts_auto"` when engine ≠ SKIP with dialogue; else `"none"`. ACT_ONE (Runway Act-Two, `performance/act_two.py`) requires a driving video by dispatch time — `precondition_error` accepts audio_path alone at this pre-check since Mode-B can still synthesize one from it before dispatch; LIVE_PORTRAIT/VIGGLE require an explicit driving video.
 
 **OUTPUTS:** Performance take records appended to the shot; `approved_performance_take_id` set at the gate.
 
@@ -1773,7 +1773,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional | — | KLING_NATIVE — legacy kling-v1-6 JWT fallback + storyboard mode (primary Kling = fal KLING_3_0 via FAL_KEY since 2026-07-11) |
 | `FAL_KEY` | Recommended | — | Seedance (action primary since 2026-07-11), Sora, Veo-proxy, Kling 3.0, LTX-proxy, Hedra, all lipsync, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | — | LTX native (preferred over FAL proxy) |
-| `RUNWAYML_API_SECRET` | Optional | — | Runway Gen-4 / gen3a_turbo, Act-One performance |
+| `RUNWAYML_API_SECRET` | Optional | — | Runway Gen-4 / gen3a_turbo, Act-Two performance |
 | `ELEVENLABS_API_KEY` | Yes (audio) | — | TTS narration + dialogue voiceover |
 | `CARTESIA_API_KEY` | Optional | — | Cartesia Sonic 2 (Korean dialogue) |
 | `STABILITY_API_KEY` | Optional | — | Stable Audio foley/BGM |

@@ -1064,7 +1064,7 @@ class TestPerformancePreSpendBudgetGate:
             open(output, "wb").write(b"fake_mp4")
             tracker.log_api(
                 provider="runway",
-                model="act_one",
+                model="act_two",
                 operation="performance_capture",
                 cost_usd=0.25,
             )
