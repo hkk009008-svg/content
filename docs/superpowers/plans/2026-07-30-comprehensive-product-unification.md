@@ -461,6 +461,16 @@ integration verification, but does not implement the production slices.
 | project identity boundaries (unplanned; invariant 2) | `web_server.py`, `domain/project_manager.py`; ADR-070/071/072 | Public project/scene/shot mutation routes; stored-ID equality; typed optimizer-cache boundary | `a83ab8ec`/`93f5a296` (+ fences above); retroactive reviews `wf_b11a3a2c`: lane-v **GO**, quality **NITS** (redundant FileNotFoundError wrap) | Landed and closed |
 | ADR-073 lock + optimizer-cache unification | completes the in-flight worktree draft left at `7b8b6786`; `domain/project_manager.py` sibling lock via stock `filelock>=3.24.3,<4`, `domain/optimizer_cache.py` extraction, stale-pin repairs, `scripts/clean_test_fixtures.py`, docs | Lock callers `_acquire_project_lock`/`_acquire_existing_project_lock`; cache consumers in `web_server.py` + both controller sites | Completed and reviewed in-session by the picking-up seat (Claude): vacuous Q3 lock pin repointed, sibling-geometry pin added, direct `optimizer_cache` unit tests added; focused files green (314), smoke OK, full matrix run at landing | Landed this session |
 
+### Wave-R fix-slice ledger (2026-07-31)
+
+| Slice | Commit | Reviews (wf_be55f23e) | State |
+|---|---|---|---|
+| M1 billed-spend truth (storyboard/motion) | `55c0797e` | money-gate **GO**; lane-v **FAIL** — guards correct at HEAD but unpinned for the real success shape (mutation probes: guard removal stays green across 250 tests) | Fixup `fixup:M1-pins` dispatched (test-only) |
+| R1 authoring-boundary threading | `1b822551` | lane-v **FAIL** + quality **FAIL** — `test_competitive_decompose_scene_threads_aspect_state_from_global_settings` vacuous (monkeypatched predicate; green with threading removed) | Fixup `fixup:R1-test` dispatched (test-only) |
+| I1 inventory fail-closed visibility | `342492d8` | lane-v **FAIL** + quality **FAIL** — zero-arg and callback-first-arg local-wrapper calls still vanish; commit's "all 25 non-network" claim false for ≥2 rows | Fixup `fixup:I1-failclosed` dispatched (production + tests) |
+| M2 native billed-swallow siblings (SORA/VEO/LTX/OMNI) | — | defect verified thrice (M1 implementer Rule #13, money-gate NIT, lane-v corroboration + orchestrator source check) | Implementer dispatched (`wf_a64283dc`) |
+| R2 optimizer coercion threading | — | defect verified thrice (2b-A quality MINOR, R1 implementer Rule #13, orchestrator source check of `prompt_optimizer.py:633`) | Implementer dispatched (`wf_a64283dc`) |
+
 ### Resumption sequencing (recorded 2026-07-31, after the Codex pickup)
 
 Standing rules for every wave below: fresh implementer per slice, one commit
