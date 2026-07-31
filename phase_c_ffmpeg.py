@@ -89,26 +89,29 @@ def _gemini_omni_quota_blocked() -> bool:
     the module-level comment on that constant for why it's separate from Veo's)."""
     return _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL > time.time()
 
-fal_client = None
 FAL_AVAILABLE: bool | None = None
 
 
-def _load_fal_client():
-    """Import the FAL provider only after the dispatch policy admits a chain."""
+def _load_fal_client() -> bool:
+    """Import the FAL provider only after the dispatch policy admits a chain.
+
+    A plain ``import fal_client`` under a ``global`` declaration binds the
+    module-level name directly, keeping the subscribe-timeout guard's grammar
+    (the bare ``fal_client`` name appears only as an import target and an
+    attribute base — never aliased, assigned, passed, or returned). Until the
+    first successful load the module attribute is intentionally unbound;
+    every FAL call site is gated on ``FAL_AVAILABLE`` truthiness first.
+    """
 
     global fal_client, FAL_AVAILABLE
-    if FAL_AVAILABLE is True and fal_client is not None:
-        return fal_client
-    if FAL_AVAILABLE is False:
-        return None
-    try:
-        import fal_client as imported_fal_client
-    except ImportError:
-        FAL_AVAILABLE = False
-        return None
-    fal_client = imported_fal_client
-    FAL_AVAILABLE = True
-    return fal_client
+    if FAL_AVAILABLE is None:
+        try:
+            import fal_client
+        except ImportError:
+            FAL_AVAILABLE = False
+        else:
+            FAL_AVAILABLE = True
+    return bool(FAL_AVAILABLE)
 
 
 def _runtime_module_probe(name: str) -> bool:

@@ -70,17 +70,25 @@ def test_urlretrieve_download_sites_have_timeout_protection():
         "the shared timeout/size/scheme-checked download helper."
     )
 
-    generate = next(
-        node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "generate_ai_video"
-    )
+    # The provider cascade moved from generate_ai_video into the policy-fenced
+    # _execute_admitted_video_chain (dispatch-fencing split); anchor on the
+    # helper itself and derive its enclosing top-level function, so the pin
+    # survives renames of the dispatch shell without going vacuous.
     helper_defs = [
-        node for node in generate.body
+        node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
         and node.name == "_download_video_or_cascade"
     ]
-    assert len(helper_defs) == 1
+    assert len(helper_defs) == 1, (
+        "exactly one _download_video_or_cascade helper must exist; every "
+        "provider download flows through it"
+    )
     helper = helper_defs[0]
+    generate = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and any(m is helper for m in ast.walk(node))
+    )
 
     module_safe_calls = [
         node for node in ast.walk(tree)
