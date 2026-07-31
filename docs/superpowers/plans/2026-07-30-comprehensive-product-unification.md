@@ -471,6 +471,25 @@ integration verification, but does not implement the production slices.
 | M2 native billed-swallow siblings (SORA/VEO/LTX/OMNI) | — | defect verified thrice (M1 implementer Rule #13, money-gate NIT, lane-v corroboration + orchestrator source check) | Implementer dispatched (`wf_a64283dc`) |
 | R2 optimizer coercion threading | — | defect verified thrice (2b-A quality MINOR, R1 implementer Rule #13, orchestrator source check of `prompt_optimizer.py:633`) | Implementer dispatched (`wf_a64283dc`) |
 
+### Wave-1 round-2 landings (2026-07-31)
+
+| Slice | Commit | State |
+|---|---|---|
+| fixup-S2C cascade-toggle CRITICAL | `a20c8b68` | landed; re-verify in flight (`wf_232e9282`) |
+| fixup-tests (vacuous aspect pin, Omni on_billed asserts, enum comments) | `384d45f2` | landed; re-verify in flight |
+| 4 LTX duration/audio/errors | `932135f8` (+ catalog hunks in `8b04bc6b`) | landed; money+lane-v in flight |
+| 5b Act-Two migration + Gen-4 truth | `8b04bc6b` | landed; lane-v+quality in flight |
+| artifact refresh | `ecd16698` | landed |
+
+Matrix: backend 4345/0, web 74/74 + build + tsc, smoke OK, anchors clean.
+**Queued follow-up fix slices:** (a) `domain/performance.py` preconditions
+still assume Act-One audio-only capability — failed Mode-B synth now
+hard-fails instead of degrading (S5B disclosure, needs severity judgment
+from its review); (b) continuity temporal chaining (`record_generated`)
+dead in production (S7 review finding — dedicated wiring slice).
+Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
+(6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
+
 ### Wave-1 round-1 verdicts (wf_dec8ec5e, resumed post-limit)
 
 I2 **GO** (NIT: Map/Set-typed imports over-included — disclosed trade). R3
