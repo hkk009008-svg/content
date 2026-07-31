@@ -461,6 +461,43 @@ integration verification, but does not implement the production slices.
 | project identity boundaries (unplanned; invariant 2) | `web_server.py`, `domain/project_manager.py`; ADR-070/071/072 | Public project/scene/shot mutation routes; stored-ID equality; typed optimizer-cache boundary | `a83ab8ec`/`93f5a296` (+ fences above); **no recorded independent reviews** | Landed; reviews owed |
 | ADR-073 lock + optimizer-cache unification | completes the in-flight worktree draft left at `7b8b6786`; `domain/project_manager.py` sibling lock via stock `filelock>=3.24.3,<4`, `domain/optimizer_cache.py` extraction, stale-pin repairs, `scripts/clean_test_fixtures.py`, docs | Lock callers `_acquire_project_lock`/`_acquire_existing_project_lock`; cache consumers in `web_server.py` + both controller sites | Completed and reviewed in-session by the picking-up seat (Claude): vacuous Q3 lock pin repointed, sibling-geometry pin added, direct `optimizer_cache` unit tests added; focused files green (314), smoke OK, full matrix run at landing | Landed this session |
 
+### Resumption sequencing (recorded 2026-07-31, after the Codex pickup)
+
+Standing rules for every wave below: fresh implementer per slice, one commit
+per slice, independent spec + quality review recorded in this ledger **before
+the next dependent slice dispatches** (the post-`14ddd8b4` review gap must not
+recur); implementers sequential wherever owned files overlap; full offline
+matrix (smoke, backend suite, web test/build, `pip check`) at each wave
+boundary; R-MEASURE for any ranking/cost claim. All slices below are offline
+(fixture-based) except 13d's real-local-server no-spend journey.
+
+- **Wave R (in flight):** retroactive reviews of the five owed families
+  (workflow `wf_b11a3a2c-ade`, 12 read-only reviewers). Triage gate: any
+  CRITICAL/IMPORTANT finding becomes a focused fix slice — implemented,
+  reviewed, and landed **before Wave 1 dispatches**.
+- **Wave 1 — provider contracts + selectors:** sequential adapter chain
+  3 (Gemini Omni) → 4 (LTX) → 5b (Runway Act-Two); parallel-eligible track
+  (disjoint files): 2c (`/api/config` + UI selectors on the server-provided
+  selectable view) and 7 (continuity/identity authority).
+- **Wave 2 — model currency:** 6b first (Gemini 2.5 shutdowns 2026-10-02/16
+  are a hard deadline), then 6a (OpenAI/Responses evaluation), 6c1 (Cartesia),
+  6c2 (music/foley truth), 6c3 (OpenAI Audio/Viggle/Pexels status guards).
+  Research fan-out may parallelize; production commits land one provider at a
+  time.
+- **Wave 3 — backend/UI state authority:** 8 (project-scoped state,
+  `allowed_actions`, typed errors) — prerequisite for Waves 4–6.
+- **Wave 4 — settings + media:** 9a (validated patch/revision write contract)
+  → 9b/9c/9d (parallel-eligible, distinct consumer families) → 10 (portable
+  media).
+- **Wave 5 — events/resume:** 11a (broadcast fan-out/replay) → 11b (stage
+  reducer/reconnect) → 11c (checkpoint/resume/review actions).
+- **Wave 6 — capability + polish + evidence:** 12 → 13a → 13b/13c (parallel)
+  → 13d (seeded no-spend E2E, `logs/ui/product-unification/` screenshots +
+  a11y artifacts).
+- **Wave 7 — documentation unification:** 14a → 14b → 14c (final drift gate).
+- **Wave 8 — evidence-led pruning:** 15a–15g, each gated on the caller-evidence
+  requirements already listed; only after the full contract matrix is green.
+
 ## Completion gate
 
 The modernization is complete only when:
