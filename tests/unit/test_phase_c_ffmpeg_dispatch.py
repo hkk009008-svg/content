@@ -229,6 +229,51 @@ def test_auto_safe_chain_skips_rejected_head_and_preserves_order(
     ltx_module.LTXVideoAPI.assert_called_once_with()
 
 
+@pytest.mark.parametrize(
+    ("requested_duration", "expected_ltx_duration"),
+    [
+        ("8s", 8),      # the shared default — already in the ltx-2-3-pro enum
+        ("10s", 10),    # exact enum member, unit suffix
+        ("5", 6),       # no unit suffix; below the floor -> snaps UP to 6
+        ("4s", 6),      # the LTX client's OLD (invalid) default -> snaps to 6
+        ("7s", 8),      # between enum members -> snaps UP to 8
+        ("9s", 10),     # between enum members -> snaps UP to 10
+        ("not-a-number", 6),  # unparseable -> falls back to the enum floor
+    ],
+)
+def test_ltx_threads_duration_from_dispatcher_config(
+    monkeypatch,
+    tmp_path,
+    requested_duration,
+    expected_ltx_duration,
+) -> None:
+    """duration is not threaded from dispatcher/config (audited 2026-07-30):
+    the LTX branch never passed `duration` to generate_video() at all, so
+    every call silently rode the client's own default (itself invalid).
+    Now the shared "Xs" config value must be parsed and snapped to the
+    ltx-2-3-pro duration enum {6, 8, 10} before being passed through."""
+    output = str(tmp_path / "ltx.mp4")
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.return_value = output
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        shot_type="wide",
+        duration=requested_duration,
+    )
+
+    assert result == output
+    ltx_instance.generate_video.assert_called_once()
+    assert ltx_instance.generate_video.call_args.kwargs["duration"] == expected_ltx_duration
+
+
 def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     monkeypatch,
     tmp_path,

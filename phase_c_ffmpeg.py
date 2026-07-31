@@ -322,7 +322,7 @@ def _execute_admitted_video_chain(
     - Native Google Veo 3.1 (reference images, native audio)
     - Native OpenAI Sora 2 (best motion physics)
     - LTX Video (4K, keyframe interpolation, cheapest)
-    - Runway Gen-4 (style refs, turbo preview)
+    - Runway Gen-4 Turbo (single reference image, turbo preview)
     - Smart routing: shot_type determines primary API
     - Fallback cascade per shot type from workflow_selector
 
@@ -332,8 +332,10 @@ def _execute_admitted_video_chain(
         reference video use it as motion guidance:
           - Veo 3.1 native : reference-video mode
           - Sora 2 native  : init_video parameter
-          - Runway Gen-4   : motion reference
-          - Kling, LTX     : ignored (no clean motion-reference input) —
+          - Kling, LTX, Runway Gen-4 Turbo : ignored (no clean
+                             motion-reference input — Gen-4 Turbo's
+                             image_to_video API takes a single
+                             prompt_image, no video/reference-clip field) —
                              fall through silently to text-to-video baseline.
         Empty string disables the feature — preserves existing behavior
         for all callers that haven't been updated yet.
@@ -445,8 +447,10 @@ def _execute_admitted_video_chain(
                     # (site 2) increments it.
                     _cascade_retries=_cascade_retries,
                     # Forward both cascade-sensitive params across the hop:
-                    #  - driving_video_path: else Veo/Sora/Runway silently fall
-                    #    back to image-only motion (no perf-capture guidance).
+                    #  - driving_video_path: else Veo/Sora silently fall back
+                    #    to image-only motion (no perf-capture guidance).
+                    #    Runway Gen-4 Turbo never consumes this param — its
+                    #    image_to_video API has no video/reference-clip input.
                     #  - negative_prompt: else an EXPLICIT caller negative is
                     #    re-derived from shot_type only (override lost). W1.1's
                     #    builder (line 124) supplies the default; this preserves
@@ -755,6 +759,28 @@ def _execute_admitted_video_chain(
             # Char-landscape shots reroute to "wide" and must keep their 4K.
             ltx_resolution = "4k" if shot_type in ("landscape", "wide") else "1080p"
 
+            # Thread duration deliberately from the dispatcher/config path
+            # (audited 2026-07-30: this call never passed `duration` at all,
+            # so every LTX request silently rode the client's old default —
+            # itself invalid for the ltx-2-3-pro profile). Parse the shared
+            # "Xs"-style config value the same way VEO_NATIVE does, then snap
+            # UP to the ltx-2-3-pro duration enum — https://docs.ltx.io/models
+            # (must stay == LTXVideoAPI.DURATION_SECONDS; kept as a local
+            # literal, like the camera-motion map and resolution choice just
+            # above, rather than an attribute lookup on the imported class —
+            # sibling tests replace the whole `ltx_native` module with a bare
+            # MagicMock class, under which a class-attribute lookup silently
+            # returns a mock object instead of a real int).
+            _LTX_DURATION_ENUM_S = (6, 8, 10)
+            try:
+                _ltx_requested_seconds = int(str(duration).strip().lower().rstrip("s"))
+            except (TypeError, ValueError):
+                _ltx_requested_seconds = _LTX_DURATION_ENUM_S[0]
+            ltx_duration = next(
+                (s for s in _LTX_DURATION_ENUM_S if _ltx_requested_seconds <= s),
+                _LTX_DURATION_ENUM_S[-1],
+            )
+
             result = ltx.generate_video(
                 image_path=image_path,
                 prompt=(
@@ -766,6 +792,7 @@ def _execute_admitted_video_chain(
                 output_path=output_mp4,
                 camera_motion=ltx_camera,
                 resolution=ltx_resolution,
+                duration=ltx_duration,
                 on_billed=_note_ltx_billed,
             )
             if result:
@@ -790,7 +817,9 @@ def _execute_admitted_video_chain(
             return try_next_api()
 
     elif target_api.upper() == "RUNWAY_GEN4":
-        # Runway Gen-4 — style lock with 3 refs, best prompt adherence
+        # Runway Gen-4 Turbo (image_to_video, model="gen4_turbo") — single
+        # reference image (prompt_image accepts ONE image here; there is no
+        # multi-reference style-lock on this endpoint), best prompt adherence.
         try:
             from runwayml import RunwayML
             client = RunwayML(api_key=settings.runwayml_api_secret)

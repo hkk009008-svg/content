@@ -18,6 +18,8 @@ import sys
 # Remove the stub so our import always gets the real module.
 sys.modules.pop("ltx_native", None)
 
+import inspect
+import json
 import urllib.request
 from io import BytesIO
 from unittest.mock import MagicMock, patch, call
@@ -161,27 +163,177 @@ def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_pa
     assert subscribe_arguments["generate_audio"] is False
 
 
-def test_fal_duration_snaps_to_ltx23_enum(monkeypatch, tmp_path):
-    """fal-ai/ltx-2.3 duration enum is {6, 8, 10} seconds — the default 4s
-    request snaps UP to 6 (the enum floor), 7-8s to 8, 9s+ to 10."""
+def test_fal_duration_helper_snaps_frame_counts_up(monkeypatch, tmp_path):
+    """Pure-function pin: `_fal_duration` snaps a frame count UP to the
+    fal-ai/ltx-2.3 duration enum {6, 8, 10}s (6-floor, 7-8s->8, 9s+->10).
+
+    This is exercised in isolation only — generate_video() now validates
+    duration against the same enum BEFORE ever computing a frame count
+    (see test_invalid_duration_rejected_before_any_network_call), so a
+    real caller can no longer reach this helper with an out-of-enum value.
+    """
     assert ltx_native.LTXVideoAPI._fal_duration(4 * 24) == 6
     assert ltx_native.LTXVideoAPI._fal_duration(8 * 24) == 8
     assert ltx_native.LTXVideoAPI._fal_duration(12 * 24) == 10
 
+
+def test_nearest_supported_duration_snaps_seconds_up():
+    """`nearest_supported_duration` is the dispatcher-facing counterpart of
+    `_fal_duration` — same snap-up bias, seconds in rather than frames in."""
+    assert ltx_native.LTXVideoAPI.nearest_supported_duration(4) == 6
+    assert ltx_native.LTXVideoAPI.nearest_supported_duration(6) == 6
+    assert ltx_native.LTXVideoAPI.nearest_supported_duration(7) == 8
+    assert ltx_native.LTXVideoAPI.nearest_supported_duration(9) == 10
+    assert ltx_native.LTXVideoAPI.nearest_supported_duration(15) == 10
+
+
+# ---------------------------------------------------------------------------
+# Duration contract: default 6s; {6, 8, 10} only; rejected BEFORE any
+# network call in EITHER mode (audited 2026-07-30 — native previously
+# defaulted to 4s, invalid for the ltx-2-3-pro profile, and sent it straight
+# to the wire with no validation at all).
+# ---------------------------------------------------------------------------
+
+def test_default_duration_is_six_seconds():
+    """RED before the fix: the public default was 4s, invalid for
+    ltx-2-3-pro (allowed {6, 8, 10}). GREEN: default is 6s."""
+    default = inspect.signature(ltx_native.LTXVideoAPI.generate_video).parameters["duration"].default
+    assert default == 6
+    assert default in ltx_native.LTXVideoAPI.DURATION_SECONDS
+
+
+def test_invalid_duration_rejected_before_any_native_http_call(monkeypatch, tmp_path):
+    """duration=4 (the old default) must be rejected before urlopen is ever
+    called — no HTTP attempt for an invalid duration."""
+    api = _make_api(ltx_key="ltx-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+
+    urlopen_mock = MagicMock()
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
+    upload_mock = MagicMock()
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", upload_mock)
+
+    with pytest.raises(ltx_native.LTXContractViolation):
+        api.generate_video(
+            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+        )
+
+    urlopen_mock.assert_not_called()
+    upload_mock.assert_not_called()
+
+
+def test_invalid_duration_rejected_before_any_fal_call(monkeypatch, tmp_path):
+    """Same duration=4 rejection in FAL mode — no upload/subscribe attempt."""
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(fal_key="fal-key")
     img = tmp_path / "frame.jpg"
     img.write_bytes(b"img")
+
+    upload_mock = MagicMock()
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", upload_mock)
+    subscribe_mock = MagicMock()
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
+
+    with pytest.raises(ltx_native.LTXContractViolation):
+        api.generate_video(
+            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+        )
+
+    upload_mock.assert_not_called()
+    subscribe_mock.assert_not_called()
+
+
+def test_invalid_duration_not_swallowed_by_generic_fallback_handler(monkeypatch, tmp_path):
+    """The contract violation must surface as LTXContractViolation, NOT be
+    absorbed by _native_generate's generic except-Exception→FAL fallback
+    (which would silently reroute a malformed local request through FAL and
+    conceal the bug — the specific defect this slice repairs). Proven by
+    configuring a FAL key that WOULD satisfy the fallback path and asserting
+    it is never reached."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+
+    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
+
+    with pytest.raises(ltx_native.LTXContractViolation):
+        api.generate_video(
+            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+        )
+
+    subscribe_mock.assert_not_called()
+
+
+def test_valid_durations_do_not_raise(monkeypatch, tmp_path):
+    """Sanity check: 6, 8, and 10 are all accepted (no-op mode, so each
+    just returns None via the no-key guard — the point is no raise)."""
+    api = _make_api()
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    for valid in (6, 8, 10):
+        assert api.generate_video(
+            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=valid,
+        ) is None
+
+
+# ---------------------------------------------------------------------------
+# Native payload: duration threaded through + audio explicitly disabled
+# (audited 2026-07-30 — the native JSON body carried no generate_audio key
+# at all, so requests silently rode the provider's default-true and
+# generated audio the product discards).
+# ---------------------------------------------------------------------------
+
+def test_native_payload_sends_duration_and_disables_audio(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
     monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
+    urlopen_mock = MagicMock(return_value=cm)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
+
+    api.generate_video(image_path=str(img), prompt="cinematic", output_path=out, duration=8)
+
+    sent_request = urlopen_mock.call_args[0][0]
+    payload = json.loads(sent_request.data.decode("utf-8"))
+    assert payload["duration"] == 8
+    assert payload["model"] == "ltx-2-3-pro"
+    assert payload["generate_audio"] is False
+
+
+def test_native_and_fal_payloads_agree_on_duration(monkeypatch, tmp_path):
+    """Same requested duration -> the same wire-level `duration` value on
+    BOTH the native JSON payload and the FAL subscribe arguments."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+
+    native_api = _make_api(ltx_key="ltx-key")
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
+    urlopen_mock = MagicMock(return_value=cm)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
+    native_api.generate_video(
+        image_path=str(img), prompt="t", output_path=str(tmp_path / "n.mp4"), duration=8,
+    )
+    native_payload = json.loads(urlopen_mock.call_args[0][0].data.decode("utf-8"))
+
+    fal_api = _make_api(fal_key="fal-key")
     subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
     monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
     monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, path: None)
-
-    api.generate_video(
-        image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+    fal_api.generate_video(
+        image_path=str(img), prompt="t", output_path=str(tmp_path / "f.mp4"), duration=8,
     )
-    subscribe_arguments = subscribe_mock.call_args.kwargs.get("arguments", {})
-    assert subscribe_arguments["duration"] == 6
+    fal_arguments = subscribe_mock.call_args.kwargs.get("arguments", {})
+
+    assert native_payload["duration"] == fal_arguments["duration"] == 8
 
 
 # ---------------------------------------------------------------------------

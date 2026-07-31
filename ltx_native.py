@@ -21,6 +21,21 @@ except ImportError:
     FAL_AVAILABLE = False
 
 
+class LTXContractViolation(ValueError):
+    """A locally-detected violation of the LTX request contract (e.g. an
+    out-of-enum ``duration`` for the ltx-2-3-pro profile — see
+    https://docs.ltx.io/models).
+
+    Raised BEFORE any network call, from :meth:`LTXVideoAPI.generate_video`
+    directly — never from inside ``_native_generate``'s try/except, so it can
+    never be swept up by the native→FAL fallback logic there. That fallback
+    exists for PROVIDER-side failures (5xx, timeouts, transient network
+    errors); silently rerouting a malformed request WE built to FAL would
+    "succeed" on a different (coerced) request and conceal the bug in our
+    own request construction (audited 2026-07-30).
+    """
+
+
 class LTXVideoAPI:
     """
     LTX Video 2.3 client.
@@ -66,12 +81,38 @@ class LTXVideoAPI:
             return 8
         return 10
 
+    @classmethod
+    def nearest_supported_duration(cls, seconds: int) -> int:
+        """Snap an arbitrary requested duration (seconds) UP to the nearest
+        value in :attr:`DURATION_SECONDS` — the same snap-up bias as
+        ``_fal_duration``, just seconds-in rather than frames-in.
+
+        Call sites (the dispatcher) use this to convert a shot's configured
+        duration into a value :meth:`generate_video` is guaranteed to accept,
+        so the contract lives in exactly one place.
+        """
+        for allowed in cls.DURATION_SECONDS:
+            if seconds <= allowed:
+                return allowed
+        return cls.DURATION_SECONDS[-1]
+
     CAMERA_MOTIONS = [
         "dolly_in", "dolly_out", "jib_up", "jib_down",
         "pan_left", "pan_right", "tilt_up", "tilt_down",
         "zoom_in", "zoom_out", "crane_up", "crane_down",
         "truck_left", "truck_right", "static",
     ]
+
+    # ltx-2-3-pro duration enum (seconds) — https://docs.ltx.io/models,
+    # confirmed against https://docs.ltx.io/api-documentation/api-reference/
+    # video-generation/image-to-video (2026-07-30 audit). Both the native
+    # api.ltx.video endpoint (model="ltx-2-3-pro") and the FAL proxy
+    # (FAL_MODEL_ID, same pro-equivalent schema per the class comment above)
+    # accept ONLY these three values at every resolution. The ltx-2-3-fast
+    # profile supports up to 20s at 1080p — a DIFFERENT contract this
+    # adapter does not select; do not conflate the two enums.
+    DURATION_SECONDS = (6, 8, 10)
+    DEFAULT_DURATION_SECONDS = 6
 
     def __init__(self):
         self.ltx_key = settings.ltx_api_key
@@ -97,7 +138,7 @@ class LTXVideoAPI:
         image_path: str,
         prompt: str,
         output_path: str,
-        duration: int = 4,
+        duration: int = DEFAULT_DURATION_SECONDS,
         resolution: str = "720p",
         camera_motion: str | None = None,
         on_billed: Callable[[], None] | None = None,
@@ -105,6 +146,14 @@ class LTXVideoAPI:
         """
         Generate a video from a single image + prompt.
         Returns output_path on success, None on failure.
+
+        Raises:
+            LTXContractViolation: ``duration`` is not one of
+                :attr:`DURATION_SECONDS` (6, 8, 10) — raised BEFORE any
+                network call, in either mode. This is deliberately NOT caught
+                internally: a malformed request WE built must surface as a
+                distinguishable error, not silently reroute through the
+                native→FAL fallback (which would conceal the bug).
 
         Args:
             on_billed: Optional zero-arg callback invoked exactly once, the
@@ -120,6 +169,15 @@ class LTXVideoAPI:
                 through the native→fal fallback so exactly one path fires it.
                 Exceptions raised by the callback are logged and swallowed.
         """
+        if duration not in self.DURATION_SECONDS:
+            raise LTXContractViolation(
+                f"LTX duration must be one of {self.DURATION_SECONDS} seconds "
+                f"(the ltx-2-3-pro profile enum — https://docs.ltx.io/models); "
+                f"got {duration!r}. Snap the caller's requested duration via "
+                f"LTXVideoAPI.nearest_supported_duration() before calling "
+                f"generate_video()."
+            )
+
         if not self.mode:
             print("[LTX] Skipped — no API key configured")
             return None
@@ -298,6 +356,14 @@ class LTXVideoAPI:
                 "model": "ltx-2-3-pro",
                 "duration": duration,
                 "resolution": res_str,
+                # Assembly owns audio (TTS/BGM/foley); the product feeds this
+                # as silent motion input. Same field name + default-true
+                # surcharge as the FAL proxy's generate_audio (audited
+                # 2026-07-30 against https://docs.ltx.io/api-documentation/
+                # api-reference/video-generation/image-to-video) — this was
+                # previously omitted entirely, so native requests carried the
+                # provider's default (true) and generated audio we discard.
+                "generate_audio": False,
             }
 
             print(f"[LTX] Native API: {res_str}, {duration}s, model=ltx-2-3-pro")
