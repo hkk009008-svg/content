@@ -351,6 +351,50 @@ def _clamp_veo_duration(speech_seconds: float) -> str:
     return _VEO_SUPPORTED_DURATIONS[-1]
 
 
+def _motion_pre_spend_duration_s(
+    target_api: str, resolved_shot_type: str
+) -> Optional[float]:
+    """Best-known duration the dispatcher is ABOUT to request, for
+    generate_motion_take's pre-spend gate ONLY (money-gate finding
+    2026-07-30/31): would_exceed()/would_exceed_cost() priced LTX and
+    SEEDANCE off the flat, one-duration-assuming API_COST_USD estimate
+    while record_api_call() was already duration-aware for both post-fact
+    (cost_tracker.py's API_COST_PER_SECOND_USD; this module's own
+    _motion_cost_kwargs SEEDANCE branch) — an LTX/SEEDANCE call about to
+    dispatch at 8s was pre-checked against a shorter-duration flat
+    UNDER-estimate (LTX's flat figure assumes a 6s floor; SEEDANCE's
+    assumes 5s).
+
+    SEEDANCE: resolved_shot_type is already resolved at this point in
+    generate_motion_take (classify_shot_type() runs ahead of the gate), and
+    the dispatcher (phase_c_ffmpeg.py's SEEDANCE branch) keys its own
+    requested duration off the SAME SEEDANCE_DURATIONS table — so this is
+    the exact figure the dispatcher will request, not an estimate.
+
+    LTX: the dispatcher's requested duration is generate_ai_video()'s
+    ``duration`` kwarg, which this controller only resolves (as
+    ``_veo_duration`` in generate_motion_take) AFTER the pre-spend gate —
+    it starts from the "8s" default and, for overlay-mode dialogue shots
+    only, is later narrowed to the probed TTS length via
+    _clamp_veo_duration (capped at "8s", i.e. never larger). Reordering
+    that TTS-probe ahead of the gate is out of this fix's scope, so this
+    returns the known "8s" default generate_ai_video always starts from:
+    exact for every non-overlay-dialogue shot (the common case), and a
+    same-or-over-estimate (never an under-estimate) for the overlay-
+    dialogue subset, since the later clamp can only shrink it to 4s/6s/8s.
+
+    Returns None (no opinion — the caller falls back to the flat table
+    exactly as before this helper existed) for every other engine.
+    """
+    api_upper = target_api.upper()
+    if api_upper == "SEEDANCE":
+        from phase_c_ffmpeg import SEEDANCE_DURATIONS
+        return float(SEEDANCE_DURATIONS.get(resolved_shot_type, 4))
+    if api_upper == "LTX":
+        return 8.0  # generate_ai_video(duration: str = "8s") default, phase_c_ffmpeg.py
+    return None
+
+
 def _resolve_f1b_audio(
     host,
     shot: dict,
@@ -2102,20 +2146,33 @@ class ShotController:
         # the F1b lip-sync pass after video generation, so precheck that required
         # second call with the same multi-call envelope pattern used by the
         # performance Mode-B gate.
+        #
+        # Duration-aware pricing for the two genuinely per-second-billed
+        # video engines (money-gate finding 2026-07-30/31): _pre_spend_duration_s
+        # is non-None only for LTX/SEEDANCE (see _motion_pre_spend_duration_s),
+        # so every other engine falls through to the exact flat-table call
+        # shape this gate used before — CostTracker.estimate_call_cost_usd /
+        # would_exceed reuse record_api_call's own rate/round logic, so the
+        # pre-check and the eventual post-fact record can never drift apart.
         engine_info = API_REGISTRY.get(target_api.upper(), {})
         needs_lipsync_precheck = has_dialogue and not _should_tag_audio_embedded(
             engine_info,
             has_dialogue,
             _voice_mode,
         )
+        _pre_spend_duration_s = _motion_pre_spend_duration_s(target_api, resolved_shot_type)
         if needs_lipsync_precheck:
-            from cost_tracker import API_COST_USD
+            from cost_tracker import API_COST_USD, CostTracker
 
             estimated_cost = (
-                API_COST_USD.get(target_api.upper(), 0.0)
+                CostTracker.estimate_call_cost_usd(target_api, _pre_spend_duration_s)
                 + API_COST_USD.get("LIPSYNC_DEFAULT", 0.0)
             )
             would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
+        elif _pre_spend_duration_s is not None:
+            would_exceed_budget = self.cost_tracker.would_exceed(
+                target_api, duration_seconds=_pre_spend_duration_s
+            )
         else:
             would_exceed_budget = self.cost_tracker.would_exceed(target_api)
 

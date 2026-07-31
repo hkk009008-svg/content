@@ -335,6 +335,196 @@ class TestPreSpendBudgetGate:
         assert motion_events, "expected a MOTION progress event"
         assert motion_events[0].kwargs.get("engine") == "KLING_NATIVE"
 
+    # --- Duration-aware pre-spend for LTX/SEEDANCE (money-gate finding ------
+    # 2026-07-30/31): would_exceed()/would_exceed_cost() priced these two
+    # genuinely per-second-billed engines off the flat, one-duration-assuming
+    # API_COST_USD estimate while record_api_call() was already
+    # duration-aware post-fact for both — a call about to dispatch at 8s was
+    # pre-checked against a shorter-duration flat UNDER-estimate.
+
+    def _fal_runtime(self) -> RuntimeSnapshot:
+        return RuntimeSnapshot(credentials={"fal_key"}, modules={"fal_client"})
+
+    def test_ltx_pre_spend_gate_catches_true_8s_duration_flat_estimate_misses(
+        self, tmp_path
+    ):
+        """RED before the fix: would_exceed("LTX") had no duration_seconds
+        parameter (a bare TypeError on the kwarg) and always priced LTX at
+        the flat 6s-floor estimate (0.36) — a spend level that estimate
+        waves through can still push the TRUE 8s dispatch cost (0.48) over
+        budget. GREEN: the gate refuses BEFORE generate_ai_video is called,
+        using the real CostTracker (not a mock) so the arithmetic is real."""
+        from cost_tracker import API_COST_USD, CostTracker
+
+        project = self._make_project(target_api="LTX")
+        ctrl, host, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.00)
+        tracker.spent_usd = 0.60
+        ctrl._core.cost_tracker = tracker
+        # Precondition: the flat estimate alone must NOT already refuse, or
+        # this test can't distinguish the fix from pre-existing behavior.
+        assert tracker.spent_usd + API_COST_USD["LTX"] <= tracker.budget_usd
+
+        gen_vid = MagicMock(return_value=None)
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=self._fal_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        gen_vid.assert_not_called()
+        lifecycle.pause.assert_called_once()
+
+    def test_seedance_pre_spend_gate_catches_true_8s_duration_flat_estimate_misses(
+        self, tmp_path
+    ):
+        """Same gap, SEEDANCE side (action shot type -> 8s dispatch):
+        flat 1.51 (5s-assuming) vs true 8s (0.302/s * 8s = 2.416)."""
+        from cost_tracker import API_COST_USD, CostTracker
+
+        project = self._make_project(target_api="SEEDANCE")
+        ctrl, host, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=2.00)
+        tracker.spent_usd = 0.30
+        ctrl._core.cost_tracker = tracker
+        assert tracker.spent_usd + API_COST_USD["SEEDANCE"] <= tracker.budget_usd
+
+        gen_vid = MagicMock(return_value=None)
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("workflow_selector.classify_shot_type", return_value="action"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=self._fal_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        gen_vid.assert_not_called()
+
+    def test_ltx_gate_threads_dispatch_duration_into_would_exceed(self, tmp_path):
+        """Call-shape pin: would_exceed() must receive duration_seconds=8.0
+        for LTX (generate_ai_video's default requested duration) — not the
+        bare single-arg call the flat-only pre-spend check used before."""
+        project = self._make_project(target_api="LTX")
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.return_value = False
+
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=lambda scene, shot, take, video_path, **kw: {
+                "success": True, "take": dict(take), "video": video_path,
+                "identity_score": 0.0,
+            }
+        )
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=self._fal_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is True
+        cost_tracker.would_exceed.assert_called_once_with("LTX", duration_seconds=8.0)
+        cost_tracker.would_exceed_cost.assert_not_called()
+
+    def test_seedance_gate_threads_shot_type_duration_into_would_exceed(self, tmp_path):
+        """Call-shape pin: SEEDANCE threads SEEDANCE_DURATIONS[shot_type]
+        (4.0 for portrait/medium), not the dispatcher's LTX-style 8s
+        default — the two engines' durations come from different tables."""
+        project = self._make_project(target_api="SEEDANCE")
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.return_value = False
+
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=lambda scene, shot, take, video_path, **kw: {
+                "success": True, "take": dict(take), "video": video_path,
+                "identity_score": 0.0,
+            }
+        )
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_write_owned_video_candidate,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="portrait"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=self._fal_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is True
+        cost_tracker.would_exceed.assert_called_once_with("SEEDANCE", duration_seconds=4.0)
+        cost_tracker.would_exceed_cost.assert_not_called()
+
+    def test_dialogue_overlay_ltx_lipsync_precheck_is_duration_aware(self, tmp_path):
+        """The mandatory-lipsync envelope (needs_lipsync_precheck branch)
+        must ALSO duration-price the LTX motion-generation component, not
+        just the bare would_exceed(target_api) branch below it. RED before
+        the fix: flat 0.36 (LTX) + 0.67 (LIPSYNC_DEFAULT) = 1.03 <= 1.10 cap
+        (would proceed); true-8s 0.48 + 0.67 = 1.15 > 1.10 (must refuse)."""
+        from cost_tracker import CostTracker
+
+        project = self._make_project(target_api="LTX")
+        project["global_settings"]["dialogue_voice_mode"] = "overlay"
+        shot = project["scenes"][0]["shots"][0]
+        shot["optimizer_cache"] = {"spec": {"purpose": "dialogue_close_up"}}
+
+        ctrl, host, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.10)
+        tracker.spent_usd = 0.0
+        ctrl._core.cost_tracker = tracker
+
+        gen_vid = MagicMock(return_value=None)
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=self._fal_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        gen_vid.assert_not_called()
+
     def test_real_aspect_reject_never_selects_leftover_or_existing_destination(
         self,
         tmp_path,
@@ -762,6 +952,72 @@ class TestPreSpendBudgetGate:
             "key": "GEMINI_OMNI",
             "reason": "runtime_unavailable",
         }
+
+
+class TestMotionPreSpendDurationEstimate:
+    """Direct unit tests for _motion_pre_spend_duration_s — the pure helper
+    feeding generate_motion_take's pre-spend gate for LTX/SEEDANCE
+    (money-gate finding 2026-07-30/31)."""
+
+    def test_seedance_uses_shot_type_table(self):
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        assert _motion_pre_spend_duration_s("SEEDANCE", "action") == 8.0
+        assert _motion_pre_spend_duration_s("SEEDANCE", "wide") == 8.0
+        assert _motion_pre_spend_duration_s("SEEDANCE", "landscape") == 8.0
+        assert _motion_pre_spend_duration_s("SEEDANCE", "portrait") == 4.0
+        assert _motion_pre_spend_duration_s("SEEDANCE", "medium") == 4.0
+
+    def test_seedance_unknown_shot_type_falls_back_to_4s_like_the_dispatcher(self):
+        """Mirrors phase_c_ffmpeg.py's own SEEDANCE_DURATIONS.get(shot_type,
+        4) fallback exactly — an unrecognized shot_type must not diverge
+        from what the dispatcher will actually request."""
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        assert _motion_pre_spend_duration_s("SEEDANCE", "some_unknown_type") == 4.0
+
+    def test_ltx_uses_generate_ai_video_default(self):
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        assert _motion_pre_spend_duration_s("LTX", "medium") == 8.0
+
+    def test_ltx_duration_independent_of_shot_type(self):
+        """Unlike SEEDANCE, LTX's pre-spend estimate does not vary by shot
+        type (the dispatcher's duration kwarg isn't shot-type-keyed)."""
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        for shot_type in ("action", "wide", "landscape", "portrait", "medium"):
+            assert _motion_pre_spend_duration_s("LTX", shot_type) == 8.0
+
+    def test_ltx_pre_spend_duration_matches_generate_ai_video_default(self):
+        """Sync-pin (mirrors the _LTX_DURATION_ENUM_S precedent in
+        phase_c_ffmpeg.py): if generate_ai_video's default duration ever
+        changes, this constant must be updated in lockstep or the
+        pre-spend estimate silently diverges from what the dispatcher
+        actually requests."""
+        import inspect
+        from phase_c_ffmpeg import generate_ai_video
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+
+        default_duration_str = inspect.signature(generate_ai_video).parameters[
+            "duration"
+        ].default
+        assert _motion_pre_spend_duration_s("LTX", "medium") == float(
+            str(default_duration_str).rstrip("s")
+        )
+
+    def test_other_engines_return_none(self):
+        """None means "no opinion" — the pre-spend gate call site falls
+        back to the flat table exactly as before this fix, for every engine
+        other than LTX/SEEDANCE."""
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        for engine in (
+            "KLING_NATIVE", "KLING_3_0", "SORA_NATIVE", "SORA_2",
+            "VEO_NATIVE", "VEO", "GEMINI_OMNI", "RUNWAY_GEN4",
+            "RUNWAY", "FAL_SVD", "AUTO",
+        ):
+            assert _motion_pre_spend_duration_s(engine, "medium") is None
+
+    def test_case_insensitive_target_api(self):
+        from cinema.shots.controller import _motion_pre_spend_duration_s
+        assert _motion_pre_spend_duration_s("ltx", "medium") == 8.0
+        assert _motion_pre_spend_duration_s("seedance", "action") == 8.0
 
 
 class TestBudgetPhaseAbort:

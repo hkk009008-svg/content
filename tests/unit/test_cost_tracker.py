@@ -7,7 +7,14 @@ import tempfile
 import pytest
 
 
-from cost_tracker import API_COST_USD, CostEntry, CostTracker, PRICING, _detect_provider
+from cost_tracker import (
+    API_COST_PER_SECOND_USD,
+    API_COST_USD,
+    CostEntry,
+    CostTracker,
+    PRICING,
+    _detect_provider,
+)
 
 
 # ===================================================================
@@ -737,6 +744,47 @@ class TestRecordAPICall:
         cost = cost_tracker.record_api_call("SORA_2", duration_seconds=8)
         assert cost == pytest.approx(API_COST_USD["SORA_2"])
 
+    @pytest.mark.parametrize("bool_duration", [True, False])
+    def test_record_api_call_ltx_bool_duration_falls_back_to_flat_table(
+        self, cost_tracker, bool_duration
+    ):
+        """Pin the bool guard: Python's bool is an int subclass, so
+        float(True) == 1.0 and float(False) == 0.0 — a stray True must not
+        be silently read as "duration = 1 second" (it would sail past the
+        finite/positive checks undetected the way False's float(False)==0.0
+        is already caught by the dur<=0 guard). A previous reviewer found
+        an analogous bool guard shipped unpinned elsewhere; this test pins
+        it for _duration_aware_cost_usd from the start."""
+        cost = cost_tracker.record_api_call("LTX", duration_seconds=bool_duration)
+        assert cost == pytest.approx(API_COST_USD["LTX"])
+
+    def test_seedance_per_second_rate_derived_not_hardcoded(self):
+        """API_COST_PER_SECOND_USD["SEEDANCE"] must be DERIVED from the flat
+        API_COST_USD["SEEDANCE"] entry (/5.0), not a second hand-maintained
+        literal — otherwise the pre-spend estimate and the flat table could
+        silently drift apart the next time someone updates one but not the
+        other."""
+        assert API_COST_PER_SECOND_USD["SEEDANCE"] == pytest.approx(
+            API_COST_USD["SEEDANCE"] / 5.0
+        )
+
+    @pytest.mark.parametrize("duration_seconds,expected_cost", [
+        (4, 1.208),   # portrait/medium shot types (SEEDANCE_DURATIONS)
+        (8, 2.416),   # action/wide/landscape shot types
+    ])
+    def test_record_api_call_seedance_duration_aware_cost(
+        self, cost_tracker, duration_seconds, expected_cost
+    ):
+        """SEEDANCE joins LTX as a genuinely per-second-billed engine
+        (money-gate finding 2026-07-30/31) — record_api_call() computes the
+        TRUE per-second cost via the SAME API_COST_PER_SECOND_USD/
+        _duration_aware_cost_usd machinery LTX already uses, matching the
+        pre-existing round(API_COST_USD["SEEDANCE"] / 5.0 * duration, 4)
+        arithmetic in cinema/shots/controller.py::_motion_cost_kwargs bit
+        for bit."""
+        cost = cost_tracker.record_api_call("SEEDANCE", duration_seconds=duration_seconds)
+        assert cost == pytest.approx(expected_cost)
+
 
 class TestRecordAPICallAudioTracking:
     """M-B2 closure (cycle-16 Tier B): audio sites now have API_COST_USD
@@ -826,6 +874,64 @@ class TestBudgetGate:
         assert tracker.would_exceed("SORA_2") is True
         tracker.close()
 
+    # --- Duration-aware would_exceed (money-gate finding 2026-07-30/31) ---
+    # would_exceed() priced every engine off the flat API_COST_USD estimate
+    # regardless of the duration about to be dispatched, even though
+    # record_api_call() was ALREADY duration-aware post-fact for LTX/
+    # SEEDANCE — an 8s/10s call was pre-checked against a shorter-duration
+    # flat UNDER-estimate. duration_seconds now reuses the exact same
+    # estimate_call_cost_usd/_duration_aware_cost_usd rate/round logic
+    # record_api_call() uses, so the pre-check can never drift from what
+    # actually gets recorded.
+
+    def test_would_exceed_ltx_flat_estimate_misses_true_8s_overage(self, db_path):
+        """RED before the fix: would_exceed("LTX") had no duration_seconds
+        parameter at all (a bare TypeError on the unexpected kwarg) and
+        always priced LTX at the flat 6s-floor estimate (0.36) — a spend
+        level that flat estimate waves through can still push the TRUE 8s
+        dispatch cost (0.06/s * 8s = 0.48) over budget. GREEN: passing the
+        real dispatched duration catches the overage the flat check missed."""
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.60
+        # Precondition: the flat estimate alone must NOT already refuse, or
+        # this test can't distinguish the fix from pre-existing behavior.
+        assert tracker.spent_usd + API_COST_USD["LTX"] <= tracker.budget_usd
+        assert tracker.would_exceed("LTX") is False
+        assert tracker.would_exceed("LTX", duration_seconds=8) is True
+        tracker.close()
+
+    def test_would_exceed_seedance_flat_estimate_misses_true_8s_overage(self, db_path):
+        """Same gap, SEEDANCE side: flat 1.51 (5s-assuming) vs true 8s
+        (0.302/s * 8s = 2.416)."""
+        tracker = CostTracker(db_path=db_path, budget_usd=2.00)
+        tracker.spent_usd = 0.30
+        assert tracker.spent_usd + API_COST_USD["SEEDANCE"] <= tracker.budget_usd
+        assert tracker.would_exceed("SEEDANCE") is False
+        assert tracker.would_exceed("SEEDANCE", duration_seconds=8) is True
+        tracker.close()
+
+    def test_would_exceed_ltx_absent_duration_keeps_flat_behavior(self, db_path):
+        """Backward compat: omitting duration_seconds (every pre-existing
+        call site not named LTX/SEEDANCE in cinema/shots/controller.py)
+        keeps the exact flat-table behavior from before this parameter
+        existed."""
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.60
+        assert tracker.would_exceed("LTX") is False
+        tracker.close()
+
+    @pytest.mark.parametrize(
+        "bad_duration", [0, -5, float("nan"), float("inf"), "not-a-number", True, False]
+    )
+    def test_would_exceed_ltx_invalid_duration_falls_back_to_flat(self, db_path, bad_duration):
+        """A non-finite/non-positive/non-numeric/bool duration_seconds must
+        fail safe to the flat estimate — never zero, never a crash. Includes
+        the pinned bool-guard case (True must not be read as duration=1)."""
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.60
+        assert tracker.would_exceed("LTX", duration_seconds=bad_duration) is False
+        tracker.close()
+
     def test_would_exceed_cost_checks_combined_envelope(self, db_path):
         tracker = CostTracker(db_path=db_path, budget_usd=1.00)
         tracker.spent_usd = 0.70
@@ -872,6 +978,46 @@ class TestBudgetGate:
         tracker = CostTracker(db_path=db_path, budget_usd=0)
         assert tracker.would_exceed("SORA_2") is False
         tracker.close()
+
+
+class TestEstimateCallCostUsd:
+    """CostTracker.estimate_call_cost_usd — the shared pre-spend estimate
+    helper would_exceed() and cinema/shots/controller.py's mandatory-
+    lipsync precheck both call, so LTX/SEEDANCE duration-pricing can never
+    drift into two independently-maintained implementations."""
+
+    def test_ltx_duration_aware(self):
+        assert CostTracker.estimate_call_cost_usd("LTX", 8) == pytest.approx(0.48)
+
+    def test_seedance_duration_aware(self):
+        assert CostTracker.estimate_call_cost_usd("SEEDANCE", 8) == pytest.approx(2.416)
+
+    def test_case_insensitive_api_name(self):
+        assert CostTracker.estimate_call_cost_usd("ltx", 8) == pytest.approx(0.48)
+
+    def test_falls_back_to_flat_when_duration_absent(self):
+        assert CostTracker.estimate_call_cost_usd("LTX") == pytest.approx(
+            API_COST_USD["LTX"]
+        )
+
+    def test_falls_back_to_flat_for_engine_without_a_rate(self):
+        assert CostTracker.estimate_call_cost_usd("SORA_2", 8) == pytest.approx(
+            API_COST_USD["SORA_2"]
+        )
+
+    @pytest.mark.parametrize(
+        "bad_duration", [0, -5, float("nan"), float("inf"), "not-a-number", True, False]
+    )
+    def test_falls_back_to_flat_for_bad_duration(self, bad_duration):
+        assert CostTracker.estimate_call_cost_usd("LTX", bad_duration) == pytest.approx(
+            API_COST_USD["LTX"]
+        )
+
+    def test_unknown_api_returns_zero_unchanged(self):
+        """Pre-existing flat-table behavior (unknown API -> 0.0) is
+        unchanged by this helper — it neither adds nor removes
+        record_api_call's own "unknown API" warning."""
+        assert CostTracker.estimate_call_cost_usd("TOTALLY_UNKNOWN_API", 8) == 0.0
 
 
 class TestDbPathResolution:

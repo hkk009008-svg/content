@@ -127,6 +127,18 @@ API_COST_PER_SECOND_USD: dict[str, float] = {
     # read 2026-07-11) — see the API_COST_USD["LTX"] comment above for the
     # flat-table/duration-aware split.
     "LTX": 0.06,
+    # SEEDANCE per-second rate DERIVED from the flat API_COST_USD entry
+    # above (fal bytedance/seedance-2.0 standard 720p = $0.3024/s, read
+    # 2026-07-11) rather than a second hardcoded literal — the two can
+    # never drift apart since both read the SAME API_COST_USD["SEEDANCE"]
+    # value. Reproduces, bit-for-bit, the arithmetic already shipped in
+    # cinema/shots/controller.py::_motion_cost_kwargs's SEEDANCE branch
+    # (``round(API_COST_USD["SEEDANCE"] / 5.0 * duration, 4)`` — the
+    # post-fact record_api_call cost override for the SEEDANCE winner/
+    # billed-reject path) so the pre-spend estimate below and that
+    # post-fact record price the SAME clip identically (money-gate
+    # finding 2026-07-30/31).
+    "SEEDANCE": API_COST_USD["SEEDANCE"] / 5.0,
 }
 
 
@@ -430,12 +442,26 @@ class CostTracker:
 
         None means "no opinion" — the caller falls back to the flat
         ``API_COST_USD`` estimate. That happens when ``duration_seconds`` is
-        not supplied, ``api_upper`` has no ``API_COST_PER_SECOND_USD`` entry,
-        or the supplied duration is non-numeric/non-finite/non-positive — a
-        bad duration must never poison the record (fail safe to the flat
-        table, mirroring the NaN-cost guard in ``log()``), never crash.
+        not supplied, is a ``bool``, ``api_upper`` has no
+        ``API_COST_PER_SECOND_USD`` entry, or the supplied duration is
+        non-numeric/non-finite/non-positive — a bad duration must never
+        poison the record (fail safe to the flat table, mirroring the
+        NaN-cost guard in ``log()``), never crash.
+
+        The explicit ``bool`` rejection is pinned deliberately: ``bool`` is
+        an ``int`` subclass in Python, so ``float(True) == 1.0`` would
+        otherwise sail through every check below (finite, positive) and be
+        silently read as "duration = 1 second" instead of being rejected as
+        the non-duration value it plainly is — a prior reviewer found an
+        analogous bool guard shipped unpinned elsewhere (money-gate finding
+        2026-07-30/31); this one ships pinned from the start, with a
+        dedicated regression case in ``test_cost_tracker.py``.
         """
-        if duration_seconds is None or api_upper not in API_COST_PER_SECOND_USD:
+        if (
+            duration_seconds is None
+            or isinstance(duration_seconds, bool)
+            or api_upper not in API_COST_PER_SECOND_USD
+        ):
             return None
         try:
             dur = float(duration_seconds)
@@ -444,6 +470,38 @@ class CostTracker:
         if not math.isfinite(dur) or dur <= 0:
             return None
         return round(API_COST_PER_SECOND_USD[api_upper] * dur, 4)
+
+    @staticmethod
+    def estimate_call_cost_usd(
+        api_name: str, duration_seconds: Optional[float] = None
+    ) -> float:
+        """Return the pre-spend cost estimate for one call to *api_name*.
+
+        Reuses ``_duration_aware_cost_usd`` — the exact same rate/round
+        logic ``record_api_call`` uses for its post-fact record — so the
+        pre-spend estimate and the eventual recorded cost can never drift
+        into two independently-maintained implementations. Falls back to
+        the flat ``API_COST_USD`` table under the identical conditions
+        ``_duration_aware_cost_usd`` documents (duration absent/bool/
+        non-finite/non-positive/non-numeric, or *api_name* has no
+        per-second rate) — never zero from a bad duration, never a crash.
+        An *api_name* absent from BOTH tables still returns 0.0 (unchanged
+        pre-existing flat-table behavior; this helper does not add or
+        remove the "unknown API" warning ``record_api_call`` emits).
+
+        Public (unlike ``_duration_aware_cost_usd``) so a caller assembling
+        a multi-call ``would_exceed_cost()`` envelope — e.g.
+        ``generate_motion_take``'s mandatory-lipsync precheck in
+        cinema/shots/controller.py — can duration-price the per-second-
+        billed component instead of re-deriving this same
+        duration-aware-or-flat choice inline (a parallel copy that could
+        drift). ``would_exceed`` below is the other caller.
+        """
+        api_upper = api_name.upper()
+        cost = CostTracker._duration_aware_cost_usd(api_upper, duration_seconds)
+        if cost is None:
+            cost = API_COST_USD.get(api_upper, 0.0)
+        return cost
 
     def record_api_call(
         self,
@@ -469,16 +527,17 @@ class CostTracker:
         Args:
             duration_seconds: the ACTUAL dispatched duration, when the
                 caller knows it. For an ``api_name`` with an
-                ``API_COST_PER_SECOND_USD`` entry (currently LTX), this
-                computes the TRUE cost (``rate * duration_seconds``) instead
-                of the flat ``API_COST_USD`` estimate, which assumes one
-                specific duration and silently under/over-records whenever
-                the actual dispatched duration differs (e.g. LTX's flat
-                figure assumes the 6s enum floor while the dispatcher's
-                shared default is 8s — money-gate finding 2026-07-30).
+                ``API_COST_PER_SECOND_USD`` entry (currently LTX and
+                SEEDANCE), this computes the TRUE cost
+                (``rate * duration_seconds``) instead of the flat
+                ``API_COST_USD`` estimate, which assumes one specific
+                duration and silently under/over-records whenever the
+                actual dispatched duration differs (e.g. LTX's flat figure
+                assumes the 6s enum floor while the dispatcher's shared
+                default is 8s — money-gate finding 2026-07-30).
                 Ignored whenever ``cost_usd`` is explicitly supplied
                 (explicit cost always wins), the api has no per-second rate,
-                or the duration is non-finite/non-positive/non-numeric —
+                or the duration is non-finite/non-positive/non-numeric/bool —
                 falls back to the flat table exactly as before.
         """
         api_upper = api_name.upper()
@@ -539,10 +598,32 @@ class CostTracker:
     # Budget gate
     # ------------------------------------------------------------------
 
-    def would_exceed(self, api_name: str) -> bool:
+    def would_exceed(
+        self, api_name: str, duration_seconds: Optional[float] = None
+    ) -> bool:
         """Pre-emptive check: would recording this call push us over budget?
 
         Returns False when ``budget_usd`` is None (no limit).
+
+        Args:
+            duration_seconds: the ACTUAL duration the dispatcher is ABOUT to
+                request, when the caller knows it ahead of dispatch (e.g.
+                ``generate_motion_take`` in cinema/shots/controller.py, for
+                the two genuinely per-second-billed video engines LTX and
+                SEEDANCE). Reuses ``estimate_call_cost_usd`` — the exact
+                same ``_duration_aware_cost_usd`` rate/round logic
+                ``record_api_call`` uses for its post-fact record — so this
+                pre-check can never drift from what actually gets recorded
+                once the call completes. An absent/unknown/non-finite/
+                non-positive/bool duration, or an *api_name* with no
+                ``API_COST_PER_SECOND_USD`` entry, falls back to the flat
+                ``API_COST_USD`` estimate exactly as before this parameter
+                existed (money-gate finding 2026-07-30/31: this check was
+                flat-only for every engine until now — an LTX/SEEDANCE call
+                about to dispatch at 8s or 10s was pre-checked against a
+                shorter-duration flat-table UNDER-estimate, even though
+                ``record_api_call`` was already duration-aware for the same
+                two engines post-fact).
 
         Defense-in-depth (cost-spent-nan-poison, Rule #13 symmetric guard):
         if spent_usd is somehow non-finite (e.g. from a race or a direct
@@ -555,7 +636,7 @@ class CostTracker:
             spent = self.spent_usd
         if not math.isfinite(spent):
             return True  # fail-safe: non-finite spend → gate fires
-        cost = API_COST_USD.get(api_name.upper(), 0.0)
+        cost = self.estimate_call_cost_usd(api_name, duration_seconds)
         return (spent + cost) > self.budget_usd
 
     def would_exceed_cost(self, estimated_cost_usd: float) -> bool:

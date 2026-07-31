@@ -1475,6 +1475,22 @@ downloaded mp4, since that API's duration is prompt-inferred rather than a
 structured request parameter); both fail open to the flat `API_COST_USD`
 estimate on any error.
 
+**Pre-spend side (2026-08-01).** The *record* being duration-true is only half
+the loop: `CostTracker.would_exceed` read the flat table, so a call about to
+dispatch at 8s or 10s was pre-checked against the 6s floor — an under-estimate
+in the direction that actually matters. `would_exceed` now takes an optional
+`duration_seconds`, and both pre-spend branches of `generate_motion_take` (the
+bare check and the mandatory-lipsync envelope) pass the duration the
+dispatcher is about to request: `SEEDANCE_DURATIONS[shot_type]` for SEEDANCE,
+`generate_ai_video`'s default 8s for LTX. `estimate_call_cost_usd` is the one
+shared decision so the pre-check and the record cannot drift, and SEEDANCE's
+per-second rate is DERIVED from its flat entry rather than re-hardcoded.
+Unknown/absent duration falls back to flat; a bool is rejected outright
+(`True` was previously read as 1 second). Deliberately still flat: image
+keyframes (no duration dimension) and the performance engines — ACT_ONE's rate
+lives in `performance/act_two.py`, LIVE_PORTRAIT is base+rate (a shape this
+mechanism cannot express), and VIGGLE is genuinely per-clip.
+
 *Typed dispatch fence, payload-branch anchors, default seed, quota anchors,
 helper count, and storyboard split contract verified: 2026-07-30. LTX
 duration contract and duration-true billing (§9.8) verified: 2026-08-01.
@@ -2008,7 +2024,7 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:770`; call at :1063) and `diagnose_clip`
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:814`; call at :1063) and `diagnose_clip`
   (`cinema/shots/controller.py:2748`; call at :2804); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
