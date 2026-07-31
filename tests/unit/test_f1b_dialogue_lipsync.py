@@ -20,24 +20,45 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# Stubs — prevent heavy imports at module load
+# Stubs — keep the heavy video SDKs out of the tests in this module
 # ---------------------------------------------------------------------------
 
 def _stub_module(name: str, **attrs):
     mod = types.ModuleType(name)
     for k, v in attrs.items():
         setattr(mod, k, v)
-    sys.modules[name] = mod
     return mod
 
 
-for _dep in [
+_STUBBED_VIDEO_DEPS = (
     "veo_native", "kling_native", "sora_native", "ltx_native",
     "runway_native", "runway_gen4", "fal_proxy", "kling_3_0",
     "sora_2", "veo_fal",
-]:
-    if _dep not in sys.modules:
-        _stub_module(_dep)
+)
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _stub_heavy_video_deps():
+    """Install placeholder modules for the heavy video SDKs, then restore them.
+
+    phase_c_ffmpeg imports every one of these lazily, inside the branch that
+    uses it (e.g. ``from veo_native import VeoNativeAPI`` at phase_c_ffmpeg.py:696),
+    so the stubs only have to exist while this module's tests run — nothing here
+    imports them at collection time.
+
+    Restoration is not optional. A bare ``sys.modules[name] = stub`` leaks an
+    attribute-less module into the rest of the pytest process, and the failure
+    surfaces in whichever *later* file patches one of these names — e.g.
+    ``@patch("ltx_native.LTXVideoAPI")`` in test_generate_ai_video_params.py
+    dying with "module 'ltx_native' does not have the attribute 'LTXVideoAPI'"
+    even though ltx_native.py:39 defines it unconditionally. MonkeyPatch.context
+    undoes each setitem on teardown, including deleting names that were absent
+    beforehand.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        for dep in _STUBBED_VIDEO_DEPS:
+            mp.setitem(sys.modules, dep, _stub_module(dep))
+        yield
 
 
 # ---------------------------------------------------------------------------
