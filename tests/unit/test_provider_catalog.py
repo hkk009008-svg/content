@@ -55,13 +55,19 @@ def test_catalog_exactly_covers_legacy_registry_plus_fal_svd_mutation_pin() -> N
 
 
 def test_viggle_is_known_broken_and_fails_closed() -> None:
-    """Slice 6c3: Viggle's adapter (performance/viggle.py) targets
+    """Slice 6c3 found Viggle's adapter (performance/viggle.py) targeted
     api.viggle.ai/v1/motion-transfer with files={character_image,
-    motion_video} — the official developer API at docs.viggle.ai (verified
-    2026-07-31) is apis.viggle.ai/v1/renders with fields {image,
-    motion_video}. KNOWN_BROKEN must fail closed (selectable/dispatchable/
-    spendable all False), same shape as the RUNWAY_ACT_ONE precedent, and
-    must cite the real docs URL as its source.
+    motion_video} while the official developer API at docs.viggle.ai is
+    apis.viggle.ai/v1/renders with fields {image, motion_video}. The
+    adapter-repair slice has since rewritten performance/viggle.py to that
+    official contract, but this entry's product_support intentionally
+    stays KNOWN_BROKEN — flipping it requires a coordinated update to
+    scripts/check_provider_catalog_claims.py, .env.example, and both
+    ai-video-gen/SKILL.md copies that is out of that slice's owned
+    pathspec (see domain/provider_catalog.py's VIGGLE entry comment).
+    KNOWN_BROKEN must fail closed (selectable/dispatchable/spendable all
+    False), same shape as the RUNWAY_ACT_ONE precedent, and must cite the
+    real docs URL as its source.
     """
     entry = CATALOG["VIGGLE"]
     assert entry.product_support is ProductSupport.KNOWN_BROKEN

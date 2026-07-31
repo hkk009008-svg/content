@@ -76,10 +76,14 @@ class TestLivePortraitRouting:
 
 class TestViggleRouting:
     def test_action_no_dialogue_skips_while_viggle_contained(self):
-        # Slice 6c containment: the Viggle adapter provably mismatches the
-        # now-official API (catalog KNOWN_BROKEN), so the auto-route returns
-        # SKIP — action motion comes from the video engines natively. Flips
-        # back to ENGINE_VIGGLE when the adapter-repair slice lands.
+        # Slice 6c containment: performance/viggle.py has since been
+        # repaired to the official apis.viggle.ai contract (the
+        # adapter-repair slice), but this route still returns SKIP —
+        # domain/provider_catalog.py's VIGGLE entry stays KNOWN_BROKEN
+        # until a follow-up slice updates scripts/check_provider_catalog_claims.py,
+        # .env.example, and both ai-video-gen/SKILL.md copies alongside the
+        # flip (see domain/performance.py's rule-3 comment). Flips back to
+        # ENGINE_VIGGLE when that coordinated update lands.
         shot = _shot(shot_type="action", dialogue="")
         assert route_performance_engine(shot, None) == ENGINE_SKIP
 
@@ -114,7 +118,10 @@ class TestShotNeedsDrivingVideo:
     def test_contained_viggle_route_needs_no_driving_video(self):
         # Slice 6c containment: action/no-dialogue routes SKIP (see
         # TestViggleRouting), so no Mode-B driving video is synthesized for
-        # it. Flips back with the Viggle adapter-repair slice.
+        # it. This is a routing-containment fact, not an adapter one — the
+        # Viggle adapter itself has already been repaired (see
+        # performance/viggle.py); this flips back once the coordinated
+        # catalog+docs+checker update in that test's comment lands.
         shot = _shot(shot_type="action", dialogue="")
         assert shot_needs_driving_video(shot) is False
 

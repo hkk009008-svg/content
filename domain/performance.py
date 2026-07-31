@@ -114,9 +114,11 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
       1. SKIP — no characters, or shot too wide for face to matter
       2. ACT_ONE — dialogue + (portrait | medium)
       3. LIVE_PORTRAIT — dialogue + close-up + explicit budget signal
-      4. action shot type, no dialogue — SKIP while the Viggle adapter is
-         contained (catalog KNOWN_BROKEN, Slice 6c); returns ENGINE_VIGGLE
-         again when the adapter-repair slice lands
+      4. action shot type, no dialogue — SKIP while Viggle stays contained
+         (catalog KNOWN_BROKEN, Slice 6c); performance/viggle.py itself has
+         since been repaired to the official contract, but this branch
+         still returns ENGINE_SKIP rather than ENGINE_VIGGLE — see the
+         comment on this branch below for why
       5. Default — ACT_ONE if dialogue, else SKIP
 
     `scene` is reserved for future scene-level routing signals; today only
@@ -140,12 +142,26 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
         return ENGINE_ACT_ONE
 
     # 3. VIGGLE — action without dialogue, full-body motion.
-    # CONTAINED (Slice 6c, 2026-07-31): the adapter targets Viggle's
-    # pre-official endpoint shape and provably mismatches the now-official
-    # API (catalog entry VIGGLE = KNOWN_BROKEN, source docs.viggle.ai), so
-    # auto-routing here guaranteed a failed capture. Action motion comes from
-    # the video engines natively; SKIP until the adapter-repair slice lands,
-    # at which point this branch returns ENGINE_VIGGLE again.
+    # CONTAINED (Slice 6c, then re-verified in the adapter-repair slice):
+    # performance/viggle.py has been rewritten to the official
+    # apis.viggle.ai/v1/renders contract (endpoint, field names,
+    # background_mode enum, and ready|failed|cancelled polling — see that
+    # module's docstring) and no longer mismatches docs.viggle.ai. This
+    # branch still returns ENGINE_SKIP rather than ENGINE_VIGGLE anyway,
+    # deliberately kept in lockstep with domain/provider_catalog.py's
+    # VIGGLE entry, which ALSO still reads product_support=KNOWN_BROKEN —
+    # not because the adapter is broken, but because flipping either one
+    # alone would leave this module and the catalog telling contradictory
+    # stories, and flipping the catalog entry requires updating
+    # scripts/check_provider_catalog_claims.py's hard-coded VIGGLE claim
+    # plus .env.example plus both ai-video-gen/SKILL.md copies in the same
+    # breath (verified: dataclasses.replace(entry, product_support=SUPPORTED)
+    # + a rerun of that checker's check() reports a drift) — none of which
+    # are in the adapter-repair slice's owned pathspec. Action motion comes
+    # from the video engines natively in the meantime; flip this branch to
+    # ENGINE_VIGGLE (and update TestViggleRouting's two containment-pinning
+    # tests below) only alongside that coordinated catalog+docs+checker
+    # update.
     if not has_dlg and st == SHOT_TYPE_ACTION:
         return ENGINE_SKIP
 
