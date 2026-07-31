@@ -1,4 +1,5 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ShotViewer from './ShotViewer'
 import type { Shot } from '../../types/project'
@@ -11,6 +12,13 @@ import type { Shot } from '../../types/project'
  * MediaAsset. "No shot selected" / "No take yet" are pre-existing, distinct
  * business states left untouched -- these tests cover the NEW media-fetch
  * states layered on top of them.
+ *
+ * Slice 13c -- the transport bar's Previous/Next were purely decorative
+ * (`aria-label` + `title` and nothing else); "Play" duplicated the video
+ * element's own native `controls`. These tests cover: Previous/Next are
+ * wired and keyboard-operable, they disable themselves with a stated reason
+ * at either end of the shot order, and "Play" is gone rather than left
+ * inert.
  */
 
 function makeShot(overrides: Partial<Shot> = {}): Shot {
@@ -180,4 +188,99 @@ describe('ShotViewer', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/projects/p1/file?path=' + encodeURIComponent('live.mp4')),
     )
   })
+
+  describe('transport bar (slice 13c)', () => {
+    it('no longer renders a "Play" affordance -- native <video controls> owns playback', () => {
+      render(<ShotViewer projectId="p1" shot={makeShot()} scene={null} shotState={undefined} />)
+
+      expect(screen.queryByRole('button', { name: 'Play' })).toBeNull()
+    })
+
+    it('inert-affordance enumeration: every transport button is either wired or disabled with a stated reason', () => {
+      const onPrevShot = vi.fn()
+      const onNextShot = vi.fn()
+      render(
+        <ShotViewer
+          projectId="p1"
+          shot={makeShot()}
+          scene={null}
+          shotState={undefined}
+          onPrevShot={onPrevShot}
+          onNextShot={onNextShot}
+          hasPrevShot={false}
+          hasNextShot={true}
+        />,
+      )
+
+      const prev = screen.getByRole('button', { name: 'Previous shot' })
+      const next = screen.getByRole('button', { name: 'Next shot' })
+
+      // Disabled control states its reason rather than looking clickable.
+      expect(prev).toBeDisabled()
+      expect(prev).toHaveAttribute('title', 'Already at the first shot')
+
+      // Enabled control actually invokes its callback -- not a dead click.
+      expect(next).toBeEnabled()
+      fireClick(next)
+      expect(onNextShot).toHaveBeenCalledTimes(1)
+      expect(onPrevShot).not.toHaveBeenCalled()
+    })
+
+    it('with no navigation wired at all, Previous/Next default to disabled instead of silently doing nothing', () => {
+      render(<ShotViewer projectId="p1" shot={makeShot()} scene={null} shotState={undefined} />)
+
+      expect(screen.getByRole('button', { name: 'Previous shot' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Next shot' })).toBeDisabled()
+    })
+
+    it('"Next shot" is keyboard-operable: Tab to it and press Enter, no pointer input', async () => {
+      const onNextShot = vi.fn()
+      render(
+        <ShotViewer
+          projectId="p1"
+          shot={makeShot()}
+          scene={null}
+          shotState={undefined}
+          onNextShot={onNextShot}
+          hasNextShot={true}
+        />,
+      )
+
+      const next = screen.getByRole('button', { name: 'Next shot' })
+      next.focus()
+      expect(next).toHaveFocus()
+
+      await userEvent.keyboard('{Enter}')
+
+      expect(onNextShot).toHaveBeenCalledTimes(1)
+    })
+
+    it('"Previous shot" is keyboard-operable via Space', async () => {
+      const onPrevShot = vi.fn()
+      render(
+        <ShotViewer
+          projectId="p1"
+          shot={makeShot()}
+          scene={null}
+          shotState={undefined}
+          onPrevShot={onPrevShot}
+          hasPrevShot={true}
+        />,
+      )
+
+      const prev = screen.getByRole('button', { name: 'Previous shot' })
+      prev.focus()
+
+      await userEvent.keyboard(' ')
+
+      expect(onPrevShot).toHaveBeenCalledTimes(1)
+    })
+  })
 })
+
+/** Plain DOM click -- distinct from `userEvent` so the keyboard-only tests
+ *  above are unambiguously exercising keyboard activation, not a shared
+ *  click helper. */
+function fireClick(el: HTMLElement) {
+  el.click()
+}

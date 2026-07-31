@@ -74,7 +74,11 @@ export function IdentitySection({ s, update }: Props) {
           <p className="text-[10px] leading-tight text-mut">
             Training, registration, and production use are unavailable. Historical records are read-only.
           </p>
-          <p className="text-[10px] leading-tight text-dim">
+          {/* `text-mut`, not `text-dim` — this still reads as production
+              guidance (slice 13b contrast audit: text-dim on this column's
+              backgrounds measures ~2.6-2.9:1, well under WCAG AA's 4.5:1
+              floor for 10px body text; text-mut clears it at 4.96-5.55:1). */}
+          <p className="text-[10px] leading-tight text-mut">
             Use clear reference images for the active identity path: Gemini multi-reference first,
             with PuLID reference conditioning on the ComfyUI fallback.
           </p>

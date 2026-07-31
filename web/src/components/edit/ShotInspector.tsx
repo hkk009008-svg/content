@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AppConfig, Project, Scene, Shot, ShotState } from '../../types/project'
-import { Badge, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
+import { Badge, LiveRegion, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 import { PROMPT_SECTION_TAGS, parsePromptSections, assemblePromptSections } from '../../lib/promptSections'
@@ -212,9 +212,12 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
   return (
     <aside className="w-[300px] flex-none overflow-y-auto border-l border-line bg-gutter">
       {saveError && (
-        <div role="alert" className="mx-3 mt-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-[11px] text-fail">
-          Could not save: {saveError}
-        </div>
+        <LiveRegion
+          politeness="assertive"
+          visuallyHidden={false}
+          message={`Could not save: ${saveError}`}
+          className="mx-3 mt-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-[11px] text-fail"
+        />
       )}
       <Section title="Prompt">
         <div className="space-y-3">

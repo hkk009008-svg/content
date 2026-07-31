@@ -116,8 +116,14 @@ export function VoiceSection({ s, config, update, projectId, onRefresh }: Props)
     <Section title="Voice">
       <div className="space-y-3">
         {langNotice && 'error' in langNotice && (
-          <p role="alert" className="text-[10px] leading-tight text-fail">
-            Couldn't apply language defaults: {langNotice.error}
+          // Message body in `text-tx` (not `text-fail`): the fail token
+          // measures ~4.2-4.4:1 on this column's backgrounds, under WCAG
+          // AA's 4.5:1 floor for 10px text (slice 13b contrast audit).
+          // Mirrors ErrorState's own convention -- a short fail-colored
+          // label, full-contrast message -- rather than coloring the whole
+          // line.
+          <p role="alert" className="text-[10px] leading-tight text-tx">
+            <span className="text-fail">Couldn't apply language defaults:</span> {langNotice.error}
           </p>
         )}
         {langNotice && 'changed' in langNotice && (

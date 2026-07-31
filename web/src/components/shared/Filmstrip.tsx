@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Project, Shot, ShotState } from '../../types/project'
 import { fileUrl } from '../../lib/mediaUrl'
-import { MICRO_LABEL } from '../ui'
+import { MediaAsset, MICRO_LABEL } from '../ui'
 
 /**
  * Filmstrip — the single canonical shot reel, merging the two prior copies:
@@ -16,6 +16,12 @@ import { MICRO_LABEL } from '../ui'
  * data change required.
  *
  * New file: design tokens only (bg-panel, border-line, text-acc/-ok/-warn/-fail).
+ *
+ * Thumbnail media (slice 13c): each tile routes its `generated_image` through
+ * `MediaAsset`/`useMediaAsset` instead of handing a raw `/file?path=` URL to
+ * `<img>` directly -- a moved/deleted take now renders the shared "missing"
+ * state instead of the browser's blank/broken-image icon, and a relocated
+ * project's take still renders with the "migrated" disclosure.
  */
 
 const FILMSTRIP_WINDOW = 40
@@ -162,17 +168,14 @@ export default function Filmstrip({
                   status === 'pending' ? 'opacity-60' : '',
                 ].join(' ')}
               >
-                {img ? (
-                  <img
-                    src={fileUrl(apiBase, projectId, img)}
-                    className="h-full w-full object-cover"
-                    alt=""
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-head text-[9px] font-mono uppercase tracking-[0.09em] text-dim">
-                    no take
-                  </div>
-                )}
+                <MediaAsset
+                  kind="image"
+                  url={img ? fileUrl(apiBase, projectId, img) : null}
+                  alt=""
+                  objectFit="cover"
+                  emptyLabel="No take"
+                  className="h-full w-full"
+                />
 
                 {/* Shot number — top left */}
                 <span className="absolute left-1 top-1 z-10 rounded bg-black/70 px-1 py-px font-mono text-[8px] tracking-[0.12em] text-tx">

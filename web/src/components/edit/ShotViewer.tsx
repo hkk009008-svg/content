@@ -8,6 +8,15 @@ interface Props {
   scene: Scene | null
   shotState: Partial<ShotState> | undefined
   apiBase?: string
+  /** Slice 13c: navigate to the previous/next shot in project shot order
+   *  (spans scene boundaries — the caller re-focuses the owning scene).
+   *  Omit, or pair with the matching `has*Shot=false`, when there is no
+   *  navigable neighbor; the button then renders `disabled` with a reason
+   *  instead of silently doing nothing. */
+  onPrevShot?: () => void
+  onNextShot?: () => void
+  hasPrevShot?: boolean
+  hasNextShot?: boolean
 }
 
 /**
@@ -18,8 +27,26 @@ interface Props {
  * can't be found (moved project, deleted file) shows an explicit missing
  * state instead of a blank/broken player -- "no shot selected" and "no take
  * yet" stay as their own distinct, pre-existing states above that.
+ *
+ * Transport bar (slice 13c): previously three purely decorative buttons
+ * ("no playback engine yet"). Previous/Next are now wired to real shot
+ * navigation and disable themselves (with an explicit reason) at either end
+ * of the shot order. The former "Play" button is removed rather than
+ * disabled forever -- a generated video already renders with the browser's
+ * own `controls` transport (see `MediaAsset` below), so a second inert Play
+ * affordance had no distinct behavior to wire.
  */
-export default function ShotViewer({ projectId, shot, scene, shotState, apiBase }: Props) {
+export default function ShotViewer({
+  projectId,
+  shot,
+  scene,
+  shotState,
+  apiBase,
+  onPrevShot,
+  onNextShot,
+  hasPrevShot = false,
+  hasNextShot = false,
+}: Props) {
   // fileUrl defaults apiBase to '/api' itself -- an explicit `= ''` default
   // here would defeat that (see TakeStrip's identical note).
   const resolveMedia = (path: string) => fileUrl(apiBase, projectId, path)
@@ -55,15 +82,27 @@ export default function ShotViewer({ projectId, shot, scene, shotState, apiBase 
         )}
       </div>
 
-      {/* Transport bar — presentational per brief (no playback engine yet). */}
+      {/* Transport bar — Previous/Next shot navigation, real playback stays
+          on the video element's own `controls` (wired above). */}
       <div className="flex flex-none items-center justify-center gap-4 border-t border-line bg-head px-4 py-2 font-mono text-[11px] text-mut">
-        <button type="button" className="hover:text-tx" aria-label="Previous frame" title="Previous frame">
+        <button
+          type="button"
+          onClick={onPrevShot}
+          disabled={!hasPrevShot || !onPrevShot}
+          aria-label="Previous shot"
+          title={hasPrevShot ? 'Previous shot' : 'Already at the first shot'}
+          className="hover:text-tx disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-mut"
+        >
           ⏮
         </button>
-        <button type="button" className="hover:text-tx" aria-label="Play" title="Play">
-          ▶
-        </button>
-        <button type="button" className="hover:text-tx" aria-label="Next frame" title="Next frame">
+        <button
+          type="button"
+          onClick={onNextShot}
+          disabled={!hasNextShot || !onNextShot}
+          aria-label="Next shot"
+          title={hasNextShot ? 'Next shot' : 'Already at the last shot'}
+          className="hover:text-tx disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-mut"
+        >
           ⏭
         </button>
         <span className="text-dim">{scene?.title || 'Untitled scene'}</span>

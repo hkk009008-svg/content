@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { SettingsSection } from './SettingsSection'
-
-const API = '/api'
+import { LoadingState, ErrorState } from '../ui'
+import { apiPost } from '../../lib/api'
 
 interface Props {
   s: any
@@ -10,11 +10,24 @@ interface Props {
 export function CostEstimatorSection({ s }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [costEstimate, setCostEstimate] = useState<any>(null)
+  const [costError, setCostError] = useState<string | null>(null)
   const [costShotCount, setCostShotCount] = useState(60)
   const [costDialogueRatio, setCostDialogueRatio] = useState(0.5)
+  // Bumped by the retry button to re-run the fetch effect below against the
+  // SAME shot-count/ratio inputs -- re-setting either of those to its own
+  // current value is a React no-op (same primitive in, no re-render, no
+  // effect re-run), so a real retry needs its own dependency to change.
+  const [retryTick, setRetryTick] = useState(0)
 
+  // slice 13b: a failed estimate fetch used to collapse to `null`, which is
+  // exactly what "haven't fetched yet" also looks like -- the panel just
+  // showed "Loading estimate..." forever with no way to tell the request
+  // had actually already failed. Route through the typed client and keep
+  // the error distinct from "no estimate yet".
   useEffect(() => {
     if (!expanded) return
+    let cancelled = false
+    setCostError(null)
     // Production-only candidate path — the max tier was retired (single
     // candidate per shot).
     const body = {
@@ -23,15 +36,19 @@ export function CostEstimatorSection({ s }: Props) {
       dialogue_shot_ratio: costDialogueRatio,
       candidate_count: 1,
     }
-    fetch(`${API}/cost-estimate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    apiPost('/api/cost-estimate', body).then((result) => {
+      if (cancelled) return
+      if (result.ok) {
+        setCostEstimate(result.data)
+      } else {
+        setCostEstimate(null)
+        setCostError(result.error)
+      }
     })
-      .then(r => (r.ok ? r.json() : null))
-      .then(setCostEstimate)
-      .catch(() => setCostEstimate(null))
-  }, [expanded, costShotCount, costDialogueRatio])
+    return () => {
+      cancelled = true
+    }
+  }, [expanded, costShotCount, costDialogueRatio, retryTick])
 
   const titleNode: ReactNode = (
     <h2 className="text-eyebrow-lg font-semibold uppercase tracking-widest flex items-center gap-2">
@@ -121,8 +138,15 @@ export function CostEstimatorSection({ s }: Props) {
           )}
         </>
       )}
-      {!costEstimate && (
-        <p className="text-eyebrow text-mut italic">Loading estimate…</p>
+      {!costEstimate && costError && (
+        <ErrorState
+          title="Estimate unavailable"
+          message={costError}
+          onRetry={() => setRetryTick((t) => t + 1)}
+        />
+      )}
+      {!costEstimate && !costError && (
+        <LoadingState label="Loading estimate" />
       )}
     </SettingsSection>
   )

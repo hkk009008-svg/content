@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Project, AppConfig } from '../../types/project'
-import { Section } from '../ui'
+import { Section, BusyState, ErrorState, LiveRegion } from '../ui'
 import { SelectRow, TextRow } from './inspector/controls'
 import { VideoSection } from './inspector/VideoSection'
 import { ImageSection } from './inspector/ImageSection'
@@ -32,16 +32,27 @@ const FALLBACK_MOODS = [
  * merged `global_settings` then refreshes.
  *
  * Every write goes through `runMutation` below, so a rejection surfaces the
- * inline banner instead of silently no-op'ing. That is a realistic outcome
- * here, not a theoretical one: this route fails closed with 409
+ * banner instead of silently no-op'ing. That is a realistic outcome here,
+ * not a theoretical one: this route fails closed with 409
  * `settings_revision_conflict` whenever the project's `global_settings`
  * revision has moved on (web_server.py `api_update_project`), and the
  * controls render from `project.global_settings` — so without the banner a
  * rejected change just keeps showing the old value with no explanation.
+ *
+ * Slice 13b renders that banner through the shared `ErrorState` primitive
+ * (still `role="alert"`, so it's the same element the runMutation tests
+ * already pin) instead of a bespoke `<div>`, adds a `BusyState` pill while
+ * an `update()` write is in flight (sliders/toggles/selects had no busy
+ * feedback at all), and a polite `LiveRegion` confirmation on success --
+ * NOT a persistent visible "Saved" card, which would fire on every
+ * keystroke/drag tick and be exactly the noise the shared primitives exist
+ * to replace.
  */
 export default function SettingsInspector({ project, config, onRefresh }: Props) {
   const s = project.global_settings as any
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [savedNotice, setSavedNotice] = useState('')
 
   /** Sibling of ShotInspector's `runMutation` — same contract: surface and
    *  don't refresh on failure, clear and refresh on a confirmed success. */
@@ -62,16 +73,28 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
   // so there is no optimistic local value for them to revert -- the banner
   // is the whole remedy.
   const update = async (key: string, value: any): Promise<void> => {
-    await runMutation(apiPut(`${API}/projects/${project.id}`, { global_settings: { ...s, [key]: value } }))
+    setBusy(true)
+    const ok = await runMutation(apiPut(`${API}/projects/${project.id}`, { global_settings: { ...s, [key]: value } }))
+    setBusy(false)
+    if (ok) setSavedNotice(`Saved ${key.replace(/_/g, ' ')}`)
   }
 
   return (
     <div>
-      {saveError && (
-        <div role="alert" className="mx-3 mt-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-[11px] text-fail">
-          Could not save: {saveError}
+      {busy && (
+        <div className="border-b border-line px-3 py-2">
+          <BusyState label="Saving settings" />
         </div>
       )}
+      {saveError && (
+        <ErrorState
+          title="Setting not saved"
+          message={saveError}
+          onDismiss={() => setSaveError(null)}
+          className="border-x-0 border-t-0"
+        />
+      )}
+      <LiveRegion message={savedNotice} />
       <ProjectSection s={s} config={config} project={project} update={update} runMutation={runMutation} />
       <VideoSection s={s} config={config} update={update} />
       <ImageSection s={s} config={config} update={update} />

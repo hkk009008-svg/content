@@ -220,3 +220,32 @@ describe('SettingsInspector -- truthful generateStyleRules()', () => {
     expect(init!.method).toBe('POST')
   })
 })
+
+describe('SettingsInspector -- slice 13b busy/success feedback', () => {
+  it('shows a BusyState pill while the settings PUT is in flight, and clears it once resolved', async () => {
+    let resolveFetch: ((res: Response) => void) | undefined
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveFetch = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<SettingsInspector project={makeProject()} config={CONFIG} onRefresh={vi.fn()} />)
+    clickPortraitAspectRatio()
+
+    expect(await screen.findByText('Saving settings')).toBeInTheDocument()
+
+    resolveFetch?.(response({}))
+    await waitFor(() => expect(screen.queryByText('Saving settings')).toBeNull())
+  })
+
+  it('announces a saved confirmation via a polite live region, not a persistent visible card', async () => {
+    stubFetch({ ok: true })
+
+    render(<SettingsInspector project={makeProject()} config={CONFIG} onRefresh={vi.fn()} />)
+    clickPortraitAspectRatio()
+
+    const notice = await screen.findByText(/Saved aspect ratio/i)
+    // A LiveRegion announcement (role="status", sr-only), not an ErrorState
+    // -shaped dismissible card that would fire on every keystroke/drag tick.
+    expect(notice).toHaveAttribute('role', 'status')
+    expect(screen.queryByRole('button', { name: /Dismiss/i })).toBeNull()
+  })
+})

@@ -23,6 +23,13 @@ interface Props {
  * to the focused scene's first shot. Selecting a Timeline clip from a
  * DIFFERENT scene also re-focuses that scene (via `setFocusScene`) so
  * `ShotBin` follows the Timeline selection across scene boundaries too.
+ *
+ * `orderedShotIds` (slice 13c) flattens every scene's shots in playback
+ * order (scenes sorted by `order`, same flattening `Timeline`/`Filmstrip`
+ * already do) so `ShotViewer`'s transport bar can step to the previous/next
+ * shot project-wide -- crossing a scene boundary re-focuses that scene via
+ * the same `handleSelectShot` the bin/timeline/inspector already share, so
+ * the whole page follows the transport bar exactly like it follows a click.
  */
 export default function EditPage({ project, config, apiBase, onRefreshProject, shotStates }: Props) {
   const { focusScene, setFocusScene } = usePage()
@@ -45,15 +52,42 @@ export default function EditPage({ project, config, apiBase, onRefreshProject, s
     return { shot: null, scene: null }
   }, [project.scenes, activeShotId])
 
+  const orderedShotIds = useMemo(() => {
+    const scenesInOrder = [...project.scenes].sort((a, b) => a.order - b.order)
+    const out: string[] = []
+    for (const sc of scenesInOrder) {
+      for (const sh of sc.shots ?? []) out.push(sh.id)
+    }
+    return out
+  }, [project.scenes])
+
   const handleSelectShot = (shotId: string) => {
     setSelectedShotId(shotId)
     const owningScene = project.scenes.find((sc) => sc.shots?.some((sh) => sh.id === shotId))
     if (owningScene && owningScene.id !== sceneId) setFocusScene(owningScene.id)
   }
 
+  const activeIndex = activeShotId ? orderedShotIds.indexOf(activeShotId) : -1
+  const hasPrevShot = activeIndex > 0
+  const hasNextShot = activeIndex !== -1 && activeIndex < orderedShotIds.length - 1
+  const handlePrevShot = () => {
+    if (hasPrevShot) handleSelectShot(orderedShotIds[activeIndex - 1])
+  }
+  const handleNextShot = () => {
+    if (hasNextShot) handleSelectShot(orderedShotIds[activeIndex + 1])
+  }
+
   return (
     <div data-page="edit" className="flex h-full min-h-0 bg-app text-tx">
-      <ShotBin scene={scene} shotStates={shotStates} activeShotId={activeShotId} onSelectShot={handleSelectShot} />
+      <ShotBin
+        scene={scene}
+        shotStates={shotStates}
+        activeShotId={activeShotId}
+        onSelectShot={handleSelectShot}
+        projectId={project.id}
+        apiBase={apiBase}
+        onRefreshProject={onRefreshProject}
+      />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ShotViewer
@@ -62,6 +96,10 @@ export default function EditPage({ project, config, apiBase, onRefreshProject, s
           scene={active.scene}
           shotState={activeShotId ? shotStates.get(activeShotId) : undefined}
           apiBase={apiBase}
+          onPrevShot={handlePrevShot}
+          onNextShot={handleNextShot}
+          hasPrevShot={hasPrevShot}
+          hasNextShot={hasNextShot}
         />
         <Timeline project={project} shotStates={shotStates} activeShotId={activeShotId} onSelect={handleSelectShot} />
       </div>

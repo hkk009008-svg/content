@@ -39,7 +39,10 @@ export default function ProjectTree({
   onRefresh,
 }: Props) {
   return (
-    <div className="flex w-[236px] shrink-0 flex-col overflow-y-auto border-r border-line bg-gutter">
+    <div
+      className="flex w-[208px] shrink-0 flex-col overflow-y-auto border-r border-line
+                 bg-gutter xl:w-[236px]"
+    >
       <div className="border-b border-line px-3 py-2">
         <span className={MICRO_LABEL}>Project</span>
       </div>

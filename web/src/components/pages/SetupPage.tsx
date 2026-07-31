@@ -44,8 +44,10 @@ export default function SetupPage({
 
       <SceneCueSheet project={project} />
 
-      {/* Right: reconciled settings inspector. */}
-      <div className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-gutter">
+      {/* Right: reconciled settings inspector. Narrower below the `xl`
+          breakpoint so the 3-column shell stays legible down to 1024px
+          instead of assuming a >=1440px floor. */}
+      <div className="w-[264px] shrink-0 overflow-y-auto border-l border-line bg-gutter xl:w-[300px]">
         <SettingsInspector project={project} config={config} onRefresh={onRefreshProject} />
       </div>
     </div>

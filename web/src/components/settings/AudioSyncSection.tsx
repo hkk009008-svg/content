@@ -129,10 +129,22 @@ export function LipsyncPriorityList({ s, config, update }: { s: any; config: App
                 </span>
               )}
             </div>
-            <button type="button" aria-label={`Move ${info?.label || key} up`} onClick={() => move(idx, -1)} disabled={idx === 0}
-              className="text-eyebrow text-mut hover:text-acc disabled:opacity-30 px-1">↑</button>
-            <button type="button" aria-label={`Move ${info?.label || key} down`} onClick={() => move(idx, 1)} disabled={idx === priority.length - 1}
-              className="text-eyebrow text-mut hover:text-acc disabled:opacity-30 px-1">↓</button>
+            <button
+              type="button"
+              aria-label={`Move ${info?.label || key} up`}
+              title={idx === 0 ? 'Already first in priority order' : `Move ${info?.label || key} up`}
+              onClick={() => move(idx, -1)}
+              disabled={idx === 0}
+              className="text-eyebrow text-mut hover:text-acc disabled:opacity-30 px-1"
+            >↑</button>
+            <button
+              type="button"
+              aria-label={`Move ${info?.label || key} down`}
+              title={idx === priority.length - 1 ? 'Already last in priority order' : `Move ${info?.label || key} down`}
+              onClick={() => move(idx, 1)}
+              disabled={idx === priority.length - 1}
+              className="text-eyebrow text-mut hover:text-acc disabled:opacity-30 px-1"
+            >↓</button>
           </div>
         )
       })}
