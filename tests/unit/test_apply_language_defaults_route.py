@@ -83,12 +83,15 @@ def test_customized_field_is_not_overwritten_by_default(client, tmp_path, monkey
     explicit Cartesia TTS choice) survives applying a different language's
     defaults -- only genuinely-unset fields get seeded.
 
-    Uses the legacy whole-object PUT (VoiceSection.tsx's actual write path
-    via SettingsInspector's `update()`) rather than the new strict PATCH --
-    `tts_provider` is not yet in PATCH's `_SETTINGS_KEY_VALIDATORS` table
-    (see the comment above that table: extending it for VoiceSection's
-    fields is out of this slice's `web_server.py` pathspec, which is
-    scoped to the language-defaults route only).
+    Seeds that field through the legacy whole-object PUT because that is
+    VoiceSection.tsx's actual write path (SettingsInspector's `update()`
+    PUTs the merged `global_settings`), so the pre-existing value arrives
+    the way the UI really writes it. The strict PATCH would accept
+    `tts_provider` too now -- a later slice added it, and the rest of
+    VoiceSection's fields, to `_SETTINGS_KEY_VALIDATORS` -- but PATCH
+    unconditionally demands a `revision` echo, while this brand-new fixture
+    project has none established yet and so takes PUT's one-time bootstrap
+    accept-and-stamp (`_settings_revision_established`).
     """
     pid = _make_project(tmp_path, monkeypatch)
     put_resp = client.put(
