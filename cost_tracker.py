@@ -82,7 +82,7 @@ API_COST_USD: dict[str, float] = {
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
     "HIDREAM_I1":    0.06,
-    "GEMINI_IMAGE":  0.077,  # gemini-3.1-flash-image (Nano Banana 2) — migrated off gemini-2.5-flash-image (shutdown deadline 2026-10-02, Slice 6b). Provider-claimed pricing page (ai.google.dev/gemini-api/docs/pricing, 2026-07-31 WebFetch) lists standard-tier image OUTPUT at $60/1M tok; carrying forward the same ~1290 tok/img estimate the 2.5 entry used ($60/1M x ~1290 tok/img ~= $0.077/img) — PROVIDER-CLAIMED, recalibrate against invoice per R-MEASURE.
+    "GEMINI_IMAGE":  0.067,  # gemini-3.1-flash-image (Nano Banana 2) — migrated off gemini-2.5-flash-image (shutdown deadline 2026-10-02, Slice 6b). The provider pricing page (ai.google.dev/gemini-api/docs/pricing, 2026-07-31) publishes the EXACT per-image figure for the 1K resolution this adapter hardcodes (gemini_image_native.py image_size="1K"): $0.067/img (quality review of 3c7714e4 — the earlier $0.077 token-estimate overstated it ~15%). PROVIDER-CLAIMED, recalibrate against invoice per R-MEASURE.
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
     "CARTESIA_SONIC_2":  0.008,   # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67

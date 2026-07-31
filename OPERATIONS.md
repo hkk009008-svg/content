@@ -97,7 +97,7 @@ Authoritative list (every variable consumed by the pipeline):
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (primary creative LLM) | LLMEnsemble, ChiefDirector, scene decomposition |
 | `OPENAI_API_KEY` | Yes (primary judge / GPT-4o-only paths) | LLMEnsemble, style director, dialogue writer, scene decomposer fallback |
-| `GEMINI_API_KEY` | Optional | Opt-in Gemini dispatch via `models=["gemini-2.5-pro", ...]`; also `gemini_omni_native.GeminiOmniAPI` (video, WS2 `GEMINI_OMNI` — the `target_api` PRIMARY for all shot types) and `gemini_image_native.GeminiImageAPI` (image, WS3 Nano Banana — the image PRIMARY for all projects). Both accept either this or `GOOGLE_API_KEY` (`settings.google_api_key or settings.gemini_api_key`). |
+| `GEMINI_API_KEY` | Optional | Opt-in Gemini dispatch via `models=["gemini-3.1-pro-preview", ...]`; also `gemini_omni_native.GeminiOmniAPI` (video, WS2 `GEMINI_OMNI` — the `target_api` PRIMARY for all shot types) and `gemini_image_native.GeminiImageAPI` (image, WS3 Nano Banana — the image PRIMARY for all projects). Both accept either this or `GOOGLE_API_KEY` (`settings.google_api_key or settings.gemini_api_key`). |
 | `GOOGLE_API_KEY` | Optional | Veo direct API path (falls back to Vertex AI if absent); also `gemini_omni_native.GeminiOmniAPI` (video) and `gemini_image_native.GeminiImageAPI` (image) — same either-key contract as `GEMINI_API_KEY` above. |
 
 ### Video generation

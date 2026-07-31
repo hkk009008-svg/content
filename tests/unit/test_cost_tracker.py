@@ -669,8 +669,10 @@ class TestRecordAPICall:
         to gemini-3.1-flash-image (Nano Banana 2). Provider-claimed pricing
         (ai.google.dev/gemini-api/docs/pricing) raised the image-output rate
         to $60/1M tok (from $30/1M tok) — carrying forward the existing
-        ~1290 tok/img estimate gives ~$0.077/img, not the old $0.03 figure."""
-        assert API_COST_USD["GEMINI_IMAGE"] == pytest.approx(0.077)
+        published exact per-image 1K figure is $0.067/img (the resolution
+        gemini_image_native hardcodes), not the old $0.03 figure nor the
+        ~15%-overstated $0.077 token-estimate."""
+        assert API_COST_USD["GEMINI_IMAGE"] == pytest.approx(0.067)
         assert API_COST_USD["GEMINI_IMAGE"] != pytest.approx(0.03)
 
     # --- Duration-aware LTX cost (money-gate finding 2026-07-30) ----------
