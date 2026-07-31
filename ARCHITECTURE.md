@@ -1920,7 +1920,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 
 ## 13. LLM coordination
 
-### 13.1 `LLMEnsemble` ([llm/ensemble.py:94](llm/ensemble.py:94))
+### 13.1 `LLMEnsemble` ([llm/ensemble.py:95](llm/ensemble.py:95))
 
 **Pattern: parallel quorum, NOT fallback.**
 

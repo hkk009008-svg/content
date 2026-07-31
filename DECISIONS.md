@@ -3917,3 +3917,74 @@ Evidence:
 - E2E through the production chokepoint (`IDENTITY_EMBED_MODEL=AdaFace`, man-ref image):
   2 detections (matches the documented MAN_REF fact), 512-d L2-normalized embeddings,
   byte-identical across runs, `validate_image(ref, ref)` → 1.0000 passed.
+
+## ADR-079: Dual-channel (stderr + warnings.warn) for all load-bearing production warnings
+
+Date: 2026-07-11
+
+Context: The TF/Keras import chain — loaded whenever `from deepface import
+DeepFace` executes (identity/validator.py, domain/character_manager.py,
+domain/continuity_engine.py, phase_c_vision.py) — inserts a blanket
+`('ignore', None, Warning, None, 0)` filter at the FRONT of the global
+`warnings.filters`. From that point every bare `warnings.warn(...)` in the
+process is invisible to operators, even under `-W error`. `pytest.warns`
+still passes because it installs its own filter context — the invisible-green
+class: tests stay green while production goes silent. Verified 2026-07-11;
+first fixed at the identity EMBED_MODEL chokepoint (ADR-066, commit
+fd423ae5 on `claude/clever-jepsen-d8074d`, merge to main owed at time of
+writing — verified via `git branch --contains fd423ae5` → only that branch).
+
+Decision: Every load-bearing operator warning (structural/degradation
+signals; the silent-gate-degradation and money-loss families especially)
+must emit on BOTH channels — `print(msg, file=sys.stderr)` in addition to
+`warnings.warn(msg)` — with a stomp-simulation test
+(`warnings.simplefilter("ignore")` + capsys asserting the message reaches
+stderr). Swept all remaining production sites (survey:
+`grep -rn 'warnings\.warn' --include='*.py' .` minus tests/, scripts/ →
+7 sites; the validator site is ADR-066's, untouched here to avoid
+conflicting with the pending merge — instead pinned with a strict xfail in
+`tests/unit/test_warning_stderr_stomp.py::TestValidatorSiblingPin` per
+R-VERIFY-TIER(B), placed in a file fd423ae5 does not touch so it cannot
+conflict; when fd423ae5 lands the strict XPASS forces the pin's removal):
+
+- `cost_tracker.py` ×4 via the new `_warn_operator` helper (single
+  write-site for the pattern in the money lane): NaN/inf cost coercion in
+  `log()` (cost-spent-nan-poison guard), unknown-model $0.00 in `log_llm()`
+  (its stdout banner folded into the stderr channel), unknown-API $0.00 in
+  `record_api_call()`, non-finite persisted spend fail-closed in
+  `rehydrate_spent_usd_from_video()`.
+- `llm/ensemble.py` `_log_llm_usage` swallowed `log_llm` failure
+  (llmensemble-cost-uncounted class — unrecorded spend under-reads the
+  budget gate).
+- `audio/dialogue.py` `_maybe_save_alignment` write-only sidecar notice
+  (only signal that `forced_alignment_enabled` burns compute for zero
+  current output).
+
+Evidence:
+- RED first (TDD): `tests/unit/test_warning_stderr_stomp.py` — 6 stomp
+  tests failed `assert "..." in ''` against bare `warnings.warn`; green
+  after the sweep.
+- `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_warning_stderr_stomp.py tests/unit/test_cost_tracker.py tests/unit/test_alignment_warning.py tests/unit/test_spent_usd_resume.py tests/unit/test_cost_spent_nan_poison_xfail.py -q`:
+
+```text
+124 passed, 2 warnings in 0.30s
+```
+
+- Full unit suite: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit -q` →
+  `3410 passed, 2 skipped, 10 warnings, 10 subtests passed in 234.10s`.
+- Validator sibling pin executed RED under `--runxfail`
+  (`1 failed, 10 passed`), xfailed on a normal run (`10 passed, 1 xfailed`).
+- money-gate-reviewer verdict: NITS. Family-1 (gate-source-mismatch): clean —
+  accumulator write chokepoint (`spent_usd +=`), all three gate readers, and
+  both coercion branches untouched; reviewer independently reproduced the RED
+  by sabotaging `_warn_operator` back to bare warn (stderr `''`). NIT
+  resolutions: (1) stacklevel claim rejected — the helper adds exactly one
+  frame and compensates with +1, so `log()`'s `stacklevel=3` reproduces
+  pre-diff attribution identically; (2) warn-raises-before-coercion rejected
+  as no-op — on a raise, the insert and accumulator increment are also
+  skipped, so no poisoned value reaches the gate and the failure is loud;
+  (3) validator sibling gap accepted → the strict-xfail pin above (the
+  reviewer's staleness evidence checked the wrong commit — `1fc7e51d` is on
+  main, but the fix is `fd423ae5`, still branch-only).
+- `scripts/ci_smoke.py` → OK after re-pointing the one anchor my
+  `import sys` shifted (ARCHITECTURE.md:1571, `llm/ensemble.py:94 → 95`).

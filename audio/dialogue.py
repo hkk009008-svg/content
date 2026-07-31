@@ -28,6 +28,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import warnings
 from typing import TYPE_CHECKING, Optional
 
@@ -493,12 +494,17 @@ def _maybe_save_alignment(
         return None
     json_path = os.path.splitext(audio_path)[0] + ".alignment.json"
     save_alignment_json(result, json_path)
-    warnings.warn(
+    msg = (
         "[alignment] forced-alignment sidecar written but load_alignment_json has "
         "no consumer — compute runs for no current output. Wire into "
-        "lip_sync.validate_lipsync_quality to use (catB-syncnet integration point).",
-        stacklevel=2,
+        "lip_sync.validate_lipsync_quality to use (catB-syncnet integration point)."
     )
+    # BOTH channels (ADR-066/067): after DeepFace/TF loads, a fronted
+    # ignore-all warnings filter makes bare warnings.warn operator-invisible —
+    # and this notice is the only signal that forced_alignment_enabled burns
+    # compute for zero current output.
+    print(msg, file=sys.stderr)
+    warnings.warn(msg, stacklevel=2)
     print(f"   📐 Forced alignment ({result.provider}, {len(result.words)} words, lang={language}) → {json_path}")
     return json_path
 

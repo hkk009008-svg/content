@@ -10,6 +10,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import sys
 import warnings
 from dataclasses import dataclass, field
 from typing import Any
@@ -184,10 +185,13 @@ class LLMEnsemble:
                 output_tokens=output_count,
             )
         except Exception as exc:  # noqa: BLE001
-            warnings.warn(
-                f"[LLMEnsemble] Failed to record LLM usage for {model!r}: {exc}",
-                stacklevel=2,
-            )
+            msg = f"[LLMEnsemble] Failed to record LLM usage for {model!r}: {exc}"
+            # BOTH channels (ADR-066/067): once DeepFace/TF loads anywhere in
+            # the process, a fronted ignore-all warnings filter silences bare
+            # warnings.warn — and unrecorded LLM spend under-reads the budget
+            # gate for the rest of the run (llmensemble-cost-uncounted class).
+            print(msg, file=sys.stderr)
+            warnings.warn(msg, stacklevel=2)
 
     # ------------------------------------------------------------------
     # Public API
