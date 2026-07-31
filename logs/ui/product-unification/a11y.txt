@@ -1,0 +1,25 @@
+
+ RUN  v2.1.9 /Users/hyungkoookkim/Content/web
+
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > LoadingState has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > EmptyState (with action) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > ErrorState (with retry/dismiss) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > OfflineState (with retry) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > BusyState has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > SuccessState (with dismiss) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > LiveRegion (polite and assertive) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Badge has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Button (primary, loading, and disabled variants) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Toggle (on and off) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > SelectPill has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Section (expanded) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Meter has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > StatusDot alongside a text label has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > Dialog (open, titled, with interactive content) has no violations
+ ✓ src/components/ui/primitives.a11y.test.tsx > shared primitive accessibility (jest-axe) > MediaAsset > idle state has no violations
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  01:10:54
+   Duration  536ms (transform 49ms, setup 20ms, collect 100ms, tests 136ms, environment 120ms, prepare 61ms)
+

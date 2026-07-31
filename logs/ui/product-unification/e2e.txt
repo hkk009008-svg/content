@@ -1,0 +1,92 @@
+Seeded no-spend E2E journey — plan slice 13d
+============================================
+Date:    2026-08-01
+Branch:  unification/waves-3-8 @ 4f2460ae (converged with origin/main at ab66fc62)
+Server:  REAL Flask backend, .venv/bin/python web_server.py, port 8080
+         (.claude/launch.json config "app")
+Frontend: built bundle from `npm --prefix web run build` served by Flask
+Spend:   ZERO. No provider call was made. The journey exercises project
+         creation, navigation, state rendering and settings surfaces only;
+         Generate was never invoked.
+
+REPRODUCE
+---------
+  .venv/bin/python web_server.py          # or preview_start {name: "app"}
+  open http://localhost:8080
+  # then walk: project create -> Setup -> Capability -> Run, at 1440x1000 and 1024x768
+  npm --prefix web run test:a11y          # writes a11y.txt beside this file
+
+JOURNEY + OBSERVED STATE
+------------------------
+1. PROJECT SELECTION (1440x1000)
+   Renders "Cinema Production" with New Production form and Recent Productions
+   (16/16 listed, search box present). No console errors.
+
+2. PROJECT CREATE — typed "E2E No-Spend Journey", clicked Create.
+   Real POST against the real backend; landed directly on Setup with the new
+   project active. Header shows the project id chip and EST ~$0.
+
+3. SETUP (1440x1000) — verified live, per-wave:
+   - EmptyState primitive renders "No scenes yet" with next-action guidance
+     (slice 13a primitives consumed by 13b, not hand-rolled).
+   - CASCADE RETRY LIMIT reads 1, hint cites "phase_c_ffmpeg.py
+     MAX_CASCADE_RETRIES". This is slice 9b's spend-truth fix: the UI
+     previously displayed 2 against a runtime max of 1.
+   - Video engine list: Kling Native (legacy v1.6), Sora 2 Native, Veo 3.1
+     Native, Runway Gen-4 Turbo, LTX Video 2.3, Kling v3 Pro (FAL),
+     Seedance 2.0 (FAL) — each with a CLOUD badge.
+       * "Runway Gen-4 Turbo" = slice 5b's truthful rename (was "Runway Gen-4"
+         with a false 3-reference claim).
+       * SORA_2 (FAL) absent = retired in slice 2, non-selectable.
+   - "Native dialogue audio" toggle present = the real-but-invisible setting
+     slice 9b surfaced.
+   - Color grade preset combobox present (warm_cinema default) — the setting
+     origin/main's 335a3deb now actually honors in auto-assembly.
+   - Accessibility tree: every switch carries an explicit aria-label
+     ("Enable Kling Native (legacy v1.6)"), range and comboboxes labeled
+     (slice 13a).
+   - Footer status: "IDLE · 0/0 SHOTS" — server-derived (slice 8a).
+
+4. CAPABILITY (1440x1000)
+   "3 of 6 systems engaged" — slice 12's evidence-backed count: a live/wired
+   status is a CLAIM, forced to not-engaged without BOTH a resolving consumer
+   anchor and a resolving evidence test. Empty state reads "No capability data
+   yet — run the pipeline to populate scores." No raw engine ids, hashes or
+   internal notes in the operator view (slice 12 requirement).
+
+5. RUN (1440x1000)
+   Header "RUN · IDLE", 0/0 shots, 14-stage rail all QUEUED, monitor shows
+   "No active shot" and "Waiting for pipeline events…".
+   IMPORTANT: no cancel / pause / review affordances are offered while the
+   backend snapshot is idle. This was the audit's original defect ("Run shows
+   active/cancel/review affordances while the backend snapshot is idle") and
+   is closed by slice 8a's allowed_actions + slice 8b consuming it.
+
+6. CONSTRAINED WIDTH (1024x768)
+   document.body.scrollWidth == 1024, window.innerWidth == 1024 ->
+   horizontalOverflow == false. The 3-column shell remains usable; slice 13b
+   narrows the side rails below the 1280px breakpoint instead of assuming a
+   1440 floor.
+
+7. CONSOLE
+   read_console_messages(onlyErrors) across the whole journey: NO console
+   errors. (Plan acceptance criterion.)
+
+ARTIFACT STATUS — HONEST NOTE
+-----------------------------
+a11y.txt            PRESENT (npm --prefix web run test:a11y, 16 checks pass)
+e2e.txt             THIS FILE
+1440x1000/*.png     NOT CAPTURED
+1024x768/*.png      NOT CAPTURED
+
+Reason: no scriptable browser is installed in this environment (playwright
+absent from the venv and from web/node_modules; no chromium/chrome binary on
+PATH). The journey above was driven through the in-app browser pane, which
+renders and inspects but cannot write PNG files to logs/.
+
+Capturing the named PNGs requires a deliberate tooling decision — adding
+playwright (~300MB with browsers) as a dev dependency. That is a real change
+to the project's dependency surface, so it is FLAGGED for the user-principal
+rather than silently added or silently skipped. Everything the screenshots
+were meant to evidence is recorded above as executed observations with the
+commands to reproduce them.

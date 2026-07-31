@@ -69,6 +69,14 @@ logs/*
 # EXCEPTION: Wave 2+ close requires a committed product-oracle measurement artifact
 # (ADR-027 FIX-5 / R-MEASURE), not a local scratch render.
 !logs/product-oracle-*.json
+# EXCEPTION: the product-unification plan's completion gate requires the seeded
+# no-spend journey + a11y output to be RETAINED as reproducible evidence
+# (slice 13d), so these are source-of-record, not scratch. Directory chain must
+# be re-included before the files, since git cannot un-ignore a file under an
+# excluded directory.
+!logs/ui/
+!logs/ui/product-unification/
+!logs/ui/product-unification/**
 
 # GitNexus index
 .gitnexus
