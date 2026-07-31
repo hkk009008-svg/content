@@ -471,6 +471,21 @@ integration verification, but does not implement the production slices.
 | M2 native billed-swallow siblings (SORA/VEO/LTX/OMNI) | — | defect verified thrice (M1 implementer Rule #13, money-gate NIT, lane-v corroboration + orchestrator source check) | Implementer dispatched (`wf_a64283dc`) |
 | R2 optimizer coercion threading | — | defect verified thrice (2b-A quality MINOR, R1 implementer Rule #13, orchestrator source check of `prompt_optimizer.py:633`) | Implementer dispatched (`wf_a64283dc`) |
 
+### Wave-1 round-1 landings (2026-07-31)
+
+| Slice | Commit | State |
+|---|---|---|
+| fixup-I2 member-access inventory | `9135587b` | landed; reviews in flight (`wf_dec8ec5e`) |
+| R3 optimizer fallback filter | `4b5293d5` | landed; reviews in flight |
+| 3 Gemini Omni repair + re-admission | `caad6bcf` | landed (incl. disclosed orchestrator integration: PORTRAIT set + 20 roster-pin reconciliations); money+lane-v+quality in flight |
+| 2c pickers on server selectable view | `9d131e77` | landed (disclosed: SelectPill + App.tsx project_id fetch); reviews in flight |
+| 7 continuity denoise + canonical identity | `4ce38c1a` | landed; reviews in flight |
+| artifact refresh | `f20f40bc` | landed |
+
+Matrix at landing: backend 4311/0, web 65/65 + build, smoke OK, anchors clean.
+Remaining Wave 1: slice 4 (LTX) -> 5b (Runway Act-Two), sequential, dispatch
+on review-clear (phase_c/adapter overlap with slice 3 now resolved).
+
 ### Wave-R round-2 verdicts (wf_54301ec0)
 
 `49d1c36a` fixup-M1 lane-v **GO** (mutation re-probed). `45eed520` fixup-R1
