@@ -490,6 +490,28 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave 2 CLOSED (2026-07-31); merged to main
+
+6c `6f684da7` + doc-truth pass `7c170997`: lane-v **NITS** (Viggle
+reachability traced end-to-end — the router branch is dead code under the
+containment; sibling surface named for the repair slice) + quality **NITS**
+(the edited file's own docstrings — fixed in the closing pass). Matrix at
+close: backend 4387/0, web 74/74 + build, smoke OK, pip check clean.
+
+**Wave 2 complete: 6b (Gemini successors, deadline met), 6a (HOLD,
+decision recorded), 6c (Cartesia currency, Viggle containment, catalog
+truth, Pexels cleanup).** Queued follow-ups carried forward: Viggle
+adapter-repair slice (official API at apis.viggle.ai; router branch +
+_router semaphore + KNOWN_BROKEN flip + rule-3 restore); **Cartesia
+sonic-2 sunset 2026-10-20** (Korean-prosody R-MEASURE + migration —
+NEW hard deadline); Stable Audio catalog source URL; duration-aware
+would_exceed precision; gpt-5.6/Responses evaluation (user-fundable);
+continuity temporal-chaining wiring; performance Mode-B interpretation
+ratified by the fix-S5B review.
+
+Branch merged to main at this point (ff, 92 commits); Waves 3-8 (slices
+8-15) remain per the Resumption sequencing for future sessions.
+
 ### 6b landed + reviewed; 6a DECIDED (HOLD); 6c dispatched
 
 6b `3c7714e4` + review-fix `96966171` (quality caught the exact published
