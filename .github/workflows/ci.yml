@@ -162,6 +162,32 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Node/npm in a Python job is deliberate, not cruft — do not delete.
+      # tests/unit/test_product_surface_inventory.py shells out to
+      # scripts/product_surface_frontend_inventory.mjs, which resolves
+      # `typescript` through createRequire(../web/package.json) — i.e. from
+      # web/node_modules, relative to the SCRIPT, not to --root. web/node_modules
+      # is gitignored, so without these two steps the helper exits 2, main()
+      # returns 1, and the 82 tests in that file that invoke it fail for a
+      # missing dependency (the other 78 mock the helper and pass regardless,
+      # which is why this read as suite noise rather than a disarmed gate).
+      # Measured on run 30621088290 (main @ 8dde7576): 82 of the job's 104
+      # failures were exactly this. That also silently disarmed
+      # test_repository_artifact_is_current, the only gate proving the committed
+      # docs/generated/product_surface_inventory.json matches the committed
+      # source. Deliberately NOT a skipif guard: an honest skip would leave the
+      # artifact-currency gate unenforced, which is the failure mode that let
+      # the drift go unnoticed in the first place. Fail closed instead.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install npm deps (TypeScript for the surface-inventory tests)
+        working-directory: web
+        run: npm ci
+
       - name: Run pytest tests/unit/
         # tests/integration/ requires real cloud credentials and must NOT run
         # in CI. Current count: ARCHITECTURE.md §16 (single source). The
