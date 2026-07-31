@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Project, AppConfig, Scene } from '../types/project'
 import { classifyShotType, getSceneGuidance, getShotTemplate } from '../lib/guidance'
+import { videoEngines, humanizeEngineReason } from '../lib/engines'
 
 const API = '/api'
 
@@ -20,6 +21,7 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
     action: '', dialogue: '', mood: 'cinematic', camera_direction: '', duration_seconds: '5',
   })
   const [generatingDialogue, setGeneratingDialogue] = useState<string | null>(null)
+  const engines = videoEngines(config)
 
   const handleAdd = async () => {
     if (!form.title.trim()) return
@@ -361,12 +363,6 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                           })
                           onRefresh()
                         }
-                        // Filter APIs by modality=video + status live/beta (for the picker)
-                        const videoApiOptions = config?.api_registry
-                          ? Object.entries(config.api_registry).filter(
-                              ([, v]: any) => (v.modality === 'video' || v.category === 'smart') && (v.status || 'live') !== 'planned'
-                            )
-                          : []
                         return (
                           <div key={shot.id || si} className="rounded bg-panel px-2 py-1.5 text-eyebrow text-mut">
                             <div className="flex gap-2">
@@ -385,9 +381,14 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                                 onChange={e => updateShotApi(e.target.value)}
                                 className="rounded bg-app border border-line px-1 py-0.5 text-eyebrow-sm text-tx"
                                 title="Override target API for this shot">
-                                {videoApiOptions.map(([k, v]: any) => (
-                                  <option key={k} value={k}>
-                                    {v.label}{v.per_shot_cost ? ` ($${v.per_shot_cost.toFixed(2)})` : ''}
+                                {engines.map((e) => (
+                                  <option
+                                    key={e.key}
+                                    value={e.key}
+                                    disabled={!e.selectable}
+                                    title={e.reason ? humanizeEngineReason(e.reason) : undefined}
+                                  >
+                                    {e.label}{e.cost ? ` ($${e.cost.toFixed(2)})` : ''}
                                   </option>
                                 ))}
                               </select>

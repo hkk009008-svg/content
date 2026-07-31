@@ -22,17 +22,22 @@ const COLOR_GRADE_PRESETS = [
 ]
 
 /**
- * Video section — engine picker + cascade + post-processing.
+ * Video section — engine cascade toggles + post-processing.
  *
- * Engines come from `videoEngines(config)` (Task 7): the reconciled,
- * Google-first-ordered list with Sora/Runway/Hedra/AUTO already excluded and
- * GEMINI_OMNI marked primary. Each row's cloud-vs-pod badge is derived from
- * `isPodGated` — provider-keyed, so a future pod-billed video engine surfaces
- * ⚙ Pod without a code change here. Enable state writes the whole nested
- * `api_engines` object (settings write contract).
+ * Engines come from `videoEngines(config)` — the server-reconciled
+ * selectable view (`config.video_engines`, built by
+ * `web_server.py:_project_video_engine_rows`). This is a cascade
+ * participation list (which dispatchable engines the project's video
+ * cascade may try), so it's further narrowed to currently `selectable`
+ * engines, excluding `AUTO` (a routing directive, not a dispatchable engine
+ * you toggle on/off). GEMINI_OMNI is marked primary. Each row's
+ * cloud-vs-pod badge is derived from `isPodGated` — provider-keyed, so a
+ * future pod-billed video engine surfaces ⚙ Pod without a code change here.
+ * Enable state writes the whole nested `api_engines` object (settings write
+ * contract).
  */
 export function VideoSection({ s, config, update }: Props) {
-  const engines = videoEngines(config)
+  const engines = videoEngines(config).filter((e) => e.selectable && e.key !== 'AUTO')
   const engineState = s.api_engines ?? {}
 
   const setEngineEnabled = (key: string, enabled: boolean) => {

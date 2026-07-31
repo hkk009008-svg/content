@@ -36,10 +36,16 @@ function AppInner() {
     approveScreening, reassembleProject,
   } = usePipelineState(project?.id ?? null)
 
-  // Load config on mount
+  // Config is project-scoped once a project is selected: `video_engines`
+  // (the server-reconciled engine-selectability view UI pickers consume —
+  // see web/src/lib/engines.ts) reads that project's persisted shot targets
+  // + api_engines overrides, so it's only meaningful with `project_id` set.
+  // Nothing before project-selection (ProjectSelector) reads `config`, so
+  // there's no need to fetch it until a project exists.
   useEffect(() => {
-    fetch(`${API}/config`).then(r => r.json()).then(setConfig).catch(() => {})
-  }, [])
+    if (!project) return
+    fetch(`${API}/config?project_id=${encodeURIComponent(project.id)}`).then(r => r.json()).then(setConfig).catch(() => {})
+  }, [project?.id])
 
   const loadProject = useCallback(async (id: string) => {
     const res = await fetch(`${API}/projects/${id}`)

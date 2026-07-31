@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { AppConfig, Shot } from '../../types/project'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections, assemblePromptSections, SECTION_LABELS } from '../../lib/promptSections'
-import { videoEngines } from '../../lib/engines'
+import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 
 interface Props {
   shot: Shot
@@ -25,18 +25,18 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
   const [intentNotes, setIntentNotes] = useState(shot.intent_notes || '')
 
   useEffect(() => {
-    fetch('/api/config').then(r => r.json()).then(setConfig).catch(() => {})
-  }, [])
+    // project_id scopes the response's `video_engines` server-selectable
+    // view (web_server.py:_project_video_engine_rows reads per-project
+    // api_engines overrides + persisted shot targets) — see lib/engines.ts.
+    fetch(`/api/config?project_id=${encodeURIComponent(projectId)}`).then(r => r.json()).then(setConfig).catch(() => {})
+  }, [projectId])
 
   const livePrompt = useMemo(() => assemblePromptSections(sections), [sections])
   const liveShot = useMemo(() => ({ ...shot, prompt: livePrompt, camera }), [shot, livePrompt, camera])
   const shotType = classifyShotType(liveShot)
   const template = getShotTemplate(liveShot, config)
 
-  const engineOptions = videoEngines(config).map((e) => ({ value: e.key, label: e.label }))
-  if (targetApi && !engineOptions.some((o) => o.value === targetApi)) {
-    engineOptions.unshift({ value: targetApi, label: targetApi })
-  }
+  const engines = videoEngines(config)
 
   const handleSave = async () => {
     setSaving(true)
@@ -108,14 +108,19 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
                 onChange={e => setTargetApi(e.target.value)}
                 className="w-full rounded border border-line bg-app px-3 py-2 text-sm text-tx"
               >
-                {engineOptions.length ? engineOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                {engines.length ? engines.map((e) => (
+                  <option
+                    key={e.key}
+                    value={e.key}
+                    disabled={!e.selectable}
+                    title={e.reason ? humanizeEngineReason(e.reason) : undefined}
+                  >
+                    {e.label}
+                  </option>
                 )) : (
-                  <>
-                    <option value="AUTO">Auto</option>
-                    <option value="VEO_NATIVE">Veo</option>
-                    <option value="LTX">LTX</option>
-                  </>
+                  // Server view not loaded yet (or config isn't project-scoped) —
+                  // keep the current value representable rather than guessing engines.
+                  <option value={targetApi}>{targetApi}</option>
                 )}
               </select>
             </div>

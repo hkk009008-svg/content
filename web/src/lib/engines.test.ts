@@ -1,6 +1,25 @@
 import { describe, it, expect } from 'vitest'
-import { videoEngines } from './engines'
-import type { AppConfig, ApiInfo } from '../types/project'
+import { videoEngines, humanizeEngineReason } from './engines'
+import type { AppConfig, ApiInfo, VideoEngineRow } from '../types/project'
+
+/**
+ * Shape-based fixtures. Deliberately fake engine keys (not the real
+ * GEMINI_OMNI/VEO_NATIVE/... roster) — `videoEngines` must derive its output
+ * purely from the shape of `config.video_engines`, never from which real
+ * engines happen to be live at any given moment (slice 3 concurrently
+ * changes GEMINI_OMNI's real catalog state).
+ */
+function row(overrides: Partial<VideoEngineRow> & Pick<VideoEngineRow, 'key' | 'label'>): VideoEngineRow {
+  return {
+    can_select: true,
+    reason: null,
+    configured_enabled: true,
+    can_configure: true,
+    in_use: false,
+    historical: false,
+    ...overrides,
+  }
+}
 
 function api(overrides: Partial<ApiInfo> & Pick<ApiInfo, 'label'>): ApiInfo {
   return {
@@ -12,95 +31,127 @@ function api(overrides: Partial<ApiInfo> & Pick<ApiInfo, 'label'>): ApiInfo {
   }
 }
 
-function mockConfig(api_registry: Record<string, ApiInfo>): Pick<AppConfig, 'api_registry'> {
-  return { api_registry }
+function config(video_engines: VideoEngineRow[], api_registry: Record<string, ApiInfo> = {}): AppConfig {
+  return { video_engines, api_registry } as unknown as AppConfig
 }
 
 describe('videoEngines', () => {
-  it('orders the Google-first cascade, marks GEMINI_OMNI primary, and excludes retired engines', () => {
-    const config = mockConfig({
-      GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
-      VEO_NATIVE: api({ label: 'Veo 3.1 Native' }),
-      SEEDANCE: api({ label: 'Seedance 2.0' }),
-      KLING_3_0: api({ label: 'Kling v3 Pro' }),
-      LTX: api({ label: 'LTX Video 2.3' }),
-      SORA_NATIVE: api({ label: 'Sora 2 Native' }),
-      RUNWAY_GEN4: api({ label: 'Runway Gen-4' }),
-    })
+  it('returns [] for a null config', () => {
+    expect(videoEngines(null)).toEqual([])
+  })
 
-    const result = videoEngines(config as AppConfig)
+  it('returns [] when config has no video_engines (no project_id on /api/config)', () => {
+    // Only api_registry present — proves there is no client-side fallback
+    // that re-derives options from the registry when the server view is
+    // absent (that was the old EXCLUDED_VIDEO_ENGINES defect).
+    const c = { api_registry: { FAKE_ENGINE: api({ label: 'Fake Engine' }) } } as unknown as AppConfig
+    expect(videoEngines(c)).toEqual([])
+  })
 
-    expect(result.map((e) => e.key)).toEqual([
-      'GEMINI_OMNI',
-      'VEO_NATIVE',
-      'SEEDANCE',
-      'KLING_3_0',
-      'LTX',
+  it('maps a selectable server row straight through, preserving server order', () => {
+    const c = config([
+      row({ key: 'ENGINE_B', label: 'Engine B' }),
+      row({ key: 'ENGINE_A', label: 'Engine A' }),
     ])
+
+    const result = videoEngines(c)
+
+    expect(result.map((e) => e.key)).toEqual(['ENGINE_B', 'ENGINE_A'])
+    expect(result[0]).toMatchObject({ key: 'ENGINE_B', label: 'Engine B', selectable: true, reason: null })
+  })
+
+  it('a server-marked non-selectable, not-in-use engine cannot appear as an option — even when present in api_registry', () => {
+    const c = config(
+      [
+        row({ key: 'LIVE_ENGINE', label: 'Live Engine', can_select: true }),
+        row({ key: 'RETIRED_ENGINE', label: 'Retired Engine', can_select: false, reason: 'retired', in_use: false }),
+      ],
+      {
+        LIVE_ENGINE: api({ label: 'Live Engine' }),
+        // Still "live" in the legacy registry — this is exactly the drift
+        // the old client-side hidden-list was vulnerable to. The server row
+        // (can_select: false, in_use: false) must win.
+        RETIRED_ENGINE: api({ label: 'Retired Engine', status: 'live' }),
+      },
+    )
+
+    const result = videoEngines(c)
+
+    expect(result.map((e) => e.key)).toEqual(['LIVE_ENGINE'])
+    expect(result.some((e) => e.key === 'RETIRED_ENGINE')).toBe(false)
+  })
+
+  it('keeps a non-selectable engine that is in_use (a historical shot override), carrying its reason', () => {
+    const c = config([
+      row({
+        key: 'HISTORICAL_ENGINE',
+        label: 'Historical Engine',
+        can_select: false,
+        reason: 'runtime_unavailable',
+        in_use: true,
+        historical: true,
+      }),
+    ])
+
+    const result = videoEngines(c)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      key: 'HISTORICAL_ENGINE',
+      selectable: false,
+      reason: 'runtime_unavailable',
+    })
+  })
+
+  it('includes AUTO when the server marks it selectable (server truth, not a client exclusion)', () => {
+    const c = config([
+      row({ key: 'AUTO', label: 'Auto (Smart Routing)', can_select: true }),
+      row({ key: 'ENGINE_A', label: 'Engine A' }),
+    ])
+
+    const result = videoEngines(c)
+
+    expect(result.map((e) => e.key)).toEqual(['AUTO', 'ENGINE_A'])
+  })
+
+  it('marks exactly the GEMINI_OMNI row primary when present, and nothing else', () => {
+    const c = config([
+      row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }),
+      row({ key: 'ENGINE_A', label: 'Engine A' }),
+    ])
+
+    const result = videoEngines(c)
+
     expect(result.find((e) => e.key === 'GEMINI_OMNI')?.primary).toBe(true)
-    expect(result.some((e) => e.key === 'SORA_NATIVE')).toBe(false)
-    expect(result.some((e) => e.key === 'RUNWAY_GEN4')).toBe(false)
-    // only GEMINI_OMNI is primary
     expect(result.filter((e) => e.primary)).toHaveLength(1)
   })
 
-  it('excludes the full retired/sunset/legacy-proxy set', () => {
-    const retired = ['SORA_NATIVE', 'SORA_2', 'RUNWAY_GEN4', 'RUNWAY', 'HEDRA_C3', 'KLING_NATIVE', 'VEO']
-    const registry: Record<string, ApiInfo> = { GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }) }
-    for (const key of retired) registry[key] = api({ label: key })
+  it('enriches cost/quality/status from api_registry by key, defaulting status to live when absent', () => {
+    const c = config(
+      [row({ key: 'ENGINE_A', label: 'Engine A' }), row({ key: 'ENGINE_B', label: 'Engine B' })],
+      { ENGINE_A: api({ label: 'Engine A', per_shot_cost: 0.42, quality_score: 0.9, status: 'beta' }) },
+    )
 
-    const result = videoEngines(mockConfig(registry) as AppConfig)
+    const result = videoEngines(c)
 
-    expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI'])
+    const a = result.find((e) => e.key === 'ENGINE_A')!
+    expect(a.cost).toBe(0.42)
+    expect(a.quality).toBe(0.9)
+    expect(a.status).toBe('beta')
+
+    const b = result.find((e) => e.key === 'ENGINE_B')!
+    expect(b.cost).toBeUndefined()
+    expect(b.quality).toBeUndefined()
+    expect(b.status).toBe('live')
+  })
+})
+
+describe('humanizeEngineReason', () => {
+  it('replaces underscores with spaces', () => {
+    expect(humanizeEngineReason('runtime_unavailable')).toBe('runtime unavailable')
   })
 
-  it('excludes AUTO (smart-routing meta-value, not a concrete engine)', () => {
-    const config = mockConfig({
-      GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
-      AUTO: api({ label: 'Auto (Smart Routing)', category: 'smart' }),
-    })
-
-    const result = videoEngines(config as AppConfig)
-
-    expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI'])
-    expect(result.some((e) => e.key === 'AUTO')).toBe(false)
-  })
-
-  it('appends a live video engine outside the canonical order/exclude lists, after the ordered set', () => {
-    const config = mockConfig({
-      GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
-      LTX: api({ label: 'LTX Video 2.3' }),
-      NEW_ENGINE: api({ label: 'Some New Engine' }),
-    })
-
-    const result = videoEngines(config as AppConfig)
-
-    expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI', 'LTX', 'NEW_ENGINE'])
-    expect(result.find((e) => e.key === 'NEW_ENGINE')?.primary).toBe(false)
-  })
-
-  it('filters out non-video modalities', () => {
-    const config = mockConfig({
-      GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
-      ELEVENLABS_V3: api({ label: 'ElevenLabs v3', modality: 'tts', category: 'tts' }),
-      FLUX_DEV: api({ label: 'FLUX-Dev', modality: 'image', category: 'image_gen' }),
-    })
-
-    const result = videoEngines(config as AppConfig)
-
-    expect(result.map((e) => e.key)).toEqual(['GEMINI_OMNI'])
-  })
-
-  it('carries cost/quality through and returns [] for a null config', () => {
-    const config = mockConfig({
-      GEMINI_OMNI: api({ label: 'Gemini Omni Flash', per_shot_cost: 0.56, quality_score: 0.85 }),
-    })
-
-    const result = videoEngines(config as AppConfig)
-    expect(result[0].cost).toBe(0.56)
-    expect(result[0].quality).toBe(0.85)
-    expect(result[0].status).toBe('live')
-
-    expect(videoEngines(null)).toEqual([])
+  it('returns an empty string for null', () => {
+    expect(humanizeEngineReason(null)).toBe('')
   })
 })

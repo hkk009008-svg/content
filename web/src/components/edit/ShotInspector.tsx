@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { AppConfig, Project, Scene, Shot, ShotState } from '../../types/project'
 import { Badge, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
-import { videoEngines } from '../../lib/engines'
+import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 import { PROMPT_SECTION_TAGS, parsePromptSections, assemblePromptSections } from '../../lib/promptSections'
 
 interface Props {
@@ -142,9 +142,18 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
   const shotType = classifyShotType(shot)
   const template = getShotTemplate(shot, config)
 
-  const engineOptions = videoEngines(config).map((e) => ({ value: e.key, label: e.label }))
+  const engineOptions = videoEngines(config).map((e) => ({
+    value: e.key,
+    label: e.label,
+    disabled: !e.selectable,
+    title: e.reason ? humanizeEngineReason(e.reason) : undefined,
+  }))
+  // Defensive: the server always includes the project's persisted target_api
+  // values as rows, but `config` may not be project-scoped yet (still
+  // loading, or fetched without project_id) — keep the current value
+  // representable rather than rendering a value-less select.
   if (form.targetApi && !engineOptions.some((o) => o.value === form.targetApi)) {
-    engineOptions.unshift({ value: form.targetApi, label: form.targetApi })
+    engineOptions.unshift({ value: form.targetApi, label: form.targetApi, disabled: false, title: undefined })
   }
 
   const voiceOptions = (config?.voice_pool ?? []).map((v) => ({ value: v.id, label: `${v.name} — ${v.style}` }))

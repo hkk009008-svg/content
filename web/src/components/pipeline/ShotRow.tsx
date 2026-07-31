@@ -4,9 +4,14 @@ import ShotApprovalControls from './ShotApprovalControls'
 import PromptEditor from './PromptEditor'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections } from '../../lib/promptSections'
+import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 
-// Module-level cache for API registry (shared across all ShotRow instances)
+// Module-level cache for API registry (shared across all ShotRow instances),
+// keyed by projectId — `config.video_engines` is project-scoped (the server
+// reads that project's persisted shot targets + api_engines overrides), so a
+// cache hit for a different project would leak stale selectability.
 let _configCache: AppConfig | null = null
+let _configCacheProjectId: string | null = null
 
 interface Props {
   shot: Shot
@@ -49,19 +54,27 @@ function getStatusBadge(status: string | undefined) {
 export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId, onRegenerate }: Props) {
   const [editingPrompt, setEditingPrompt] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
-  const [config, setConfig] = useState<AppConfig | null>(_configCache)
+  const [config, setConfig] = useState<AppConfig | null>(
+    _configCacheProjectId === projectId ? _configCache : null,
+  )
   const apiRegistry: Record<string, ApiInfo> | null = config?.api_registry || null
 
-  // Load API registry once (module-level cache shared across instances)
+  // Load config once per project (module-level cache shared across instances).
   useEffect(() => {
-    if (_configCache) { setConfig(_configCache); return }
-    fetch('/api/config').then(r => r.json()).then(cfg => {
+    if (_configCacheProjectId === projectId && _configCache) {
+      setConfig(_configCache)
+      return
+    }
+    // project_id scopes `video_engines` (see lib/engines.ts) to this project's
+    // api_engines overrides + persisted shot targets.
+    fetch(`/api/config?project_id=${encodeURIComponent(projectId)}`).then(r => r.json()).then(cfg => {
       if (cfg.api_registry) {
         _configCache = cfg
+        _configCacheProjectId = projectId
         setConfig(cfg)
       }
     }).catch(() => {})
-  }, [])
+  }, [projectId])
 
   const updateShotApi = async (newApi: string) => {
     await fetch(`/api/projects/${projectId}/shots/${shot.id}`, {
@@ -81,6 +94,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
   const shotTemplate = getShotTemplate(shot, config)
   const isReviewable = status === 'image_review' || (imageUrl && status !== 'generating_image')
   const isFailed = status === 'failed'
+  const engines = videoEngines(config)
 
   // Parse structured sections from prompt (shared with PromptEditor / ShotInspector)
   const prompt = shot.prompt || ''
@@ -141,24 +155,23 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
           <span className="text-eyebrow text-mut bg-panel px-1.5 py-0.5 rounded">
             📷 {shot.camera}
           </span>
-          {apiRegistry ? (
+          {engines.length > 0 ? (
             <select
               className="text-eyebrow text-mut bg-panel px-1 py-0.5 rounded border-0 cursor-pointer hover:text-tx focus:ring-1 focus:ring-acc"
               value={shot.target_api || 'AUTO'}
               onChange={(e) => updateShotApi(e.target.value)}
-              title={apiRegistry[shot.target_api]?.description || ''}
+              title={apiRegistry?.[shot.target_api]?.description || ''}
             >
-              {(['smart', 'native', 'fal_proxy'] as const).map(cat => {
-                const label = cat === 'smart' ? 'Smart' : cat === 'native' ? 'Native APIs' : 'FAL Proxy'
-                const entries = Object.entries(apiRegistry).filter(([, v]) => v.category === cat)
-                return entries.length > 0 ? (
-                  <optgroup key={cat} label={label}>
-                    {entries.map(([key, info]) => (
-                      <option key={key} value={key}>{info.label}</option>
-                    ))}
-                  </optgroup>
-                ) : null
-              })}
+              {engines.map((e) => (
+                <option
+                  key={e.key}
+                  value={e.key}
+                  disabled={!e.selectable}
+                  title={e.reason ? humanizeEngineReason(e.reason) : undefined}
+                >
+                  {e.label}
+                </option>
+              ))}
             </select>
           ) : (
             <span className="text-eyebrow text-mut bg-panel px-1.5 py-0.5 rounded">

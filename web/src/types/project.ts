@@ -254,6 +254,28 @@ export interface PurposeRanking {
   ranked: { key: string; info: ApiInfo }[]
 }
 
+/**
+ * One row of the server-reconciled video-engine view
+ * (`web_server.py:_project_video_engine_rows`, exposed on
+ * `GET /api/config?project_id=…` as `config.video_engines`).
+ *
+ * This is the single source of truth for whether an engine is currently
+ * selectable — it already folds in catalog lifecycle, date-effective sunset
+ * policy, per-project `api_engines` disable state, aspect-ratio
+ * compatibility, and runtime availability. UI code must consume `can_select`
+ * / `reason` as-is and must not re-derive selectability from `api_registry`.
+ */
+export interface VideoEngineRow {
+  key: string
+  label: string
+  can_select: boolean
+  reason: string | null
+  configured_enabled: boolean
+  can_configure: boolean
+  in_use: boolean
+  historical: boolean
+}
+
 export interface WorkflowTemplate {
   pulid_weight: number
   pulid_start_at: number
@@ -504,6 +526,12 @@ export interface AppConfig {
   // by PROVIDER (e.g. "RUNPOD_GPU", "FAL_AI"), each value the list of engine/API
   // keys that provider bills. NOT engine-keyed — see web/src/lib/podGating.ts.
   billing_providers?: Record<string, string[]>
+  // Server-reconciled video-engine selectability view (web_server.py:627
+  // `_project_video_engine_rows`) — present only when `/api/config` is
+  // called with a `project_id` (the rows are project-scoped: they read
+  // per-project `api_engines` overrides + persisted shot targets). See
+  // web/src/lib/engines.ts, the single UI-side derivation point.
+  video_engines?: VideoEngineRow[]
 }
 
 // ── Part 4: Capability Dashboard ────────────────────────────────────────────

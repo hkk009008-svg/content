@@ -4,6 +4,11 @@
 export interface SelectOption {
   value: string
   label: string
+  /** Renders as a disabled <option> (e.g. a server-marked non-selectable
+   *  engine surfaced so its current-value/history context stays visible). */
+  disabled?: boolean
+  /** Native <option title> tooltip — pair with `disabled` to explain why. */
+  title?: string
 }
 
 interface Props {
@@ -26,7 +31,7 @@ export function SelectPill({ value, onChange, options, 'aria-label': ariaLabel }
       className="rounded-full border border-line bg-panel px-2 py-0.5 text-[11px] text-tx focus:border-acc focus:outline-none"
     >
       {normalize(options).map((o) => (
-        <option key={o.value} value={o.value}>
+        <option key={o.value} value={o.value} disabled={o.disabled} title={o.title}>
           {o.label}
         </option>
       ))}
