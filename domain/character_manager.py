@@ -528,17 +528,18 @@ def _count_faces(image_path: str) -> int:
 
 
 def compute_face_embedding(image_path: str) -> Optional[np.ndarray]:
-    """Compute ArcFace/GhostFaceNet embedding for a face image."""
+    """Compute an EMBED_MODEL face embedding for an image.
+
+    Routes through identity.validator.represent_deterministic — the single
+    represent chokepoint that owns BOTH the cv2 single-thread determinism
+    guard and the EMBED_MODEL dispatch (AdaFace is not a DeepFace built-in,
+    so a direct DeepFace.represent here would crash under it).
+    """
     if not DEEPFACE_AVAILABLE:
         return None
     try:
-        from identity.validator import cv2_single_thread, EMBED_MODEL
-        with cv2_single_thread():  # determinism: serialize the OpenCV align race
-            embeddings = DeepFace.represent(
-                img_path=image_path,
-                model_name=EMBED_MODEL,
-                enforce_detection=False,
-            )
+        from identity.validator import represent_deterministic
+        embeddings = represent_deterministic(image_path)
         if embeddings:
             return np.array(embeddings[0]["embedding"])
     except Exception as e:

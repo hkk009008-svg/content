@@ -27,9 +27,17 @@ class TestEmbedModelChokepoint:
         assert EMBED_MODEL == "GhostFaceNet"
 
     def test_no_hardcoded_model_strings_remain(self):
-        """The three production represent sites must use the shared constant."""
+        """The three production represent sites route through ONE chokepoint.
+
+        Strengthened with the AdaFace adapter (P5 item 1): the chokepoint is
+        now the shared FUNCTION identity.validator.represent_deterministic
+        (guard + EMBED_MODEL dispatch), not just the shared constant — a
+        direct DeepFace.represent in domain/ would crash under
+        IDENTITY_EMBED_MODEL=AdaFace (not a DeepFace built-in).
+        """
         import pathlib
         repo = pathlib.Path(__file__).resolve().parents[2]
+
         for rel in (
             "identity/validator.py",
             "domain/character_manager.py",
@@ -37,11 +45,28 @@ class TestEmbedModelChokepoint:
         ):
             src = (repo / rel).read_text()
             assert 'model_name="GhostFaceNet"' not in src, (
-                f"{rel} regained a hardcoded embedding model string — use "
-                f"identity.validator.EMBED_MODEL (single write-site)"
+                f"{rel} regained a hardcoded embedding model string — route "
+                f"through identity.validator.represent_deterministic"
             )
-            assert "model_name=EMBED_MODEL" in src, (
-                f"{rel} no longer routes through the EMBED_MODEL chokepoint"
+
+        validator_src = (repo / "identity/validator.py").read_text()
+        assert "model_name=EMBED_MODEL" in validator_src, (
+            "identity/validator.py no longer feeds EMBED_MODEL to DeepFace "
+            "inside represent_deterministic"
+        )
+
+        for rel in (
+            "domain/character_manager.py",
+            "domain/continuity_engine.py",
+        ):
+            src = (repo / rel).read_text()
+            assert "represent_deterministic" in src, (
+                f"{rel} no longer routes through the shared represent chokepoint"
+            )
+            assert "DeepFace.represent(" not in src, (
+                f"{rel} regained a direct DeepFace.represent call — it would "
+                f"crash under IDENTITY_EMBED_MODEL=AdaFace; use "
+                f"identity.validator.represent_deterministic"
             )
 
     def test_non_default_model_fires_structural_warning(self, monkeypatch):
@@ -60,6 +85,33 @@ class TestEmbedModelChokepoint:
         with pytest.warns(UserWarning, match="UNCALIBRATED"):
             model = v._resolve_embed_model()
         assert model == "Buffalo_L"
+
+    def test_structural_warning_survives_tf_filter_stomp(self, monkeypatch, capsys):
+        """The TF/Keras import chain (pulled in by `from deepface import
+        DeepFace`, which runs BEFORE EMBED_MODEL resolves) installs a blanket
+        ('ignore', None, Warning, None, 0) at the front of the global warning
+        filters — verified 2026-07-11: a bare warnings.warn after DeepFace
+        loads reaches nobody, even under -W error. pytest.warns only passes
+        because it installs its own filter context. So the STRUCTURAL message
+        must ALSO go to stderr via print, or production operators never see
+        it (invisible-green class)."""
+        import sys
+        import warnings as w
+        import identity.validator as v
+        settings_mod = sys.modules["config.settings"]
+
+        class _S:
+            identity_embed_model = "Buffalo_L"
+
+        monkeypatch.setattr(settings_mod, "settings", _S())
+        with w.catch_warnings():
+            w.simplefilter("ignore")  # simulate the TF stomp
+            assert v._resolve_embed_model() == "Buffalo_L"
+        err = capsys.readouterr().err
+        assert "STRUCTURAL" in err and "Buffalo_L" in err, (
+            "structural warning silenced by an ignore-all warnings filter — "
+            "it must also print to stderr"
+        )
 
     def test_default_model_is_silent(self, monkeypatch):
         import sys

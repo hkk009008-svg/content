@@ -134,7 +134,7 @@ class CharacterContinuityTracker:
             return {"passed": True, "results": {}}
 
         import cv2
-        from identity.validator import cv2_single_thread, EMBED_MODEL
+        from identity.validator import cv2_single_thread, represent_deterministic
 
         # Extract 3 frames for robustness
         cap = cv2.VideoCapture(video_path)
@@ -180,12 +180,11 @@ class CharacterContinuityTracker:
                     cv2.imwrite(temp_face, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
                     try:
-                        with cv2_single_thread():
-                            face_emb_list = DeepFace.represent(
-                                img_path=temp_face,
-                                model_name=EMBED_MODEL,
-                                enforce_detection=False,
-                            )
+                        # Guard + EMBED_MODEL dispatch live inside the shared
+                        # chokepoint (identity.validator.represent_deterministic);
+                        # AdaFace is not a DeepFace built-in, so a direct
+                        # DeepFace.represent here would crash under it.
+                        face_emb_list = represent_deterministic(temp_face)
                         if not face_emb_list:
                             continue
                         face_emb = np.array(face_emb_list[0]["embedding"])

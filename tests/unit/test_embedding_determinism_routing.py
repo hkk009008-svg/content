@@ -38,22 +38,29 @@ def test_public_guard_alias_exported():
     assert cv2_single_thread is _cv2_single_thread
 
 
-def test_compute_face_embedding_routes_represent_through_guard(monkeypatch):
-    """character_manager.compute_face_embedding (persists embedding.npy) must run
-    DeepFace.represent strictly inside the single-thread guard."""
+def test_compute_face_embedding_routes_through_shared_chokepoint(monkeypatch):
+    """character_manager.compute_face_embedding (persists embedding.npy) must
+    route through identity.validator.represent_deterministic — the shared
+    chokepoint that owns BOTH the single-thread guard and the EMBED_MODEL
+    dispatch (a direct DeepFace.represent would bypass the guard AND crash
+    under IDENTITY_EMBED_MODEL=AdaFace). Guard-inside-chokepoint is pinned
+    separately in tests/unit/test_adaface_adapter.py::TestDispatch."""
     import identity.validator as v
     import domain.character_manager as cm
     events = []
     monkeypatch.setattr(cm, "DEEPFACE_AVAILABLE", True)
-    monkeypatch.setattr(v, "cv2_single_thread", _spy_guard(events))
 
-    def fake_represent(*a, **k):
-        events.append("call")
+    def fake_chokepoint(image_path):
+        events.append("chokepoint")
         return [{"embedding": [0.1] * 512}]
-    monkeypatch.setattr(cm.DeepFace, "represent", fake_represent)
+    monkeypatch.setattr(v, "represent_deterministic", fake_chokepoint)
+    monkeypatch.setattr(
+        cm.DeepFace, "represent",
+        lambda *a, **k: pytest.fail("direct DeepFace.represent bypasses the chokepoint"),
+    )
 
     out = cm.compute_face_embedding("x.jpg")
-    assert events == ["enter", "call", "exit"], events
+    assert events == ["chokepoint"], events
     assert isinstance(out, np.ndarray)
 
 
@@ -91,11 +98,14 @@ def test_has_detectable_face_routes_extract_through_guard(monkeypatch):
     assert events == ["enter", "call", "exit"], events
 
 
-def test_continuity_validate_routes_both_face_calls_through_guard(monkeypatch):
+def test_continuity_validate_routes_both_face_calls_deterministically(monkeypatch):
     """continuity_engine.CharacterContinuityTracker.validate_multi_identity must run
-    BOTH its extract_faces and represent inside the guard. Without the wraps the
-    events would be ['call', 'call'] (un-routed) — this closes the silent-strip gap
-    the determinism-fix verifier flagged for the continuity siblings."""
+    extract_faces inside the guard AND its per-face represent through the shared
+    represent_deterministic chokepoint (which owns guard + EMBED_MODEL dispatch —
+    pinned in tests/unit/test_adaface_adapter.py::TestDispatch). Without the
+    routing the events would be bare ['call'] (un-routed) — this closes the
+    silent-strip gap the determinism-fix verifier flagged for the continuity
+    siblings."""
     import cv2
     import numpy as np
     import identity.validator as v
@@ -135,13 +145,20 @@ def test_continuity_validate_routes_both_face_calls_through_guard(monkeypatch):
 
     monkeypatch.setattr(ce.DeepFace, "extract_faces",
                         _spy_call([{"face": np.zeros((16, 16, 3), dtype=np.uint8)}]))
-    monkeypatch.setattr(ce.DeepFace, "represent",
-                        _spy_call([{"embedding": [0.1] * 512}]))
+
+    def fake_chokepoint(image_path):
+        events.append("chokepoint")
+        return [{"embedding": [0.1] * 512}]
+    monkeypatch.setattr(v, "represent_deterministic", fake_chokepoint)
+    monkeypatch.setattr(
+        ce.DeepFace, "represent",
+        lambda *a, **k: pytest.fail("direct DeepFace.represent bypasses the chokepoint"),
+    )
 
     tracker = object.__new__(ce.CharacterContinuityTracker)  # bypass the heavy project ctor
     tracker.embeddings = {}
     tracker.characters = {}
     tracker.validate_multi_identity("v.mp4", ["c1"])
 
-    # extract_faces guarded, then represent guarded — each enter/call/exit.
-    assert events == ["enter", "call", "exit", "enter", "call", "exit"], events
+    # extract_faces guarded locally, then represent via the shared chokepoint.
+    assert events == ["enter", "call", "exit", "chokepoint"], events

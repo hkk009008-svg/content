@@ -56,14 +56,29 @@ def _resolve_embed_model() -> str:
     except Exception:
         model = "GhostFaceNet"
     if model != "GhostFaceNet":
+        import sys
         import warnings
-        warnings.warn(
+        msg = (
             f"[identity] STRUCTURAL: IDENTITY_EMBED_MODEL={model!r} — every "
             "calibrated identity threshold assumes GhostFaceNet score "
             "distributions; gates are UNCALIBRATED for this model until a "
-            "pod measurement pass re-derives them.",
-            stacklevel=2,
+            "pod measurement pass re-derives them."
         )
+        # BOTH channels, deliberately: the TF/Keras chain (imported via
+        # `from deepface import DeepFace` ABOVE, before this runs) fronts a
+        # blanket ('ignore', None, Warning) filter, so warnings.warn alone
+        # never reaches an operator in production (verified 2026-07-11;
+        # pytest.warns still sees it because it installs its own context).
+        print(msg, file=sys.stderr)
+        warnings.warn(msg, stacklevel=2)
+    if model == "AdaFace":
+        # Not a DeepFace built-in — represent_deterministic dispatches to the
+        # vendored adapter. Fail LOUD here (startup) if the checkpoint is
+        # missing: a per-call failure would be swallowed by _get_embedding's
+        # broad except and validate_* would silently SKIP (passed=True) — the
+        # silent-gate-degradation class.
+        from identity.adaface import assert_ready
+        assert_ready()
     return model
 
 
@@ -155,17 +170,31 @@ def _cv2_single_thread():
 cv2_single_thread = _cv2_single_thread
 
 
-def _represent_deterministic(image_path: str) -> list:
-    """GhostFaceNet DeepFace.represent under the cv2 single-thread guard.
+def represent_deterministic(image_path: str) -> list:
+    """EMBED_MODEL embedding read under the cv2 single-thread guard.
 
-    The deterministic chokepoint for the five represent call sites (the binding
-    instrument's figure/ref reads + the production validate_image/validate_video
-    embedding reads). See _cv2_single_thread for the root-cause writeup.
+    THE single represent chokepoint for ALL identity-QC embedding reads: the
+    five validator call sites (the binding instrument's figure/ref reads + the
+    production validate_image/validate_video embedding reads) AND the domain/
+    siblings (character_manager.compute_face_embedding, continuity_engine's
+    per-face read) import this. See _cv2_single_thread for the root-cause
+    writeup.
+
+    AdaFace is not a DeepFace built-in — it dispatches to the vendored adapter
+    (identity/adaface.py), whose internal extract_faces alignment is the same
+    racy OpenCV path, hence the guard wraps BOTH branches.
     """
     with _cv2_single_thread():
+        if EMBED_MODEL == "AdaFace":
+            from identity import adaface
+            return adaface.represent(img_path=image_path, enforce_detection=False)
         return DeepFace.represent(
             img_path=image_path, model_name=EMBED_MODEL, enforce_detection=False
         )
+
+
+# Private alias: the five in-module call sites predate the public rename.
+_represent_deterministic = represent_deterministic
 
 
 def _classify_face_detection(
@@ -982,10 +1011,19 @@ class IdentityValidator:
     # ------------------------------------------------------------------
 
     def _disk_cache_path(self, cache_key: str) -> Optional[str]:
-        """Return path to a disk-cached .npy embedding file, or None."""
+        """Return path to a disk-cached .npy embedding file, or None.
+
+        Keyed by EMBED_MODEL for non-default backbones: a warm GhostFaceNet
+        cache must never be served to an AdaFace run (cross-model cosine is
+        meaningless, and the mismatch would be silent). GhostFaceNet keeps the
+        historical un-suffixed name so existing caches stay valid.
+        """
         if not self.cache_dir or not cache_key:
             return None
         safe_key = cache_key.replace("/", "_").replace("\\", "_")
+        if EMBED_MODEL != "GhostFaceNet":
+            safe_model = EMBED_MODEL.replace("/", "_").replace("\\", "_")
+            return os.path.join(self.cache_dir, f"emb_{safe_key}__{safe_model}.npy")
         return os.path.join(self.cache_dir, f"emb_{safe_key}.npy")
 
     def _get_embedding(self, image_path: str, cache_key: str = "") -> Optional[np.ndarray]:

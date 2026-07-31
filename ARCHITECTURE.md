@@ -101,7 +101,7 @@ SCENE_PREVIEW → ASSEMBLY → SCREENING`.
 | Review/gates | [cinema/review/controller.py](cinema/review/controller.py) | Gate predicate-poll. **`PERFORMANCE_REVIEW`** satisfied when engine=SKIP, no approved keyframe, or take explicitly approved. |
 | Story prep | [domain/](domain/) — `scene_decomposer.py`, `dialogue_writer.py`, `continuity_engine.py`, `character_manager.py`, `location_manager.py`, `project_manager.py`, `language_defaults.py`, `shot_types.py`, `performance.py` | Filelock-guarded JSON CRUD (10s). LLM persona "CineDecompose v2.0" with 5 HardConstraints + 4 Tripwires. |
 | LLM | [llm/](llm/) — `ensemble.py`, `chief_director.py`, `style_director.py`, `prompt_optimizer.py`, `negative_prompts.py` | Parallel quorum (not fallback), then a judge picks. Anthropic + OpenAI + **Gemini opt-in**. |
-| Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace). Singleton via double-checked locking; 4 access paths converge. |
+| Identity | [identity/](identity/), [face_validator_gate.py](face_validator_gate.py), [phase_c_vision.py](phase_c_vision.py) | **GhostFaceNet via DeepFace** (NOT ArcFace) by default; `IDENTITY_EMBED_MODEL` selects the backbone (AdaFace adapter available, UNCALIBRATED — default stays GhostFaceNet until pod calibration). Singleton via double-checked locking; 4 access paths converge. |
 | Image gen | [phase_c_assembly.py](phase_c_assembly.py), [gemini_image_native.py](gemini_image_native.py), [pulid.json](pulid.json) | Single production tier: Gemini multi-reference is the default primary; RunPodComfyUI + PuLID is the first reference-conditioned fallback. (`quality_max.py`/`pulid_max.json` max-tier driver + graph retired WS1 Task 4 — see §8.3.) |
 | Video gen | [workflow_selector.py](workflow_selector.py), [domain/video_engine_policy.py](domain/video_engine_policy.py), [phase_c_ffmpeg.py](phase_c_ffmpeg.py), [kling_native.py](kling_native.py), [sora_native.py](sora_native.py), [veo_native.py](veo_native.py), [ltx_native.py](ltx_native.py) | 5 historical shot-type order seeds feed a typed pre-spend dispatch fence; 12 legacy payload branches remain, but known-broken/retired/unready/project-disabled/aspect-incompatible entries are unreachable. Runway + Seedance dispatch inline (no adapter file). |
 | Performance | [performance/](performance/) — `_router.py`, `act_two.py`, `live_portrait.py`, `viggle.py`, `driving_video.py`, `motion_gate.py`, `identity_gate.py`, helpers `_cache.py`/`_net.py`/`_poll.py` | Per-provider semaphores. Mode B autopilot synthesizes via SadTalker, content-hash cached. |
@@ -749,9 +749,9 @@ reason retained as `target_api_policy_reason`.
 Composes 4 subsystems:
 
 1. `CharacterContinuityTracker` ([:35](domain/continuity_engine.py:35)) — preloads embeddings, builds identity-anchored prompt fragments (respecting HC1), tracks wardrobe via `appearance_log`.
-2. `LocationPersistence` ([:237](domain/continuity_engine.py:237)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
-3. `PhysicsPromptEngineer` ([:264](domain/continuity_engine.py:264)) — appends physics constraint clauses.
-4. `TemporalConsistencyManager` ([:342](domain/continuity_engine.py:342)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
+2. `LocationPersistence` ([:236](domain/continuity_engine.py:236)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
+3. `PhysicsPromptEngineer` ([:263](domain/continuity_engine.py:263)) — appends physics constraint clauses.
+4. `TemporalConsistencyManager` ([:341](domain/continuity_engine.py:341)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
 
 **Key public methods:**
 - `enhance_shot_prompt(shot, scene, previous_shot, shot_index, approved_anchor_image)` → returns shot with appended prompt + `continuity_config` dict.
@@ -1674,12 +1674,33 @@ engine counts re-verified 2026-08-01 — generation cascade is 2 engines, not
 
 ### 11.1 Model
 
-`IdentityValidator` uses **DeepFace's `GhostFaceNet`** model. Every embedding
-read routes through one chokepoint, `_represent_deterministic`
-([identity/validator.py:126](identity/validator.py:126)):
+The embedding backbone is a **single chokepoint**: `EMBED_MODEL`
+([identity/validator.py:85](identity/validator.py:85), fed by the
+`IDENTITY_EMBED_MODEL` env via `config.settings`, default **GhostFaceNet**),
+consumed by ONE shared represent function, `represent_deterministic`
+([identity/validator.py:170](identity/validator.py:170)) — the five validator
+call sites AND the domain/ siblings (`character_manager.compute_face_embedding`,
+`continuity_engine`'s per-face read) all route through it:
 ```python
-DeepFace.represent(..., model_name="GhostFaceNet", ...)
+with _cv2_single_thread():
+    if EMBED_MODEL == "AdaFace":   # not a DeepFace built-in → vendored adapter
+        return adaface.represent(...)
+    return DeepFace.represent(..., model_name=EMBED_MODEL, ...)
 ```
+Selecting any non-GhostFaceNet model fires a STRUCTURAL warning: **every
+calibrated identity threshold in the repo assumes GhostFaceNet score
+distributions** (P5 item 2 — pod paired re-calibration — is owed before any
+default flip). The **AdaFace adapter** ([identity/adaface.py](identity/adaface.py),
+vendored net in [identity/adaface_net.py](identity/adaface_net.py), MIT,
+github.com/mk-minchul/AdaFace) keeps detection/alignment on the same
+`DeepFace.extract_faces` stack and swaps only the embedding backbone; input is
+112×112 **BGR** `(x/255−0.5)/0.5` (opposite channel order from the DeepFace
+stack — the known P5 pitfall, pinned in `tests/unit/test_adaface_adapter.py`).
+A missing checkpoint fails LOUD at `_resolve_embed_model` time (download via
+`scripts/download_adaface_ckpt.py`); per-call failure would silently SKIP
+validations. Disk-cached embeddings are keyed by model for non-default
+backbones (`emb_<key>__<model>.npy`) so a warm GhostFaceNet cache is never
+served to an AdaFace run.
 
 **Determinism (load-bearing — operator finding 2026-06-13).** DeepFace's
 `align=True` path (the default; `align=False` collapses the man-binding signal
@@ -1710,12 +1731,16 @@ before that module was retired WS1 Task 4 — the underlying property holds for
 any future concurrent caller: each call still runs single-threaded (per-call
 determinism holds), but a concurrent overlap leaves OpenCV at 1 thread
 (benign); gate with a `threading.Lock` if a parallel caller with >1 workers
-returns. ROUTED (commit `970015b`): the
-domain-layer sibling sites `domain/continuity_engine.py:165,183` and
-`domain/character_manager.py:371,389,402` (the last persists `embedding.npy`)
-wrap their `DeepFace` calls in `cv2_single_thread` (imported from
-`identity.validator`); `tests/unit/test_embedding_determinism_routing.py`
-(5 tests, green) pins the routing.
+returns. ROUTED (commit `970015b`, strengthened by the AdaFace adapter): the
+domain-layer `extract_faces` sites (`domain/continuity_engine.py:165`,
+`domain/character_manager.py:505,523`) wrap their `DeepFace` calls in
+`cv2_single_thread` (imported from `identity.validator`), and the domain
+`represent` sites (`domain/continuity_engine.py:187`,
+`domain/character_manager.py:542`) route through the shared
+`represent_deterministic` chokepoint (`identity/validator.py:173` — guard +
+`IDENTITY_EMBED_MODEL` dispatch). `character_manager.compute_face_embedding`
+(`:530`) is the producer whose result is persisted to `embedding.npy`
+(`:308`); `tests/unit/test_embedding_determinism_routing.py` pins the routing.
 
 Naming clarification: everything in the codebase that says "ArcFace" actually
 runs GhostFaceNet. ArcFace is the loss function GhostFaceNet was trained with;
@@ -1798,7 +1823,7 @@ Consumer: `workflow_selector.get_adaptive_pulid_weight` reads
 ±0.10. Three return paths all return a float — no None bug. That consumer
 itself only sees history entries from the 3 LIVE sites in practice.
 
-*Last verified: 2026-06-13 (site count corrected 2026-08-01 — see item 2)*
+*Last verified: 2026-08-01 (site count corrected; EMBED_MODEL chokepoint + AdaFace adapter merged)*
 
 ---
 
@@ -2031,7 +2056,7 @@ Consumers (as of T6, 2026-06-06):
 
 `@dataclass(frozen=True) Settings` ([config/settings.py:48](config/settings.py:48)).
 **Env-derived API keys + paths ONLY. No UI knobs.** Cached as `@lru_cache(maxsize=1)`
-singleton via `get_settings()` ([:140-142](config/settings.py:140)).
+singleton via `get_settings()` ([:148-150](config/settings.py:148)).
 
 Reading project UI knobs from `settings` is a silent-failure bug
 (`getattr(settings, "tts_provider", "DEFAULT")` returns the default because

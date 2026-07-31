@@ -83,6 +83,10 @@ logs/*
 !logs/cartesia-prosody-20260801/
 !logs/cartesia-prosody-20260801/**
 
+# Model weights (downloaded, never committed — e.g. AdaFace checkpoints via
+# scripts/download_adaface_ckpt.py)
+models/
+
 # GitNexus index
 .gitnexus
 
