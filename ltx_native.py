@@ -279,8 +279,26 @@ class LTXVideoAPI:
         end_frame_path: str,
         prompt: str,
         output_path: str,
-        num_frames: int,
+        duration: int = DEFAULT_DURATION_SECONDS,
     ) -> str | None:
+        """First+last-frame transition via the FAL proxy.
+
+        Raises:
+            LTXContractViolation: ``duration`` is not one of
+                :attr:`DURATION_SECONDS` — the SAME reject-before-any-
+                network-call contract as :meth:`generate_video`. Previously
+                this method took ``num_frames`` and silently SNAPPED it via
+                ``_fal_duration`` instead of rejecting — the one entry point
+                that diverged from the shared duration contract (money-gate
+                finding 2026-07-30). Dormant (no live caller); kept
+                contract-consistent for whenever one is wired.
+        """
+        if duration not in self.DURATION_SECONDS:
+            raise LTXContractViolation(
+                f"LTX duration must be one of {self.DURATION_SECONDS} seconds "
+                f"(the ltx-2-3-pro profile enum — https://docs.ltx.io/models); "
+                f"got {duration!r}."
+            )
         try:
             start_url = self._upload_to_fal(start_frame_path)
             end_url = self._upload_to_fal(end_frame_path)
@@ -291,7 +309,7 @@ class LTXVideoAPI:
                 "prompt": prompt,
                 "image_url": start_url,
                 "end_image_url": end_url,
-                "duration": self._fal_duration(num_frames),
+                "duration": duration,
                 "resolution": "1080p",
                 "generate_audio": False,
             }
@@ -438,9 +456,27 @@ class LTXVideoAPI:
         end_frame_path: str,
         prompt: str,
         output_path: str,
-        num_frames: int,
+        duration: int = DEFAULT_DURATION_SECONDS,
     ) -> str | None:
-        """Native LTX Video API — keyframe transition."""
+        """Native LTX Video API — keyframe transition.
+
+        Raises:
+            LTXContractViolation: ``duration`` is not one of
+                :attr:`DURATION_SECONDS` — the SAME reject-before-any-
+                network-call contract as :meth:`generate_video`. Previously
+                this method took ``num_frames`` and sent it straight to the
+                wire with NO duration validation at all (money-gate finding
+                2026-07-30). Dormant (no live caller; the wire payload shape
+                below — ``/transition``, raw num_frames+width/height — is a
+                pre-2.3 legacy schema left otherwise untouched here, kept
+                contract-consistent for whenever a caller is wired).
+        """
+        if duration not in self.DURATION_SECONDS:
+            raise LTXContractViolation(
+                f"LTX duration must be one of {self.DURATION_SECONDS} seconds "
+                f"(the ltx-2-3-pro profile enum — https://docs.ltx.io/models); "
+                f"got {duration!r}."
+            )
         try:
             with open(start_frame_path, "rb") as f:
                 start_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -451,7 +487,7 @@ class LTXVideoAPI:
                 "prompt": prompt,
                 "start_image": start_b64,
                 "end_image": end_b64,
-                "num_frames": num_frames,
+                "num_frames": duration * 24,
                 "width": 1280,
                 "height": 720,
             }

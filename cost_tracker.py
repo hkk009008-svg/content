@@ -56,13 +56,18 @@ API_COST_USD: dict[str, float] = {
     "VEO_NATIVE":    0.30,
     "GEMINI_OMNI":   0.56,   # $0.112/s x ~5s estimate (Gemini Developer API preview pricing — WEB-VERIFIED NOT REPO-MEASURED, confirm against a live billed call per R-MEASURE). Duration is prompt-inferred/variable on this API (no structured duration kwarg), so this flat per-clip estimate risks the exact under-billing pattern SEEDANCE needed fixing for on 2026-07-11 (see SEEDANCE_DURATIONS, phase_c_ffmpeg.py:38) — a duration-probe (ffprobe on the downloaded mp4) fix is recommended before this is load-bearing at scale, not shipped in this first pass.
     "VEO":           0.25,
-    "LTX":           0.36,   # per clip: fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified
+    "LTX":           0.36,   # FLOOR ESTIMATE (pre-spend gate / no-duration callers only): fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified. The dispatcher's shared default duration is 8s (phase_c_ffmpeg.generate_ai_video(duration="8s")), so this 6s-assuming flat figure under-records ~33% on default shots — record_api_call(duration_seconds=...) computes the TRUE per-second cost from API_COST_PER_SECOND_USD below whenever the caller supplies the actual dispatched duration (money-gate finding 2026-07-30).
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
     "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
     "SEEDANCE":      1.51,    # per ~5s clip: fal bytedance/seedance-2.0 standard 720p = $0.3024/s (fal model page, read 2026-07-11; r2v-with-video-input bills 0.6x; calibrate against fal invoice)
     # Performance-capture APIs (per ~5s clip; mirrors performance/* _cost_log estimates).
-    "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
+    # ACT_ONE: the routing engine NAME kept for backward compat with existing
+    # routing/historical cost-log data (domain.performance.ENGINE_ACT_ONE,
+    # performance/_router.py) — the adapter it actually dispatches migrated
+    # to Runway ACT-TWO (performance/act_two.py, 2026-07-30 slice 5b); rate
+    # unchanged (~$0.05/s matches act_two.py's own _cost_log estimate).
+    "ACT_ONE":        0.25,    # Runway Act-Two retargeting (key name is legacy — see comment above), approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
     "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
@@ -99,6 +104,29 @@ API_COST_USD: dict[str, float] = {
     "LIPSYNC_OMNIHUMAN":   0.80,   # OmniHuman v1.5 via FAL: $0.16/s (fal model page 2026-07-11) -> 5s clip
     "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL
     "LIPSYNC_DEFAULT":     0.67,   # fallback when the cascade reports no engine name — assume the sync-3 primary won (undercounting the likely winner is the worse error)
+}
+
+
+# ---------------------------------------------------------------------------
+# Per-second cost rates for duration-billed video APIs whose flat
+# API_COST_USD estimate above assumes one specific duration.
+# record_api_call(duration_seconds=...) computes the TRUE cost from these
+# instead of the flat table whenever the caller supplies the actual
+# dispatched duration — grepped for an existing duration-aware pattern in
+# this module before adding this (money-gate finding 2026-07-30: none
+# existed here; the closest precedent is the per-module ``_cost_log``
+# helpers in performance/act_two.py, performance/live_portrait.py, and
+# performance/driving_video.py, which each compute
+# ``cost_usd = round(rate * duration_s, N)`` inline). Pulling the rate up to
+# the shared record site (rather than a bespoke per-caller helper) lets any
+# duration-billed engine opt in without its own copy of the arithmetic.
+# ---------------------------------------------------------------------------
+
+API_COST_PER_SECOND_USD: dict[str, float] = {
+    # fal ltx-2.3 $0.06/s audio-off @1080p (fal OpenAPI + model page,
+    # read 2026-07-11) — see the API_COST_USD["LTX"] comment above for the
+    # flat-table/duration-aware split.
+    "LTX": 0.06,
 }
 
 
@@ -385,6 +413,29 @@ class CostTracker:
             video_id=video_id,
         )
 
+    @staticmethod
+    def _duration_aware_cost_usd(
+        api_upper: str, duration_seconds: Optional[float]
+    ) -> Optional[float]:
+        """Return the TRUE per-second cost for *api_upper*, or None.
+
+        None means "no opinion" — the caller falls back to the flat
+        ``API_COST_USD`` estimate. That happens when ``duration_seconds`` is
+        not supplied, ``api_upper`` has no ``API_COST_PER_SECOND_USD`` entry,
+        or the supplied duration is non-numeric/non-finite/non-positive — a
+        bad duration must never poison the record (fail safe to the flat
+        table, mirroring the NaN-cost guard in ``log()``), never crash.
+        """
+        if duration_seconds is None or api_upper not in API_COST_PER_SECOND_USD:
+            return None
+        try:
+            dur = float(duration_seconds)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(dur) or dur <= 0:
+            return None
+        return round(API_COST_PER_SECOND_USD[api_upper] * dur, 4)
+
     def record_api_call(
         self,
         api_name: str,
@@ -392,6 +443,7 @@ class CostTracker:
         operation: str = "",
         shot_id: str = "",
         video_id: str = "",
+        duration_seconds: Optional[float] = None,
     ) -> float:
         """Record a generation API call against the budget.
 
@@ -404,8 +456,25 @@ class CostTracker:
         returned a video that download/aspect checks then discarded —
         operation="motion_generation_rejected", 2026-07-11). Never call for
         attempts that failed BEFORE the provider produced output.
+
+        Args:
+            duration_seconds: the ACTUAL dispatched duration, when the
+                caller knows it. For an ``api_name`` with an
+                ``API_COST_PER_SECOND_USD`` entry (currently LTX), this
+                computes the TRUE cost (``rate * duration_seconds``) instead
+                of the flat ``API_COST_USD`` estimate, which assumes one
+                specific duration and silently under/over-records whenever
+                the actual dispatched duration differs (e.g. LTX's flat
+                figure assumes the 6s enum floor while the dispatcher's
+                shared default is 8s — money-gate finding 2026-07-30).
+                Ignored whenever ``cost_usd`` is explicitly supplied
+                (explicit cost always wins), the api has no per-second rate,
+                or the duration is non-finite/non-positive/non-numeric —
+                falls back to the flat table exactly as before.
         """
         api_upper = api_name.upper()
+        if cost_usd is None:
+            cost_usd = self._duration_aware_cost_usd(api_upper, duration_seconds)
         if cost_usd is None:
             cost_usd = API_COST_USD.get(api_upper, 0.0)
             if cost_usd == 0.0 and api_upper not in API_COST_USD:

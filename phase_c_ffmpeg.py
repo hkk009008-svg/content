@@ -58,6 +58,24 @@ PORTRAIT_CAPABLE = PORTRAIT_CAPABLE_VIDEO_ENGINES
 # otherwise under-record by 38% (money-gate review 2026-07-11).
 SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
 
+# ltx-2-3-pro duration enum (seconds) — MUST stay == ltx_native.LTXVideoAPI.
+# DURATION_SECONDS (https://docs.ltx.io/models; both endpoints share this
+# enum, confirmed 2026-07-30). Module-level (like SEEDANCE_DURATIONS above)
+# rather than a per-call local so it is a proper, importable, testable
+# symbol a sync-pin test can check against the real ltx_native constant
+# (see the test reference below). Kept as a LITERAL rather than an
+# attribute lookup on the imported LTXVideoAPI class: sibling dispatch tests
+# replace the whole `ltx_native` module with a bare MagicMock class
+# (`ltx_module.LTXVideoAPI = MagicMock(...)`), under which
+# `LTXVideoAPI.DURATION_SECONDS` silently returns a MagicMock — iterating it
+# yields ZERO items (no TypeError) and indexing it returns another MagicMock,
+# not an int, so the snap-up logic below would silently pass a MagicMock as
+# `duration` to generate_video() instead of raising or using a real value
+# (verified empirically 2026-07-30). A sync-pin test guards against drift
+# instead (tests/unit/test_ltx_native.py::
+# test_phase_c_ffmpeg_duration_enum_matches_ltx_native).
+_LTX_DURATION_ENUM_S = (6, 8, 10)
+
 # Once-per-run structural flag: multiple admitted fallbacks use FAL, so a
 # missing client degrades the whole run, not one clip.
 _FAL_MISSING_WARNED = False
@@ -741,6 +759,19 @@ def _execute_admitted_video_chain(
             _ltx_billed_noted = True
             _note_billed_attempt(target_api.upper())
 
+        # Bind LTXContractViolation BEFORE the main try below so the
+        # `except LTXContractViolation` clause always has a real name to
+        # evaluate — if `from ltx_native import LTXVideoAPI` itself fails
+        # inside that try (module missing, etc.), Python must still be able
+        # to resolve the except clause's type expression without a
+        # NameError/UnboundLocalError masking the real import failure. The
+        # `()` sentinel matches no exception, so an import failure falls
+        # through to the generic `except Exception` exactly as before.
+        try:
+            from ltx_native import LTXContractViolation
+        except Exception:
+            LTXContractViolation = ()
+
         try:
             from ltx_native import LTXVideoAPI
             ltx = LTXVideoAPI()
@@ -765,13 +796,9 @@ def _execute_admitted_video_chain(
             # itself invalid for the ltx-2-3-pro profile). Parse the shared
             # "Xs"-style config value the same way VEO_NATIVE does, then snap
             # UP to the ltx-2-3-pro duration enum — https://docs.ltx.io/models
-            # (must stay == LTXVideoAPI.DURATION_SECONDS; kept as a local
-            # literal, like the camera-motion map and resolution choice just
-            # above, rather than an attribute lookup on the imported class —
-            # sibling tests replace the whole `ltx_native` module with a bare
-            # MagicMock class, under which a class-attribute lookup silently
-            # returns a mock object instead of a real int).
-            _LTX_DURATION_ENUM_S = (6, 8, 10)
+            # — via the module-level _LTX_DURATION_ENUM_S (see its own
+            # comment for why it's a literal, not an LTXVideoAPI attribute
+            # lookup).
             try:
                 _ltx_requested_seconds = int(str(duration).strip().lower().rstrip("s"))
             except (TypeError, ValueError):
@@ -807,10 +834,38 @@ def _execute_admitted_video_chain(
                     )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
+                if _cascade_out is not None:
+                    # Surface the TRUE dispatched duration (not the flat
+                    # per-clip API_COST_USD estimate's assumed 6s) so a
+                    # duration-aware cost record (cost_tracker.record_api_call
+                    # ``duration_seconds=``) can be computed from what was
+                    # actually billed, not guessed — money-gate finding
+                    # 2026-07-30.
+                    _cascade_out["cascade_metadata"]["duration_s"] = ltx_duration
                 return result
             # result is None here whether or not the provider billed before
             # failing (on_billed already noted it in the billed case) —
             # cascade to the next engine either way.
+            return try_next_api()
+        except LTXContractViolation as e:
+            # A LOCAL request-construction bug (e.g. an out-of-enum duration
+            # reaching generate_video despite the snap above), not a
+            # provider-side failure — the blanket `except Exception` below
+            # would otherwise fold it into routine cascade noise
+            # indistinguishable from a transient provider error
+            # (silent-gate-degradation doctrine: a local-contract bug must be
+            # VISIBLE). Still cascades — a broken LTX dispatch must not stall
+            # the shot — but at WARNING with a distinct reason, and recorded
+            # into _cascade_out for callers/tests to inspect, not just logged.
+            logger.warning(
+                "LTX contract violation — local request-construction bug, "
+                "not a provider failure",
+                extra={"engine": "LTX", "reason": "ltx_contract_violation", "error": str(e)},
+            )
+            if _cascade_out is not None:
+                _cascade_out.setdefault("contract_violations", []).append(
+                    {"engine": "LTX", "reason": "ltx_contract_violation", "detail": str(e)}
+                )
             return try_next_api()
         except Exception as e:
             logger.warning("LTX error", extra={"engine": "LTX", "error": str(e)})

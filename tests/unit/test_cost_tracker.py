@@ -612,6 +612,68 @@ class TestRecordAPICall:
         assert row["cost_usd"] == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
         assert row["cost_usd"] != 0.0
 
+    # --- Duration-aware LTX cost (money-gate finding 2026-07-30) ----------
+    # The flat API_COST_USD["LTX"] entry assumes the 6s duration-enum floor
+    # (0.06/s * 6 = 0.36), but the dispatcher's shared default duration is
+    # 8s (phase_c_ffmpeg.generate_ai_video(duration="8s")) — a flat-table
+    # record under-counts ~33% on default shots. record_api_call() now
+    # accepts duration_seconds and, for engines with an
+    # API_COST_PER_SECOND_USD entry, computes the TRUE per-second cost
+    # instead of the flat estimate.
+    @pytest.mark.parametrize("duration_seconds,expected_cost", [
+        (6, 0.36),   # enum floor — matches the pre-existing flat estimate
+        (8, 0.48),   # the dispatcher's shared default duration
+        (10, 0.60),  # enum ceiling
+    ])
+    def test_record_api_call_ltx_duration_aware_cost(
+        self, cost_tracker, duration_seconds, expected_cost
+    ):
+        """RED before the fix: record_api_call() had no duration_seconds
+        parameter at all (TypeError on the unexpected kwarg), so every LTX
+        record silently rode the flat 6s estimate (0.36) regardless of the
+        actual dispatched duration — the budget gate under-counted 8s/10s
+        LTX spend. GREEN: the TRUE per-second figure is recorded for 6, 8,
+        and 10s dispatches."""
+        cost = cost_tracker.record_api_call("LTX", duration_seconds=duration_seconds)
+        assert cost == pytest.approx(expected_cost)
+        assert cost_tracker.spent_usd == pytest.approx(expected_cost)
+        row = cost_tracker.conn.execute(
+            "SELECT cost_usd FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["cost_usd"] == pytest.approx(expected_cost)
+
+    def test_record_api_call_ltx_no_duration_falls_back_to_flat_table(self, cost_tracker):
+        """Backward compat: omitting duration_seconds keeps the existing
+        flat-table estimate — callers that don't know the dispatched
+        duration (e.g. the pre-spend would_exceed() estimate) are
+        unaffected."""
+        cost = cost_tracker.record_api_call("LTX")
+        assert cost == pytest.approx(API_COST_USD["LTX"])
+
+    def test_record_api_call_explicit_cost_usd_wins_over_duration_seconds(self, cost_tracker):
+        """An explicit cost_usd override always wins, even when
+        duration_seconds is also supplied."""
+        cost = cost_tracker.record_api_call("LTX", cost_usd=0.99, duration_seconds=8)
+        assert cost == pytest.approx(0.99)
+
+    @pytest.mark.parametrize("bad_duration", [0, -5, float("nan"), float("inf"), "not-a-number"])
+    def test_record_api_call_ltx_invalid_duration_falls_back_to_flat_table(
+        self, cost_tracker, bad_duration
+    ):
+        """A non-finite/non-positive/non-numeric duration_seconds must not
+        poison the record — fail safe to the flat-table estimate rather
+        than crashing or recording a bad cost."""
+        cost = cost_tracker.record_api_call("LTX", duration_seconds=bad_duration)
+        assert cost == pytest.approx(API_COST_USD["LTX"])
+
+    def test_record_api_call_duration_seconds_ignored_for_engines_without_a_rate(
+        self, cost_tracker
+    ):
+        """duration_seconds is a no-op for engines with no
+        API_COST_PER_SECOND_USD entry — the flat table still applies."""
+        cost = cost_tracker.record_api_call("SORA_2", duration_seconds=8)
+        assert cost == pytest.approx(API_COST_USD["SORA_2"])
+
 
 class TestRecordAPICallAudioTracking:
     """M-B2 closure (cycle-16 Tier B): audio sites now have API_COST_USD

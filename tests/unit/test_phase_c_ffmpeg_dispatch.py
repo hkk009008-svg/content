@@ -221,6 +221,7 @@ def test_auto_safe_chain_skips_rejected_head_and_preserves_order(
     assert cascade["cascade_metadata"] == {
         "engine": "LTX",
         "attempts": ["LTX"],
+        "duration_s": 8,  # the shared dispatcher default (no explicit duration passed)
     }
     assert cascade["policy_rejections"] == [
         {"key": "AUTO", "reason": "auto_sentinel"},
@@ -319,6 +320,7 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     assert cascade["cascade_metadata"] == {
         "engine": "LTX",
         "attempts": ["VEO_NATIVE", "LTX"],
+        "duration_s": 8,  # the shared dispatcher default (no explicit duration passed)
     }
     assert cascade["policy_rejections"] == [
         {"key": "SORA_2", "reason": "retired"},
@@ -326,6 +328,61 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     veo_module.VeoNativeAPI.assert_called_once_with()
     ltx_module.LTXVideoAPI.assert_called_once_with()
     policy_filter.assert_called_once()
+
+
+def test_ltx_contract_violation_cascades_and_is_surfaced_distinctly(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """A local LTXContractViolation (e.g. an out-of-enum duration reaching
+    generate_video despite the dispatcher's own snap-up) must still cascade
+    to the next candidate — but be recorded DISTINCTLY from a routine
+    provider error, not folded into the same blanket 'LTX error' noise
+    (silent-gate-degradation doctrine: a local-contract bug must be VISIBLE,
+    money-gate finding 2026-07-30)."""
+    import ltx_native as real_ltx_native
+
+    output = str(tmp_path / "veo.mp4")
+
+    veo_instance = MagicMock()
+    veo_instance.generate_video.return_value = output
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(return_value=veo_instance)
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.side_effect = real_ltx_native.LTXContractViolation(
+        "bad duration"
+    )
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    ltx_module.LTXContractViolation = real_ltx_native.LTXContractViolation
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade: dict = {}
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        video_fallbacks=["VEO_NATIVE"],
+        shot_type="wide",
+        ctx=_ctx(),
+        _cascade_out=cascade,
+    )
+
+    assert result == output
+    assert cascade["cascade_metadata"]["engine"] == "VEO_NATIVE"
+    assert cascade["contract_violations"] == [
+        {"engine": "LTX", "reason": "ltx_contract_violation", "detail": "bad duration"}
+    ]
+    veo_module.VeoNativeAPI.assert_called_once_with()
 
 
 def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
@@ -425,6 +482,7 @@ def test_cooldown_winner_keeps_prior_cycle_attempt_provenance(
     assert cascade["cascade_metadata"] == {
         "engine": "LTX",
         "attempts": ["LTX", "LTX"],
+        "duration_s": 8,  # the shared dispatcher default (no explicit duration passed)
     }
 
 

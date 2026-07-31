@@ -34,8 +34,10 @@ def _run_finalize(
     # Bind the REAL cost helpers — a MagicMock _motion_cost_kwargs unpacks
     # as empty kwargs and silently drops the duration-aware cost under test.
     mock_self._motion_cost_kwargs = (
-        lambda engine, st, video_path="": ShotController._motion_cost_kwargs(
-            mock_self, engine, st, video_path
+        lambda engine, st, video_path="", cascade_metadata=None: (
+            ShotController._motion_cost_kwargs(
+                mock_self, engine, st, video_path, cascade_metadata
+            )
         )
     )
     mock_self._record_billed_rejects = (
@@ -95,6 +97,26 @@ class TestMotionCostWinnerKey:
         assert "cost_usd" not in call.kwargs, (
             f"non-SEEDANCE record must use the table default; got {call.kwargs}"
         )
+
+    def test_ltx_winner_records_true_dispatched_duration(self):
+        """LTX wins with the dispatcher's true duration in cascade_metadata →
+        the record threads duration_seconds so CostTracker bills 0.06/s × 8s
+        (fix-S4-money: the 8s shared default otherwise under-records ~33%
+        against the flat 6s-floor table figure)."""
+        mock_self = _run_finalize(
+            {"cascade_metadata": {"engine": "LTX", "duration_s": 8}}
+        )
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "LTX"
+        assert call.kwargs.get("duration_seconds") == 8
+
+    def test_ltx_winner_without_duration_metadata_uses_flat_floor(self):
+        """LTX win with no duration_s in metadata → no duration kwarg; the
+        conservative flat table floor applies (never crash, never $0)."""
+        mock_self = _run_finalize({"cascade_metadata": {"engine": "LTX"}})
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "LTX"
+        assert "duration_seconds" not in call.kwargs
 
     def test_non_seedance_winner_keys_winner_without_override(self):
         """A non-SEEDANCE cascade winner still keys on the winner."""

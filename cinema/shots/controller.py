@@ -1560,13 +1560,24 @@ class ShotController:
         return video_path
 
     def _motion_cost_kwargs(
-        self, engine: object, resolved_shot_type: str, video_path: str = ""
+        self,
+        engine: object,
+        resolved_shot_type: str,
+        video_path: str = "",
+        cascade_metadata: Optional[dict] = None,
     ) -> dict:
         """Per-engine cost overrides for a motion generation record.
 
         SEEDANCE is per-second-billed with shot-type-dependent durations;
         API_COST_USD["SEEDANCE"] is per ~5s, so recompute for the requested
         duration (8s action clips under-record by 38% on the flat figure).
+
+        LTX is per-second-billed with the TRUE dispatched duration surfaced
+        by the dispatcher in ``cascade_metadata["duration_s"]`` (fix-S4-money
+        2026-07-31: the 8s shared dispatch default otherwise under-records
+        ~33% against the flat 6s-floor table figure). Winner-path only —
+        billed-but-rejected attempts have no recorded dispatch duration and
+        keep the conservative flat floor.
 
         GEMINI_OMNI has no structured duration kwarg (duration is
         prompt-inferred/variable on this API) so, unlike SEEDANCE, its
@@ -1585,6 +1596,11 @@ class ShotController:
             from phase_c_ffmpeg import SEEDANCE_DURATIONS
             _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
             return {"cost_usd": round(API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4)}
+        if _engine == "LTX":
+            _dur = (cascade_metadata or {}).get("duration_s")
+            if isinstance(_dur, (int, float)) and not isinstance(_dur, bool) and _dur > 0:
+                return {"duration_seconds": _dur}
+            return {}
         if _engine == "GEMINI_OMNI" and video_path and os.path.exists(video_path):
             from cost_tracker import API_COST_USD
             try:
@@ -1826,7 +1842,10 @@ class ShotController:
                     shot_id=shot_id,
                     video_id=video_id,
                     **self._motion_cost_kwargs(
-                        _motion_engine, resolved_shot_type, video_path=final_vid
+                        _motion_engine,
+                        resolved_shot_type,
+                        video_path=final_vid,
+                        cascade_metadata=take.get("cascade_metadata"),
                     ),
                 )
             except Exception:
