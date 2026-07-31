@@ -99,7 +99,6 @@ function makeCharacter(overrides: Partial<Character> = {}): Character {
     reference_images: [],
     canonical_reference: '',
     voice_id: 'voice-a',
-    ip_adapter_weight: 0.8,
     physical_traits: '',
     embedding_cache: '',
     ...overrides,

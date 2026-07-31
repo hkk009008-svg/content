@@ -241,7 +241,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:576](web_server.py:576)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:566](web_server.py:566)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -255,7 +255,7 @@ shape: every response for a real project also carries server-derived
 "resume_checkpoint", "cancel", "pause", "resume"}`), so the UI never has to
 infer legality from transport state.
 
-`_pipeline_action_authority(pid)` ([web_server.py:669](web_server.py:669))
+`_pipeline_action_authority(pid)` ([web_server.py:659](web_server.py:659))
 derives both from the SAME `_running_pipelines`/`_PIPELINE_PENDING` registry
 that gates `/generate`, `/cancel`, `/pause`, `/resume` — **never** from
 `_progress_queues`/SSE subscriber state, since a client can disconnect from
@@ -286,7 +286,7 @@ pipeline) branch only — a checkpoint is only actionable while idle, and
 
 `PUT /api/projects/<pid>` → `api_update_project`
 ([web_server.py:1388](web_server.py:1388)) and `PATCH /api/projects/<pid>` →
-`api_patch_project_settings` ([web_server.py:1477](web_server.py:1477)) both
+`api_patch_project_settings` ([web_server.py:1474](web_server.py:1474)) both
 guard `global_settings` writes with an integer `revision` counter
 (`_current_settings_revision`/`_settings_revision_established`,
 [web_server.py:1155](web_server.py:1155)) so two overlapping editors — or a
@@ -810,7 +810,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:2656](web_server.py:2656) — uses the
+`api_generate_dialogue` at [web_server.py:2623](web_server.py:2623) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 

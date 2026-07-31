@@ -416,16 +416,6 @@ _PUBLIC_SHOT_COMPATIBILITY_TYPES = {
     "keyframe_review": dict,
     "scene_location": str,
 }
-def _parse_ip_adapter_weight(value) -> float:
-    if isinstance(value, bool):
-        raise ValueError("ip_adapter_weight must be a finite number")
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        raise ValueError("ip_adapter_weight must be a finite number")
-    if not math.isfinite(parsed):
-        raise ValueError("ip_adapter_weight must be a finite number")
-    return parsed
 
 
 def _json_object_or_none():
@@ -969,10 +959,17 @@ def get_config():
             "frame_interpolation": {"available": True, "description": "RIFE 4x interpolation (8fps → 24fps)"},
             "upscaling": {"available": True, "description": "Real-ESRGAN 2x upscale for 4K output"},
         },
+        # Only knobs with a real production reader belong here — advertising a
+        # range the pipeline never consults is the same defect class as an
+        # inert UI control (audit 2026-07-30, slice 9d follow-up).
+        # img2img_denoise is read at workflow_selector.py:343-353.
+        # Removed with the ip_adapter_weight deletion: `identity_threshold`
+        # (the pipeline reads the per-shot value from continuity config, and
+        # the wired project-level override is `identity_strictness`) and
+        # `ip_adapter_weight` (generation uses the shot-type PuLID template
+        # plus the adaptive face-lock gate).
         "continuity_options": {
             "img2img_denoise": {"min": 0.2, "max": 0.6, "default": 0.35, "description": "Lower = more similar to previous shot"},
-            "identity_threshold": {"min": 0.4, "max": 0.8, "default": 0.55, "description": "Face similarity threshold for validation"},
-            "ip_adapter_weight": {"min": 0.5, "max": 1.0, "default": 0.85, "description": "PuLID face-lock strength"},
         },
         "color_grade_presets": [
             "warm_cinema", "cool_noir", "vibrant", "desaturated",
@@ -1593,10 +1590,6 @@ def api_add_character(pid):
     name = request.form.get("name", "Unnamed Character")
     description = request.form.get("description", "")
     voice_id = request.form.get("voice_id", "")
-    try:
-        ip_weight = _parse_ip_adapter_weight(request.form.get("ip_adapter_weight", "0.85"))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
 
     # Save uploaded reference images
     images = request.files.getlist("reference_images")
@@ -1620,7 +1613,6 @@ def api_add_character(pid):
             project, name, description,
             reference_image_paths=image_paths,
             voice_id=voice_id,
-            ip_adapter_weight=ip_weight,
             commit_timeout=HTTP_PROJECT_TIMEOUT,
         )
     except ValueError as e:
@@ -1657,14 +1649,6 @@ def api_update_character(pid, cid):
         data = request.json or {}
     else:
         data = request.form.to_dict()
-    try:
-        ip_weight = (
-            _parse_ip_adapter_weight(data["ip_adapter_weight"])
-            if "ip_adapter_weight" in data
-            else None
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
 
     # Handle reference image uploads.
     #
@@ -1741,8 +1725,6 @@ def api_update_character(pid, cid):
                 for field in ["name", "description", "voice_id", "physical_traits"]:
                     if field in data:
                         latest_char[field] = data[field]
-                if ip_weight is not None:
-                    latest_char["ip_adapter_weight"] = ip_weight
                 if saved_paths:
                     refs = latest_char.setdefault("reference_images", [])
                     for save_path in saved_paths:
@@ -2109,10 +2091,6 @@ def api_add_object(pid):
     branding_constraints = data.get("branding_constraints", "")
     scale_reference = data.get("scale_reference", "")
     texture_anchor = data.get("texture_anchor", "")
-    try:
-        ip_weight = _parse_ip_adapter_weight(data.get("ip_adapter_weight", "0.85"))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
 
     # Create the object FIRST to claim a unique id, then save uploaded references
     # into <project>/objects/<obj_id>/. The previous flow used a shared
@@ -2129,7 +2107,6 @@ def api_add_object(pid):
         branding_constraints=branding_constraints,
         scale_reference=scale_reference,
         texture_anchor=texture_anchor,
-        ip_adapter_weight=ip_weight,
     )
 
     image_paths = []
@@ -2183,14 +2160,6 @@ def api_update_object(pid, oid):
         return jsonify({"error": "Object not found"}), 404
 
     data = (request.json or {}) if request.is_json else request.form.to_dict()
-    try:
-        ip_weight = (
-            _parse_ip_adapter_weight(data["ip_adapter_weight"])
-            if "ip_adapter_weight" in data
-            else None
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
 
     # Handle additional reference image uploads
     saved_paths = []
@@ -2229,8 +2198,6 @@ def api_update_object(pid, oid):
                       "texture_anchor"]:
             if field in data:
                 latest_obj[field] = data[field]
-        if ip_weight is not None:
-            latest_obj["ip_adapter_weight"] = ip_weight
         if saved_paths:
             refs = latest_obj.setdefault("reference_images", [])
             for p in saved_paths:

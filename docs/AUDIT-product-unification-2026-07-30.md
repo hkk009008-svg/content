@@ -303,7 +303,7 @@ the audit baseline.
 | 9a settings write contract | project mutation PATCH/revision or explicit-save API, schema/conflict tests | Slices 2, 8 | fresh backend worker → two reviewers | OPEN |
 | 9b video/spend settings | video inspector, engine duration/audio, face-swap/cascade defaults and runtime readers/tests | 9a and Slice 2 | fresh worker → two reviewers | OPEN |
 | 9c voice/language settings | voice inspector, TTS/default-voice/lipsync/WPM/language-default consumers and tests | 9a | fresh worker → two reviewers | OPEN |
-| 9d identity/object stored settings | `ip_adapter_weight`, `scale_reference`, and other unconsumed fields: wire or remove with tests | 9a | one focused worker per consumer family → two reviews | OPEN |
+| 9d identity/object stored settings | `ip_adapter_weight`, `scale_reference`, and other unconsumed fields: wire or remove with tests | 9a | one focused worker per consumer family → two reviews | LANDED in two steps: `6e7477a0` labeled all three read-only; the `ip_adapter_weight` REMOVE decision then deleted it end to end (UI/API/factories/`characters.json`) + retired the now-impossible `confirmed[15]` validation pins. `scale_reference` remains read-only pending its `llm/prompt_optimizer.py` wiring. |
 | 10 media portability | publishers, path model, file route, previews/tests | project boundary | fresh worker → two reviewers | OPEN |
 | 11a event fan-out/replay | backend subscriber registry, monotonic IDs, snapshot/replay contract and concurrency tests | Slice 8 | fresh backend worker → two reviewers | OPEN |
 | 11b stage/reconnect reducer | canonical event vocabulary, UI reducer/reconnect state/tests | 11a | fresh UI worker → two reviewers | OPEN |

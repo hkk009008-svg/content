@@ -5,7 +5,6 @@ export interface Character {
   reference_images: string[]
   canonical_reference: string
   voice_id: string
-  ip_adapter_weight: number
   physical_traits: string
   embedding_cache: string
 }
@@ -38,7 +37,6 @@ export interface ProductObject {
   branding_constraints: string    // e.g., "logo must be visible, legible, centered"
   scale_reference: string         // e.g., "fits in adult hand, ~6cm tall"
   texture_anchor: string          // critical visual features: logo, badge, signature color
-  ip_adapter_weight: number
   embedding_cache: string
 }
 

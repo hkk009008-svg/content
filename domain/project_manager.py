@@ -284,7 +284,6 @@ def make_character(
     description: str,
     reference_images: Optional[List[str]] = None,
     voice_id: str = "",
-    ip_adapter_weight: float = 0.85,
     gender: str = "",
 ) -> dict:
     return {
@@ -295,7 +294,6 @@ def make_character(
         "canonical_reference": "",
         "voice_id": voice_id,
         "gender": gender,
-        "ip_adapter_weight": ip_adapter_weight,
         "physical_traits": "",
         "embedding_cache": "",
     }
@@ -311,7 +309,6 @@ def make_object(
     branding_constraints: str = "",
     scale_reference: str = "",             # e.g. "fits in adult hand", "tabletop scale"
     texture_anchor: str = "",              # critical visual: logo, badge, signature color
-    ip_adapter_weight: float = 0.85,
 ) -> dict:
     """Factory for ProductObject records — product/prop assets used in commercials.
 
@@ -331,7 +328,6 @@ def make_object(
         "branding_constraints": branding_constraints,
         "scale_reference": scale_reference,
         "texture_anchor": texture_anchor,
-        "ip_adapter_weight": ip_adapter_weight,
         "embedding_cache": "",
     }
 
