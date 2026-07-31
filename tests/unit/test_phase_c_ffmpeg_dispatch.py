@@ -8,6 +8,7 @@ effect.
 from __future__ import annotations
 
 import builtins
+import importlib
 import inspect
 import sys
 import types
@@ -47,6 +48,32 @@ def _veo_ltx_snapshot() -> RuntimeSnapshot:
         credentials={"google_api_key", "fal_key"},
         modules={"google.genai", "fal_client"},
     )
+
+
+def _real_ltx_contract_violation() -> type:
+    """Return the REAL ``ltx_native.LTXContractViolation`` class.
+
+    Several sibling test modules (test_budget_pre_spend_gate,
+    test_dialogue_audio_cache, test_dialogue_routing, test_ensure_shot_audio,
+    test_f1b_dialogue_lipsync) install a bare ``types.ModuleType`` stub for
+    'ltx_native' at THEIR import time — i.e. during collection, before any test
+    here runs — and never remove it.  A plain ``import ltx_native`` therefore
+    yields the stub (no attributes) whenever this file is run alongside them
+    without test_ltx_native.py, which is the only module that pops the stub and
+    reinstates the real one.  Don't depend on that sibling: resolve the real
+    class here, restoring whatever was cached so the stub-based tests are
+    unaffected.
+    """
+    cached = sys.modules.get("ltx_native")
+    exc = getattr(cached, "LTXContractViolation", None)
+    if exc is not None:
+        return exc
+    sys.modules.pop("ltx_native", None)
+    try:
+        return importlib.import_module("ltx_native").LTXContractViolation
+    finally:
+        if cached is not None:
+            sys.modules["ltx_native"] = cached
 
 
 def _provider_import_bomb(name, globals=None, locals=None, fromlist=(), level=0):
@@ -340,7 +367,7 @@ def test_ltx_contract_violation_cascades_and_is_surfaced_distinctly(
     provider error, not folded into the same blanket 'LTX error' noise
     (silent-gate-degradation doctrine: a local-contract bug must be VISIBLE,
     money-gate finding 2026-07-30)."""
-    import ltx_native as real_ltx_native
+    contract_violation = _real_ltx_contract_violation()
 
     output = str(tmp_path / "veo.mp4")
 
@@ -351,12 +378,10 @@ def test_ltx_contract_violation_cascades_and_is_surfaced_distinctly(
     monkeypatch.setitem(sys.modules, "veo_native", veo_module)
 
     ltx_instance = MagicMock()
-    ltx_instance.generate_video.side_effect = real_ltx_native.LTXContractViolation(
-        "bad duration"
-    )
+    ltx_instance.generate_video.side_effect = contract_violation("bad duration")
     ltx_module = types.ModuleType("ltx_native")
     ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
-    ltx_module.LTXContractViolation = real_ltx_native.LTXContractViolation
+    ltx_module.LTXContractViolation = contract_violation
     monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
     monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
     monkeypatch.setattr(
