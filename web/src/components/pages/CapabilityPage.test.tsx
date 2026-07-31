@@ -49,7 +49,7 @@ const readyScorecard: CapabilityScorecard = {
   tier: 'production',
   summary: { shots_total: 3, shots_clearing_all_bars: 2 },
   dimensions: [
-    { key: 'identity', label: 'Identity · ArcFace', value: 0.82, bar: 0.6, pass: true, n_measured: 3 },
+    { key: 'identity', label: 'Identity · GhostFaceNet', value: 0.82, bar: 0.6, pass: true, n_measured: 3 },
     { key: 'coherence', label: 'Coherence', value: 0.7, bar: 0.6, pass: true, n_measured: 3 },
     { key: 'motion', label: 'Motion fidelity', value: 0.55, bar: null, pass: true, n_measured: 2 },
     { key: 'lipsync', label: 'Lipsync · SyncNet', value: null, bar: 0.65, pass: null, n_measured: 0 },

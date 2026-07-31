@@ -174,7 +174,7 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
                            "attempts": attempts, "fallback": bool(cas.get("fallback"))})
 
     dimensions = [
-        _dimension("identity", "Identity · ArcFace", ident_v, identity_bar),
+        _dimension("identity", "Identity · GhostFaceNet", ident_v, identity_bar),
         _dimension("coherence", "Coherence", coh_v, coherence_bar),
         _dimension("motion", "Motion fidelity", motion_v, None),
         _dimension("lipsync", "Lipsync · SyncNet", lip_v, lipsync_bar),
