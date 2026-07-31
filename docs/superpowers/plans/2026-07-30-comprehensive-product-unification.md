@@ -490,6 +490,24 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave 1 CLOSED (2026-07-31, wf_30a56037 closing verdicts)
+
+fix-S4 `97a3504e` money-gate **GO** + lane-v **GO** (both convergently note
+the PRE-EXISTING pre-check gap: `would_exceed` reads the flat table while
+records are duration-true — bounded by next-check `is_over_budget`,
+code-documented soft cap, same pattern as SEEDANCE). fix-S5B `6a66b560`
+lane-v **GO** + quality **NITS** (docstring stragglers fixed in the closing
+commit; absent create_ephemeral note added at the cap constant).
+
+**Wave 1 complete: slices 3, 4, 5b, 2c, 7 all landed with recorded
+independent review evidence.** Queued follow-ups: duration-aware
+`would_exceed` for LTX+SEEDANCE (money precision, non-urgent); bool-guard
+and module-missing regression pins; `performance.py` Mode-B interpretation
+ratified by review; continuity temporal-chaining wiring slice.
+
+Next per Resumption sequencing: **Wave 2 — 6b Gemini 2.5 migrations
+(2026-10-02/16 shutdowns), then 6a, 6c1–c3.**
+
 ### Wave-1 round-2 verdicts (wf_232e9282) + round-3 fixes
 
 fixup-S2C `a20c8b68` lane-v **GO** (mutation re-proved). fixup-tests

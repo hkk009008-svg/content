@@ -74,7 +74,11 @@ _RUNWAY_API_VERSION = "2024-11-06"
 # unbounded inline encode risks a multi-hundred-MB JSON request body. Fail
 # loudly before sending rather than hang on an oversized request or have an
 # intermediate proxy silently truncate it.
-_MAX_INLINE_BYTES = 15 * 1024 * 1024  # 15 MB pre-encode (~20 MB after base64)
+# 15 MB pre-encode (~20 MB after base64). This is this adapter's OWN safety
+# bound, not a documented Runway limit. For larger assets the installed SDK
+# exposes uploads.create_ephemeral() (asset upload, no inline cap) — the
+# future no-cap path if real driving videos outgrow inline data-URIs.
+_MAX_INLINE_BYTES = 15 * 1024 * 1024
 
 
 def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:

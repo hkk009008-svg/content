@@ -345,7 +345,7 @@ def _execute_admitted_video_chain(
     - Fallback cascade per shot type from workflow_selector
 
     v4 addition — driving_video_path:
-        Optional path to a performance-capture clip (output of Act-One /
+        Optional path to a performance-capture clip (output of Act-Two /
         LivePortrait / Viggle). When supplied, engines that accept a
         reference video use it as motion guidance:
           - Veo 3.1 native : reference-video mode

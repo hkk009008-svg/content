@@ -3,7 +3,7 @@
 When a dialogue shot has no operator-uploaded driving video (Mode A), we
 generate one automatically from the TTS audio + the approved keyframe.
 The result feeds back as `driving_video_path` for LivePortrait or as a
-reference for Act-One.
+reference for Act-Two.
 
 Provider chain (try in order, fall through on failure):
   1. SadTalker via ComfyUI — free on existing pod
@@ -175,7 +175,7 @@ def synth_driving_face_from_audio(
     """Generate a driving face video from TTS audio + a still keyframe.
 
     Used as Mode B autopilot when no operator-uploaded driving video exists.
-    The output feeds into Act-One or LivePortrait as the driving reference.
+    The output feeds into Act-Two or LivePortrait as the driving reference.
 
     Cascade:
       'auto'      → SadTalker
