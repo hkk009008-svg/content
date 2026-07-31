@@ -490,6 +490,44 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave 6 landed + converged with origin/main (2026-08-01)
+
+Slice 12 (`ddc17e28` — capability "engaged" is now PROVEN: a live/wired status
+is forced to engaged_static=False without BOTH a resolving consumer anchor and
+a resolving evidence test), 13a (`20d3db4f` — shared state primitives, dialog
+focus contract, `npm --prefix web run test:a11y` writing the plan-required
+logs/ui/product-unification/a11y.txt), 13b+13c (`f7d62149` — Setup dead-space
+fix + pinned production summary, responsive rails usable at 1024, four WCAG AA
+contrast failures fixed with COMPUTED ratios, a real loading/error
+indistinguishability bug in the cost estimator; Edit/Run inert affordances
+wired-or-disabled-with-reason and keyboard reorder), 14a (`fed589eb` — prompts/
+env/skill routing reconciled against current code + two --check scripts),
+reference-write portability (`5ca6387f`), plus the earlier reference-image and
+SSE/ShotInspector fixes.
+
+**CONVERGED with origin/main at `ab66fc62`.** origin/main had independently
+absorbed six of the 14 spawned-session tasks (`8b56fd9e` ArcFace→GhostFaceNet,
+`be1c20f7` LipsyncPriorityList extraction + AudioSyncSection delete,
+`6304cb58` vacuous cascade-retry test deleted, `0087e7c3` settings/ retired
+into setup/inspector/, `335a3deb` color_grade_preset honored + dead mood
+fallback repaired, `d702481c` LTX sys.modules pollution) and a merge of waves
+3-5 (`4a41e149`). Structural conflict resolved deliberately: main's deletion of
+settings/ accepted, MY improvements ported onto the relocated files (the
+disabled-with-reason titles onto LipsyncPriorityList; the typed-client +
+ErrorState estimator fix with corrected import depth), derived artifacts
+regenerated rather than hand-merged.
+
+Post-merge matrix: backend 4621/0, web 345/345, build clean, ci_smoke OK.
+
+**Key save:** the export-checker session's NO-GO prevented a blind
+AudioSyncSection delete that would have removed the only UI writer for
+`lipsync_engine_priority` — a strict-PATCH-covered settings key. That is a
+silent capability regression, not merely a build break.
+
+**REMAINING: 13d** (seeded no-spend E2E + named screenshots — needs the real
+Flask server), **14b/14c** (operator docs, Program Manual + final drift gate),
+**Wave 8** (15a-15g evidence-led pruning).
+
 ### Waves 3-5 landed on branch `unification/waves-3-8` (2026-07-31/08-01)
 
 Slices 8a/8b/9a (`7ba2a5f8`, `a496d686`), 9b/9c/9d/10 (`a2ac5e89`, `6eeb4bd1`,
