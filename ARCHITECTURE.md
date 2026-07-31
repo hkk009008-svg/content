@@ -2204,10 +2204,15 @@ the other five live in `web/src/components/setup/inspector/`, alongside the
 shared row primitives (`controls.tsx`) and the reorderable
 `LipsyncPriorityList.tsx` that the Voice section mounts.
 
-2 `.tsx` files remain in `web/src/components/settings/`:
-`CostEstimatorSection.tsx`, mounted inside Budget
-([BudgetSection.tsx:29](web/src/components/setup/inspector/BudgetSection.tsx:29)),
-and its container helper `SettingsSection.tsx`.
+`web/src/components/settings/` **no longer exists.** Its last two survivors were
+folded into `setup/inspector/`: `CostEstimatorSection.tsx` moved there, still
+mounted inside Budget
+([BudgetSection.tsx:28](web/src/components/setup/inspector/BudgetSection.tsx:28)),
+and the single-consumer container helper `SettingsSection` was inlined into it as
+a module-private `CollapsibleSection`. Collapsible containers otherwise come from
+`ui/Section.tsx`; the estimator card keeps its own because it needs *controlled*
+expansion to gate the `/api/cost-estimate` fetch, which `Section`'s uncontrolled
+`defaultOpen` cannot express.
 
 ### 14.7 Dev/build
 

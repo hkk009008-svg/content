@@ -1515,9 +1515,25 @@ class CinemaPipeline:
                 return None
 
         # 4. Color grading
+        #
+        # Precedence — explicit `color_grade_preset` knob > mood mapping >
+        # "warm_cinema" — mirroring the manual per-clip path in
+        # `cinema/shots/controller.py` (`apply_correction("color_grade", ...)`),
+        # which resolves `params.preset > color_grade_preset > "warm_cinema"`.
+        #
+        # Both non-default terms were previously unreachable here: this step
+        # never read `color_grade_preset` at all, and derived its mood from
+        # `settings["mood"]` — a key `GlobalSettings` does not define (the
+        # project-level field is `music_mood`; bare `mood` is a *Scene* field).
+        # Its "cinematic" default is absent from the map below, so every
+        # UI-created project graded to "warm_cinema" unconditionally while the
+        # Setup knob promised "Applied on final assembly. Auto-mapped from mood
+        # if unset." A stray `mood` merged through the unrestricted
+        # PUT /api/projects/<pid> `global_settings` update is still honored
+        # first, so no existing project's grade shifts for any reason but this.
         try:
-            from phase_c_ffmpeg import apply_color_grade
-            mood = settings.get("mood", "cinematic")
+            from phase_c_ffmpeg import COLOR_GRADE_PRESETS, apply_color_grade
+            mood = settings.get("mood") or settings.get("music_mood", "cinematic")
             _mood_to_grade = {
                 "suspense": "cool_noir", "thriller": "cool_noir", "horror": "moonlight",
                 "noir": "cool_noir", "dystopian": "high_contrast",
@@ -1527,14 +1543,32 @@ class CinemaPipeline:
                 "ethereal": "pastel", "dreamy": "pastel",
                 "cyberpunk": "vibrant", "gritty": "high_contrast",
             }
-            grade_preset = _mood_to_grade.get(mood, "warm_cinema")
+            # An unknown preset would otherwise be swallowed by
+            # `apply_color_grade`'s own `.get(preset, warm_cinema)` fallback and
+            # logged as if it had been applied — WARNING because a bad setting
+            # is structural (once per assembly), not per-clip noise.
+            configured = settings.get("color_grade_preset")
+            if configured and configured not in COLOR_GRADE_PRESETS:
+                logger.warning(
+                    "Unknown color_grade_preset; falling back to mood mapping",
+                    extra={
+                        "color_grade_preset": configured,
+                        "known_presets": sorted(COLOR_GRADE_PRESETS),
+                    },
+                )
+                configured = None
+            grade_preset = configured or _mood_to_grade.get(mood, "warm_cinema")
             graded_path = os.path.join(self.temp_dir, "graded.mp4")
             graded = apply_color_grade(stitched, graded_path, preset=grade_preset)
             if graded:
                 stitched = graded
                 logger.info(
                     "Applied color grade",
-                    extra={"grade_preset": grade_preset, "mood": mood},
+                    extra={
+                        "grade_preset": grade_preset,
+                        "mood": mood,
+                        "grade_source": "setting" if configured else "mood",
+                    },
                 )
         except Exception:
             logger.exception("Color grading skipped")

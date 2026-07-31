@@ -617,7 +617,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `apply_color_grade` | `phase_c_ffmpeg.py:1399` | 8 grade presets (`COLOR_GRADE_PRESETS` at `:1387`) or LUT. |
+| `apply_color_grade` | `phase_c_ffmpeg.py:2077` | 8 grade presets (`COLOR_GRADE_PRESETS` at `:2065`) or LUT. |
 | `two_pass_loudnorm` | `phase_c_ffmpeg.py:1537` | EBU R128 two-pass (-14 LUFS). |
 | `xfade_concat` | `phase_c_ffmpeg.py:1814` | Cross-dissolve (mixed-audio-presence fix in `_build_xfade_filtergraph` at `:1745`). |
 | `assess_motion_quality` | `phase_c_ffmpeg.py:1275` | Optical-flow → `accept/interpolate/regenerate`. Requires OpenCV. |
@@ -947,7 +947,7 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1362`):
    a. **Normalize** each clip to 1920×1080@30fps (`scale + pad + fps`, `libx264 crf=20`, `aac 192k`).
    b. **Stitch** — hard-cut concat demuxer by default, OR `xfade_concat` cross-dissolve per scene boundary when `scene_transitions=True` (`phase_c_ffmpeg.py:1814`), with transition clamped to `0.4 * min(durations)`.
-   c. **Color grade** via `apply_color_grade()` (`phase_c_ffmpeg.py:1399`) using a mood→preset map (`COLOR_GRADE_PRESETS`, `phase_c_ffmpeg.py:1387`).
+   c. **Color grade** via `apply_color_grade()` (`phase_c_ffmpeg.py:2077`), resolving `global_settings.color_grade_preset` → `music_mood`→preset map → `"warm_cinema"` (`COLOR_GRADE_PRESETS`, `phase_c_ffmpeg.py:2065`).
    d. **Tri-mix audio:** voice (1.0) + BGM (0.12) + foley (0.20). Voice source binds dynamically: `[0:a]` when audio is embedded, else the standalone dialogue MP3; `amix duration=longest` for the standalone path, `first` when embedded.
    e. **Two-pass loudnorm** EBU R128 (`two_pass_loudnorm`, `phase_c_ffmpeg.py:1537`; defaults -14 LUFS / 11 LU / -1.5 dBTP).
 
@@ -963,7 +963,7 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 **FAILURE MODES + RECOVERY:**
 - **Audio mix fallback cascade** (`_assemble_final`): 3-input → 2-input → BGM-only → copy-as-is, so a missing foley/BGM track degrades gracefully rather than failing assembly.
 - **xfade audio mismatch (FIXED, Lane V #24/#25).** Engines like Kling produce silent clips; Veo embeds audio. `_has_audio_stream` (`phase_c_ffmpeg.py:1725`) probes each leg: all-silent → video-only filtergraph (`alab=None`); mixed → silent legs padded with `anullsrc` and every leg normalized to 48kHz stereo `fltp` before `acrossfade` (`phase_c_ffmpeg.py:1444-1511`). A `xfade_concat` failure raises, and the caller falls back to hard-cut concat.
-- **Color grade is single project-level mood** (`settings.get("mood")`) — every scene gets the same grade; per-scene mood is not honored at the final grade.
+- **Color grade is a single project-level choice** — `global_settings.color_grade_preset` when set, else the `music_mood`→preset map, else `"warm_cinema"`. Every scene gets the same grade; per-scene `Scene.mood` is not honored at the final grade.
 
 ---
 
@@ -1849,7 +1849,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | `api_engines.KLING_NATIVE.storyboard_mode` | `False` | Kling storyboard batch for 2–6-shot scenes (nested 2 levels; **is** wired — D-12) |
 | `cascade_retry_limit` | `1` | Overrides `MAX_CASCADE_RETRIES` |
 | `scene_transitions` + `transition_duration` | `False` / `0.5` | Cross-dissolve between scenes (ffmpeg xfade) |
-| `color_grade` / `mood` | — / `"cinematic"` | Color-grade preset selector (project-level; same grade for all scenes — D-post-1) |
+| `color_grade_preset` | — (then `music_mood` map, then `"warm_cinema"`) | Color-grade preset selector (project-level; same grade for all scenes — D-post-1) |
 | `music_mood` | `"suspense"` | BGM mood + style-rule input |
 | `music_mastering` | `"cinema_master"` | Mastering preset; read from `global_settings`, NOT `Settings` (D-orch-1) |
 | `lip_sync_mode` | `"auto"` | `auto`/`overlay`/`generation`/`skip` |
@@ -1925,7 +1925,7 @@ Each entry: **symptom → diagnose → fix**, with the source location that gove
 #### Color shift / temporal discontinuity between shots
 
 - **Diagnose:** `assess_coherence(current, previous)` returns `color_drift`, `lighting_consistency`, `composition_similarity` (`coherence_analyzer.py:219`). **First check `result.valid`** — `False` means an image failed to load, the scores are meaningless.
-- **Fix:** Lower `color_drift_sensitivity` (→0.2) to trigger `adjust_color_prompt` sooner; lower `continuity_options.img2img_denoise` (→0.25–0.30) for tighter same-location consistency; for final-cut polish enable `scene_transitions` (cross-dissolve smooths boundaries); apply a per-shot color-grade correction via the iterate/correct endpoint. Caveat: the final color grade is a **single project-level preset** from `global_settings["mood"]` — all scenes get the same grade (D-post-1).
+- **Fix:** Lower `color_drift_sensitivity` (→0.2) to trigger `adjust_color_prompt` sooner; lower `continuity_options.img2img_denoise` (→0.25–0.30) for tighter same-location consistency; for final-cut polish enable `scene_transitions` (cross-dissolve smooths boundaries); apply a per-shot color-grade correction via the iterate/correct endpoint. Caveat: the final color grade is a **single project-level preset** — `global_settings["color_grade_preset"]`, else a `music_mood`-derived default — so all scenes get the same grade (D-post-1).
 
 #### Quota exhaustion / API failures during video generation
 
@@ -2063,6 +2063,6 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-driving-video | Only Sora fully wires `driving_video_path`; Veo and Kling accept the param but silently ignore it (SDK `video=`/`image=` mutual exclusivity) |
 | D-veo-refs | Veo `reference_images` are accepted by the call chain but dropped before the SDK call ("Bug #4"); identity comes from the start frame only (`veo_native.py:155`) |
 | D-state-1 | `save_project` acquires its own lock — calling it while already holding `project_lock()` deadlocks; use the unlocked variant inside a held lock |
-| D-post-1 | The final color grade is one project-level preset (`global_settings["mood"]`); all scenes share it |
+| D-post-1 | The final color grade is one project-level preset (`global_settings["color_grade_preset"]`, else `music_mood`-mapped); all scenes share it |
 
 > **General caution on line anchors:** `check_doc_claims.py` does not verify prose/comment line-RANGE anchors, and any edit shifts line numbers. The `file:line` citations throughout this appendix are point-in-time (2026-06-09). When a line no longer matches, grep the symbol name — the function/class is what's load-bearing, not the exact line.
