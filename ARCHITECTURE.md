@@ -286,7 +286,7 @@ pipeline) branch only — a checkpoint is only actionable while idle, and
 
 `PUT /api/projects/<pid>` → `api_update_project`
 ([web_server.py:1388](web_server.py:1388)) and `PATCH /api/projects/<pid>` →
-`api_patch_project_settings` ([web_server.py:1472](web_server.py:1472)) both
+`api_patch_project_settings` ([web_server.py:1477](web_server.py:1477)) both
 guard `global_settings` writes with an integer `revision` counter
 (`_current_settings_revision`/`_settings_revision_established`,
 [web_server.py:1155](web_server.py:1155)) so two overlapping editors — or a
