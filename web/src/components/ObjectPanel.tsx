@@ -314,24 +314,17 @@ function ObjectFormFields({
           className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-tx" />
       </div>
 
-      {/* Scale — stored but has no production consumer today (audit
-          2026-07-30, slice 9d): unlike material_traits/surface_type/
-          branding_constraints/texture_anchor above, nothing reads
-          scale_reference back out of the object record. Read-only (rather
-          than a silently-inert editable field) so the operator isn't misled
-          into thinking it shapes composition or camera choice. */}
+      {/* Scale — read back into the object identity anchor and the LLM
+          user-prompt by llm/prompt_optimizer.py, alongside brand /
+          material_traits / texture_anchor / branding_constraints. Slice 9d
+          labeled this read-only while it had no production reader; that
+          reader now exists, so the control is live again. */}
       <div>
-        <label className="text-eyebrow text-tx block mb-0.5 uppercase tracking-wider">
-          Scale Reference <span className="text-dim normal-case tracking-normal">(read-only)</span>
-        </label>
+        <label className="text-eyebrow text-tx block mb-0.5 uppercase tracking-wider">Scale Reference</label>
         <input type="text" value={form.scale_reference}
-          readOnly
+          onChange={e => update('scale_reference', e.target.value)}
           placeholder="fits in adult hand, ~24cm tall, hand-sized"
-          className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-dim cursor-not-allowed" />
-        <p className="text-eyebrow-sm text-mut mt-0.5">
-          Stored for reference only — not currently read by the generation prompt or camera
-          framing, unlike the fields above.
-        </p>
+          className="w-full bg-panel border border-line rounded px-2 py-1 text-eyebrow text-tx" />
       </div>
 
       {/* Reference images — multi-angle ideal */}

@@ -435,7 +435,8 @@ def _fallback_optimize(
         brand = o.get("brand", "")
         material = o.get("material_traits", "")
         texture = o.get("texture_anchor", "")
-        parts = [p for p in [o.get("name", ""), brand, material, texture] if p]
+        scale = o.get("scale_reference", "")
+        parts = [p for p in [o.get("name", ""), brand, material, texture, scale] if p]
         obj_anchor = ": ".join([parts[0], ", ".join(parts[1:])]) if len(parts) > 1 else (parts[0] if parts else "")
 
     identity_anchor = obj_anchor if (has_objects and primary_subject == "object") else char_anchor
@@ -725,7 +726,8 @@ def optimize_shot_prompt(
         scene_context:   Optional scene-level description for cross-shot continuity.
         has_dialogue:    True when this shot includes spoken lines.
         objects:         List of product/prop dicts (id, name, brand, material_traits,
-                         surface_type, branding_constraints, texture_anchor, ...).
+                         surface_type, branding_constraints, texture_anchor,
+                         scale_reference, ...).
         primary_subject: 'character' | 'object' | 'environment' — disambiguates
                          hero subject when both characters and objects are present.
         intent_notes:    Operator's per-shot creative direction (e.g., "emphasize
@@ -783,6 +785,7 @@ def optimize_shot_prompt(
         if o.get("surface_type"): bits.append(f"surface={o['surface_type']}")
         if o.get("texture_anchor"): bits.append(f"hero_features={o['texture_anchor'][:80]}")
         if o.get("branding_constraints"): bits.append(f"branding={o['branding_constraints'][:80]}")
+        if o.get("scale_reference"): bits.append(f"scale={o['scale_reference'][:80]}")
         obj_lines.append(f"- {o.get('name', o.get('id', '?'))}: {'; '.join(bits)}")
 
     project_lang = global_settings.get("language", "English")

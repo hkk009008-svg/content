@@ -605,6 +605,28 @@ independently tested, collision seam sent for dedicated review). (2) A 13a
 implementer used `git stash` on the shared tree against an explicit
 prohibition; it restored cleanly and was self-reported.
 
+**9d follow-up landed — `scale_reference` wired to its reader.** Slice 9d
+labeled three reader-less identity/object fields read-only instead of wiring
+them, because each field's natural reader sat in another lane. That lane is
+now clear for `scale_reference`: its reader `llm/prompt_optimizer.py` last
+landed at `4b5293d5`, which is merged to main, and the file is byte-identical
+on `main` and this branch. The field is therefore wired on BOTH optimizer
+paths — the heuristic `obj_anchor` in `_fallback_optimize` and the `obj_lines`
+block of the LLM `user_prompt` — plus the `objects:` docstring. Both paths
+matter: the pipeline falls back to the heuristic on any LLM failure, so wiring
+only one would half-work silently. Reciprocal tests pin each path and were
+confirmed RED against the pre-fix file before being taken GREEN. Runtime
+reachability re-proved at `cinema/shots/controller.py:895` — shot objects are
+forwarded whole, not field-picked, so the stored value genuinely arrives.
+`ObjectPanel.tsx` restores the control to editable and its tests now pin the
+edit round-trip. **Still open from 9d:** `ip_adapter_weight` on both
+`Character` and `ProductObject` remains reader-less at the record level — the
+`ip_adapter_weight` values that `workflow_selector.py` (lines 40/62/81/99/120)
+writes and `phase_c_assembly.py:470` reads are shot-type workflow presets, not
+the stored per-entity field. 9d handled the UI side by removing the Character
+PuLID sliders in favour of an informational note; `ObjectPanel.tsx` never
+rendered the field at all. Wiring it belongs with workflow_selector/continuity.
+
 ### Wave 2 CLOSED (2026-07-31); merged to main
 
 6c `6f684da7` + doc-truth pass `7c170997`: lane-v **NITS** (Viggle
