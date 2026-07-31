@@ -1,5 +1,5 @@
 import { Section } from '../../ui'
-import { CostEstimatorSection } from '../../settings/CostEstimatorSection'
+import { CostEstimatorSection } from './CostEstimatorSection'
 import { NumberRow } from './controls'
 
 interface Props {
@@ -9,8 +9,7 @@ interface Props {
 
 /**
  * Budget section — the per-video spend cap (read by CostTracker as a gate) plus
- * the production-only cost-estimate sub-view (reused from settings/, stripped of
- * the retired max tier).
+ * the production-only cost-estimate sub-view (stripped of the retired max tier).
  */
 export function BudgetSection({ s, update }: Props) {
   return (
