@@ -490,6 +490,34 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Waves 3-5 landed on branch `unification/waves-3-8` (2026-07-31/08-01)
+
+Slices 8a/8b/9a (`7ba2a5f8`, `a496d686`), 9b/9c/9d/10 (`a2ac5e89`, `6eeb4bd1`,
+`45b289fd`, `1cb40224`, `6e7477a0`), 11a/11b/11c (`07753c81`, `39ddcb18`).
+Matrix at each landing: backend 4422 -> 4474 -> 4524 (0 failures), web 100 ->
+174 -> 217, smoke OK, anchors clean.
+
+**CORRECTION — commit-trail attribution (found by two independent reviewers).**
+`a2ac5e89` is titled for slice 10 but ALSO carries, undisclosed: the settings
+PUT opt-in -> fail-closed guard (`_settings_revision_established`), the
+~14-entry `_SETTINGS_KEY_VALIDATORS` extension, and the `face_swap_enabled`
+default flip. The later commits `45b289fd` and `6eeb4bd1` describe those same
+changes as their own work; their diffs do not contain them. Cause: commits
+were assembled by pathspec while `web_server.py` / `cinema/shots/controller.py`
+carried several agents' edits at once, so the message written for a later
+commit described work already ridden in an earlier one. The substance is
+present, tested and reviewed — only the attribution is wrong. History is left
+intact (the commits are already reviewed); this entry is the durable record.
+Process fix for later waves: assemble commits per FILE-OWNER, and re-read the
+actual staged diff before writing the message.
+
+**Process defects recorded, not hidden:** (1) 11b and 11c were dispatched as
+"disjoint" but shared `usePipelineState.ts`/`AppShell.tsx` — R-ORCH forbids
+this; no lost update occurred (both feature sets verified present and
+independently tested, collision seam sent for dedicated review). (2) A 13a
+implementer used `git stash` on the shared tree against an explicit
+prohibition; it restored cleanly and was self-reported.
+
 ### Wave 2 CLOSED (2026-07-31); merged to main
 
 6c `6f684da7` + doc-truth pass `7c170997`: lane-v **NITS** (Viggle
