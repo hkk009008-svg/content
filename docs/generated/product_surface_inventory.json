@@ -833,22 +833,6 @@
       "url_template": "/api/config?project_id={1}"
     },
     {
-      "backend_route_ids": [],
-      "expanded_wrapper": "videoEngines",
-      "id": "frontend-operation:6c7f068ac0b33e84",
-      "kind": "unknown_wrapper_call",
-      "method": null,
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 40,
-        "path": "web/src/components/setup/inspector/VideoSection.tsx"
-      },
-      "transport_id": null,
-      "url_template": null
-    },
-    {
       "backend_route_ids": [
         "route:api_add_location:4522f1083c852069"
       ],
@@ -1185,7 +1169,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 60,
+        "line": 62,
         "path": "web/src/components/setup/inspector/VideoSection.tsx"
       },
       "transport_id": null,
@@ -1270,6 +1254,22 @@
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "cascadeEngineOptions",
+      "id": "frontend-operation:a972c4c455f6aed9",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 42,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -4066,7 +4066,7 @@
       "owner": "isPodGated",
       "reason": "imported wrapper call",
       "source": {
-        "line": 60,
+        "line": 62,
         "path": "web/src/components/setup/inspector/VideoSection.tsx"
       }
     },
@@ -4248,18 +4248,6 @@
       "source": {
         "line": 62,
         "path": "web/src/components/GenerationPanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "config",
-      "id": "unresolved:84b60e7bfd8008eb",
-      "kind": "unknown_wrapper_call",
-      "owner": "videoEngines",
-      "reason": "imported wrapper call",
-      "source": {
-        "line": 40,
-        "path": "web/src/components/setup/inspector/VideoSection.tsx"
       }
     },
     {
@@ -4644,6 +4632,18 @@
       "source": {
         "line": 178,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:eea6109b809c7b7b",
+      "kind": "unknown_wrapper_call",
+      "owner": "cascadeEngineOptions",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 42,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
       }
     },
     {
