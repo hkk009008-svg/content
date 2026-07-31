@@ -113,6 +113,74 @@ class TestSuggestedImageApiForwarding:
         assert shot_hint["image_api"] is None
 
 
+class TestCanonicalIdentityAnchorPrecedence:
+    """Slice 7 defect 2: the user-approved canonical identity_anchor (built by
+    domain.character_manager.build_identity_anchor — the character's
+    immutable 'DNA', wired into continuity_config["identity_anchor"] via
+    get_identity_anchor) must win over the prompt optimizer's own invented
+    identity_anchor (llm/prompt_optimizer.py's LLM guess at face/hair/build,
+    or an object-specific anchor). The optimizer's identity_anchor stays
+    advisory: only used when the shot carries no canonical identity at all."""
+
+    def test_canonical_identity_anchor_wins_over_optimizer_invented_one(self):
+        ctrl, project = _build_keyframe_controller()
+        project["global_settings"]["prompt_optimizer_enabled"] = True
+        canonical = "Alice: straight blonde hair, round wire-rimmed glasses, slim build"
+        ctrl._core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": {"identity_anchor": canonical},
+        }
+        opt_spec = {
+            "image_prompt": "optimized prompt",
+            # Optimizer-invented and WRONG relative to the canonical record —
+            # must never reach generate_ai_broll.
+            "identity_anchor": "a woman with short curly red hair",
+        }
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll, \
+             patch("llm.prompt_optimizer.optimize_shot_prompt", return_value=opt_spec):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        assert mock_broll.call_args.kwargs["identity_anchor"] == canonical
+
+    def test_optimizer_identity_anchor_used_when_no_canonical_identity(self):
+        """Advisory/object-specific fallback: with no canonical identity on
+        the shot (e.g. no registered primary character), the optimizer's
+        identity_anchor is the only signal available and must still reach
+        generate_ai_broll."""
+        ctrl, project = _build_keyframe_controller()
+        project["global_settings"]["prompt_optimizer_enabled"] = True
+        # helper default continuity_config has no "identity_anchor" key
+        opt_spec = {
+            "image_prompt": "optimized prompt",
+            "identity_anchor": "brand logo: red circle, chrome finish",
+        }
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll, \
+             patch("llm.prompt_optimizer.optimize_shot_prompt", return_value=opt_spec):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        assert mock_broll.call_args.kwargs["identity_anchor"] == "brand logo: red circle, chrome finish"
+
+    def test_optimizer_disabled_keeps_canonical_identity_anchor(self):
+        """Control: with the optimizer off, the canonical anchor from
+        continuity_config is what reaches generate_ai_broll — unaffected."""
+        ctrl, project = _build_keyframe_controller()
+        canonical = "Alice: straight blonde hair, round wire-rimmed glasses, slim build"
+        ctrl._core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": {"identity_anchor": canonical},
+        }
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll:
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        assert mock_broll.call_args.kwargs["identity_anchor"] == canonical
+
+
 class TestKeyframeCostProvenance:
     """The keyframe cost is recorded under the backend that ACTUALLY ran
     (threaded out of generate_ai_broll via ImageGenResult), not a tier-based

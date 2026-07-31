@@ -123,6 +123,59 @@ class TestGetDenoiseStrength:
 
 
 # ---------------------------------------------------------------------------
+# get_denoise_strength — explicit anchor overrides mutable chaining history
+# (Slice 7 defect 1: denoise strength must derive from the REAL anchor/
+# init-image condition, not TemporalConsistencyManager's own mutable
+# last_generated_image/shot_index history).
+# ---------------------------------------------------------------------------
+
+
+class TestGetDenoiseStrengthExplicitAnchor:
+    def test_first_shot_with_explicit_anchor_is_not_max_creative_freedom(self):
+        """A first shot (shot_index=0) WITH an explicit, real anchor image IS
+        chaining from a real init image — it must not get the
+        no-image-to-chain-from 0.55 strength."""
+        mgr = TemporalConsistencyManager()  # fresh: no prior chaining history
+        strength = mgr.get_denoise_strength(shot_index=0, has_explicit_anchor=True)
+        assert strength != 0.55
+        assert strength == 0.40  # falls through to the early-shot fallback rung
+
+    def test_first_shot_without_anchor_keeps_max_creative_freedom(self):
+        """Control: without an explicit anchor, shot_index=0 still returns
+        first-shot strength — the anchor condition is what must flip it."""
+        mgr = TemporalConsistencyManager()
+        strength = mgr.get_denoise_strength(shot_index=0, has_explicit_anchor=False)
+        assert strength == 0.55
+
+    def test_explicit_anchor_still_honors_location_change(self):
+        """The anchor bypasses ONLY the first-shot short-circuit — the
+        transition-type ladder underneath (location continuity) still runs."""
+        mgr = TemporalConsistencyManager()
+        strength = mgr.get_denoise_strength(
+            shot_index=0,
+            has_explicit_anchor=True,
+            previous_scene={"location_id": "office"},
+            current_scene={"location_id": "street"},
+        )
+        assert strength == 0.50
+
+    def test_explicit_anchor_ignores_mutable_chaining_history(self):
+        """has_explicit_anchor must come from the caller's real anchor/init
+        condition, not self.last_generated_image — the result must be the
+        same whether or not this manager instance happens to already carry
+        prior chaining state."""
+        with_history = TemporalConsistencyManager()
+        with_history.last_generated_image = "/tmp/fake_prev.jpg"
+        with_history.current_scene_id = "scene_1"
+
+        fresh = TemporalConsistencyManager()  # last_generated_image is None
+
+        assert with_history.get_denoise_strength(
+            shot_index=0, has_explicit_anchor=True
+        ) == fresh.get_denoise_strength(shot_index=0, has_explicit_anchor=True)
+
+
+# ---------------------------------------------------------------------------
 # should_use_img2img
 # ---------------------------------------------------------------------------
 
@@ -289,6 +342,65 @@ class TestContinuityEngineSecondaryChars:
             {"id": "s1", "shots": []}, None, 0,
         )
         assert enhanced["continuity_config"]["secondary_chars"] == []
+
+
+# ---------------------------------------------------------------------------
+# ContinuityEngine.enhance_shot_prompt — end-to-end explicit-anchor denoise
+# (Slice 7 defect 1 acceptance: first shot WITH an explicit anchor uses
+# continuity strength; first shot WITHOUT one uses first-shot strength).
+# ---------------------------------------------------------------------------
+
+
+class TestEnhanceShotPromptExplicitAnchorDenoise:
+    def test_first_shot_with_real_anchor_file_uses_continuity_strength(
+        self, engine_two_chars, tmp_path
+    ):
+        anchor_path = str(tmp_path / "anchor.jpg")
+        with open(anchor_path, "w") as f:
+            f.write("fake anchor image data")
+
+        enhanced = engine_two_chars.enhance_shot_prompt(
+            {"characters_in_frame": [], "prompt": "p"},
+            {"id": "scene_1", "shots": []},
+            None,
+            0,
+            approved_anchor_image=anchor_path,
+        )
+
+        cc = enhanced["continuity_config"]
+        assert cc["use_img2img"] is True
+        assert cc["init_image"] == anchor_path
+        # Not the first-shot-with-no-image 0.55 — a real anchor is a real
+        # init image, so the transition-type ladder applies.
+        assert cc["denoise_strength"] != 0.55
+        assert cc["denoise_strength"] == 0.40
+
+    def test_first_shot_without_anchor_uses_first_shot_strength(self, engine_two_chars):
+        enhanced = engine_two_chars.enhance_shot_prompt(
+            {"characters_in_frame": [], "prompt": "p"},
+            {"id": "scene_1", "shots": []},
+            None,
+            0,
+        )
+        cc = enhanced["continuity_config"]
+        assert cc["use_img2img"] is False
+        assert cc["denoise_strength"] == 1.0
+
+    def test_nonexistent_anchor_path_falls_back_to_first_shot_strength(
+        self, engine_two_chars
+    ):
+        """A path that fails os.path.exists is not a real anchor condition —
+        must behave identically to no anchor at all, never crash."""
+        enhanced = engine_two_chars.enhance_shot_prompt(
+            {"characters_in_frame": [], "prompt": "p"},
+            {"id": "scene_1", "shots": []},
+            None,
+            0,
+            approved_anchor_image="/nonexistent/anchor.jpg",
+        )
+        cc = enhanced["continuity_config"]
+        assert cc["use_img2img"] is False
+        assert cc["denoise_strength"] == 1.0
 
 
 # ---------------------------------------------------------------------------

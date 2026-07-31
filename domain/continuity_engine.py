@@ -375,6 +375,7 @@ class TemporalConsistencyManager:
         current_shot: dict = None,
         previous_scene: dict = None,
         current_scene: dict = None,
+        has_explicit_anchor: bool = False,
     ) -> float:
         """
         Context-aware denoising strength based on transition type.
@@ -383,11 +384,23 @@ class TemporalConsistencyManager:
         - Same location, consecutive shots: 0.30
         - Same location, after time skip: 0.40
         - Location change within scene: 0.50
-        - First shot of new scene: 0.55
-        - Fallback (shot_index based): 0.45 / 0.35
+        - First shot of new scene, no explicit anchor: 0.55
+        - Fallback (shot_index based): 0.40 / 0.30
+
+        ``has_explicit_anchor`` reflects the REAL init-image condition the
+        caller already resolved (an approved, on-disk anchor/keyframe image —
+        see ContinuityEngine.enhance_shot_prompt's ``anchor_image``), not this
+        manager's own mutable ``last_generated_image`` chaining history. A
+        shot with an explicit anchor IS chaining from a real image even when
+        it is shot_index 0 or this manager instance never recorded a prior
+        generation, so it must fall through to the same transition-type
+        ladder below rather than short-circuiting to first-shot strength.
         """
-        # First shot of a scene — maximum creative freedom
-        if shot_index == 0 or self.last_generated_image is None:
+        # First shot of a scene with NO explicit anchor to chain from —
+        # maximum creative freedom. An explicit anchor overrides this: it IS
+        # a real init image, so the denoise strength must reflect actual
+        # continuity, not the absence of prior mutable chaining state.
+        if not has_explicit_anchor and (shot_index == 0 or self.last_generated_image is None):
             return 0.55
 
         # Check location continuity
@@ -540,12 +553,15 @@ class ContinuityEngine:
                 shot_type, primary_char, self.identity_validator
             )
 
-        # Context-aware denoise
+        # Context-aware denoise — has_explicit_anchor reflects the REAL,
+        # verified-on-disk anchor condition (anchor_image, computed above)
+        # rather than the temporal manager's own mutable chaining history.
         denoise = self.temporal_manager.get_denoise_strength(
             shot_index,
             previous_shot=previous_shot,
             current_shot=shot,
             current_scene=scene,
+            has_explicit_anchor=bool(anchor_image),
         ) if use_img2img else 1.0
 
         continuity_config = {

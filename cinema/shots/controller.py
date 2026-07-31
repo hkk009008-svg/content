@@ -873,7 +873,16 @@ class ShotController:
         # Apply optimizer outputs (when produced) to the call args
         if opt_spec:
             full_prompt = opt_spec.get("image_prompt") or full_prompt
-            identity_anchor_override = opt_spec.get("identity_anchor") or cc.get("identity_anchor", "")
+            # Canonical identity wins: cc["identity_anchor"] is the
+            # user-approved, immutable "DNA" string built by
+            # character_manager.build_identity_anchor (never changes between
+            # shots, by design). The optimizer's own identity_anchor is an
+            # LLM-invented guess at face/hair/build (llm/prompt_optimizer.py's
+            # "critical visual features to preserve") — or, for object-primary
+            # shots, an object-specific anchor. It must stay advisory: only
+            # used when the shot has no canonical identity to defend (e.g. no
+            # registered primary character), never allowed to override one.
+            identity_anchor_override = cc.get("identity_anchor") or opt_spec.get("identity_anchor") or ""
             negative_override = opt_spec.get("negative_constraints") or negative_prompt
             # If the user hasn't pinned a target_api, take the optimizer's suggestion
             if shot.get("target_api", "AUTO") == "AUTO":
