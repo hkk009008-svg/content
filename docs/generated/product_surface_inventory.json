@@ -17,6 +17,22 @@
       "url_template": null
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "getShotTemplate",
+      "id": "frontend-operation:02016cdf6cd91715",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 34,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
       "backend_route_ids": [
         "route:api_capability_scorecard:954484d2a3d45586"
       ],
@@ -45,6 +61,22 @@
       "source": {
         "line": 217,
         "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "useSSE",
+      "id": "frontend-operation:0545b878a6df5049",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 30,
+        "path": "web/src/hooks/usePipelineState.ts"
       },
       "transport_id": null,
       "url_template": null
@@ -238,6 +270,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "assemblePromptSections",
+      "id": "frontend-operation:26bed98a584c475c",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 96,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "id": "frontend-operation:314029e29cd78efc",
       "kind": "direct_transport",
       "method": "PUT",
@@ -387,6 +435,38 @@
       "url_template": null
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "parsePromptSections",
+      "id": "frontend-operation:3c905828c2e1305b",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 17,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "usePipelineState",
+      "id": "frontend-operation:3d798e87329b4e78",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 37,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
       "backend_route_ids": [
         "route:api_generate_keyframe:ccfc0fb03f450e57"
       ],
@@ -420,6 +500,38 @@
       },
       "transport_id": "frontend-transport:8c862baef67de0dc",
       "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "getShotTemplate",
+      "id": "frontend-operation:4b34b1340e6d6d9d",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 81,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "classifyShotType",
+      "id": "frontend-operation:4c3a5e39960350af",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 333,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -625,6 +737,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "classifyShotType",
+      "id": "frontend-operation:67d3994d99a80083",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 33,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "withRefresh",
       "id": "frontend-operation:6a129be78a1fa429",
       "kind": "unknown_wrapper_call",
@@ -653,6 +781,22 @@
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "videoEngines",
+      "id": "frontend-operation:6c7f068ac0b33e84",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 35,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -688,6 +832,22 @@
       },
       "transport_id": "frontend-transport:2d89c53d8127f23c",
       "url_template": "/api/projects/{1}/scenes/reorder"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "parsePromptSections",
+      "id": "frontend-operation:733b04606c7e59b9",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 30,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -824,6 +984,38 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "classifyShotType",
+      "id": "frontend-operation:8cce0a54fb8b99cd",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 142,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "fileUrl",
+      "id": "frontend-operation:8e51af40585d3d77",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 167,
+        "path": "web/src/components/shared/Filmstrip.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "handleDelete",
       "id": "frontend-operation:8f2a758e2cf1467a",
       "kind": "unknown_wrapper_call",
@@ -840,6 +1032,54 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "getSceneGuidance",
+      "id": "frontend-operation:8f456bd76c05c9a9",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 129,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "getShotTemplate",
+      "id": "frontend-operation:9993b848392a5596",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 143,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "isPodGated",
+      "id": "frontend-operation:9c937b668b95b3dc",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 55,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "withRefresh",
       "id": "frontend-operation:9dfc98d5b1607809",
       "kind": "unknown_wrapper_call",
@@ -852,6 +1092,22 @@
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "stageTone",
+      "id": "frontend-operation:a16fd646a7000e23",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/console/Notes.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -901,6 +1157,22 @@
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "classifyShotType",
+      "id": "frontend-operation:ac0a691f08966d37",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 80,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -1006,6 +1278,38 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "classifyShotType",
+      "id": "frontend-operation:b98d1077f954df2d",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/edit/ShotBin.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "parsePromptSections",
+      "id": "frontend-operation:b9962673c40e37ec",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 87,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "handleDelete",
       "id": "frontend-operation:ba678ef9fdaede9d",
       "kind": "unknown_wrapper_call",
@@ -1018,6 +1322,22 @@
         "path": "web/src/components/LocationPanel.tsx"
       },
       "transport_id": "frontend-transport:5bce946c5a869ddc",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "getShotTemplate",
+      "id": "frontend-operation:bc48220ba15116c0",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 334,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -1158,6 +1478,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "videoEngines",
+      "id": "frontend-operation:d61cf1865a18c611",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 145,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "withRefresh",
       "id": "frontend-operation:d847bc7e5731d4f3",
       "kind": "unknown_wrapper_call",
@@ -1224,6 +1560,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "getSceneGuidance",
+      "id": "frontend-operation:dd9784c65f743e24",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 295,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "id": "frontend-operation:dfbc38e6343db8dd",
       "kind": "direct_transport",
       "method": "PUT",
@@ -1255,6 +1607,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "assemblePromptSections",
+      "id": "frontend-operation:e1fde5aa5623a846",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 31,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "loadHistoricalLoraStatus",
       "id": "frontend-operation:e457fc179a19c672",
       "kind": "unknown_wrapper_call",
@@ -1267,6 +1635,22 @@
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:f72fe25a94cb2bcf",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "stageTone",
+      "id": "frontend-operation:e542828a9e1b9d6a",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 62,
+        "path": "web/src/components/GenerationPanel.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -1285,6 +1669,22 @@
       },
       "transport_id": "frontend-transport:9d7c8fd84a1b706d",
       "url_template": "/api/projects/{1}/pause"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "videoEngines",
+      "id": "frontend-operation:e8ba6403ef9b8fe0",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 36,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
     },
     {
       "backend_route_ids": [
@@ -3380,6 +3780,54 @@
     },
     {
       "domain": "frontend",
+      "expression": "next.sections",
+      "id": "unresolved:201a4c84522aa6f6",
+      "kind": "unknown_wrapper_call",
+      "owner": "assemblePromptSections",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 96,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "scene",
+      "id": "unresolved:224b23426a6e072d",
+      "kind": "unknown_wrapper_call",
+      "owner": "getSceneGuidance",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 295,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:233f7d739f4acb78",
+      "kind": "unknown_wrapper_call",
+      "owner": "getShotTemplate",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 334,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "{ id: 'draft', order: 0, title: form.title, location_id: form.location_id, characters_present: form.characters_present, action: form.action, dialogue: form.dialogue, mood: form.mood, camera_direction: form.camera_direction, duration_seconds: parseFloat(form.duration_seconds || '0') || 0, num_shots: 0, shots: [], }",
+      "id": "unresolved:29c3c5250dd7d64c",
+      "kind": "unknown_wrapper_call",
+      "owner": "getSceneGuidance",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 129,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:29d3702485fc9d75",
       "kind": "unknown_wrapper_call",
@@ -3404,6 +3852,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "e.key",
+      "id": "unresolved:326a6d1003a3f4ee",
+      "kind": "unknown_wrapper_call",
+      "owner": "isPodGated",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 55,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:34d469a1f0422c42",
       "kind": "unknown_wrapper_call",
@@ -3424,6 +3884,42 @@
       "source": {
         "line": 180,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "apiBase",
+      "id": "unresolved:3ab20f3c89b5905d",
+      "kind": "unknown_wrapper_call",
+      "owner": "fileUrl",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 167,
+        "path": "web/src/components/shared/Filmstrip.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:4a102e17cec5b6c1",
+      "kind": "unknown_wrapper_call",
+      "owner": "classifyShotType",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 142,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:5a09b7dd6a2c2f66",
+      "kind": "unknown_wrapper_call",
+      "owner": "getShotTemplate",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 143,
+        "path": "web/src/components/edit/ShotInspector.tsx"
       }
     },
     {
@@ -3476,6 +3972,30 @@
     },
     {
       "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:8085d456b8dac024",
+      "kind": "unknown_wrapper_call",
+      "owner": "classifyShotType",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 80,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "e.stage",
+      "id": "unresolved:82a5846eafab2d3f",
+      "kind": "unknown_wrapper_call",
+      "owner": "stageTone",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 62,
+        "path": "web/src/components/GenerationPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:864b1f5ad1a60c38",
       "kind": "unknown_wrapper_call",
@@ -3500,6 +4020,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:8a7830cb143791a0",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 36,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:8b2864382f4419bf",
       "kind": "unknown_wrapper_call",
@@ -3512,6 +4044,30 @@
     },
     {
       "domain": "frontend",
+      "expression": "e.stage",
+      "id": "unresolved:8cc890ba09a9156c",
+      "kind": "unknown_wrapper_call",
+      "owner": "stageTone",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 28,
+        "path": "web/src/components/console/Notes.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "currentPrompt",
+      "id": "unresolved:8da48aaf384a3963",
+      "kind": "unknown_wrapper_call",
+      "owner": "parsePromptSections",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 17,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:90c757c49be5af0c",
       "kind": "unknown_wrapper_call",
@@ -3520,6 +4076,18 @@
       "source": {
         "line": 179,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:9518c98bef34db67",
+      "kind": "unknown_wrapper_call",
+      "owner": "classifyShotType",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 333,
+        "path": "web/src/components/ScenePanel.tsx"
       }
     },
     {
@@ -3572,6 +4140,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "project?.id ?? null",
+      "id": "unresolved:a7390ff692a5df71",
+      "kind": "unknown_wrapper_call",
+      "owner": "usePipelineState",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 37,
+        "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:b04bad8584065e60",
       "kind": "unknown_wrapper_call",
@@ -3580,6 +4160,18 @@
       "source": {
         "line": 108,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:b5e8c82147319b3c",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 145,
+        "path": "web/src/components/edit/ShotInspector.tsx"
       }
     },
     {
@@ -3620,6 +4212,30 @@
     },
     {
       "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:c2070ad59cde5b3f",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 35,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "sections",
+      "id": "unresolved:c48f7e5cc06bbcff",
+      "kind": "unknown_wrapper_call",
+      "owner": "assemblePromptSections",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 31,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:c8588466a02ab8b5",
       "kind": "unknown_wrapper_call",
@@ -3644,6 +4260,42 @@
     },
     {
       "domain": "frontend",
+      "expression": "liveShot",
+      "id": "unresolved:cff5accffa8dc380",
+      "kind": "unknown_wrapper_call",
+      "owner": "classifyShotType",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 33,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:d0adfd8e824e2137",
+      "kind": "unknown_wrapper_call",
+      "owner": "getShotTemplate",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 81,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot",
+      "id": "unresolved:d1fff2c65fb1dc78",
+      "kind": "unknown_wrapper_call",
+      "owner": "classifyShotType",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 64,
+        "path": "web/src/components/edit/ShotBin.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:d5b24c7447ff2997",
       "kind": "unknown_wrapper_call",
@@ -3652,6 +4304,54 @@
       "source": {
         "line": 183,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "shot.prompt || ''",
+      "id": "unresolved:da04c7ee675da13f",
+      "kind": "unknown_wrapper_call",
+      "owner": "parsePromptSections",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 30,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "projectId",
+      "id": "unresolved:dfafaf6cfc2e0193",
+      "kind": "unknown_wrapper_call",
+      "owner": "useSSE",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 30,
+        "path": "web/src/hooks/usePipelineState.ts"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "liveShot",
+      "id": "unresolved:e3f6fa53c160dc39",
+      "kind": "unknown_wrapper_call",
+      "owner": "getShotTemplate",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 34,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "prompt",
+      "id": "unresolved:e7fd1a0353ab6112",
+      "kind": "unknown_wrapper_call",
+      "owner": "parsePromptSections",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 87,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
       }
     },
     {

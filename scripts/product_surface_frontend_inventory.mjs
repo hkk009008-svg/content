@@ -306,6 +306,14 @@ function observation(checker, call, container, kind) {
 function moduleFacts(checker, file) {
   const constants = new Map();
   const imports = new Map();
+  // Imports from within the project (relative specifiers) are candidate
+  // wrapper modules we simply couldn't see into; imports from a package
+  // (react, etc.) are framework/library calls out of this tool's declared
+  // scope (frontendFiles() already excludes node_modules outright). Tracked
+  // separately from `imports` so the opaque-call heuristic below can stay
+  // scoped to project-owned code without touching the existing literal-URL
+  // classification, which never needed the distinction.
+  const localImports = new Set();
   for (const statement of file.statements) {
     if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
       for (const item of statement.declarationList.declarations) {
@@ -324,9 +332,18 @@ function moduleFacts(checker, file) {
       if (ts.isNamespaceImport(clause.namedBindings)) names.push(clause.namedBindings.name);
       else names.push(...clause.namedBindings.elements.map((item) => item.name));
     }
-    for (const name of names) imports.set(checker.getSymbolAtLocation(name), name.text);
+    const specifier = ts.isStringLiteralLike(statement.moduleSpecifier)
+      ? statement.moduleSpecifier.text
+      : undefined;
+    const isLocal = specifier !== undefined &&
+      (specifier.startsWith("./") || specifier.startsWith("../"));
+    for (const name of names) {
+      const importSymbol = checker.getSymbolAtLocation(name);
+      imports.set(importSymbol, name.text);
+      if (isLocal) localImports.add(importSymbol);
+    }
   }
-  return { constants, imports };
+  return { constants, imports, localImports };
 }
 function unknown(root, file, node, kind, reason, expression, owner) {
   const row = { domain: "frontend", kind, reason,
@@ -357,7 +374,7 @@ function transportTarget(checker, expression, aliases, callKind) {
   return undefined;
 }
 function analyzeFile(root, file, checker) {
-  const { constants, imports } = moduleFacts(checker, file);
+  const { constants, imports, localImports } = moduleFacts(checker, file);
   const functions = functionFacts(checker, file);
   const aliases = new Map();
   const unresolved = [];
@@ -824,19 +841,22 @@ function analyzeFile(root, file, checker) {
     return left !== undefined && right !== undefined &&
       componentByWrapper.get(left) === componentByWrapper.get(right);
   }
+  // A parameter-sourced safe wrapper used to be suppressed unconditionally
+  // here (pre-7b8b6786 behavior for the fixed-url case too), on the
+  // assumption a safe wrapper is always represented by some call. That
+  // assumption is false for an exported wrapper that is never called in
+  // this file: it silently erased the definition's own transport row with
+  // nothing left to represent it. Route parameter-kind through the same
+  // Tarjan-component wrapperIsRepresented gate the fixed-url case already
+  // uses, so an uncalled wrapper's transport survives regardless of its
+  // URL-source kind.
   const representedDefinitions = new Set();
   for (const transport of transports) {
     const containerSymbol = transport.container?.symbol;
     const wrapper = containerSymbol
       ? wrappers.get(containerSymbol)
       : undefined;
-    const abstractSafeDefinition = (
-      wrapper?.safe && wrapper._urlSource?.kind === "parameter"
-    );
-    if (
-      abstractSafeDefinition ||
-      (wrapper && wrapperIsRepresented(containerSymbol))
-    ) {
+    if (wrapper && wrapperIsRepresented(containerSymbol)) {
       representedDefinitions.add(transport.node.getStart(file));
     }
   }
@@ -889,20 +909,35 @@ function analyzeFile(root, file, checker) {
             text(file, urlNode), wrapper.info.name,
           ));
         }
-      } else if (imported && !suspiciousNodes.has(node) && !aliases.has(callSymbol)) {
+      } else if (
+        imported && !suspiciousNodes.has(node) && !aliases.has(callSymbol) &&
+        localImports.has(callSymbol)
+      ) {
+        // A call through a project-local import we cannot see into (the
+        // wrapper's own file is analyzed separately, symbol-by-symbol, so
+        // its classification never crosses files) used to land here only
+        // when the URL argument was a literal that happened to look like a
+        // path or a scheme. A non-literal argument (parameter passthrough,
+        // a computed expression) made resolveUrl return null and the call
+        // site vanished from both operations and unresolved -- the live
+        // network call disappeared instead of surfacing as unresolved.
+        // Emit the same taxonomy row regardless of whether the URL resolved
+        // to something path-shaped; only the populated url_template differs.
         const urlNode = node.arguments[0];
-        const urlTemplate = resolveUrl(checker, constants, urlNode);
-        if (
-          urlTemplate !== null &&
-          (urlTemplate.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(urlTemplate))
-        ) {
+        const urlValue = urlNode ? unwrap(urlNode) : undefined;
+        const isCallbackArgument = urlValue !== undefined &&
+          (ts.isArrowFunction(urlValue) || ts.isFunctionExpression(urlValue));
+        if (urlNode && !isCallbackArgument) {
+          const urlTemplate = resolveUrl(checker, constants, urlNode);
+          const looksLikeUrl = urlTemplate !== null &&
+            (urlTemplate.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(urlTemplate));
           operations.push({
             expanded_wrapper: imported,
             kind: "unknown_wrapper_call",
             method: null,
             source: source(root, file, node),
             _transport_ref: null,
-            url_template: urlTemplate,
+            url_template: looksLikeUrl ? urlTemplate : null,
           });
           unresolved.push(unknown(
             root, file, node, "unknown_wrapper_call", "imported wrapper call",

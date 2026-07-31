@@ -556,6 +556,115 @@ export function run(id: string) {
     assert "imported wrapper call" in reasons
 
 
+def test_imported_wrapper_call_with_non_literal_url_still_lands_in_unresolved(
+    tmp_path: Path,
+) -> None:
+    """A non-literal argument must not erase an opaque imported-wrapper call site.
+
+    Before the fix, the imported-wrapper branch pushed operations+unresolved
+    only when resolveUrl returned a non-null template matching /^\\// or a
+    scheme. A parameter-passthrough argument (`request(id)` below) makes
+    resolveUrl return null, and neither push happened -- the live call to an
+    opaque, project-local import vanished entirely instead of surfacing as
+    unresolved. `useCallback` (a non-relative, framework import, called with
+    a callback argument rather than a URL) must stay excluded either way.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "opaque-wrapper.ts",
+        """
+import { request } from './client'
+import { useCallback } from 'react'
+
+const noop = useCallback(() => {}, [])
+
+export function run(id: string) {
+  request(id)
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in unknown} == {"request"}
+    request_op = unknown[0]
+    assert request_op["method"] is None
+    assert request_op["url_template"] is None
+
+    reasons = {row["reason"] for row in result["unresolved"]}
+    assert "imported wrapper call" in reasons
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["owner"] == "request"
+    assert imported_rows[0]["expression"] == "id"
+
+
+def test_cross_file_opaque_wrapper_call_and_its_own_definition_both_surface(
+    tmp_path: Path,
+) -> None:
+    """Closing the imported-call gap must not reopen the parameter-wrapper one.
+
+    wrapperDef.ts defines a safe, parameter-sourced, never-called-in-file
+    wrapper (defect 2's shape); caller.ts imports it and calls it with a
+    parameter passthrough (defect 1's shape). Before either fix this
+    end-to-end scenario produced zero frontend_operations: wrapperDef.ts's
+    own abstractSafeDefinition bypass erased its transport, and caller.ts's
+    non-literal argument fell through the imported-wrapper branch untouched.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "wrapperDef.ts",
+        """
+export function genericApiCall(url: string) {
+  return fetch(url, { method: 'GET' })
+}
+""",
+    )
+    _frontend(
+        root,
+        "caller.ts",
+        """
+import { genericApiCall } from './wrapperDef'
+
+export function useOpaque(url: string) {
+  return genericApiCall(url)
+}
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 1
+    kinds = {row["kind"] for row in result["frontend_operations"]}
+    assert kinds == {"direct_transport", "unknown_wrapper_call"}
+
+    direct = next(
+        row for row in result["frontend_operations"] if row["kind"] == "direct_transport"
+    )
+    assert direct["source"]["path"] == "web/src/wrapperDef.ts"
+    assert direct["transport_id"] == result["frontend_transports"][0]["id"]
+
+    opaque_call = next(
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    )
+    assert opaque_call["expanded_wrapper"] == "genericApiCall"
+    assert opaque_call["source"]["path"] == "web/src/caller.ts"
+
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["source"]["path"] == "web/src/caller.ts"
+    assert imported_rows[0]["owner"] == "genericApiCall"
+
+
 def test_wrapper_url_parameter_position_is_preserved_and_routes_match(
     tmp_path: Path,
 ) -> None:
@@ -1354,6 +1463,55 @@ export function fixedRoot() {{
     if expected_kind == "one_hop_wrapper_call":
         assert operation["expanded_wrapper"] == "fixedRoot"
         assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+
+
+@pytest.mark.parametrize(
+    ("external_call", "expected_kind"),
+    [
+        ("", "direct_transport"),
+        ("getResource('/api/param-root')", "one_hop_wrapper_call"),
+    ],
+)
+def test_parameter_direct_root_is_suppressed_only_when_a_call_represents_it(
+    tmp_path: Path,
+    external_call: str,
+    expected_kind: str,
+) -> None:
+    """A safe parameter-sourced wrapper must not erase an uncalled exported root.
+
+    Mirrors test_fixed_direct_root_is_suppressed_only_when_a_call_represents_it:
+    before the fix, a safe wrapper whose URL comes from a parameter was folded
+    into `representedDefinitions` unconditionally (`abstractSafeDefinition`),
+    bypassing the Tarjan wrapperIsRepresented gate the fixed-url case already
+    used. An uncalled exported parameter-sourced wrapper therefore produced
+    zero operations end to end -- its own fetch() was suppressed as "reachable
+    from an expanded call" when no such call existed anywhere in the file.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "param-root.ts",
+        f"""
+export function getResource(url: string) {{
+  return fetch(url)
+}}
+{external_call}
+""",
+    )
+
+    result = _build(root)
+
+    assert len(result["frontend_transports"]) == 1
+    assert len(result["frontend_operations"]) == 1
+    operation = result["frontend_operations"][0]
+    assert operation["kind"] == expected_kind
+    assert operation["method"] == "GET"
+    if expected_kind == "one_hop_wrapper_call":
+        assert operation["expanded_wrapper"] == "getResource"
+        assert operation["transport_id"] == result["frontend_transports"][0]["id"]
+        assert operation["url_template"] == "/api/param-root"
+    else:
+        assert operation["url_template"] is None
 
 
 @pytest.mark.parametrize(
