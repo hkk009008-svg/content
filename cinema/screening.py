@@ -174,6 +174,34 @@ def _take_duration_seconds(take: dict, fallback: float) -> float:
         return fallback
 
 
+def _resolve_manifest_media_path(project: dict, stored_path: str) -> str:
+    """Resolve a stored take path for the manifest's existence check.
+
+    Module-level sibling of ``ReviewController._resolve_take_path``'s
+    chokepoint: this function has no controller ``self``, so it borrows the
+    ONE migration implementation (``ShotController._resolve_stored_media_path``
+    — relative-join, legacy-absolute re-root, never fabricating an escape
+    outside the project) via a tiny duck-typed shim carrying the two
+    attributes that method reads. Local import keeps ShotController's heavy
+    transitive surface off the screening import path.
+    """
+    if not stored_path:
+        return ""
+    project_id = project.get("id") or ""
+    if not project_id:
+        return stored_path
+    from domain.project_manager import get_project_dir
+    from cinema.shots.controller import ShotController
+
+    class _PathCtx:
+        pass
+
+    ctx = _PathCtx()
+    ctx.project = project
+    ctx.project_dir = get_project_dir(project_id)
+    return ShotController._resolve_stored_media_path(ctx, stored_path)
+
+
 def _build_timeline_manifest(project: dict, *, verify_files: bool = False) -> list[dict]:
     """Walk scenes/shots in order, emit per-shot timeline manifest.
 
@@ -266,7 +294,14 @@ def _build_timeline_manifest(project: dict, *, verify_files: bool = False) -> li
             # appear at a stale start_s/end_s while NOT being in the actual
             # assembled video. Mirrors cinema_pipeline.py:544-548.
             if verify_files:
-                take_path = (approved_take or {}).get("path", "")
+                # Slice 10 persists take paths PROJECT-RELATIVE, so the raw
+                # stored value must be resolved against the current project
+                # dir before os.path.exists — otherwise it resolves against
+                # CWD and every shot looks deleted. Same chokepoint discipline
+                # as ReviewController._resolve_take_path.
+                take_path = _resolve_manifest_media_path(
+                    project, (approved_take or {}).get("path", "")
+                )
                 if not take_path or not os.path.exists(take_path):
                     continue
 

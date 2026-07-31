@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:92](web_server.py:92) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:84](web_server.py:84) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:122](web_server.py:122) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:263](web_server.py:263) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:263](web_server.py:263) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:293](web_server.py:293) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2084](web_server.py:2084)) does
+  `api_stream` ([web_server.py:2798](web_server.py:2798)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:280](web_server.py:280)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:460](web_server.py:460)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -470,7 +470,7 @@ Implications:
 - Approvals survive worker crashes — state lives on disk.
 - A 500ms-bounded latency between approval and resume.
 
-### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:224-247](cinema/review/controller.py:224))
+### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:265-288](cinema/review/controller.py:265))
 
 | Gate | Predicate |
 |---|---|
@@ -668,7 +668,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1862](web_server.py:1862) — uses the
+`api_generate_dialogue` at [web_server.py:2489](web_server.py:2489) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1624,7 +1624,7 @@ prefers Suno V5 with FAL Stable Audio as fallback; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1371](cinema_pipeline.py:1371)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1379](cinema_pipeline.py:1379)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
@@ -1785,8 +1785,8 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:706`; call at :995) and `diagnose_clip`
-  (`cinema/shots/controller.py:2660`; call at :2712); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:770`; call at :1063) and `diagnose_clip`
+  (`cinema/shots/controller.py:2748`; call at :2804); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
 

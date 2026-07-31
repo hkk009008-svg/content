@@ -86,12 +86,19 @@ export function VideoSection({ s, config, update }: Props) {
 
         <RangeRow
           label="Cascade retry limit"
-          value={s.cascade_retry_limit ?? 2}
+          value={s.cascade_retry_limit ?? 1}
           min={0}
           max={5}
           step={1}
           onChange={(v) => update('cascade_retry_limit', v)}
-          hint="Full cascade retries before giving up. 0 = no retries, 2 = default."
+          hint="Full cascade retries before giving up. 0 = no retries, 1 = default (phase_c_ffmpeg.py MAX_CASCADE_RETRIES)."
+        />
+
+        <ToggleRow
+          label="Native dialogue audio"
+          checked={s.dialogue_voice_mode === 'native'}
+          onChange={(v) => update('dialogue_voice_mode', v ? 'native' : 'overlay')}
+          hint="Let the winning video engine (Veo, Gemini Omni) generate its own embedded dialogue voice instead of silent video + ElevenLabs TTS overlay. Overlay (off) is the default and works with every engine, including ones with no native voice."
         />
 
         <div className="space-y-3 border-t border-line pt-3">
@@ -100,18 +107,18 @@ export function VideoSection({ s, config, update }: Props) {
             value={s.color_grade_preset ?? 'warm_cinema'}
             options={COLOR_GRADE_PRESETS}
             onChange={(v) => update('color_grade_preset', v)}
-            hint="Applied on final assembly. Auto-mapped from mood if unset."
+            hint="Used by the manual per-clip Color Grade correction. Automatic final-assembly grading currently keys off mood only, not this value (tracked gap — cinema_pipeline.py)."
           />
 
           <RangeRow
             label="Motion quality gate"
-            value={s.motion_quality_threshold ?? 0.4}
+            value={s.motion_quality_threshold ?? 0.5}
             min={0}
             max={1}
             step={0.05}
             format={(v) => v.toFixed(2)}
             onChange={(v) => update('motion_quality_threshold', v)}
-            hint="Min smoothness score to accept video. Below → auto RIFE or regenerate."
+            hint="Overrides the per-shot-type motion-fidelity floor for performance-capture-driven takes only (defaults: portrait 0.42 / medium 0.55 / action 0.60 / wide 0.65). Below floor → take flagged for regeneration."
           />
 
           <ToggleRow
@@ -158,7 +165,7 @@ export function VideoSection({ s, config, update }: Props) {
             label="Face swap"
             checked={s.face_swap_enabled === true}
             onChange={(v) => update('face_swap_enabled', v)}
-            hint="FAL PixVerse post-video face swap."
+            hint="FAL PixVerse / FaceFusion post-video face swap — a billed per-clip correction. Off by default."
           />
         </div>
       </div>

@@ -28,3 +28,65 @@ class TestAlignmentWriteOnlyWarning:
              patch("audio.alignment.save_alignment_json", return_value=None):
             with pytest.warns(UserWarning, match="consumer"):
                 dialogue._maybe_save_alignment(str(tmp_path / "out.mp3"))
+
+
+class TestForcedAlignmentDefaultReconciliation:
+    """Slice 9c: the gate's own fallback default must match VoiceSection's
+    display default (`s.forced_alignment_enabled !== false` -> ON when unset)
+    and every domain/language_defaults.py entry (`forced_alignment_enabled:
+    True`). Before this fix, `get_project_setting(ctx, "forced_alignment_enabled",
+    False)` disagreed with both — a project that never wrote the key showed
+    the toggle ON but silently never ran alignment.
+    """
+
+    def test_absent_key_now_defaults_to_enabled(self, tmp_path):
+        """ctx with NO forced_alignment_enabled key must still run alignment
+        (default reconciled to True), matching the UI's default-on toggle."""
+        import audio.dialogue as dialogue
+        from cinema.context import PipelineContext
+
+        fake = MagicMock()
+        fake.words = [MagicMock()]
+        fake.provider = "whisper"
+
+        # global_settings deliberately omits forced_alignment_enabled.
+        ctx = PipelineContext(global_settings={"language": "English"})
+
+        with patch("audio.alignment.align_audio_to_text", return_value=fake) as mock_align, \
+             patch("audio.alignment.save_alignment_json", return_value=None):
+            with pytest.warns(UserWarning, match="consumer"):
+                result = dialogue._maybe_save_alignment(str(tmp_path / "out.mp3"), ctx=ctx)
+
+        mock_align.assert_called_once()
+        assert result is not None
+
+    def test_ctx_none_now_defaults_to_enabled(self, tmp_path):
+        """ctx=None (CLI path with no per-project settings) also defaults to
+        enabled — get_project_setting(None, key, default) returns `default`,
+        which must now be True."""
+        import audio.dialogue as dialogue
+
+        fake = MagicMock()
+        fake.words = [MagicMock()]
+        fake.provider = "whisper"
+
+        with patch("audio.alignment.align_audio_to_text", return_value=fake) as mock_align, \
+             patch("audio.alignment.save_alignment_json", return_value=None):
+            with pytest.warns(UserWarning, match="consumer"):
+                dialogue._maybe_save_alignment(str(tmp_path / "out.mp3"))
+
+        mock_align.assert_called_once()
+
+    def test_explicit_false_still_disables(self, tmp_path):
+        """An explicit False must still skip alignment — only the ABSENT-key
+        default changed, not the ability to opt out."""
+        import audio.dialogue as dialogue
+        from cinema.context import PipelineContext
+
+        ctx = PipelineContext(global_settings={"forced_alignment_enabled": False})
+
+        with patch("audio.alignment.align_audio_to_text") as mock_align:
+            result = dialogue._maybe_save_alignment(str(tmp_path / "out.mp3"), ctx=ctx)
+
+        mock_align.assert_not_called()
+        assert result is None

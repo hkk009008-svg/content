@@ -5,6 +5,7 @@ import PromptEditor from './PromptEditor'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections } from '../../lib/promptSections'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
+import { apiPut } from '../../lib/api'
 
 // Module-level cache for API registry (shared across all ShotRow instances),
 // keyed by projectId — `config.video_engines` is project-scoped (the server
@@ -54,6 +55,7 @@ function getStatusBadge(status: string | undefined) {
 export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId, onRegenerate }: Props) {
   const [editingPrompt, setEditingPrompt] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
+  const [apiUpdateError, setApiUpdateError] = useState<string | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(
     _configCacheProjectId === projectId ? _configCache : null,
   )
@@ -76,13 +78,23 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
     }).catch(() => {})
   }, [projectId])
 
+  // Sibling of PromptEditor's `handleSave` PUT to the same shots endpoint --
+  // same truthfulness contract: a non-2xx (or network) failure must not be
+  // painted as success. Only mutate `shot.target_api` (the existing
+  // "optimistic update" -- this component has no setter for the parent's
+  // `shot` object, so a confirmed-good value is written back onto the prop
+  // in place) once the server has actually confirmed it; setting the error
+  // state below forces a re-render either way, so a failure's rejected
+  // value never sticks in the (controlled) select -- it re-renders showing
+  // the still-true `shot.target_api` instead.
   const updateShotApi = async (newApi: string) => {
-    await fetch(`/api/projects/${projectId}/shots/${shot.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_api: newApi }),
-    })
-    shot.target_api = newApi  // optimistic update
+    setApiUpdateError(null)
+    const result = await apiPut(`/api/projects/${projectId}/shots/${shot.id}`, { target_api: newApi })
+    if (!result.ok) {
+      setApiUpdateError(result.error)
+      return
+    }
+    shot.target_api = newApi
   }
   const status = shotState?.status || 'pending'
   const imageUrl = shotState?.generated_image || shot.generated_image
@@ -189,6 +201,12 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
             </>
           )}
         </div>
+
+        {apiUpdateError && (
+          <p role="alert" className="mt-1 text-eyebrow text-fail">
+            Could not change API: {apiUpdateError}
+          </p>
+        )}
 
         {shotTemplate && (
           <p className="mt-1 text-eyebrow text-mut">

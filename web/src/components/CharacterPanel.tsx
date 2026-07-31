@@ -272,15 +272,6 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                         className="w-full text-eyebrow text-mut file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-panel file:text-tx file:text-eyebrow file:cursor-pointer"
                       />
                     </div>
-                    <div>
-                      <label className="text-eyebrow text-mut">PuLID: {form.ip_adapter_weight}</label>
-                      <input
-                        type="range" min="0.5" max="1.0" step="0.05"
-                        value={form.ip_adapter_weight}
-                        onChange={e => setForm({ ...form, ip_adapter_weight: e.target.value })}
-                        className="w-full accent-acc"
-                      />
-                    </div>
                     <div className="flex gap-2">
                       <button onClick={handleSaveEdit} disabled={submitting}
                         className="flex-1 bg-ok/80 hover:bg-ok py-1.5 rounded text-white text-xs font-medium">
@@ -317,7 +308,7 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                       <div className="text-mut text-xs mt-0.5 line-clamp-2">{c.description}</div>
                       <div className="flex gap-1.5 mt-1.5 flex-wrap">
                         <span className="text-eyebrow bg-panel px-1.5 py-0.5 rounded text-mut">
-                          PuLID: {c.ip_adapter_weight}
+                          PuLID stored: {c.ip_adapter_weight}
                         </span>
                         {c.canonical_reference && (
                           <span className="text-eyebrow bg-green-900/30 text-ok px-1.5 py-0.5 rounded">
@@ -335,6 +326,15 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                           </span>
                         )}
                       </div>
+                      {/* Read-only: PuLID face-lock strength is stored per character (round-trips
+                          old projects) but generation currently applies the shot-type PuLID
+                          template + adaptive face-lock gate, never this per-character value.
+                          No editable control is offered so the operator isn't misled into
+                          thinking the slider changes anything (audit 2026-07-30, slice 9d). */}
+                      <p className="text-eyebrow-sm text-dim mt-1" data-policy="informational">
+                        PuLID strength · not used by production — generation applies the shot-type
+                        PuLID template and the adaptive face-lock gate instead.
+                      </p>
                     </div>
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 shrink-0">
                       <button onClick={() => startEdit(c)} className="text-acc hover:text-acc text-xs">
@@ -453,17 +453,6 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                   </select>
                 </div>
               )}
-              <div>
-                <label className="text-xs text-mut block mb-1">
-                  PuLID Face-Lock Strength: {form.ip_adapter_weight}
-                </label>
-                <input
-                  type="range" min="0.5" max="1.0" step="0.05"
-                  value={form.ip_adapter_weight}
-                  onChange={e => setForm({ ...form, ip_adapter_weight: e.target.value })}
-                  className="w-full accent-acc"
-                />
-              </div>
               <div className="flex gap-2">
                 <button
                   onClick={handleAdd} disabled={submitting || !form.name.trim()}

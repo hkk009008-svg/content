@@ -107,6 +107,12 @@ class MotionRenderPhase:
             kf_take_id = shot.get("approved_keyframe_take_id", "")
             if not kf_take_id:
                 return None
+            # self._gen is CinemaPipeline in production; its _resolve_take_path
+            # is a pure delegate to ReviewController._resolve_take_path (the
+            # FIX-MEDIA chokepoint), which resolves a project-relative stored
+            # take path (current persistence shape) or a legacy absolute one
+            # to a real, directly-openable path before this os.path.exists()
+            # check runs. Do not read shot["path"]/take["path"] directly here.
             kf_path = self._gen._resolve_take_path(shot, kf_take_id)
             if not kf_path or not os.path.exists(kf_path):
                 return None

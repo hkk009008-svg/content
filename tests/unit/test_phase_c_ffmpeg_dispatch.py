@@ -446,6 +446,69 @@ def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
     ]
 
 
+def test_cascade_retry_limit_defaults_to_one_when_setting_absent(
+    monkeypatch,
+) -> None:
+    """Reciprocal-default test (slice 9b, settings-reconciliation audit).
+
+    A project whose ``global_settings`` never wrote ``cascade_retry_limit``
+    (every project created via ``domain.project_manager.make_project``,
+    which does not scaffold this key) must fall back to the SAME
+    ``MAX_CASCADE_RETRIES`` the source declares (phase_c_ffmpeg.py's
+    ``try_next_api``): 1 cooldown retry, i.e. 2 total dispatch passes.
+    VideoSection's "Cascade retry limit" slider now displays this same
+    value (1) as its default — before this audit it displayed 2, which
+    matched neither this constant nor docs/PROGRAM-MANUAL.md's repeated
+    "default 1" citations.
+
+    Mirrors test_cooldown_retry_reuses_filtered_chain_without_raw_revive's
+    harness exactly, swapping the explicit ``cascade_retry_limit=1``
+    override for a context whose ``global_settings`` simply omits the key
+    — the real "operator never touched this setting" shape.
+    """
+    veo_instance = MagicMock()
+    veo_instance.generate_video.return_value = None
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(return_value=veo_instance)
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.return_value = None
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+    sleep = MagicMock()
+    monkeypatch.setattr(phase_c_ffmpeg.time, "sleep", sleep)
+
+    # A real project's global_settings dict, present but never touched for
+    # this key — NOT this file's _ctx() helper, which bakes in its own
+    # cascade_retry_limit=0 test-safety default and would mask the bug.
+    no_override_ctx = PipelineContext(global_settings={"aspect_ratio": "16:9"})
+    assert "cascade_retry_limit" not in no_override_ctx.global_settings
+
+    cascade: dict = {}
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "VEO_NATIVE",
+        "out.mp4",
+        video_fallbacks=["LTX"],
+        ctx=no_override_ctx,
+        _cascade_out=cascade,
+    )
+
+    assert result is None
+    sleep.assert_called_once_with(30)
+    assert veo_module.VeoNativeAPI.call_count == 2
+    assert ltx_module.LTXVideoAPI.call_count == 2
+
+
 def test_cooldown_winner_keeps_prior_cycle_attempt_provenance(
     monkeypatch,
     tmp_path,

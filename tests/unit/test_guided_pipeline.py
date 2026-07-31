@@ -271,6 +271,96 @@ class TestEnsureSceneFoley(GuidedPipelineTestCase):
             self.assertEqual(pkg["foley"], [])
 
 
+class TestBuildScenePackagesResolvesStoredMediaPaths(GuidedPipelineTestCase):
+    """FIX-MEDIA regression: _build_scene_packages's final-assembly clip
+    gathering calls self._resolve_take_path(shot, final_take_id) --
+    CinemaPipeline's delegate straight into ReviewController._resolve_take_path
+    (cinema_pipeline.py:326-327), the same chokepoint slice 10's
+    project-relative take persistence exposed. Unlike
+    TestEnsureSceneFoley.test_build_scene_packages_populates_foley_list
+    (which mocks _resolve_take_path away to isolate foley behavior), these
+    tests leave it REAL/unmocked so a regression to the raw take.get("path")
+    body fails here.
+
+    Foley/scene-audio are orthogonal to path resolution -- mocked in every
+    test below the same way test_build_scene_packages_populates_foley_list
+    does, so nothing here pays for (or depends on) real TTS/foley providers.
+    _resolve_take_path is deliberately left REAL in all three.
+    """
+
+    def test_relative_stored_final_take_path_is_found(self):
+        """Slice 10 persists a NEW final take's path project-relative.
+        _build_scene_packages must still find + include the clip (RED
+        against the pre-fix chokepoint: the raw relative string fails
+        os.path.exists() against the test's CWD, not project_dir, so the
+        shot would land in missing_shots and drop out of the assembly)."""
+        project, _scene, shot = self.create_project_with_single_shot()
+        project_dir = project_manager.get_project_dir(project["id"])
+        rel_path = os.path.join("shots", shot["id"], "outputs", "take_final.mp4")
+        _write_asset(os.path.join(project_dir, rel_path))
+
+        take = project_manager.make_take("motion", path=rel_path)
+        shot["motion_takes"] = [take]
+        shot["approved_final_take_id"] = take["id"]
+        project_manager.save_project(project)
+
+        pipeline = CinemaPipeline(project["id"])
+        with mock.patch.object(pipeline, "_ensure_scene_audio", return_value=None), \
+             mock.patch.object(pipeline, "_ensure_scene_foley", return_value=""):
+            packages, missing = pipeline._build_scene_packages(project)
+
+        self.assertEqual(missing, [], f"relative take path was not resolved: {missing}")
+        self.assertEqual(len(packages), 1)
+        clips = packages[0]["clips"]
+        self.assertEqual(len(clips), 1)
+        clip_path = clips[0]
+        self.assertTrue(os.path.isabs(clip_path), f"expected an absolute clip path, got {clip_path!r}")
+        self.assertTrue(os.path.exists(clip_path))
+        self.assertEqual(os.path.normpath(clip_path), os.path.normpath(os.path.join(project_dir, rel_path)))
+
+    def test_legacy_absolute_stored_final_take_path_still_works(self):
+        """Legacy pre-slice-10 final takes stored an absolute path outright;
+        _build_scene_packages must keep including those clips unchanged."""
+        project, _scene, shot = self.create_project_with_single_shot()
+        project_dir = project_manager.get_project_dir(project["id"])
+        abs_path = os.path.join(project_dir, "legacy_take.mp4")
+        _write_asset(abs_path)
+
+        take = project_manager.make_take("motion", path=abs_path)
+        shot["motion_takes"] = [take]
+        shot["approved_final_take_id"] = take["id"]
+        project_manager.save_project(project)
+
+        pipeline = CinemaPipeline(project["id"])
+        with mock.patch.object(pipeline, "_ensure_scene_audio", return_value=None), \
+             mock.patch.object(pipeline, "_ensure_scene_foley", return_value=""):
+            packages, missing = pipeline._build_scene_packages(project)
+
+        self.assertEqual(missing, [])
+        self.assertEqual(packages[0]["clips"], [abs_path])
+
+    def test_genuinely_missing_final_take_still_reported_missing(self):
+        """Sanity check: a take whose file genuinely does not exist (not a
+        resolution-shape issue) must still land in missing_shots -- the fix
+        must not paper over real missing media."""
+        project, _scene, shot = self.create_project_with_single_shot()
+        take = project_manager.make_take(
+            "motion",
+            path=os.path.join("shots", shot["id"], "outputs", "never_written.mp4"),
+        )
+        shot["motion_takes"] = [take]
+        shot["approved_final_take_id"] = take["id"]
+        project_manager.save_project(project)
+
+        pipeline = CinemaPipeline(project["id"])
+        with mock.patch.object(pipeline, "_ensure_scene_audio", return_value=None), \
+             mock.patch.object(pipeline, "_ensure_scene_foley", return_value=""):
+            packages, missing = pipeline._build_scene_packages(project)
+
+        self.assertEqual(missing, [shot["id"]])
+        self.assertEqual(packages[0]["clips"], [])
+
+
 class TestConcatFoleyTrack(GuidedPipelineTestCase):
     """Unit tests for CinemaPipeline._concat_foley_track."""
 

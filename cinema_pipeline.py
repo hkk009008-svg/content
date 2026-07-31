@@ -757,6 +757,14 @@ class CinemaPipeline:
             else:
                 for shot in scene.get("shots", []):
                     final_take_id = shot.get("approved_final_take_id", "")
+                    # self._resolve_take_path (delegate, above) routes into
+                    # ReviewController._resolve_take_path -- the FIX-MEDIA
+                    # chokepoint that resolves a project-relative stored take
+                    # path (current persistence shape) or a legacy absolute
+                    # one to a real, directly-openable path. Do not read
+                    # take["path"] directly here; that bypasses the resolver
+                    # and makes this existence check silently fail for
+                    # relatively-stored takes.
                     final_path = self._resolve_take_path(shot, final_take_id)
                     if not final_path or not os.path.exists(final_path):
                         missing_shots.append(shot.get("id", ""))

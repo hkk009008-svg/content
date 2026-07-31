@@ -211,12 +211,23 @@ export interface GlobalSettings {
   // The orchestrator consults these before falling back to PURPOSE_API_RANKING.
   // -----------------------------------------------------------------
   tts_provider?: string                     // API key, e.g. "ELEVENLABS_V3", "CARTESIA_SONIC_2"
+  default_male_voice?: string                // voice id, e.g. ElevenLabs "Eric"
+  default_female_voice?: string              // voice id, e.g. ElevenLabs "Lily"
   dialogue_mode_enabled?: boolean           // route multi-line dialogue through ELEVENLABS_DIALOGUE
   forced_alignment_enabled?: boolean        // WhisperX word-level alignment + DTW correction
+  dialogue_target_wpm?: number               // target words/min, atempo post-process; 0 disables pacing
+  dialogue_voice_mode?: 'overlay' | 'native' // 'overlay' = TTS lip-sync over silent video (default); 'native' = engine's own embedded voice
   // Lipsync engine priority — drag-rank in UI; first available wins.
   lipsync_engine_priority?: string[]        // e.g. ["HEDRA_C3", "SYNC_SO_V3", "MUSETALK", "OMNIHUMAN_V1_5"]
   lipsync_quality_validation?: boolean      // SyncNet score gate after each lipsync
   lipsync_validation_threshold?: number     // 0.0-1.0, default 0.65
+
+  // Optimistic-concurrency counter (slice 9a). Stamped by the server on
+  // every successful settings write (PUT or PATCH) — never set this
+  // directly; echo the last-observed value back on write so PATCH (or a
+  // now-fail-closed PUT, see web_server.py's _settings_revision_established)
+  // can detect a write that raced against newer state.
+  revision?: number
 }
 
 export type ApiModality = 'video' | 'image' | 'lipsync' | 'tts' | 'music' | 'foley' | 'upscale'
@@ -417,6 +428,29 @@ export interface ProgressEvent {
   budget?: number
 }
 
+/** Subset of {"start","resume_checkpoint","cancel","pause","resume"} the
+ *  server currently considers legal for a project
+ *  (`web_server.py:_pipeline_action_authority`). "resume_checkpoint" (Slice
+ *  11c) only ever appears alongside "start" -- both idle, both dispatched
+ *  through `POST /generate`, distinguished only by the request body's
+ *  `resume` flag. It is a DIFFERENT action from plain "resume", which
+ *  un-pauses an already-running pipeline via `POST /resume`. */
+export type PipelineAction = 'start' | 'resume_checkpoint' | 'cancel' | 'pause' | 'resume'
+
+/** Resume-info summary for an on-disk checkpoint -- identical shape from
+ *  both `GET /checkpoint` and the `checkpoint` key `GET /pipeline-state`
+ *  threads onto its idle branch (Slice 11c;
+ *  `cinema.services.checkpoint_info`). Only `resumable` is guaranteed;
+ *  every other field is present exactly when `resumable` is true. */
+export interface CheckpointInfo {
+  resumable: boolean
+  completed_scenes?: number
+  total_scenes?: number
+  stage?: string
+  shots_done?: number
+  shots_failed?: number
+}
+
 export interface PipelineState {
   paused: boolean
   cancelled: boolean
@@ -427,6 +461,22 @@ export interface PipelineState {
   failed_shots: string[]
   scenes_completed: number
   gate_status: GateStatus
+  /** Slice 8a (2026-07-30 comprehensive-unification plan) -- additive to
+   *  every field above on every 200 response from
+   *  `GET /api/projects/<pid>/pipeline-state`, on both the live-pipeline
+   *  and disk-snapshot branches. Derived from the SAME
+   *  `_running_pipelines` / `_PIPELINE_PENDING` registry that gates
+   *  `/generate`, `/cancel`, `/pause`, `/resume` -- never from transport/SSE
+   *  connectivity. Absent only on the distinct 404 "Project not found"
+   *  error shape, which this interface does not model. */
+  running: boolean
+  allowed_actions: PipelineAction[]
+  /** Slice 11c -- additive on the disk-snapshot (idle) branch ONLY; a
+   *  live pipeline's response does not carry this key (see
+   *  `web_server.py:api_pipeline_state`'s docstring). Optional here
+   *  because of that branch split, not because the idle branch itself
+   *  ever omits it. */
+  checkpoint?: CheckpointInfo
 }
 
 export interface GateStatus {

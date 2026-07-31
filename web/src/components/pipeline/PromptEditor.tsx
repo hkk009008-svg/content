@@ -3,6 +3,7 @@ import type { AppConfig, Shot } from '../../types/project'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections, assemblePromptSections, SECTION_LABELS } from '../../lib/promptSections'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
+import { apiGet, apiPut } from '../../lib/api'
 
 interface Props {
   shot: Shot
@@ -17,6 +18,7 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
   const [sections, setSections] = useState(() => parsePromptSections(currentPrompt, true))
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [targetApi, setTargetApi] = useState(shot.target_api || 'AUTO')
   const [camera, setCamera] = useState(shot.camera || 'zoom_in_slow')
   const [visualEffect, setVisualEffect] = useState(shot.visual_effect || 'cinematic_glow')
@@ -28,7 +30,15 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
     // project_id scopes the response's `video_engines` server-selectable
     // view (web_server.py:_project_video_engine_rows reads per-project
     // api_engines overrides + persisted shot targets) — see lib/engines.ts.
-    fetch(`/api/config?project_id=${encodeURIComponent(projectId)}`).then(r => r.json()).then(setConfig).catch(() => {})
+    // Routed through the typed client for consistency with App.tsx's
+    // identical-purpose GET; guarded the same way against a stale response
+    // landing after this editor unmounts/re-targets a different project.
+    let cancelled = false
+    apiGet<AppConfig>(`/api/config?project_id=${encodeURIComponent(projectId)}`).then((result) => {
+      if (cancelled) return
+      if (result.ok) setConfig(result.data)
+    })
+    return () => { cancelled = true }
   }, [projectId])
 
   const livePrompt = useMemo(() => assemblePromptSections(sections), [sections])
@@ -40,20 +50,25 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
 
   const handleSave = async () => {
     setSaving(true)
-    await fetch(`/api/projects/${projectId}/shots/${shotId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: livePrompt,
-        target_api: targetApi,
-        camera,
-        visual_effect: visualEffect,
-        negative_constraints: negativeConstraints,
-        continuity_constraints: continuityConstraints,
-        intent_notes: intentNotes,
-      }),
+    setSaveError(null)
+    const result = await apiPut(`/api/projects/${projectId}/shots/${shotId}`, {
+      prompt: livePrompt,
+      target_api: targetApi,
+      camera,
+      visual_effect: visualEffect,
+      negative_constraints: negativeConstraints,
+      continuity_constraints: continuityConstraints,
+      intent_notes: intentNotes,
     })
     setSaving(false)
+    // Slice 8 requirement 5: a non-2xx (or network/parse) failure is an
+    // error, not optimistic success -- keep the editor open with the
+    // unsaved edits intact and surface the error, rather than closing as
+    // if the save had landed.
+    if (!result.ok) {
+      setSaveError(result.error)
+      return
+    }
     onSaved()
   }
 
@@ -204,6 +219,12 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
             <p className="text-xs text-tx/70">{livePrompt}</p>
           </div>
         </div>
+
+        {saveError && (
+          <div role="alert" className="mx-5 mb-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-xs text-fail">
+            Could not save: {saveError}
+          </div>
+        )}
 
         <div className="flex justify-end gap-3 px-5 py-3 border-t border-line">
           <button

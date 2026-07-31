@@ -177,8 +177,11 @@ class TestDispatchSkipWithoutHTTP:
     """Dispatch-level tests for the skip-without-HTTP guard (T-A's core fix)."""
 
     def _make_ctx(self, language: str = "English"):
+        # forced_alignment_enabled pinned False: these tests exercise Cartesia
+        # voice mapping, not alignment, and the gate's real (True) default
+        # would otherwise attempt a real whisper transcription of fake bytes.
         from cinema.context import PipelineContext
-        return PipelineContext(global_settings={"language": language})
+        return PipelineContext(global_settings={"language": language, "forced_alignment_enabled": False})
 
     def test_unmappable_voice_cartesia_not_called_elevenlabs_gets_original(self, tmp_path):
         """Provider=CARTESIA + 11labs id + English (no mapping) → generate_cartesia
@@ -311,8 +314,9 @@ class TestDispatchMappableVoice:
     on Cartesia failure (False), ElevenLabs fallback gets the ORIGINAL 11labs id."""
 
     def _make_ctx(self, language: str = "Korean"):
+        # forced_alignment_enabled pinned False — see TestDispatchSkipWithoutHTTP._make_ctx.
         from cinema.context import PipelineContext
-        return PipelineContext(global_settings={"language": language})
+        return PipelineContext(global_settings={"language": language, "forced_alignment_enabled": False})
 
     def test_mappable_voice_cartesia_called_with_uuid(self, tmp_path):
         """Korean + 11labs id → _resolve_cartesia_voice maps to Seoyun UUID;

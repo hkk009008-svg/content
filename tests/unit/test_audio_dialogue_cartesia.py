@@ -433,6 +433,46 @@ class TestResolveTtsProvider:
         result = _resolve_tts_provider({}, {}, cfg)
         assert result == "CARTESIA_SONIC_2"
 
+    # ---- Slice 9c: explicit tts_provider override ---------------------------
+    # VoiceSection's "Dialogue TTS provider" picker persists `tts_provider`,
+    # but the router previously never consulted it — an English project with
+    # Cartesia explicitly selected still got ElevenLabs, no matter what.
+
+    def test_explicit_cartesia_override_wins_for_english(self):
+        """English (would normally route to ElevenLabs) + explicit Cartesia
+        override + key present -> Cartesia wins."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider(
+            {"language": "en"}, {}, self._settings(), tts_override="CARTESIA_SONIC_2",
+        )
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_cartesia_override_without_key_falls_back(self):
+        """Explicit Cartesia override but no API key -> graceful ElevenLabs
+        fallback (never force a call guaranteed to fail)."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider(
+            {"language": "en"}, {}, self._settings(key=""), tts_override="CARTESIA_SONIC_2",
+        )
+        assert result == "ELEVENLABS"
+
+    def test_default_elevenlabs_override_leaves_auto_routing_untouched(self):
+        """The picker's own default value, "ELEVENLABS_V3", must not suppress
+        the Korean auto-route — only an explicit Cartesia override changes
+        anything."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider(
+            {"language": "ko"}, {}, self._settings(), tts_override="ELEVENLABS_V3",
+        )
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_no_override_unchanged_behavior(self):
+        """tts_override=None (the parameter's default) reproduces the
+        pre-existing language-only routing exactly."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "en"}, {}, self._settings())
+        assert result == "ELEVENLABS"
+
 
 # ---------------------------------------------------------------------------
 # Dispatcher integration in generate_dialogue_voiceover
@@ -447,9 +487,15 @@ class TestDispatcherIntegration:
     """
 
     def _make_ctx(self, language: str = "English"):
-        """Build a PipelineContext-shape with the project language set."""
+        """Build a PipelineContext-shape with the project language set.
+
+        forced_alignment_enabled is pinned False — these tests exercise TTS
+        provider routing, not alignment, and the gate's real (True) default
+        would otherwise make every test here attempt a real WhisperX/whisper
+        transcription of the fake mp3 bytes written by the ffmpeg stubs.
+        """
         from cinema.context import PipelineContext
-        return PipelineContext(global_settings={"language": language})
+        return PipelineContext(global_settings={"language": language, "forced_alignment_enabled": False})
 
     def test_korean_pipeline_routes_to_cartesia(self, tmp_path, monkeypatch):
         """Korean project language → per-line Cartesia generation."""
@@ -769,3 +815,75 @@ class TestDispatcherIntegration:
         # Cartesia was the actual TTS provider invoked (didn't fall back to ElevenLabs)
         assert not mock_client.text_to_speech.convert.called, \
             "ElevenLabs should NOT be invoked on Cartesia success (cost-record failure is best-effort)"
+
+
+# ---------------------------------------------------------------------------
+# Slice 9c: explicit tts_provider override must reach PATH 1's gate too
+# ---------------------------------------------------------------------------
+
+class TestDialogueModeSkipsOnCartesiaOverride:
+    """_try_dialogue_mode (PATH 1, ElevenLabs-only) ran unconditionally
+    whenever 2+ speakers were present, regardless of the stored tts_provider
+    override -- so an operator's explicit Cartesia choice never got a
+    chance for any multi-speaker scene. It must now defer to PATH 2.
+    """
+
+    def test_skips_when_override_is_cartesia(self):
+        from audio.dialogue import _try_dialogue_mode
+        from cinema.context import PipelineContext
+
+        ctx = PipelineContext(global_settings={"tts_provider": "CARTESIA_SONIC_2"})
+        dialogue_lines = [
+            {"character_id": "c1", "text": "Hi", "delivery": "natural"},
+            {"character_id": "c2", "text": "Hello", "delivery": "natural"},
+        ]
+        characters = [{"id": "c1", "voice_id": "v1"}, {"id": "c2", "voice_id": "v2"}]
+
+        # No client/save mocking on purpose: a correct skip returns None
+        # before any ElevenLabs SDK call is attempted; an incorrect
+        # (non-skipping) implementation would raise trying to reach the
+        # real (unmocked) `client`.
+        result = _try_dialogue_mode(dialogue_lines, characters, "out.mp3", ctx=ctx)
+        assert result is None
+
+    def test_runs_normally_without_override(self):
+        """Regression guard: no tts_provider set -> PATH 1 still runs its
+        normal course (reaches the ElevenLabs dialogue endpoint)."""
+        from audio.dialogue import _try_dialogue_mode
+        from cinema.context import PipelineContext
+
+        ctx = PipelineContext(global_settings={})
+        dialogue_lines = [
+            {"character_id": "c1", "text": "Hi", "delivery": "natural"},
+            {"character_id": "c2", "text": "Hello", "delivery": "natural"},
+        ]
+        characters = [{"id": "c1", "voice_id": "v1"}, {"id": "c2", "voice_id": "v2"}]
+
+        with patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save:
+            mock_client.text_to_dialogue.convert.return_value = b"fake_audio"
+            result = _try_dialogue_mode(dialogue_lines, characters, "out.mp3", ctx=ctx)
+
+        assert mock_client.text_to_dialogue.convert.called
+        assert mock_save.called
+        assert result == "out.mp3"
+
+    def test_elevenlabs_v3_default_value_does_not_skip(self):
+        """The picker's own default value must not be mistaken for an
+        override -- only the literal "CARTESIA_SONIC_2" skips PATH 1."""
+        from audio.dialogue import _try_dialogue_mode
+        from cinema.context import PipelineContext
+
+        ctx = PipelineContext(global_settings={"tts_provider": "ELEVENLABS_V3"})
+        dialogue_lines = [
+            {"character_id": "c1", "text": "Hi", "delivery": "natural"},
+            {"character_id": "c2", "text": "Hello", "delivery": "natural"},
+        ]
+        characters = [{"id": "c1", "voice_id": "v1"}, {"id": "c2", "voice_id": "v2"}]
+
+        with patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save"):
+            mock_client.text_to_dialogue.convert.return_value = b"fake_audio"
+            _try_dialogue_mode(dialogue_lines, characters, "out.mp3", ctx=ctx)
+
+        assert mock_client.text_to_dialogue.convert.called

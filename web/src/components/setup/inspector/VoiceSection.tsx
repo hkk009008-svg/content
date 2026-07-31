@@ -1,12 +1,26 @@
+import { useEffect, useRef, useState } from 'react'
 import { Section } from '../../ui'
 import type { AppConfig } from '../../../types/project'
 import { LipsyncPriorityList } from './LipsyncPriorityList'
+import { apiPost } from '../../../lib/api'
 import { RangeRow, SelectRow, ToggleRow, NumberRow } from './controls'
 
 interface Props {
   s: any
   config: AppConfig | null
   update: (key: string, value: any) => void | Promise<void>
+  /** Needed to invoke the per-project language-defaults contract below.
+   *  Optional so existing shape-based tests that don't exercise that path
+   *  can keep rendering without it. */
+  projectId?: string
+  onRefresh?: () => void
+}
+
+interface ApplyLanguageDefaultsResponse {
+  language: string
+  changed_fields: string[]
+  applied_defaults: Record<string, unknown>
+  recommended_voices: { male?: string; female?: string; available_count: number }
 }
 
 // ElevenLabs voice defaults per the brief — Eric (male) / Lily (female).
@@ -36,8 +50,15 @@ const MUSIC_MASTERING = [
  *
  * Pace is a target-WPM number (`dialogue_target_wpm`), applied via atempo
  * post-process — NOT a `speed` field, because eleven_v3 ignores speed.
+ *
+ * Language change also invokes the language-defaults contract
+ * (`POST /api/projects/<id>/apply-language-defaults`, backed by
+ * domain/language_defaults.py) — every field it can seed (tts_provider,
+ * dialogue_mode_enabled, forced_alignment_enabled, lipsync_engine_priority,
+ * lipsync_quality_validation, lipsync_validation_threshold) lives in this
+ * section, so this is where the applied/changed-fields result surfaces.
  */
-export function VoiceSection({ s, config, update }: Props) {
+export function VoiceSection({ s, config, update, projectId, onRefresh }: Props) {
   const ttsOptions = config?.api_registry
     ? Object.entries(config.api_registry)
         .filter(([, info]) => info.modality === 'tts')
@@ -57,9 +78,56 @@ export function VoiceSection({ s, config, update }: Props) {
 
   const validationOn = s.lipsync_quality_validation !== false
 
+  // Apply per-language optimized defaults whenever the project's language
+  // actually CHANGES (not on initial mount/every unrelated refresh — the ref
+  // starts at the first-seen value, so the first effect run always sees
+  // prev === next and skips). Non-destructive: overwrite_existing defaults
+  // to false server-side, so a field the operator already customized is
+  // left alone; only unset fields get seeded.
+  const prevLanguageRef = useRef<string | undefined>(s.language)
+  const [langNotice, setLangNotice] = useState<
+    { language: string; changed: string[] } | { error: string } | null
+  >(null)
+
+  useEffect(() => {
+    const prev = prevLanguageRef.current
+    const next = s.language
+    prevLanguageRef.current = next
+    if (!next || prev === next || !projectId) return
+
+    let cancelled = false
+    apiPost<ApplyLanguageDefaultsResponse>(`/api/projects/${projectId}/apply-language-defaults`, {
+      language: next,
+    }).then((result) => {
+      if (cancelled) return
+      if (result.ok) {
+        setLangNotice({ language: result.data.language, changed: result.data.changed_fields })
+        if (result.data.changed_fields.length) onRefresh?.()
+      } else {
+        setLangNotice({ error: result.error })
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [s.language, projectId, onRefresh])
+
   return (
     <Section title="Voice">
       <div className="space-y-3">
+        {langNotice && 'error' in langNotice && (
+          <p role="alert" className="text-[10px] leading-tight text-fail">
+            Couldn't apply language defaults: {langNotice.error}
+          </p>
+        )}
+        {langNotice && 'changed' in langNotice && (
+          <p className="text-[10px] leading-tight text-ok">
+            {langNotice.changed.length
+              ? `Applied ${langNotice.language} voice/lipsync defaults — changed: ${langNotice.changed.join(', ')}`
+              : `${langNotice.language} defaults already match — nothing to change.`}
+          </p>
+        )}
+
         <SelectRow
           label="Dialogue TTS provider"
           value={s.tts_provider ?? 'ELEVENLABS_V3'}
@@ -113,7 +181,9 @@ export function VoiceSection({ s, config, update }: Props) {
               <LipsyncPriorityList s={s} config={config} update={update} />
             </div>
             <p className="mt-1 text-[10px] leading-tight text-mut">
-              Tried in order — first available engine wins.
+              Reordering is saved but not yet read by the overlay/generation
+              cascades — each still tries its own fixed engine order
+              (lip_sync.py). Kept here as a staged preference for that wiring.
             </p>
           </div>
 
@@ -145,7 +215,7 @@ export function VoiceSection({ s, config, update }: Props) {
             max={220}
             step={5}
             onChange={(v) => update('dialogue_target_wpm', v)}
-            hint="Target words-per-minute — applied via atempo post-process once wired (eleven_v3 ignores speed)."
+            hint="Target words-per-minute — measured against the assembled line(s) and applied via an atempo post-process (eleven_v3 ignores speed). 0 disables pacing."
           />
 
           <SelectRow

@@ -4,6 +4,7 @@ import { Badge, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 import { PROMPT_SECTION_TAGS, parsePromptSections, assemblePromptSections } from '../../lib/promptSections'
+import { apiPut } from '../../lib/api'
 
 interface Props {
   project: Project
@@ -75,9 +76,15 @@ function ReadOnlyRow({ label, value }: { label: string; value: ReactNode }) {
 export default function ShotInspector({ project, config, scene, shot, shotState, apiBase = '', onRefreshProject }: Props) {
   const base = apiBase || '/api'
   const [form, setForm] = useState<ShotForm>(() => buildForm(shot))
+  // Sibling of PromptEditor's `handleSave` PUT to the same shots endpoint --
+  // same truthfulness contract: surfaced here since this panel has no
+  // modal/"editor" of its own to keep open, so an inline banner is the
+  // equivalent of PromptEditor's `saveError`.
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
     setForm(buildForm(shot))
+    setSaveError(null)
   }, [shot?.id])
 
   if (!shot) {
@@ -88,21 +95,31 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
     )
   }
 
-  const persistShot = async (next: ShotForm) => {
-    await fetch(`${base}/projects/${project.id}/shots/${shot.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: assemblePromptSections(next.sections),
-        target_api: next.targetApi,
-        camera: next.camera,
-        visual_effect: next.visualEffect,
-        negative_constraints: next.negativeConstraints,
-        continuity_constraints: next.continuityConstraints,
-        intent_notes: next.intentNotes,
-      }),
+  /** Returns whether the save landed, so callers that applied an optimistic
+   *  local update (`updateField` below) can revert it on failure instead of
+   *  leaving a value showing that the server never actually confirmed --
+   *  the same "never paint success on a non-2xx" contract PromptEditor's
+   *  `handleSave` enforces for this identical endpoint. On success, the
+   *  authoritative project is re-fetched (mirrors `withRefresh` in
+   *  App.tsx); on failure, nothing is refetched -- the server state didn't
+   *  change, and the error banner is what the user needs to see. */
+  const persistShot = async (next: ShotForm): Promise<boolean> => {
+    const result = await apiPut(`${base}/projects/${project.id}/shots/${shot.id}`, {
+      prompt: assemblePromptSections(next.sections),
+      target_api: next.targetApi,
+      camera: next.camera,
+      visual_effect: next.visualEffect,
+      negative_constraints: next.negativeConstraints,
+      continuity_constraints: next.continuityConstraints,
+      intent_notes: next.intentNotes,
     })
+    if (!result.ok) {
+      setSaveError(result.error)
+      return false
+    }
+    setSaveError(null)
     await onRefreshProject()
+    return true
   }
 
   // Global-settings (project-level) writer — mirrors SettingsInspector's
@@ -131,12 +148,25 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
   const updateSectionLocal = (tag: string, value: string) => {
     setForm((prev) => ({ ...prev, sections: { ...prev.sections, [tag]: value } }))
   }
-  const commitSections = () => persistShot(form)
+  // Free-text fields: the operator's keystrokes already live in `form`
+  // (updateSectionLocal/setForm above) independent of the network call, so
+  // a failed commit surfaces the error but deliberately does NOT wipe what
+  // they typed -- same "keep the edits intact, don't discard on failure"
+  // behavior as PromptEditor's modal staying open on a rejected save.
+  const commitSections = () => { void persistShot(form) }
 
+  // Instant-commit controls (the API pill below): unlike free text, there
+  // is no separate "unsaved draft" -- the pill's displayed value IS the
+  // save target. Revert it on failure so a rejected change never sits
+  // there looking saved (the literal "paints optimistic success on a
+  // non-2xx" defect) -- `persistShot`'s own error banner explains why.
   const updateField = (patch: Partial<ShotForm>) => {
+    const previous = form
     const next = { ...form, ...patch }
     setForm(next)
-    void persistShot(next)
+    void persistShot(next).then((ok) => {
+      if (!ok) setForm(previous)
+    })
   }
 
   const shotType = classifyShotType(shot)
@@ -170,6 +200,11 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
 
   return (
     <aside className="w-[300px] flex-none overflow-y-auto border-l border-line bg-gutter">
+      {saveError && (
+        <div role="alert" className="mx-3 mt-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-[11px] text-fail">
+          Could not save: {saveError}
+        </div>
+      )}
       <Section title="Prompt">
         <div className="space-y-3">
           {PROMPT_SECTION_TAGS.map((tag) => (

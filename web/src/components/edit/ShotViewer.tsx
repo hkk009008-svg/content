@@ -1,4 +1,6 @@
 import type { Scene, Shot, ShotState } from '../../types/project'
+import { fileUrl } from '../../lib/mediaUrl'
+import MediaAsset from '../ui/MediaAsset'
 
 interface Props {
   projectId: string
@@ -11,11 +13,16 @@ interface Props {
 /**
  * ShotViewer — the center stage. Media-resolution pattern reused verbatim
  * from `console/HeroShot.tsx`: `state?.generated_image || shot?.generated_image`
- * (video analogous), resolved through the projects file endpoint.
+ * (video analogous), resolved through the projects file endpoint. Slice 10:
+ * the resolved URL renders through MediaAsset, so a take whose stored path
+ * can't be found (moved project, deleted file) shows an explicit missing
+ * state instead of a blank/broken player -- "no shot selected" and "no take
+ * yet" stay as their own distinct, pre-existing states above that.
  */
-export default function ShotViewer({ projectId, shot, scene, shotState, apiBase = '' }: Props) {
-  const base = apiBase || '/api'
-  const resolveMedia = (path: string) => `${base}/projects/${projectId}/file?path=${encodeURIComponent(path)}`
+export default function ShotViewer({ projectId, shot, scene, shotState, apiBase }: Props) {
+  // fileUrl defaults apiBase to '/api' itself -- an explicit `= ''` default
+  // here would defeat that (see TakeStrip's identical note).
+  const resolveMedia = (path: string) => fileUrl(apiBase, projectId, path)
 
   const imgUrl = shotState?.generated_image || shot?.generated_image || null
   const videoUrl = shotState?.generated_video || shot?.generated_video || null
@@ -26,18 +33,22 @@ export default function ShotViewer({ projectId, shot, scene, shotState, apiBase 
         {!shot ? (
           <div className="font-mono text-[11px] uppercase tracking-wide text-dim">No shot selected</div>
         ) : videoUrl ? (
-          <video
+          <MediaAsset
             key={videoUrl}
-            src={resolveMedia(videoUrl)}
+            kind="video"
+            url={resolveMedia(videoUrl)}
+            objectFit="contain"
             controls
-            className="max-h-full max-w-full rounded border border-line object-contain"
+            className="max-h-full max-w-full rounded border border-line"
           />
         ) : imgUrl ? (
-          <img
+          <MediaAsset
             key={imgUrl}
-            src={resolveMedia(imgUrl)}
+            kind="image"
+            url={resolveMedia(imgUrl)}
             alt={shot.prompt?.slice(0, 80)}
-            className="max-h-full max-w-full rounded border border-line object-contain"
+            objectFit="contain"
+            className="max-h-full max-w-full rounded border border-line"
           />
         ) : (
           <div className="font-mono text-[11px] uppercase tracking-wide text-dim">No take yet</div>

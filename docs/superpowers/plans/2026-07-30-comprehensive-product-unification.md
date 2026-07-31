@@ -490,6 +490,34 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Waves 3-5 landed on branch `unification/waves-3-8` (2026-07-31/08-01)
+
+Slices 8a/8b/9a (`7ba2a5f8`, `a496d686`), 9b/9c/9d/10 (`a2ac5e89`, `6eeb4bd1`,
+`45b289fd`, `1cb40224`, `6e7477a0`), 11a/11b/11c (`07753c81`, `39ddcb18`).
+Matrix at each landing: backend 4422 -> 4474 -> 4524 (0 failures), web 100 ->
+174 -> 217, smoke OK, anchors clean.
+
+**CORRECTION — commit-trail attribution (found by two independent reviewers).**
+`a2ac5e89` is titled for slice 10 but ALSO carries, undisclosed: the settings
+PUT opt-in -> fail-closed guard (`_settings_revision_established`), the
+~14-entry `_SETTINGS_KEY_VALIDATORS` extension, and the `face_swap_enabled`
+default flip. The later commits `45b289fd` and `6eeb4bd1` describe those same
+changes as their own work; their diffs do not contain them. Cause: commits
+were assembled by pathspec while `web_server.py` / `cinema/shots/controller.py`
+carried several agents' edits at once, so the message written for a later
+commit described work already ridden in an earlier one. The substance is
+present, tested and reviewed — only the attribution is wrong. History is left
+intact (the commits are already reviewed); this entry is the durable record.
+Process fix for later waves: assemble commits per FILE-OWNER, and re-read the
+actual staged diff before writing the message.
+
+**Process defects recorded, not hidden:** (1) 11b and 11c were dispatched as
+"disjoint" but shared `usePipelineState.ts`/`AppShell.tsx` — R-ORCH forbids
+this; no lost update occurred (both feature sets verified present and
+independently tested, collision seam sent for dedicated review). (2) A 13a
+implementer used `git stash` on the shared tree against an explicit
+prohibition; it restored cleanly and was self-reported.
+
 ### Wave 2 CLOSED (2026-07-31); merged to main
 
 6c `6f684da7` + doc-truth pass `7c170997`: lane-v **NITS** (Viggle
@@ -647,8 +675,9 @@ per slice, independent spec + quality review recorded in this ledger **before
 the next dependent slice dispatches** (the post-`14ddd8b4` review gap must not
 recur); implementers sequential wherever owned files overlap; full offline
 matrix (smoke, backend suite, web test/build, `pip check`) at each wave
-boundary; R-MEASURE for any ranking/cost claim. All slices below are offline
-(fixture-based) except 13d's real-local-server no-spend journey.
+boundary; a dedicated surface-inventory regeneration commit at each wave
+boundary (below); R-MEASURE for any ranking/cost claim. All slices below are
+offline (fixture-based) except 13d's real-local-server no-spend journey.
 
 - **Wave R (in flight):** retroactive reviews of the five owed families
   (workflow `wf_b11a3a2c-ade`, 12 read-only reviewers). Triage gate: any
@@ -676,6 +705,50 @@ boundary; R-MEASURE for any ranking/cost claim. All slices below are offline
 - **Wave 7 — documentation unification:** 14a → 14b → 14c (final drift gate).
 - **Wave 8 — evidence-led pruning:** 15a–15g, each gated on the caller-evidence
   requirements already listed; only after the full contract matrix is green.
+
+#### Wave-boundary derived-state refresh (inventory + doc anchors)
+
+Two artifacts are derived from source line positions and go stale on any edit,
+whether or not behaviour changed: `docs/generated/product_surface_inventory.json`
+and the `file:line` anchors in `ARCHITECTURE.md`. Once every slice in a wave is
+committed — **not before** — refresh both and land them as one commit:
+
+```
+.venv/bin/python scripts/product_surface_inventory.py --root . \
+  --output docs/generated/product_surface_inventory.json
+.venv/bin/python scripts/check_doc_claims.py --fix
+.venv/bin/python -m pytest \
+  tests/unit/test_product_surface_inventory.py::test_repository_artifact_is_current -q
+.venv/bin/python scripts/ci_smoke.py
+```
+
+Precedent: `3ad04f6c` (wave 3), `b10ac746` (wave 4), `ce391c00` (wave 5) —
+each a standalone `chore(audit): refresh inventory + anchors` commit touching
+exactly `ARCHITECTURE.md` + the generated JSON. Never fold either into a
+feature commit: both are derived state, and mixing them hides which source
+change moved the surface.
+
+The two fail differently, so check both. A stale inventory fails
+`test_repository_artifact_is_current` (pytest only). Stale `ARCHITECTURE.md`
+anchors fail `ci_smoke.py` as `DOC-ANCHOR DRIFT` — a hard gate, unlike the
+advisory drift reported for other docs.
+
+**A red `test_repository_artifact_is_current` mid-wave is expected, not a
+defect to chase.** The artifact records `source.line` for every frontend
+transport, so any edit above a `fetch` in a component makes it stale without
+changing the surface at all. Diff the regenerated output against the committed
+one before concluding a route or transport actually changed — as of
+2026-08-01 the entire staleness was `CapabilityConsole.tsx` line 372 → 422 in
+two rows. Regenerating mid-wave only pins a line number the next slice moves
+again.
+
+Until `dcc7b048` this test could not execute in CI at all: the `pytest-unit`
+job installed no `web/node_modules`, so the TypeScript helper was unresolvable
+and the 82 tests in that file that invoke it failed on the dependency — 82 of
+the 104 failures in run `30621088290`. The file's other 78 tests mock the
+helper (`_mock_helper_payload`) and passed regardless, which is why the gap
+read as ordinary suite noise rather than a disarmed gate. Treat any earlier
+signal on this gate as uninformative.
 
 ## Completion gate
 

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi } from 'vitest'
 import { VideoSection } from './VideoSection'
@@ -191,5 +191,116 @@ describe('VideoSection', () => {
 
     expect(screen.queryAllByTestId('video-engine-row')).toHaveLength(0)
     expect(screen.getByText('No video engines available.')).toBeTruthy()
+  })
+})
+
+/**
+ * Slice 9b — video/spend settings reconciliation. Each test below pins BOTH
+ * halves of the reciprocal contract for one exposed setting: (a) the
+ * displayed default equals the runtime default it will be read against
+ * (cited file:line in each test), and (b) writing through the UI contract
+ * (`update(key, value)`) uses the exact key the runtime reader consumes.
+ * `config={null}` throughout — none of these settings depend on server
+ * config, only on the `s` (draft settings) prop.
+ */
+describe('settings reconciliation (slice 9b — video/spend defaults)', () => {
+  it('cascade retry limit: displayed default (1) matches phase_c_ffmpeg.py MAX_CASCADE_RETRIES (line ~487), not the previous UI default of 2', () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const slider = screen.getByRole('slider', { name: 'Cascade retry limit' })
+    expect(slider).toHaveValue('1')
+
+    fireEvent.change(slider, { target: { value: '3' } })
+    expect(update).toHaveBeenCalledWith('cascade_retry_limit', 3)
+  })
+
+  it('native dialogue audio: displayed default (overlay/off) matches controller.py _dialogue_voice_mode\'s default ("overlay"), and toggling writes overlay<->native', async () => {
+    const update = vi.fn()
+    const { rerender } = render(<VideoSection s={{}} config={null} update={update} />)
+
+    const toggle = screen.getByRole('switch', { name: 'Native dialogue audio' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+
+    await userEvent.click(toggle)
+    expect(update).toHaveBeenCalledWith('dialogue_voice_mode', 'native')
+
+    rerender(<VideoSection s={{ dialogue_voice_mode: 'native' }} config={null} update={update} />)
+    const toggleAfter = screen.getByRole('switch', { name: 'Native dialogue audio' })
+    expect(toggleAfter.getAttribute('aria-checked')).toBe('true')
+
+    await userEvent.click(toggleAfter)
+    expect(update).toHaveBeenCalledWith('dialogue_voice_mode', 'overlay')
+  })
+
+  it('face swap: displayed default (off) now matches controller.py apply_correction\'s fail-closed default (False, fixed in slice 9b — was True)', async () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const toggle = screen.getByRole('switch', { name: 'Face swap' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+
+    await userEvent.click(toggle)
+    expect(update).toHaveBeenCalledWith('face_swap_enabled', true)
+  })
+
+  it('motion quality gate: displayed default (0.50) ties to performance/motion_gate.py DEFAULT_MOTION_FLOOR (the true per-shot-type default when unset is 0.42-0.65 and cannot be a single number — see hint)', () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const slider = screen.getByRole('slider', { name: 'Motion quality gate' })
+    expect(slider).toHaveValue('0.5')
+
+    fireEvent.change(slider, { target: { value: '0.6' } })
+    expect(update).toHaveBeenCalledWith('motion_quality_threshold', 0.6)
+  })
+
+  it('coherence analysis: displayed default (on) matches controller.py diagnose_clip\'s default (True) — already agreed before this slice', async () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const toggle = screen.getByRole('switch', { name: 'Coherence analysis' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+
+    await userEvent.click(toggle)
+    expect(update).toHaveBeenCalledWith('coherence_check_enabled', false)
+  })
+
+  it('color drift sensitivity: displayed default (0.30) matches controller.py diagnose_clip\'s default (0.3) — already agreed before this slice', () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const slider = screen.getByRole('slider', { name: 'Color drift sensitivity' })
+    expect(slider).toHaveValue('0.3')
+
+    fireEvent.change(slider, { target: { value: '0.2' } })
+    expect(update).toHaveBeenCalledWith('color_drift_sensitivity', 0.2)
+  })
+
+  it('scene transitions + duration: displayed defaults (off / 0.5s) match cinema_pipeline.py\'s defaults — already agreed before this slice', () => {
+    const update = vi.fn()
+    const { rerender } = render(<VideoSection s={{}} config={null} update={update} />)
+
+    const toggle = screen.getByRole('switch', { name: 'Scene transitions' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(screen.queryByRole('slider', { name: 'Transition duration (s)' })).toBeNull()
+
+    rerender(<VideoSection s={{ scene_transitions: true }} config={null} update={update} />)
+    const durationSlider = screen.getByRole('slider', { name: 'Transition duration (s)' })
+    expect(durationSlider).toHaveValue('0.5')
+
+    fireEvent.change(durationSlider, { target: { value: '1' } })
+    expect(update).toHaveBeenCalledWith('transition_duration', 1)
+  })
+
+  it('color grade preset: displayed default (warm_cinema) matches the manual per-clip correction default in controller.py (final-assembly auto-grading ignores this value — see hint)', () => {
+    const update = vi.fn()
+    render(<VideoSection s={{}} config={null} update={update} />)
+
+    const select = screen.getByRole('combobox', { name: 'Color grade' })
+    expect(select).toHaveValue('warm_cinema')
+
+    fireEvent.change(select, { target: { value: 'cool_noir' } })
+    expect(update).toHaveBeenCalledWith('color_grade_preset', 'cool_noir')
   })
 })

@@ -165,6 +165,10 @@ class ReviewController:
         return self._core.project
 
     @property
+    def project_dir(self) -> str:
+        return self._core.project_dir
+
+    @property
     def progress(self):
         """Bound-method-shaped proxy so legacy self.progress(...) calls work."""
         return self._lifecycle.report_progress
@@ -187,9 +191,46 @@ class ReviewController:
         takes = shot.get(collection_name, [])
         return takes[-1] if takes else None
 
+    def _resolve_stored_media_path(self, stored_path: str) -> str:
+        """Resolve a take/shot ``path`` value read back from persisted state
+        to a real, directly-openable absolute path under the CURRENT project
+        directory.
+
+        FIX-MEDIA (slice 10 follow-up): ``_resolve_take_path`` is the
+        chokepoint every consumer of a stored take path routes through
+        (``_rebuild_review_clips`` here, ``CinemaPipeline._resolve_take_path``
+        -> ``_build_scene_packages`` for final assembly, and
+        ``MotionRenderPhase._scene_keyframes`` for storyboard eligibility via
+        ``self._gen._resolve_take_path``). Slice 10 made
+        ``ShotController._to_project_relative`` persist NEW take paths
+        project-relative; this delegates to that same slice's read-side
+        counterpart, ``ShotController._resolve_stored_media_path``, so there
+        is exactly ONE implementation of the relative/legacy-absolute/
+        moved-repo migration logic (see that method's docstring for the full
+        contract, including why outside-project paths are never fabricated
+        into an escape).
+
+        Reuse shape: ``ShotController._resolve_stored_media_path`` only reads
+        ``self.project_dir`` and ``self.project`` on its bound ``self`` --
+        both of which ``ReviewController`` also exposes (identical proxy
+        shape to ShotController's, see ``project`` / ``project_dir`` above).
+        Calling it unbound with a ReviewController ``self`` is therefore a
+        true reuse of the one implementation, not a duplicate copy. Kept as a
+        local import (not a module-level one) so constructing a
+        ReviewController never pays ShotController's heavier transitive
+        import surface (phase_c_vision / lip_sync / etc.) unless a stored
+        path is actually resolved -- mirrors this file's existing
+        TYPE_CHECKING-only import discipline for cinema.core (Pattern L,
+        docs/REFACTOR_HANDOFF.md section 7).
+        """
+        from cinema.shots.controller import ShotController
+
+        return ShotController._resolve_stored_media_path(self, stored_path)
+
     def _resolve_take_path(self, shot: dict, take_id: str) -> str:
         _, take = self._host._find_take(shot, take_id)
-        return take.get("path", "") if take else ""
+        raw_path = take.get("path", "") if take else ""
+        return self._resolve_stored_media_path(raw_path)
 
     def _candidate_take(self, shot: dict) -> Optional[dict]:
         if shot.get("approved_final_take_id"):
@@ -620,9 +661,18 @@ class ReviewController:
         manifest = {}
         for scene, shot_index, shot in self._all_shots(active_project):
             candidate = self._candidate_take(shot) or {}
-            keyframe_path = self._resolve_take_path(shot, shot.get("approved_keyframe_take_id", "")) or (
-                self._latest_take(shot, "keyframe_takes") or {}
-            ).get("path")
+            # Both the primary lookup AND the latest-take fallback read a raw
+            # stored `path` -- wrap the WHOLE expression in
+            # _resolve_stored_media_path (mirrors the established sibling
+            # pattern in ShotController.diagnose_clip, e.g.
+            # cinema/shots/controller.py:2777-2782) so the fallback branch
+            # isn't left as an unresolved relative/legacy path. Double-
+            # resolving the primary branch's already-absolute result is a
+            # cheap no-op (_resolve_stored_media_path short-circuits on an
+            # existing absolute path).
+            keyframe_path = self._resolve_take_path(shot, shot.get("approved_keyframe_take_id", "")) or self._resolve_stored_media_path(
+                (self._latest_take(shot, "keyframe_takes") or {}).get("path")
+            )
             manifest[shot["id"]] = {
                 "scene_id": scene.get("id", ""),
                 "shot_index": shot_index,
@@ -630,7 +680,7 @@ class ReviewController:
                 "camera": shot.get("camera", ""),
                 "target_api": shot.get("target_api", "AUTO"),
                 "image": keyframe_path,
-                "video": candidate.get("path", "") if candidate.get("kind") != "keyframe" else "",
+                "video": self._resolve_stored_media_path(candidate.get("path", "")) if candidate.get("kind") != "keyframe" else "",
                 "take_id": candidate.get("id", ""),
                 "take_kind": candidate.get("kind", ""),
                 "status": "pending_review",

@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProgressEvent } from '../types/project'
 import { useSSE } from './useSSE'
 
+// Slice 11a wire shape: `id`/`replayed` are inlined onto data-bearing events
+// (live or reconnect-replayed); GAP/HEARTBEAT/END never carry either.
+type WireEvent = ProgressEvent & { id?: number; replayed?: boolean; gap_from?: number; gap_to?: number }
+
 class MockEventSource {
   static instances: MockEventSource[] = []
 
@@ -17,7 +21,7 @@ class MockEventSource {
     MockEventSource.instances.push(this)
   }
 
-  emit(event: ProgressEvent) {
+  emit(event: WireEvent) {
     this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent<string>)
   }
 
@@ -259,5 +263,106 @@ describe('useSSE project lifecycle', () => {
     act(() => vi.advanceTimersByTime(1_000))
     expect(MockEventSource.instances).toHaveLength(2)
     expect(MockEventSource.instances[1].url).toBe('/api/projects/A/stream')
+  })
+})
+
+describe('useSSE -- reconnect resumes from the last seen event id (Slice 11b)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    MockEventSource.instances = []
+    vi.stubGlobal('EventSource', MockEventSource)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('a fresh connection carries no last_event_id, then a reconnect after a real event sends it', () => {
+    const { result } = renderHook(() => useSSE('A'))
+
+    act(() => result.current.start())
+    const first = MockEventSource.instances[0]
+    expect(first.url).toBe('/api/projects/A/stream') // no known position yet -- server's own snapshot path
+
+    act(() => first.emit({ ...progressEvent, id: 7 }))
+    act(() => first.fail())
+    act(() => vi.advanceTimersByTime(1_000))
+
+    const second = MockEventSource.instances[1]
+    expect(second.url).toBe('/api/projects/A/stream?last_event_id=7')
+  })
+
+  it('the tracked id advances with each further event, so a SECOND reconnect resumes from the newest one', () => {
+    const { result } = renderHook(() => useSSE('A'))
+
+    act(() => result.current.start())
+    const first = MockEventSource.instances[0]
+    act(() => first.emit({ ...progressEvent, id: 3 }))
+    act(() => first.fail())
+    act(() => vi.advanceTimersByTime(1_000))
+
+    const second = MockEventSource.instances[1]
+    expect(second.url).toBe('/api/projects/A/stream?last_event_id=3')
+    act(() => second.emit({ ...progressEvent, id: 9, replayed: true }))
+    act(() => second.fail())
+    act(() => vi.advanceTimersByTime(1_000))
+
+    const third = MockEventSource.instances[2]
+    expect(third.url).toBe('/api/projects/A/stream?last_event_id=9')
+  })
+
+  it('a GAP control frame flows through into events/latest like a real message (no id, unlike data events)', () => {
+    const { result } = renderHook(() => useSSE('A'))
+    act(() => result.current.start())
+    const source = MockEventSource.instances[0]
+
+    const gapEvent: WireEvent = { stage: 'GAP', detail: 'Missed events 4-9 (replay buffer cap exceeded)', percent: -1, gap_from: 4, gap_to: 9 }
+    act(() => source.emit(gapEvent))
+
+    expect(result.current.latest).toEqual(gapEvent)
+    expect(result.current.events).toEqual([gapEvent])
+
+    // GAP carries no id -- a reconnect right after it must not claim a
+    // position the server never confirmed.
+    act(() => source.fail())
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(MockEventSource.instances[1].url).toBe('/api/projects/A/stream')
+  })
+
+  it('starting a fresh run resets the tracked id -- a new run must not send a stale last_event_id from the prior run', () => {
+    const { result } = renderHook(() => useSSE('A'))
+
+    act(() => result.current.start())
+    const run1 = MockEventSource.instances[0]
+    act(() => run1.emit({ ...progressEvent, id: 42 }))
+    act(() => run1.emit({ ...progressEvent, stage: 'END' })) // graceful end of run 1
+
+    act(() => result.current.start()) // run 2 begins
+    const run2 = MockEventSource.instances[1]
+    expect(run2.url).toBe('/api/projects/A/stream') // no last_event_id=42 leaking into a fresh bus
+  })
+
+  it('a project switch also resets the tracked id', () => {
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useSSE(projectId),
+      { initialProps: { projectId: 'A' } },
+    )
+    act(() => result.current.start())
+    const sourceA = MockEventSource.instances[0]
+    act(() => sourceA.emit({ ...progressEvent, id: 15 }))
+
+    rerender({ projectId: 'B' })
+    act(() => result.current.start())
+    const sourceB = MockEventSource.instances[1]
+    expect(sourceB.url).toBe('/api/projects/B/stream')
+
+    act(() => sourceB.fail())
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(MockEventSource.instances[2].url).toBe('/api/projects/B/stream') // still no id -- B never saw one
   })
 })

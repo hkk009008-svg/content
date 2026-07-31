@@ -8,6 +8,7 @@ export { StatusDot, type Status } from './StatusDot'
 export { Meter, type MeterTone } from './Meter'
 export { SelectPill, type SelectOption } from './SelectPill'
 export { Section } from './Section'
+export { default as MediaAsset, type MediaAssetProps } from './MediaAsset'
 
 // Mono uppercase micro-label className — replaces the deleted `<Eyebrow>`
 // component's default styling. Compose with an explicit tone override
