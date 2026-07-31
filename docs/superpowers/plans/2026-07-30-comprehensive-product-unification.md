@@ -471,6 +471,22 @@ integration verification, but does not implement the production slices.
 | M2 native billed-swallow siblings (SORA/VEO/LTX/OMNI) | — | defect verified thrice (M1 implementer Rule #13, money-gate NIT, lane-v corroboration + orchestrator source check) | Implementer dispatched (`wf_a64283dc`) |
 | R2 optimizer coercion threading | — | defect verified thrice (2b-A quality MINOR, R1 implementer Rule #13, orchestrator source check of `prompt_optimizer.py:633`) | Implementer dispatched (`wf_a64283dc`) |
 
+### Wave-R round-2 verdicts (wf_54301ec0)
+
+`49d1c36a` fixup-M1 lane-v **GO** (mutation re-probed). `45eed520` fixup-R1
+lane-v **GO** (real-arithmetic data-narrowing verified). `10284394` M2
+money-gate **GO** + lane-v **NITS** (MINOR: OMNI billed-then-aspect-rejected
+pin — folded into slice 3's owned surface). `e838e18b` R2 lane-v **NITS**
+(MINOR: `_fallback_optimize` shares the threading gap — slice R3 dispatched)
++ quality **GO**. `cd82f01c` fixup-I1 lane-v **NITS** + quality **FAIL**
+(IMPORTANT: named-import object member-access calls — `import { api };
+api.get(url)` — still vanish; contract-covered shape → fixup-I2 dispatched;
+exotic residuals recorded as disclosed limitations: rebound namespace const,
+barrel `export * as`, `.call/.apply`, rebound identifier).
+
+Wave R closes on fixup-I2/R3 GO; Wave 1 (slices 3 + 2c + 7) dispatched in
+parallel with them — file-disjoint.
+
 ### Resumption sequencing (recorded 2026-07-31, after the Codex pickup)
 
 Standing rules for every wave below: fresh implementer per slice, one commit
