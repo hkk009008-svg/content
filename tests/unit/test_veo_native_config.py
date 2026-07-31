@@ -369,3 +369,145 @@ def test_generate_video_defaults_aspect_ratio_to_16_9():
 
     cfg = captured["config"]
     assert cfg.aspect_ratio == "16:9"
+
+
+# ---------------------------------------------------------------------------
+# generate_video — on_billed fires exactly at the provider's billed-video
+# boundary (money-gate 2026-07-11 class, extended to veo_native in slice M2:
+# a post-billing bytes-retrieval failure must still be distinguishable from a
+# pre-billing failure to the caller). Mirrors kling_native.py's on_billed
+# tests (commit 55c0797e).
+# ---------------------------------------------------------------------------
+
+def test_pre_billing_failure_does_not_call_on_billed():
+    """An empty response (no generated_videos) => the provider never
+    delivered a video => never billed => on_billed must NOT fire."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    on_billed = MagicMock()
+
+    op = MagicMock()
+    op.done = True
+    op.error = None
+    op.response.generated_videos = []
+    op.response.rai_media_filtered_reasons = []
+    op.response.rai_media_filtered_count = 0
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = op
+    api.client.operations.get.side_effect = lambda o: o
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img):
+        result = api.generate_video(
+            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_post_billing_bytes_retrieval_failure_still_notes_billed():
+    """RED->GREEN target: a bytes-retrieval failure AFTER the operation
+    response reports a generated video must still fire on_billed. Pre-fix,
+    _extract_video_bytes's failure fell into the blanket
+    `except Exception: return None`, indistinguishable from a pre-billing
+    failure and losing the spend to the caller's budget gate. on_billed must
+    fire BEFORE the retrieval attempt, not after."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    gen_vid = MagicMock()
+    gen_vid.video.video_bytes = None  # Gemini backend: falls through to files.download
+
+    op = MagicMock()
+    op.done = True
+    op.error = None
+    op.response.generated_videos = [gen_vid]
+    op.response.rai_media_filtered_reasons = []
+
+    def _failing_download(*args, **kwargs):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing bytes-retrieval failure")
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = op
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.side_effect = _failing_download
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img):
+        result = api.generate_video(
+            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+            on_billed=on_billed,
+        )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the bytes-retrieval attempt so a caller's "
+        f"spend record is never lost to a post-billing failure; got {call_order!r}"
+    )
+
+
+def test_success_fires_on_billed_exactly_once():
+    """The happy path also bills — on_billed must fire exactly once, before
+    bytes retrieval, even when retrieval subsequently succeeds."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    on_billed = MagicMock()
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = _completed_operation()
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        result = api.generate_video(
+            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+            on_billed=on_billed,
+        )
+
+    assert result == "/tmp/out.mp4"
+    on_billed.assert_called_once()
+
+
+def test_on_billed_exception_does_not_abort_success():
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = _completed_operation()
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        result = api.generate_video(
+            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+            on_billed=_bad_callback,
+        )
+
+    assert result == "/tmp/out.mp4", (
+        "A broken on_billed callback must not abort an otherwise-successful generation"
+    )

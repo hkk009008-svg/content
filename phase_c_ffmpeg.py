@@ -573,6 +573,25 @@ def _execute_admitted_video_chain(
 
     elif target_api.upper() == "SORA_NATIVE":
         # Native OpenAI Sora 2 — best motion physics
+        #
+        # _sora_billed_noted makes _note_billed_attempt idempotent for this
+        # attempt: generate_video's on_billed hook fires the moment the
+        # provider reports the generation completed (covers a post-billing
+        # download failure that still returns None — money-gate 2026-07-11,
+        # extended to this branch in slice M2), AND the post-call `if result:`
+        # compat path below fires for any caller (test double / stub) that
+        # hands back a truthy result without ever invoking on_billed.
+        # Whichever fires first wins; the guard stops a real success from
+        # appending "SORA_NATIVE" to billed_attempts twice.
+        _sora_billed_noted = False
+
+        def _note_sora_billed() -> None:
+            nonlocal _sora_billed_noted
+            if _sora_billed_noted:
+                return
+            _sora_billed_noted = True
+            _note_billed_attempt(target_api.upper())
+
         try:
             from sora_native import SoraNativeAPI
             sora = SoraNativeAPI()
@@ -602,11 +621,13 @@ def _execute_admitted_video_chain(
                 resolution="1080p",
                 driving_video_path=driving_video_path,
                 aspect_ratio=fal_aspect_ratio(_aspect),
+                on_billed=_note_sora_billed,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
-                _note_billed_attempt(target_api.upper())
+                # No-op when the real on_billed hook already fired above.
+                _note_sora_billed()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -615,6 +636,9 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
+            # result is None here whether or not the provider billed before
+            # failing (on_billed already noted it in the billed case) —
+            # cascade to the next engine either way.
             return try_next_api()
         except Exception as e:
             logger.warning("Sora Native error", extra={"engine": "SORA_NATIVE", "error": str(e)})
@@ -622,6 +646,25 @@ def _execute_admitted_video_chain(
 
     elif target_api.upper() == "VEO_NATIVE":
         # Native Google Veo 3.1 — reference images + native audio
+        #
+        # _veo_billed_noted makes _note_billed_attempt idempotent for this
+        # attempt: generate_video's on_billed hook fires the moment the
+        # operation response reports a generated video (covers a post-billing
+        # bytes-retrieval/write failure that still returns None — money-gate
+        # 2026-07-11, extended to this branch in slice M2), AND the post-call
+        # `if result:` compat path below fires for any caller (test double /
+        # stub) that hands back a truthy result without ever invoking
+        # on_billed. Whichever fires first wins; the guard stops a real
+        # success from appending "VEO_NATIVE" to billed_attempts twice.
+        _veo_billed_noted = False
+
+        def _note_veo_billed() -> None:
+            nonlocal _veo_billed_noted
+            if _veo_billed_noted:
+                return
+            _veo_billed_noted = True
+            _note_billed_attempt(target_api.upper())
+
         try:
             from veo_native import VeoNativeAPI
             veo = VeoNativeAPI()
@@ -644,11 +687,13 @@ def _execute_admitted_video_chain(
                 driving_video_path=driving_video_path,
                 duration=duration,
                 aspect_ratio=fal_aspect_ratio(_aspect),
+                on_billed=_note_veo_billed,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
-                _note_billed_attempt(target_api.upper())
+                # No-op when the real on_billed hook already fired above.
+                _note_veo_billed()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -657,6 +702,9 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
+            # result is None here whether or not the provider billed before
+            # failing (on_billed already noted it in the billed case) —
+            # cascade to the next engine either way.
             return try_next_api()
         except Exception as e:
             logger.warning("Veo Native error", extra={"engine": "VEO_NATIVE", "error": str(e)})
@@ -664,6 +712,26 @@ def _execute_admitted_video_chain(
 
     elif target_api.upper() == "LTX":
         # LTX Video 2.3 — 4K, cheapest, best for environments + transitions
+        #
+        # _ltx_billed_noted makes _note_billed_attempt idempotent for this
+        # attempt: generate_video's on_billed hook fires the moment the
+        # provider confirms billable video output (a URL on the fal path, or
+        # the video bytes themselves on the native path — covers a
+        # post-billing download/write failure that still returns None —
+        # money-gate 2026-07-11, extended to this branch in slice M2), AND
+        # the post-call `if result:` compat path below fires for any caller
+        # (test double / stub) that hands back a truthy result without ever
+        # invoking on_billed. Whichever fires first wins; the guard stops a
+        # real success from appending "LTX" to billed_attempts twice.
+        _ltx_billed_noted = False
+
+        def _note_ltx_billed() -> None:
+            nonlocal _ltx_billed_noted
+            if _ltx_billed_noted:
+                return
+            _ltx_billed_noted = True
+            _note_billed_attempt(target_api.upper())
+
         try:
             from ltx_native import LTXVideoAPI
             ltx = LTXVideoAPI()
@@ -693,11 +761,13 @@ def _execute_admitted_video_chain(
                 output_path=output_mp4,
                 camera_motion=ltx_camera,
                 resolution=ltx_resolution,
+                on_billed=_note_ltx_billed,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
-                _note_billed_attempt(target_api.upper())
+                # No-op when the real on_billed hook already fired above.
+                _note_ltx_billed()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -706,6 +776,9 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
+            # result is None here whether or not the provider billed before
+            # failing (on_billed already noted it in the billed case) —
+            # cascade to the next engine either way.
             return try_next_api()
         except Exception as e:
             logger.warning("LTX error", extra={"engine": "LTX", "error": str(e)})
@@ -1263,6 +1336,25 @@ def _execute_admitted_video_chain(
     elif target_api.upper() == "GEMINI_OMNI":
         # Legacy Gemini Omni Flash payload. The typed catalog marks the product
         # known-broken, so executable dispatch cannot reach this branch.
+        #
+        # _gemini_omni_billed_noted makes _note_billed_attempt idempotent for
+        # this attempt: generate_video's on_billed hook fires the moment the
+        # interaction reaches "completed" status (covers a post-billing video
+        # retrieval/write failure that still returns None — money-gate
+        # 2026-07-11, extended to this branch in slice M2), AND the post-call
+        # `if result:` compat path below fires for any caller (test double /
+        # stub) that hands back a truthy result without ever invoking
+        # on_billed. Whichever fires first wins; the guard stops a real
+        # success from appending "GEMINI_OMNI" to billed_attempts twice.
+        _gemini_omni_billed_noted = False
+
+        def _note_gemini_omni_billed() -> None:
+            nonlocal _gemini_omni_billed_noted
+            if _gemini_omni_billed_noted:
+                return
+            _gemini_omni_billed_noted = True
+            _note_billed_attempt(target_api.upper())
+
         global _GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL
         if _gemini_omni_quota_blocked():
             remaining = int(_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL - time.time())
@@ -1303,11 +1395,13 @@ def _execute_admitted_video_chain(
                 output_path=output_mp4,
                 reference_images=multi_angle_refs,
                 aspect_ratio=fal_aspect_ratio(_aspect),
+                on_billed=_note_gemini_omni_billed,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
-                _note_billed_attempt(target_api.upper())
+                # No-op when the real on_billed hook already fired above.
+                _note_gemini_omni_billed()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -1316,6 +1410,9 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
+            # result is None here whether or not the provider billed before
+            # failing (on_billed already noted it in the billed case) —
+            # cascade to the next engine either way.
             return try_next_api()
         except Exception as e:
             error_str = str(e).lower()

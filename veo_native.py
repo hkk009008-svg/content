@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Callable
 
 from google import genai
 from google.genai import types
@@ -146,6 +147,7 @@ class VeoNativeAPI:
         generate_audio: bool = False,
         driving_video_path: str = "",
         aspect_ratio: str = "16:9",
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Veo 3.1.
@@ -175,9 +177,22 @@ class VeoNativeAPI:
                 image-to-video call here. Accepted for interface stability;
                 wiring motion conditioning needs a separate GenerateVideosSource
                 design (spec §4.2). Currently image-only.
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the operation's response reports a generated video —
+                the repo's billed bar (a provider that RETURNED a video is
+                billed regardless of what happens next; see
+                phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the bytes
+                are retrieved/written so a caller can record the spend even
+                when the retrieval/write that follows fails and this method
+                still returns None (money-gate 2026-07-11 class, extended to
+                the native adapters in slice M2). Exceptions raised by the
+                callback are logged and swallowed — a broken accounting hook
+                must never abort a generation that would otherwise succeed.
 
         Returns:
-            output_path on success, None on failure.
+            output_path on success, None on failure — either pre-billing
+            (operation error, RAI filter, empty response) or post-billing
+            (the provider returned a video but bytes retrieval/write failed).
         """
         if not os.path.exists(image_path):
             print(f"[VEO-NATIVE] Start frame not found: {image_path}")
@@ -270,9 +285,21 @@ class VeoNativeAPI:
                     print(f"[VEO-NATIVE] No video generated (empty response)")
                 return None
 
+            # Provider returned a generated video — billed regardless of what
+            # happens next. Notify the caller BEFORE bytes retrieval/write so
+            # a subsequent failure below still reaches the caller's spend
+            # accounting, even though this call goes on to return None.
+            generated_video = resp.generated_videos[0]
+            if on_billed is not None:
+                try:
+                    on_billed()
+                except Exception as callback_exc:
+                    print(
+                        f"[VEO-NATIVE] Warning: on_billed callback raised: {callback_exc}"
+                    )
+
             # Retrieve bytes — Vertex returns them inline; only the Gemini
             # backend needs a Files API download (which raises on Vertex).
-            generated_video = resp.generated_videos[0]
             video_data = _extract_video_bytes(self.client, generated_video)
             with open(output_path, "wb") as f:
                 f.write(video_data)

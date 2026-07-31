@@ -336,5 +336,128 @@ def test_generate_video_returns_none_on_exception(tmp_path, capsys):
     assert "429 quota exceeded" in out
 
 
+# ---------------------------------------------------------------------------
+# generate_video — on_billed fires exactly when the interaction reaches
+# "completed" status (money-gate 2026-07-11 class, extended to
+# gemini_omni_native in slice M2: a post-billing video-retrieval failure must
+# still be distinguishable from a pre-billing failure to the caller). Mirrors
+# kling_native.py's on_billed tests (commit 55c0797e).
+# ---------------------------------------------------------------------------
+
+
+def test_pre_billing_failure_does_not_call_on_billed(tmp_path):
+    """A non-completed terminal status => the provider never delivered a
+    video => never billed => on_billed must NOT fire."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    on_billed = MagicMock()
+
+    interaction = MagicMock()
+    interaction.status = "failed"
+    api.client.interactions.create.return_value = interaction
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
+        on_billed=on_billed,
+    )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_post_billing_retrieval_failure_still_notes_billed(tmp_path):
+    """RED->GREEN target: a Files API retrieval failure AFTER the interaction
+    reached "completed" status must still fire on_billed. Pre-fix, the
+    files.download failure fell into the blanket `except Exception: return
+    None`, indistinguishable from a pre-billing failure and losing the spend
+    to the caller's budget gate. on_billed must fire BEFORE the retrieval
+    attempt, not after."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=False)
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    active_file = MagicMock()
+    active_file.state = "ACTIVE"
+    api.client.files.get.return_value = active_file
+
+    def _failing_download(*args, **kwargs):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing retrieval failure")
+
+    api.client.files.download.side_effect = _failing_download
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
+        on_billed=on_billed,
+    )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the retrieval attempt so a caller's spend "
+        f"record is never lost to a post-billing failure; got {call_order!r}"
+    )
+
+
+def test_success_fires_on_billed_exactly_once(tmp_path):
+    """The happy path also bills — on_billed must fire exactly once, before
+    video retrieval, even when retrieval subsequently succeeds."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=True)
+    on_billed = MagicMock()
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=output_path,
+        on_billed=on_billed,
+    )
+
+    assert result == output_path
+    on_billed.assert_called_once()
+
+
+def test_on_billed_exception_does_not_abort_success(tmp_path):
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=True)
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=output_path,
+        on_billed=_bad_callback,
+    )
+
+    assert result == output_path, (
+        "A broken on_billed callback must not abort an otherwise-successful generation"
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -115,6 +115,123 @@ def test_native_branch_notes_billed_attempt_on_aspect_reject(target_api, module_
     )
 
 
+# ---------------------------------------------------------------------------
+# Slice M2 real-success-shape pin: the on_billed hook AND the post-call
+# `if result:` compat path share ONE idempotency guard per branch (mirrors
+# kling_native's, commit 55c0797e). A real success — on_billed fires from
+# inside the adapter's own generate_video, which then returns a truthy
+# result and is NOT aspect-rejected — must net EXACTLY ONE billed_attempts
+# entry, not two. Covers SORA_NATIVE/VEO_NATIVE/LTX (M2 scope); GEMINI_OMNI
+# is exercised separately below since it can't reach this branch through the
+# public generate_ai_video admission fence (denied as known-broken).
+# ---------------------------------------------------------------------------
+
+def _run_native_billed_success(target_api: str, module_name: str, class_attr: str, aspect: str = "16:9"):
+    """Drive a native branch whose generate_video calls the caller's on_billed
+    hook AND returns a truthy result (a real success, not aspect-rejected);
+    return _cascade_out."""
+
+    def _bill_then_succeed(*args, **kwargs):
+        kwargs["on_billed"]()
+        return "/tmp/out.mp4"
+
+    mock_inst = MagicMock()
+    mock_inst.generate_video.side_effect = _bill_then_succeed
+    mock_mod = MagicMock()
+    getattr(mock_mod, class_attr).return_value = mock_inst
+
+    cascade: dict = {}
+    with patch.dict(sys.modules, {module_name: mock_mod}):
+        sys.modules.pop("phase_c_ffmpeg", None)
+        try:
+            import phase_c_ffmpeg
+            with patch("os.path.exists", return_value=True), \
+                 patch.object(
+                     phase_c_ffmpeg,
+                     "_video_policy_runtime_snapshot",
+                     return_value=_native_runtime(target_api),
+                 ), \
+                 patch.object(
+                     phase_c_ffmpeg,
+                     "_video_policy_current_date",
+                     return_value=date(2026, 9, 23),
+                 ), \
+                 patch.object(phase_c_ffmpeg, "_accept_or_reject", lambda p, a: True):
+                phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api=target_api,
+                    output_mp4="/tmp/o.mp4",
+                    shot_type="medium",
+                    video_fallbacks=[target_api],
+                    ctx=_ctx(aspect),
+                    _cascade_out=cascade,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+    return cascade
+
+
+@pytest.mark.parametrize("target_api,module_name,class_attr", [
+    ("SORA_NATIVE", "sora_native", "SoraNativeAPI"),
+    ("VEO_NATIVE", "veo_native", "VeoNativeAPI"),
+    ("LTX", "ltx_native", "LTXVideoAPI"),
+])
+def test_native_branch_real_success_nets_exactly_one_billed_attempt(target_api, module_name, class_attr):
+    cascade = _run_native_billed_success(target_api, module_name, class_attr)
+    assert cascade.get("billed_attempts") == [target_api], (
+        f"{target_api}: on_billed firing from inside a real success must not "
+        f"double-count with the post-call compat path; got {cascade!r}"
+    )
+
+
+def test_gemini_omni_real_success_nets_exactly_one_billed_attempt() -> None:
+    """GEMINI_OMNI can't reach _execute_admitted_video_chain through the
+    public generate_ai_video (denied as known-broken at the policy layer —
+    see test_known_broken_gemini_omni_is_denied_before_provider_or_billing
+    above), so this drives the chain function directly, mirroring how
+    _execute_admitted_video_chain documents itself as the post-admission
+    entry point."""
+    from cinema.context import PipelineContext
+
+    def _bill_then_succeed(*args, **kwargs):
+        kwargs["on_billed"]()
+        return "/tmp/out.mp4"
+
+    mock_inst = MagicMock()
+    mock_inst.generate_video.side_effect = _bill_then_succeed
+    mock_mod = MagicMock()
+    mock_mod.GeminiOmniAPI.return_value = mock_inst
+
+    cascade: dict = {}
+    with patch.dict(sys.modules, {"gemini_omni_native": mock_mod}):
+        sys.modules.pop("phase_c_ffmpeg", None)
+        try:
+            import phase_c_ffmpeg
+            with patch("os.path.exists", return_value=True), \
+                 patch.object(phase_c_ffmpeg, "_accept_or_reject", lambda p, a: True):
+                result = phase_c_ffmpeg._execute_admitted_video_chain(
+                    "/tmp/f.png",
+                    "zoom_in_slow",
+                    "GEMINI_OMNI",
+                    "/tmp/o.mp4",
+                    shot_type="medium",
+                    ctx=PipelineContext(global_settings={"aspect_ratio": "16:9"}),
+                    _cascade_out=cascade,
+                    admitted_candidates=("GEMINI_OMNI",),
+                    aspect="16:9",
+                    _attempt_history=[],
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+
+    assert result == "/tmp/out.mp4"
+    assert cascade.get("billed_attempts") == ["GEMINI_OMNI"], (
+        f"on_billed firing from inside a real success must not double-count "
+        f"with the post-call compat path; got {cascade!r}"
+    )
+
+
 def test_known_broken_gemini_omni_is_denied_before_provider_or_billing() -> None:
     mock_inst = MagicMock()
     mock_mod = MagicMock()

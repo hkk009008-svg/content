@@ -11,6 +11,7 @@ import os
 import secrets
 import tempfile
 from pathlib import Path
+from typing import Callable
 
 import openai
 from config.settings import settings
@@ -54,6 +55,7 @@ class SoraNativeAPI:
         resolution: str = "1080p",
         driving_video_path: str = "",
         aspect_ratio: str = "16:9",
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Sora 2.
@@ -79,9 +81,25 @@ class SoraNativeAPI:
                 or "9:16" (portrait). When portrait, both the PIL resize target
                 and the API ``size=`` parameter are transposed via portrait_swap
                 so the full generation pipeline emits 9:16 output.
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the provider reports the generation ``completed`` —
+                the repo's billed bar (a provider that finished rendering a
+                video is billed regardless of what happens next; see
+                phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the
+                download_content call so a caller can record the spend even
+                when the download that follows fails and this method still
+                returns None (money-gate 2026-07-11 class, extended to the
+                native adapters in slice M2: post-billing failures were
+                previously indistinguishable from pre-billing ones).
+                Exceptions raised by the callback are logged and swallowed —
+                a broken accounting hook must never abort a download that
+                would otherwise succeed.
 
         Returns:
-            output_path on success, None on failure.
+            output_path on success, None on failure — either pre-billing
+            (SDK/create_and_poll error, non-completed status) or
+            post-billing (the provider completed the video but the download
+            that followed failed).
         """
         # Driving video is a complete input reference — check it before requiring
         # an otherwise unused still.
@@ -167,6 +185,19 @@ class SoraNativeAPI:
                     return None
 
                 print(f"[SORA-NATIVE] Generation completed")
+
+                # Provider reports the video completed — billed regardless of
+                # what happens next. Notify the caller BEFORE the download
+                # attempt so a subsequent download failure below still reaches
+                # the caller's spend accounting, even though this call goes on
+                # to return None.
+                if on_billed is not None:
+                    try:
+                        on_billed()
+                    except Exception as callback_exc:
+                        print(
+                            f"[SORA-NATIVE] Warning: on_billed callback raised: {callback_exc}"
+                        )
 
                 # Download via download_content — publish atomically so a
                 # mid-stream failure cannot leave a partial new file or destroy

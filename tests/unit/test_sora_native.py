@@ -330,6 +330,113 @@ def test_download_exception_returns_none_and_cleans_temp(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# generate_video — on_billed fires exactly at the provider's billed-URL
+# boundary (money-gate 2026-07-11 class, extended to sora_native in slice M2:
+# a post-billing download failure must still be distinguishable from a
+# pre-billing failure to the caller). Mirrors kling_native.py's on_billed
+# tests (commit 55c0797e).
+# ---------------------------------------------------------------------------
+
+def test_pre_billing_failure_does_not_call_on_billed(monkeypatch, tmp_path):
+    """A non-completed status => the provider never delivered a video =>
+    never billed => on_billed must NOT fire."""
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="failed")
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path, prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_post_billing_download_failure_still_notes_billed(monkeypatch, tmp_path):
+    """RED->GREEN target: a download failure AFTER the provider reported the
+    generation completed must still fire on_billed. Pre-fix, download_content's
+    failure fell into the blanket `except Exception: return None`,
+    indistinguishable from a pre-billing failure and losing the spend to the
+    caller's budget gate. on_billed must fire BEFORE the download attempt.
+    """
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
+
+    def _failing_download(*args, **kwargs):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing download failure")
+
+    api.client.videos.download_content.side_effect = _failing_download
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path, prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the download attempt so a caller's spend "
+        f"record is never lost to a post-billing download failure; got {call_order!r}"
+    )
+
+
+def test_success_fires_on_billed_exactly_once(monkeypatch, tmp_path):
+    """The happy path also bills — on_billed must fire exactly once, before
+    download, even when the download subsequently succeeds."""
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
+    api.client.videos.download_content.return_value = _make_download_content()
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path, prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result == out
+    on_billed.assert_called_once()
+
+
+def test_on_billed_exception_does_not_abort_download(monkeypatch, tmp_path):
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
+    api.client.videos.download_content.return_value = _make_download_content()
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path, prompt="test", output_path=out, on_billed=_bad_callback
+    )
+
+    assert result == out, (
+        "A broken on_billed callback must not abort an otherwise-successful download"
+    )
+
+
+# ---------------------------------------------------------------------------
 # generate_video — driving video: used when file exists
 # ---------------------------------------------------------------------------
 

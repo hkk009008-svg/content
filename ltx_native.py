@@ -10,6 +10,7 @@ import json
 import base64
 import urllib.request
 import time
+from typing import Callable
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 
@@ -99,10 +100,25 @@ class LTXVideoAPI:
         duration: int = 4,
         resolution: str = "720p",
         camera_motion: str | None = None,
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Generate a video from a single image + prompt.
         Returns output_path on success, None on failure.
+
+        Args:
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the provider has confirmed billable video output — a
+                video URL for the fal path (``_fal_generate``), or the video
+                bytes themselves for the native path (``_native_generate``,
+                which returns bytes directly with no separate URL step) —
+                the repo's billed bar (see phase_c_ffmpeg._note_billed_attempt).
+                Fires BEFORE the download/write that follows so a caller can
+                record the spend even when that download/write fails and
+                this method still returns None (money-gate 2026-07-11 class,
+                extended to the native adapters in slice M2). Threaded
+                through the native→fal fallback so exactly one path fires it.
+                Exceptions raised by the callback are logged and swallowed.
         """
         if not self.mode:
             print("[LTX] Skipped — no API key configured")
@@ -122,6 +138,7 @@ class LTXVideoAPI:
                 num_frames=num_frames,
                 resolution=res,
                 camera_motion=camera_motion,
+                on_billed=on_billed,
             )
         else:
             return self._fal_generate(
@@ -131,6 +148,7 @@ class LTXVideoAPI:
                 num_frames=num_frames,
                 resolution=res,
                 camera_motion=camera_motion,
+                on_billed=on_billed,
             )
 
     def _upload_to_fal(self, file_path: str) -> str:
@@ -145,6 +163,7 @@ class LTXVideoAPI:
         num_frames: int,
         resolution: dict,
         camera_motion: str | None = None,
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         try:
             image_url = self._upload_to_fal(image_path)
@@ -176,6 +195,17 @@ class LTXVideoAPI:
             if not video_url:
                 print("[LTX] ERROR: No video URL in response")
                 return None
+
+            # Provider returned a playable video URL — billed regardless of
+            # what happens next. Notify the caller BEFORE the download
+            # attempt so a subsequent download failure below still reaches
+            # the caller's spend accounting, even though this call goes on
+            # to return None.
+            if on_billed is not None:
+                try:
+                    on_billed()
+                except Exception as callback_exc:
+                    print(f"[LTX] Warning: on_billed callback raised: {callback_exc}")
 
             urllib.request.urlretrieve(video_url, output_path)
             print(f"[LTX] Video saved: {output_path}")
@@ -240,6 +270,7 @@ class LTXVideoAPI:
         num_frames: int,
         resolution: dict,
         camera_motion: str | None = None,
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Native LTX Video API — image-to-video generation.
@@ -292,6 +323,16 @@ class LTXVideoAPI:
                 # (→ caller cascades) instead of accepting the empty result.
                 if not video_data:
                     raise RuntimeError("LTX native returned empty 200 body")
+                # Video bytes confirmed non-empty — billed regardless of what
+                # happens next (this single response IS the delivery; there is
+                # no separate URL step). Notify the caller BEFORE the disk
+                # write so a subsequent write failure still reaches the
+                # caller's spend accounting.
+                if on_billed is not None:
+                    try:
+                        on_billed()
+                    except Exception as callback_exc:
+                        print(f"[LTX] Warning: on_billed callback raised: {callback_exc}")
                 with open(output_path, "wb") as f:
                     f.write(video_data)
 
@@ -303,14 +344,14 @@ class LTXVideoAPI:
             body = e.read().decode("utf-8", "replace")[:500] if hasattr(e, "read") else str(e)
             if getattr(e, "code", 0) >= 500 and self.fal_key and FAL_AVAILABLE:
                 print(f"[LTX] Native {e.code}; falling back to FAL")
-                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
+                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion, on_billed=on_billed)
             print(f"[LTX] Native failed ({getattr(e, 'code', '?')}): {body}")
             return None
         except (urllib.request.URLError, TimeoutError, ConnectionError) as e:
             # Transient network errors (DNS, timeout, connection refused) — recover via FAL, like 5xx
             if self.fal_key and FAL_AVAILABLE:
                 print(f"[LTX] Native network error ({e}); falling back to FAL")
-                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
+                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion, on_billed=on_billed)
             print(f"[LTX] Native network error (no fallback): {e}")
             return None
         except (OSError, json.JSONDecodeError) as e:
@@ -322,7 +363,7 @@ class LTXVideoAPI:
             # Fall back to FAL if native fails
             if self.fal_key and FAL_AVAILABLE:
                 print(f"[LTX] Falling back to FAL proxy...")
-                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
+                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion, on_billed=on_billed)
             return None
 
     def _native_transition(

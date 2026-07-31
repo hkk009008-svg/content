@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import os
 import time
+from typing import Callable
 
 from google import genai
 from google.genai import types
@@ -49,6 +50,7 @@ class GeminiOmniAPI:
         output_path: str,
         reference_images: list = None,
         aspect_ratio: str = "16:9",
+        on_billed: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Gemini
@@ -65,10 +67,23 @@ class GeminiOmniAPI:
                 subject/character preservation. When present, the interaction
                 task is "reference_to_video"; otherwise "image_to_video".
             aspect_ratio: Output aspect ratio (e.g. "16:9", "9:16").
+            on_billed: Optional zero-arg callback invoked exactly once, the
+                moment the interaction reaches the "completed" terminal
+                status — the repo's billed bar (a provider that finished the
+                interaction is billed regardless of what happens next; see
+                phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the video
+                bytes/file are retrieved so a caller can record the spend
+                even when that retrieval fails and this method still returns
+                None (money-gate 2026-07-11 class, extended to the native
+                adapters in slice M2). Exceptions raised by the callback are
+                logged and swallowed — a broken accounting hook must never
+                abort a generation that would otherwise succeed.
 
         Returns:
             output_path on success, None on failure (graceful — lets the
-            cascade fall through to the next engine).
+            cascade fall through to the next engine) — either pre-billing
+            (non-completed terminal status) or post-billing (the interaction
+            completed but video retrieval/write failed).
         """
         if not os.path.exists(image_path):
             print(f"[GEMINI-OMNI] Start frame not found: {image_path}")
@@ -122,6 +137,18 @@ class GeminiOmniAPI:
             if interaction.status != "completed":
                 print(f"[GEMINI-OMNI] Generation ended with status={interaction.status!r}")
                 return None
+
+            # Interaction completed — billed regardless of what happens next.
+            # Notify the caller BEFORE video retrieval/write so a subsequent
+            # failure below still reaches the caller's spend accounting, even
+            # though this call goes on to return None.
+            if on_billed is not None:
+                try:
+                    on_billed()
+                except Exception as callback_exc:
+                    print(
+                        f"[GEMINI-OMNI] Warning: on_billed callback raised: {callback_exc}"
+                    )
 
             video = interaction.output_video
             # `is not None` (not truthiness) — mirrors veo_native._extract_video_bytes:

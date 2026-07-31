@@ -317,6 +317,134 @@ def test_fal_exception_returns_none(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# FAL mode — on_billed fires exactly at the provider's billed-URL boundary
+# (money-gate 2026-07-11 class, extended to ltx_native in slice M2: a
+# post-billing download failure must still be distinguishable from a
+# pre-billing failure to the caller). Mirrors kling_native.py's on_billed
+# tests (commit 55c0797e).
+# ---------------------------------------------------------------------------
+
+def test_fal_pre_billing_failure_does_not_call_on_billed(monkeypatch, tmp_path):
+    """No video URL in the fal response => the provider never delivered a
+    video => never billed => on_billed must NOT fire."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    monkeypatch.setattr(
+        ltx_native.fal_client, "subscribe", MagicMock(return_value={"video": {}})
+    )
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_fal_post_billing_download_failure_still_notes_billed(monkeypatch, tmp_path):
+    """RED->GREEN target: a download failure AFTER fal returned a video URL
+    must still fire on_billed. Pre-fix, urlretrieve's failure fell into the
+    blanket `except Exception: return None`, indistinguishable from a
+    pre-billing failure and losing the spend to the caller's budget gate.
+    on_billed must fire BEFORE the download attempt, not after."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    out = str(tmp_path / "out.mp4")
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    monkeypatch.setattr(
+        ltx_native.fal_client,
+        "subscribe",
+        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+    )
+
+    def _failing_urlretrieve(url, dest):
+        call_order.append("download")
+        raise RuntimeError("simulated post-billing download failure")
+
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", _failing_urlretrieve)
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "download"], (
+        "on_billed must fire BEFORE the download attempt so a caller's spend "
+        f"record is never lost to a post-billing download failure; got {call_order!r}"
+    )
+
+
+def test_fal_success_fires_on_billed_exactly_once(monkeypatch, tmp_path):
+    """The happy path also bills — on_billed must fire exactly once, before
+    download, even when the download subsequently succeeds."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    monkeypatch.setattr(
+        ltx_native.fal_client,
+        "subscribe",
+        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+    )
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result == out
+    on_billed.assert_called_once()
+
+
+def test_fal_on_billed_exception_does_not_abort_download(monkeypatch, tmp_path):
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"img")
+    out = str(tmp_path / "out.mp4")
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    monkeypatch.setattr(
+        ltx_native.fal_client,
+        "subscribe",
+        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+    )
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=_bad_callback
+    )
+
+    assert result == out, (
+        "A broken on_billed callback must not abort an otherwise-successful download"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Native mode — happy path (urlopen CM → bytes → path)
 # ---------------------------------------------------------------------------
 
@@ -713,3 +841,160 @@ def test_native_http_5xx_no_fal_key_returns_none(monkeypatch, tmp_path):
 
     result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Native mode — on_billed fires exactly when video bytes are confirmed
+# non-empty (the native response IS the delivery — no separate URL step —
+# so this doubles as the "download" boundary). Money-gate 2026-07-11 class,
+# extended to ltx_native in slice M2: a post-billing write failure must
+# still be distinguishable from a pre-billing failure to the caller. Mirrors
+# kling_native.py's on_billed tests (commit 55c0797e).
+# ---------------------------------------------------------------------------
+
+def test_native_pre_billing_empty_body_does_not_call_on_billed(monkeypatch, tmp_path):
+    """An empty 200 body => no video bytes were ever delivered => never
+    billed => on_billed must NOT fire."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")  # no fal_key -> no fallback, clean None
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"")  # empty 200 body
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result is None
+    on_billed.assert_not_called()
+
+
+def test_native_post_billing_write_failure_still_notes_billed(monkeypatch, tmp_path):
+    """RED->GREEN target: a disk write failure AFTER the native API delivered
+    non-empty video bytes must still fire on_billed. Pre-fix, the write's
+    OSError fell into the no-fallback local-error branch with no accounting
+    signal at all, losing the spend to the caller's budget gate. on_billed
+    must fire BEFORE the disk write, not after."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    call_order: list[str] = []
+    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"VIDEOBYTES")
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    import builtins
+    original_open = builtins.open
+
+    def _open_raises_on_write(path, mode="r", *args, **kwargs):
+        if mode == "wb" and str(path) == out:
+            call_order.append("write")
+            raise OSError("no space left on device")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", _open_raises_on_write)
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    # Local file-I/O OSError does NOT trigger FAL fallback (existing contract,
+    # see test_local_oserror_does_not_fallback_to_fal) — still returns None.
+    assert result is None
+    on_billed.assert_called_once()
+    assert call_order == ["billed", "write"], (
+        "on_billed must fire BEFORE the disk write so a caller's spend record "
+        f"is never lost to a post-billing write failure; got {call_order!r}"
+    )
+
+
+def test_native_success_fires_on_billed_exactly_once(monkeypatch, tmp_path):
+    """The happy path also bills — on_billed must fire exactly once, before
+    the disk write, even when the write subsequently succeeds."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result == out
+    on_billed.assert_called_once()
+
+
+def test_native_on_billed_exception_does_not_abort_write(monkeypatch, tmp_path):
+    """A broken accounting callback must never abort an otherwise-successful
+    generation — the callback's own exception must be swallowed and logged,
+    not allowed to propagate into the outer except and blank out a real
+    video."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    def _bad_callback():
+        raise RuntimeError("accounting hook bug")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=_bad_callback
+    )
+
+    assert result == out, (
+        "A broken on_billed callback must not abort an otherwise-successful write"
+    )
+
+
+def test_native_fallback_to_fal_threads_on_billed(monkeypatch, tmp_path):
+    """A PRE-billing native failure (urlopen raises immediately — nothing was
+    ever delivered) falls back to FAL, which then bills and succeeds.
+    on_billed must fire exactly once, through the FAL path — the same
+    callback threaded through the native→fal fallback, not a fresh one."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+    on_billed = MagicMock()
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    monkeypatch.setattr(
+        ltx_native.urllib.request,
+        "urlopen",
+        MagicMock(side_effect=RuntimeError("unexpected library error")),
+    )
+    monkeypatch.setattr(
+        ltx_native.fal_client,
+        "subscribe",
+        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+    )
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(
+        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    )
+
+    assert result == out
+    on_billed.assert_called_once()
