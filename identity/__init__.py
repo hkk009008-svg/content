@@ -17,7 +17,7 @@ who need the vision-LLM fallback should construct via `make_validator()`
 
 Prefer `get_shared_validator()` for nearly all callers — sharing one
 IdentityValidator instance across phase_c_vision, face_validator_gate,
-and performance.identity_gate means: (a) ArcFace weights load once per
+and performance.identity_gate means: (a) GhostFaceNet weights load once per
 process instead of three times, and (b) the rolling-stats history that
 feeds `workflow_selector.get_adaptive_pulid_weight` collects signal from
 every identity check in the pipeline.
@@ -66,7 +66,7 @@ def get_shared_validator() -> IdentityValidator:
     face_validator_gate, and performance.identity_gate. Sharing one
     instance means:
 
-      - ArcFace weights load once per process (was 3x).
+      - GhostFaceNet weights load once per process (was 3x).
       - Rolling-stats history accumulates signal from per-shot keyframe
         validations + N=8 best-of grading + performance-gate scoring,
         giving workflow_selector.get_adaptive_pulid_weight a much
@@ -74,7 +74,7 @@ def get_shared_validator() -> IdentityValidator:
 
     Thread-safe via _SHARED_VALIDATOR_LOCK. Raises whatever
     IdentityValidator's constructor raises (typically due to missing
-    insightface / ArcFace weights); callers that need a None-on-failure
+    DeepFace / GhostFaceNet weights); callers that need a None-on-failure
     contract should wrap in try/except.
     """
     global _SHARED_VALIDATOR
