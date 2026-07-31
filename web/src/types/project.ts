@@ -211,12 +211,23 @@ export interface GlobalSettings {
   // The orchestrator consults these before falling back to PURPOSE_API_RANKING.
   // -----------------------------------------------------------------
   tts_provider?: string                     // API key, e.g. "ELEVENLABS_V3", "CARTESIA_SONIC_2"
+  default_male_voice?: string                // voice id, e.g. ElevenLabs "Eric"
+  default_female_voice?: string              // voice id, e.g. ElevenLabs "Lily"
   dialogue_mode_enabled?: boolean           // route multi-line dialogue through ELEVENLABS_DIALOGUE
   forced_alignment_enabled?: boolean        // WhisperX word-level alignment + DTW correction
+  dialogue_target_wpm?: number               // target words/min, atempo post-process; 0 disables pacing
+  dialogue_voice_mode?: 'overlay' | 'native' // 'overlay' = TTS lip-sync over silent video (default); 'native' = engine's own embedded voice
   // Lipsync engine priority — drag-rank in UI; first available wins.
   lipsync_engine_priority?: string[]        // e.g. ["HEDRA_C3", "SYNC_SO_V3", "MUSETALK", "OMNIHUMAN_V1_5"]
   lipsync_quality_validation?: boolean      // SyncNet score gate after each lipsync
   lipsync_validation_threshold?: number     // 0.0-1.0, default 0.65
+
+  // Optimistic-concurrency counter (slice 9a). Stamped by the server on
+  // every successful settings write (PUT or PATCH) — never set this
+  // directly; echo the last-observed value back on write so PATCH (or a
+  // now-fail-closed PUT, see web_server.py's _settings_revision_established)
+  // can detect a write that raced against newer state.
+  revision?: number
 }
 
 export type ApiModality = 'video' | 'image' | 'lipsync' | 'tts' | 'music' | 'foley' | 'upscale'

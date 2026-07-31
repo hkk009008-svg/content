@@ -1,20 +1,24 @@
 """Validated project-settings write contract (plan slice 9a).
 
 Covers the strict, revision-guarded partial write (``PATCH
-/api/projects/<pid>``) and the compat whole-object route's (``PUT``) new
-opt-in revision check. The defect this closes: the UI writes whole stale
-``global_settings`` snapshots on every keystroke (see
+/api/projects/<pid>``) and the compat whole-object route's (``PUT``)
+fail-closed revision check. The defect this closes: the UI writes whole
+stale ``global_settings`` snapshots on every keystroke (see
 web/src/components/setup/SettingsInspector.tsx / ShotInspector.tsx
 ``update()``), so a concurrent or out-of-order write can silently clobber
 newer state. PATCH fixes this for new callers with a strict per-key
-validated, revision-checked contract; PUT gains the same guard as an
-opt-in so existing callers are unaffected unless they echo a revision.
+validated, revision-checked contract. PUT gets the SAME guard, fail-closed:
+once global_settings carries an established revision, every PUT MUST echo
+a matching one or 409s (see ``_settings_revision_established`` in
+web_server.py) — omitting the field is no longer a silent bypass. Only a
+project whose settings have never been stamped gets a one-time,
+unconditional accept-and-stamp (the sole legacy compat window; it closes
+the moment that first write lands).
 """
 
 from __future__ import annotations
 
 import json
-import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -371,79 +375,154 @@ def test_concurrent_write_simulation_last_writer_with_correct_revision_wins(
     assert final["global_settings"]["color_palette"] == "cold blue"
 
 
-def test_concurrent_patch_race_exactly_one_writer_succeeds_per_revision(
+def test_patch_race_exactly_one_writer_succeeds_via_injected_competing_write(
     client, tmp_path, monkeypatch
 ):
-    """Real thread race (not just sequential simulation): two racing PATCHes
-    both claiming revision 0 must resolve to exactly one 200 and one 409 --
-    the project file lock (mutate_project) is the serialization point."""
-    import web_server
+    """Deterministic replacement for a threading.Barrier-based real-thread
+    race (flaky-by-construction: OS scheduling decides which thread's lock
+    acquire actually wins, so the outcome depends on timing this test
+    doesn't control). Exercises the SAME property -- exactly one writer
+    wins per revision, the loser gets 409 with zero mutation -- without any
+    real concurrency: monkeypatch the same project read mutate_project
+    performs UNDER the project file lock so a fully-committed competing
+    write lands between this request's own locked read and its own write.
+    That forces the exact interleaving a real race only sometimes produces,
+    every run, with no threads and no timing dependence."""
+    from domain import project_manager
 
     pid = _make_project(tmp_path, monkeypatch)
-    barrier = threading.Barrier(2)
-    statuses: dict[str, int] = {}
-    errors: list[Exception] = []
+    project_file = _project_file(tmp_path, pid)
+    original_loader = project_manager._load_expected_project_unlocked
+    calls = {"n": 0}
+    after_competing_write: dict = {}
 
-    def _attempt(label: str):
-        try:
-            barrier.wait(timeout=5)
-            with web_server.app.test_client() as thread_client:
-                resp = thread_client.patch(
-                    f"/api/projects/{pid}",
-                    json={"global_settings": {"revision": 0, "music_mood": label}},
-                )
-            statuses[label] = resp.status_code
-        except Exception as exc:  # pragma: no cover - failure surfaced via errors
-            errors.append(exc)
+    def _inject_competing_write_under_lock(project_id):
+        calls["n"] += 1
+        # mutate_project calls _load_expected_project_unlocked twice per
+        # invocation: an unlocked existence preflight, then the
+        # authoritative read taken UNDER the project file lock. Firing on
+        # the 2nd call lands the competing write strictly between this
+        # request's own locked read and its own (about-to-be-attempted)
+        # write -- exactly the window a genuine second thread would need
+        # to win the race.
+        if project_id == pid and calls["n"] == 2:
+            competing = original_loader(project_id)
+            competing["global_settings"]["revision"] = 1
+            competing["global_settings"]["music_mood"] = "other-tab-won"
+            project_manager._save_project_unlocked(competing)
+            after_competing_write["bytes"] = project_file.read_bytes()
+        return original_loader(project_id)
 
-    threads = [
-        threading.Thread(target=_attempt, args=("alice",)),
-        threading.Thread(target=_attempt, args=("bob",)),
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join(timeout=5)
+    monkeypatch.setattr(
+        project_manager,
+        "_load_expected_project_unlocked",
+        _inject_competing_write_under_lock,
+    )
 
-    assert errors == []
-    assert sorted(statuses.values()) == [200, 409]
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 0, "music_mood": "late-writer"}},
+    )
 
+    assert resp.status_code == 409
+    body = resp.get_json()
+    assert body["code"] == "settings_revision_conflict"
+    assert body["current_revision"] == 1
+    assert body["global_settings"]["music_mood"] == "other-tab-won"
+
+    # Zero mutation from the loser: the file is byte-identical to what the
+    # competing write alone produced.
+    assert project_file.read_bytes() == after_competing_write["bytes"]
     persisted = _load(pid)
     assert persisted["global_settings"]["revision"] == 1
-    assert persisted["global_settings"]["music_mood"] in ("alice", "bob")
-    winner = persisted["global_settings"]["music_mood"]
-    assert statuses[winner] == 200
-    loser = "bob" if winner == "alice" else "alice"
-    assert statuses[loser] == 409
+    assert persisted["global_settings"]["music_mood"] == "other-tab-won"
+
+    # The "loser" isn't stranded -- retrying with the revision the
+    # competing write actually produced succeeds normally. The lock
+    # serialized the two writers; it didn't strand either of them.
+    retry = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "music_mood": "late-writer"}},
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["global_settings"]["revision"] == 2
+    assert _load(pid)["global_settings"]["music_mood"] == "late-writer"
 
 
 # ---------------------------------------------------------------------------
-# Whole-object PUT -- opt-in revision check (compat)
+# Whole-object PUT -- fail-closed revision check (compat window closes
+# permanently after the first write establishes a revision)
 # ---------------------------------------------------------------------------
 
 
-def test_put_without_revision_key_is_unaffected_compat(client, tmp_path, monkeypatch):
-    """A caller that never echoes revision behaves exactly as before this
-    slice: no conflict is possible to raise, out-of-order writes just apply
-    in the order the server receives them."""
+def test_put_without_revision_key_accepted_once_before_any_revision_exists(
+    client, tmp_path, monkeypatch
+):
+    """The ONLY compat window: a caller that never echoes "revision" still
+    succeeds on a project whose settings have never been stamped -- and
+    that first write is exactly what ESTABLISHES the counter, closing the
+    window for every write after it (see the sibling fail-closed test
+    below)."""
     pid = _make_project(tmp_path, monkeypatch)
 
-    resp1 = client.put(
+    resp = client.put(
         f"/api/projects/{pid}", json={"global_settings": {"music_mood": "hopeful"}}
     )
-    resp2 = client.put(
-        f"/api/projects/{pid}", json={"global_settings": {"color_palette": "cold blue"}}
-    )
 
-    assert resp1.status_code == 200
-    assert resp2.status_code == 200
+    assert resp.status_code == 200
     persisted = _load(pid)
     assert persisted["global_settings"]["music_mood"] == "hopeful"
-    assert persisted["global_settings"]["color_palette"] == "cold blue"
-    # Still bumped on every successful settings write, even though neither
-    # caller checked it -- a future revision-aware caller (PATCH) can detect
-    # that state changed underneath it.
-    assert persisted["global_settings"]["revision"] == 2
+    # Bumped even though this caller never looked at the field -- a future
+    # revision-aware caller (PATCH, or this same route once established)
+    # can now detect that state changed underneath it.
+    assert persisted["global_settings"]["revision"] == 1
+
+
+def test_put_without_revision_key_fails_closed_once_established(
+    client, tmp_path, monkeypatch
+):
+    """IMPORTANT (the live-probed data-loss defect this slice closes): once
+    ANY write has stamped a revision, a PUT that omits "revision" entirely
+    must NOT silently clobber it. Before this fix, only an EXPLICIT wrong
+    value was rejected (see test_put_opt_in_revision_check_rejects_stale_write);
+    simply never mentioning the field bypassed the guard completely instead
+    of being held to it -- reproduces the brief's repro shape (a PATCH
+    establishes revision 1; a second, revision-naive PUT must 409, not
+    200, and must not touch the file)."""
+    pid = _make_project(tmp_path, monkeypatch)
+    first = client.put(
+        f"/api/projects/{pid}", json={"global_settings": {"music_mood": "hopeful"}}
+    )
+    assert first.status_code == 200
+    assert first.get_json()["global_settings"]["revision"] == 1
+    before = _project_file(tmp_path, pid).read_bytes()
+
+    stale_put = client.put(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"color_palette": "cold blue"}},
+    )
+
+    assert stale_put.status_code == 409
+    body = stale_put.get_json()
+    assert body["code"] == "settings_revision_conflict"
+    assert body["current_revision"] == 1
+    assert body["retryable"] is True
+    assert _project_file(tmp_path, pid).read_bytes() == before
+    persisted = _load(pid)
+    assert persisted["global_settings"].get("color_palette", "") != "cold blue"
+    assert persisted["global_settings"]["music_mood"] == "hopeful"
+
+    # The caller isn't stuck -- retrying WITH the now-current revision
+    # succeeds, exactly like the sequential-simulation test below.
+    retry = client.put(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "color_palette": "cold blue"}},
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["global_settings"]["revision"] == 2
+    final = _load(pid)
+    assert final["global_settings"]["color_palette"] == "cold blue"
+    assert final["global_settings"]["music_mood"] == "hopeful"
 
 
 def test_put_opt_in_revision_check_rejects_stale_write(client, tmp_path, monkeypatch):
@@ -523,3 +602,203 @@ def test_put_and_patch_share_the_same_revision_counter(client, tmp_path, monkeyp
     assert ok_patch.status_code == 200
     assert ok_patch.get_json()["global_settings"]["revision"] == 2
     assert ok_patch.get_json()["global_settings"]["music_mood"] == "hopeful"
+
+
+# ---------------------------------------------------------------------------
+# PATCH -- VoiceSection.tsx / VideoSection.tsx settings (9a<->9c integration
+# gap: slice 9c wired both components into the Setup page before
+# _SETTINGS_KEY_VALIDATORS caught up, so the new strict PATCH 400ed on
+# every key either section writes). One test per key family.
+# ---------------------------------------------------------------------------
+
+
+def test_patch_accepts_voice_provider_settings_voicesection_family(client, tmp_path, monkeypatch):
+    """VoiceSection.tsx's TTS-provider + default-voice selects."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "tts_provider": "CARTESIA_SONIC_2",
+                "default_male_voice": "1W00IGEmNmwmsDeYy7ag",
+                "default_female_voice": "uyVNoMrnUku1dZyVEXwD",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["tts_provider"] == "CARTESIA_SONIC_2"
+    assert settings["default_male_voice"] == "1W00IGEmNmwmsDeYy7ag"
+    assert settings["default_female_voice"] == "uyVNoMrnUku1dZyVEXwD"
+
+
+def test_patch_accepts_dialogue_toggle_settings_voicesection_family(client, tmp_path, monkeypatch):
+    """VoiceSection.tsx's dialogue-quality toggles."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "dialogue_mode_enabled": False,
+                "forced_alignment_enabled": False,
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["dialogue_mode_enabled"] is False
+    assert settings["forced_alignment_enabled"] is False
+
+    invalid = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "dialogue_mode_enabled": "yes"}},
+    )
+    assert invalid.status_code == 400
+    assert "dialogue_mode_enabled" in invalid.get_json()["invalid_keys"]
+
+
+def test_patch_accepts_lipsync_cluster_settings_voicesection_family(client, tmp_path, monkeypatch):
+    """VoiceSection.tsx's lipsync cascade cluster -- includes
+    lipsync_engine_priority, the first PATCH-covered setting shaped as an
+    array rather than a scalar/object."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "lip_sync_mode": "generation",
+                "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK"],
+                "lipsync_quality_validation": False,
+                "lipsync_validation_threshold": 0.7,
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["lip_sync_mode"] == "generation"
+    assert settings["lipsync_engine_priority"] == ["SYNC_SO_V3", "MUSETALK"]
+    assert settings["lipsync_quality_validation"] is False
+    assert settings["lipsync_validation_threshold"] == 0.7
+
+
+@pytest.mark.parametrize(
+    "bad_priority",
+    ["SYNC_SO_V3", {"0": "SYNC_SO_V3"}, ["SYNC_SO_V3", 7], [None]],
+    ids=["bare-string", "object", "list-with-int", "list-with-none"],
+)
+def test_patch_rejects_non_string_list_lipsync_engine_priority(client, tmp_path, monkeypatch, bad_priority):
+    """The new list-of-strings validator must fail closed on a non-list,
+    and on a list containing a non-string item -- not just accept anything
+    JSON-serializable the way _validate_object_setting would."""
+    pid = _make_project(tmp_path, monkeypatch)
+    before = _project_file(tmp_path, pid).read_bytes()
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 0, "lipsync_engine_priority": bad_priority}},
+    )
+
+    assert resp.status_code == 400
+    body = resp.get_json()
+    assert body["code"] == "invalid_setting_key"
+    assert "lipsync_engine_priority" in body["invalid_keys"]
+    assert _project_file(tmp_path, pid).read_bytes() == before
+
+
+def test_patch_accepts_dialogue_pace_and_mix_settings_voicesection_family(client, tmp_path, monkeypatch):
+    """VoiceSection.tsx's dialogue pace (target WPM) + music mastering."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "dialogue_target_wpm": 0,  # "0 disables pacing" per the control's own hint
+                "music_mastering": "lo_fi",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["dialogue_target_wpm"] == 0
+    assert settings["music_mastering"] == "lo_fi"
+
+    invalid = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "dialogue_target_wpm": -5}},
+    )
+    assert invalid.status_code == 400
+    assert "dialogue_target_wpm" in invalid.get_json()["invalid_keys"]
+
+
+def test_patch_accepts_video_cascade_settings_videosection_family(client, tmp_path, monkeypatch):
+    """VideoSection.tsx's cascade retry limit + native-dialogue-voice toggle."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "cascade_retry_limit": 3,
+                "dialogue_voice_mode": "native",
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["cascade_retry_limit"] == 3
+    assert settings["dialogue_voice_mode"] == "native"
+
+    invalid = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "cascade_retry_limit": 2.5}},
+    )
+    assert invalid.status_code == 400
+    assert "cascade_retry_limit" in invalid.get_json()["invalid_keys"]
+
+
+def test_patch_accepts_postprocess_color_settings_videosection_family(client, tmp_path, monkeypatch):
+    """VideoSection.tsx's post-processing / color-grade cluster."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 0,
+                "color_grade_preset": "cool_noir",
+                "motion_quality_threshold": 0.6,
+                "scene_transitions": True,
+                "transition_duration": 1.5,
+                "face_swap_enabled": True,
+            }
+        },
+    )
+
+    assert resp.status_code == 200
+    settings = resp.get_json()["global_settings"]
+    assert settings["color_grade_preset"] == "cool_noir"
+    assert settings["motion_quality_threshold"] == 0.6
+    assert settings["scene_transitions"] is True
+    assert settings["transition_duration"] == 1.5
+    assert settings["face_swap_enabled"] is True
+
+    invalid = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "transition_duration": -0.1}},
+    )
+    assert invalid.status_code == 400
+    assert "transition_duration" in invalid.get_json()["invalid_keys"]
