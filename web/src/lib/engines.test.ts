@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { videoEngines, humanizeEngineReason } from './engines'
+import { videoEngines, cascadeEngineOptions, humanizeEngineReason } from './engines'
 import type { AppConfig, ApiInfo, VideoEngineRow } from '../types/project'
 
 /**
@@ -143,6 +143,90 @@ describe('videoEngines', () => {
     expect(b.cost).toBeUndefined()
     expect(b.quality).toBeUndefined()
     expect(b.status).toBe('live')
+  })
+})
+
+describe('cascadeEngineOptions', () => {
+  it('returns [] for a null config', () => {
+    expect(cascadeEngineOptions(null)).toEqual([])
+  })
+
+  it('returns [] when config has no video_engines', () => {
+    const c = { api_registry: {} } as unknown as AppConfig
+    expect(cascadeEngineOptions(c)).toEqual([])
+  })
+
+  it('excludes AUTO even when it is marked can_configure', () => {
+    const c = config([
+      row({ key: 'AUTO', label: 'Auto (Smart Routing)' }),
+      row({ key: 'ENGINE_A', label: 'Engine A' }),
+    ])
+
+    expect(cascadeEngineOptions(c).map((e) => e.key)).toEqual(['ENGINE_A'])
+  })
+
+  it('excludes a row that is not can_configure, even when it is currently selectable', () => {
+    const c = config([
+      row({ key: 'ENGINE_A', label: 'Engine A', can_configure: false }),
+      row({ key: 'ENGINE_B', label: 'Engine B' }),
+    ])
+
+    expect(cascadeEngineOptions(c).map((e) => e.key)).toEqual(['ENGINE_B'])
+  })
+
+  it('retains a project-disabled (can_select: false), not-in-use row when it is still can_configure — the S2C fix', () => {
+    const c = config([
+      row({
+        key: 'ENGINE_A',
+        label: 'Engine A',
+        can_select: false,
+        reason: 'project_disabled',
+        configured_enabled: false,
+        can_configure: true,
+        in_use: false,
+      }),
+    ])
+
+    const result = cascadeEngineOptions(c)
+
+    expect(result.map((e) => e.key)).toEqual(['ENGINE_A'])
+    expect(result[0]).toMatchObject({ selectable: false, reason: 'project_disabled', configuredEnabled: false })
+  })
+
+  it('excludes an in-use historical row that is not can_configure, unlike videoEngines()', () => {
+    const c = config([
+      row({
+        key: 'HISTORICAL_ENGINE',
+        label: 'Historical Engine',
+        can_select: false,
+        reason: 'runtime_unavailable',
+        in_use: true,
+        historical: true,
+        can_configure: false,
+      }),
+    ])
+
+    // videoEngines() (the picker view) keeps this row because it's in_use...
+    expect(videoEngines(c).map((e) => e.key)).toEqual(['HISTORICAL_ENGINE'])
+    // ...but the cascade-participation view must not, since it's not
+    // currently product-configurable.
+    expect(cascadeEngineOptions(c)).toEqual([])
+  })
+
+  it('marks exactly the GEMINI_OMNI row primary and enriches from api_registry', () => {
+    const c = config(
+      [row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }), row({ key: 'ENGINE_A', label: 'Engine A' })],
+      { GEMINI_OMNI: api({ label: 'Gemini Omni Flash', per_shot_cost: 0.5, quality_score: 0.95, status: 'beta' }) },
+    )
+
+    const result = cascadeEngineOptions(c)
+
+    const gemini = result.find((e) => e.key === 'GEMINI_OMNI')!
+    expect(gemini.primary).toBe(true)
+    expect(gemini.cost).toBe(0.5)
+    expect(gemini.quality).toBe(0.95)
+    expect(gemini.status).toBe('beta')
+    expect(result.filter((e) => e.primary)).toHaveLength(1)
   })
 })
 

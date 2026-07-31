@@ -1,6 +1,6 @@
 import { Section, Badge, Toggle } from '../../ui'
 import type { AppConfig } from '../../../types/project'
-import { videoEngines } from '../../../lib/engines'
+import { cascadeEngineOptions } from '../../../lib/engines'
 import { isPodGated } from '../../../lib/podGating'
 import { RangeRow, ToggleRow, SelectRow } from './controls'
 
@@ -24,20 +24,22 @@ const COLOR_GRADE_PRESETS = [
 /**
  * Video section — engine cascade toggles + post-processing.
  *
- * Engines come from `videoEngines(config)` — the server-reconciled
- * selectable view (`config.video_engines`, built by
- * `web_server.py:_project_video_engine_rows`). This is a cascade
- * participation list (which dispatchable engines the project's video
- * cascade may try), so it's further narrowed to currently `selectable`
- * engines, excluding `AUTO` (a routing directive, not a dispatchable engine
- * you toggle on/off). GEMINI_OMNI is marked primary. Each row's
- * cloud-vs-pod badge is derived from `isPodGated` — provider-keyed, so a
- * future pod-billed video engine surfaces ⚙ Pod without a code change here.
- * Enable state writes the whole nested `api_engines` object (settings write
- * contract).
+ * Engines come from `cascadeEngineOptions(config)` — a cascade
+ * PARTICIPATION list (which dispatchable engines the project's video
+ * cascade may try), distinct from the shot-level picker view
+ * (`videoEngines(config)`). Retention here is keyed on `can_configure`
+ * (product-configurable), NOT `can_select`: `can_select` folds in this
+ * project's own disable state, so keying retention on it would make
+ * disabling a not-yet-in-use engine delete its row — and therefore its
+ * toggle — with no way to re-enable it. `AUTO` is excluded (a routing
+ * directive, not a dispatchable engine you toggle on/off). GEMINI_OMNI is
+ * marked primary. Each row's cloud-vs-pod badge is derived from
+ * `isPodGated` — provider-keyed, so a future pod-billed video engine
+ * surfaces ⚙ Pod without a code change here. Enable state writes the whole
+ * nested `api_engines` object (settings write contract).
  */
 export function VideoSection({ s, config, update }: Props) {
-  const engines = videoEngines(config).filter((e) => e.selectable && e.key !== 'AUTO')
+  const engines = cascadeEngineOptions(config)
   const engineState = s.api_engines ?? {}
 
   const setEngineEnabled = (key: string, enabled: boolean) => {
@@ -58,8 +60,8 @@ export function VideoSection({ s, config, update }: Props) {
           )}
           {engines.map((e) => {
             const pod = isPodGated(e.key, config)
-            const cfg = engineState[e.key] ?? config?.api_engine_defaults?.[e.key] ?? { enabled: true }
-            const enabled = cfg.enabled !== false
+            const localCfg = engineState[e.key]
+            const enabled = localCfg ? localCfg.enabled !== false : e.configuredEnabled
             return (
               <div
                 key={e.key}
