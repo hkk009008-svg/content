@@ -1,0 +1,75 @@
+{
+  "instrument": "scripts/measure_cartesia_prosody.py",
+  "measured_at": "20260731T194049Z",
+  "why": "sonic-2 sunsets 2026-10-20; migration needs measured evidence (R-MEASURE), not a provider claim.",
+  "api_calls_made": 4,
+  "models": [
+    "sonic-2",
+    "sonic-3.5"
+  ],
+  "rows": [
+    {
+      "sample": "korean",
+      "language": "ko",
+      "model_id": "sonic-2",
+      "words": 10,
+      "voice_id": "ce9ca2b6-2bed-4452-99bb-052e1ec0b534",
+      "status": "ok",
+      "duration_s": 4.624,
+      "wpm": 129.8,
+      "rms_dbfs": -16.3,
+      "peak_dbfs": -0.5,
+      "silence_total_s": 0.96,
+      "silence_ratio": 0.208
+    },
+    {
+      "sample": "korean",
+      "language": "ko",
+      "model_id": "sonic-3.5",
+      "words": 10,
+      "voice_id": "ce9ca2b6-2bed-4452-99bb-052e1ec0b534",
+      "status": "ok",
+      "duration_s": 3.971,
+      "wpm": 151.1,
+      "rms_dbfs": -16.0,
+      "peak_dbfs": -2.0,
+      "silence_total_s": 0.507,
+      "silence_ratio": 0.128
+    },
+    {
+      "sample": "english_control",
+      "language": "en",
+      "model_id": "sonic-2",
+      "words": 13,
+      "voice_id": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+      "status": "ok",
+      "duration_s": 4.127,
+      "wpm": 189.0,
+      "rms_dbfs": -17.7,
+      "peak_dbfs": -0.5,
+      "silence_total_s": 1.26,
+      "silence_ratio": 0.305
+    },
+    {
+      "sample": "english_control",
+      "language": "en",
+      "model_id": "sonic-3.5",
+      "words": 13,
+      "voice_id": "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+      "status": "ok",
+      "duration_s": 3.631,
+      "wpm": 214.8,
+      "rms_dbfs": -18.6,
+      "peak_dbfs": -1.1,
+      "silence_total_s": 0.778,
+      "silence_ratio": 0.214
+    }
+  ],
+  "not_measured": [
+    "naturalness / expressiveness — a HUMAN judgment; deliberately no composite score is emitted (2026-07-18 precedent: a loudness proxy contradicted the human listener and the proxy was wrong)",
+    "accent and pronunciation quality",
+    "listener preference"
+  ],
+  "audio_dir": "/var/folders/n7/d7jxjw3j4lgg5dgg7xty9z1r0000gn/T/cartesia-prosody-20260731T194049Z-gxk1boj4",
+  "audio_retained": "logs/cartesia-prosody-20260801/ (committed alongside this artifact)"
+}

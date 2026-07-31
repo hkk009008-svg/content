@@ -77,6 +77,11 @@ logs/*
 !logs/ui/
 !logs/ui/product-unification/
 !logs/ui/product-unification/**
+# EXCEPTION: R-MEASURE artifacts backing a migration GO/NO-GO are
+# source-of-record (the sonic-2 sunset decision), not scratch.
+!logs/cartesia-prosody-*.json
+!logs/cartesia-prosody-20260801/
+!logs/cartesia-prosody-20260801/**
 
 # GitNexus index
 .gitnexus
