@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:263](web_server.py:263) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:263](web_server.py:263) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:293](web_server.py:293) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:378](web_server.py:378) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:378](web_server.py:378) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:408](web_server.py:408) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2798](web_server.py:2798)) does
+  `api_stream` ([web_server.py:2934](web_server.py:2934)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -189,7 +189,7 @@ Three endpoints avoid constructing `CinemaPipeline`:
 - `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:2114](web_server.py:2114))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
   live pipeline exists ([web_server.py:2615](web_server.py:2615)).
-- `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
+- `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + historical LoRA rows + top-level dormant `lora_availability` + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `lora_policy.lora_dormant_status_fields()` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`. Identity dimension label is **GhostFaceNet** (§11), not ArcFace. Component rows are produced by [cinema/capability_manifest.py](cinema/capability_manifest.py) (Slice 12, evidence-backed capability manifest): a `pipeline_status.toml` component claiming `live`/`wired` is forced `engaged_static=False` (rendered inactive/unavailable with a human `reason`) unless a `consumer` and `evidence_tests` anchor both resolve — a `status` string alone is never sufficient. The endpoint's JSON only carries the operator-safe projection (`to_operator_view`); raw anchors/producer/consumer/dev notes stay in the diagnostic-only projection (`to_diagnostic_view`), never transmitted here.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
 `ContinuityEngine + ChiefDirector + LLMEnsemble + CostTracker`, which is heavy
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:460](web_server.py:460)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:575](web_server.py:575)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -668,7 +668,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:2489](web_server.py:2489) — uses the
+`api_generate_dialogue` at [web_server.py:2604](web_server.py:2604) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -953,7 +953,7 @@ keep-own-clothing constraint line; single-char shots never enter this branch
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 `take["metadata"]["identity_per_char"]`
 ([cinema/shots/controller.py:1014](cinema/shots/controller.py:1014)) and are surfaced as `identity_multi`
-in the capability scorecard ([cinema/capability_scorecard.py:166](cinema/capability_scorecard.py:166)).
+in the capability scorecard ([cinema/capability_scorecard.py:164](cinema/capability_scorecard.py:164)).
 
 ### 8.3 Max tier (RETIRED WS1 Task 4) — history, for archaeology
 
@@ -2367,4 +2367,13 @@ anchors scoped to §10.6/§10.7 only — not a whole-file re-verify). §8.3 upda
 (`conjunctive` identity-floor halt mode); scoped to §8.3 only — not a whole-file
 re-verify. §3.1/§3.5 updated 2026-06-04 (Lane D) to document the read-only
 `capability-scorecard` endpoint + `cinema/capability_scorecard.py` (Part-4
-dashboard backend); scoped to those two subsections only.*
+dashboard backend); scoped to those two subsections only. §3.5 updated
+2026-07-31 (comprehensive-unification Slice 12) to document
+`cinema/capability_manifest.py` (evidence-backed `engaged_static` validation:
+a `live`/`wired` component now requires a resolving `consumer` +
+`evidence_tests`, else it renders inactive/unavailable with a reason) and
+the corrected GhostFaceNet identity label; §8.2's `cinema/capability_scorecard.py`
+anchor corrected from `:166` to `:164` (drifted by an unrelated import
+cleanup in the same slice — a markdown-link anchor, one of the doc-checker's
+known ungated forms per the same-line-only anchor gate); scoped to those
+citations only, not a whole-file re-verify.*
