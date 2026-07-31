@@ -5,7 +5,6 @@ Projects are stored as JSON files under projects/<project_id>/.
 """
 
 import os
-import fcntl
 import json
 import logging
 import uuid
@@ -17,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Optional, List, Dict
 
-from filelock import FileLock as _BaseFileLock, Timeout
+from filelock import FileLock, Timeout
 from pydantic import ValidationError
 
 from cinema.auto_approve import AutoApproveConfig
@@ -40,32 +39,7 @@ class ProjectLockError(RuntimeError):
         )
 
 
-class FileLock(_BaseFileLock):
-    """Repository lock that leaves parent-directory creation to its caller.
-
-    Creation-capable call paths explicitly run ``_ensure_project_dir`` first.
-    Existing-target call paths do not, so a concurrent deletion cannot be
-    silently reversed by the third-party lock's directory helper.
-    """
-
-    def _acquire(self) -> None:
-        open_flags = os.O_RDWR | os.O_CREAT
-        no_follow = getattr(os, "O_NOFOLLOW", None)
-        if no_follow is not None:
-            open_flags |= no_follow
-        fd = os.open(self.lock_file, open_flags, 0o644)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            return
-        except BaseException:
-            os.close(fd)
-            raise
-        if os.fstat(fd).st_nlink == 0:
-            os.close(fd)
-            return
-        self._context.lock_file_fd = fd
+PROJECT_LOCK_MODE = 0o600
 
 
 @dataclass
@@ -114,7 +88,19 @@ def _project_file(project_id: str) -> str:
 
 
 def _project_lock_path(project_id: str) -> str:
-    return os.path.join(_project_dir(project_id), "project.lock")
+    """Return the per-project lock path, a SIBLING of the project directory.
+
+    The lock deliberately lives at ``projects/<pid>.lock`` rather than inside
+    ``projects/<pid>/``: ``delete_project`` rmtrees the project directory, and
+    an in-directory lock file unlinked mid-wait lets two waiters "hold" the
+    lock on different inodes. A sibling file survives per-project deletion,
+    is covered by the existing ``projects/*`` gitignore patterns, and can
+    never collide with a project directory because ``is_safe_project_id``
+    rejects ``.`` in IDs (which also keeps ``list_projects`` skipping it).
+    """
+    if not is_safe_project_id(project_id):
+        raise ValueError("Invalid project_id")
+    return os.path.join(os.path.abspath(PROJECTS_DIR), f"{project_id}.lock")
 
 
 def _ensure_project_dir(project_id: str):
@@ -126,7 +112,11 @@ def _ensure_project_dir(project_id: str):
 @contextmanager
 def _acquire_project_lock(project_id: str, timeout: float = 10):
     _ensure_project_dir(project_id)
-    lock = FileLock(_project_lock_path(project_id), timeout=timeout)
+    lock = FileLock(
+        _project_lock_path(project_id),
+        timeout=timeout,
+        mode=PROJECT_LOCK_MODE,
+    )
     try:
         with lock:
             yield
@@ -148,12 +138,17 @@ def _acquire_existing_project_lock(project_id: str, timeout: float = 10):
         yield False
         return
 
-    lock = FileLock(_project_lock_path(project_id), timeout=timeout)
+    lock = FileLock(
+        _project_lock_path(project_id),
+        timeout=timeout,
+        mode=PROJECT_LOCK_MODE,
+    )
     try:
         lock.__enter__()
     except FileNotFoundError:
-        # The project directory was deleted between the existence check and
-        # FileLock opening its lock file. Never recreate it.
+        # The lock lives beside (not inside) the project directory, so this
+        # only fires if the projects root itself vanished mid-acquire. Treat
+        # the target as missing; never create project state from this path.
         yield False
         return
     except Timeout as exc:

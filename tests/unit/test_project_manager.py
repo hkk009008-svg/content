@@ -378,8 +378,8 @@ class TestProjectIdBoundary:
         real_file_lock = dpm.FileLock
 
         class DeleteBeforeAcquire:
-            def __init__(self, path, timeout):
-                self._lock = real_file_lock(path, timeout=timeout)
+            def __init__(self, path, timeout, **kwargs):
+                self._lock = real_file_lock(path, timeout=timeout, **kwargs)
 
             def __enter__(self):
                 shutil.rmtree(project_dir)
@@ -402,6 +402,28 @@ class TestProjectIdBoundary:
         mutator.assert_not_called()
         ensure_bomb.assert_not_called()
         assert not os.path.exists(project_dir)
+
+    def test_lock_path_is_a_sibling_outside_the_project_dir(
+        self,
+        tmp_projects_dir,
+    ):
+        """Deleting projects/<pid>/ must never unlink an actively held lock.
+
+        The unlink race (two waiters holding different inodes of the same
+        lock path) is prevented by geometry: the lock file is a sibling of
+        the project directory, so per-project rmtree cannot touch it.
+        """
+        import domain.project_manager as dpm
+
+        pid = "abc123def456"
+        lock_path = dpm._project_lock_path(pid)
+        project_dir = os.path.abspath(dpm._project_dir(pid))
+
+        assert not (lock_path + os.sep).startswith(project_dir + os.sep)
+        assert os.path.dirname(lock_path) == os.path.dirname(project_dir)
+
+        with pytest.raises(ValueError):
+            dpm._project_lock_path("../escape")
 
     def test_stored_id_change_between_preflight_and_lock_fails_closed(
         self,

@@ -505,11 +505,12 @@ post-fix you still see the default `(True, 0.65)` behavior, check that
 the calling controller is passing `_settings = self.project.get("global_settings", {})`
 through to `generate_lip_sync_video(..., settings=_settings)`.
 
-### Project lock timeout (`Timeout while waiting for project.lock`)
+### Project lock timeout (`Project '<pid>' is locked by another operation`)
 
-Another process is holding the per-project filelock. Likely a previous
-`web_server.py` instance still alive. Check `ps aux | grep web_server`
-and kill stale processes.
+Another process is holding the per-project filelock
+(`domain/projects/<pid>.lock` — a sibling of the project directory, removed
+automatically on release). Likely a previous `web_server.py` instance still
+alive. Check `ps aux | grep web_server` and kill stale processes.
 
 ---
 

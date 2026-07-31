@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import date
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -547,7 +548,11 @@ def test_stored_project_id_mismatch_fails_q3_boundaries_without_cross_write(
         stored_id,
     )
     before = project_path.read_bytes()
-    lock_path = tmp_path / pid / "project.lock"
+    from domain.project_manager import _project_lock_path
+
+    # The production sibling lock path — not a hardcoded copy, so this pin
+    # cannot silently go vacuous if the lock location moves again.
+    lock_path = Path(_project_lock_path(pid))
     lock_path.unlink(missing_ok=True)
 
     if boundary == "config":
@@ -1384,11 +1389,9 @@ _OPTIMIZER_SPEC_FIELDS = {
 
 
 def test_optimizer_spec_type_cases_cover_every_public_consumer_field():
-    import web_server
+    from domain.optimizer_cache import OPTIMIZER_SPEC_FIELD_TYPES
 
-    assert _OPTIMIZER_SPEC_FIELDS == set(
-        web_server._PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES,
-    )
+    assert _OPTIMIZER_SPEC_FIELDS == set(OPTIMIZER_SPEC_FIELD_TYPES)
 
 
 @pytest.mark.parametrize("field", sorted(_OPTIMIZER_SPEC_FIELDS))

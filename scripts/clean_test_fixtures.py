@@ -93,9 +93,15 @@ def classify(project_dir: Path) -> tuple[str, str]:
         if pat.search(name):
             return ("DELETE", f"dirname matches /{pat.pattern}/")
 
-    lock_path = project_dir / "project.lock"
-    if lock_path.exists():
-        return ("LOCKED_SKIP", "project.lock present (active session?)")
+    # Current lock is a sibling file (projects/<pid>.lock, held only during
+    # writes); the in-directory project.lock is legacy residue but still a
+    # skip signal if present.
+    lock_paths = (
+        project_dir.parent / f"{project_dir.name}.lock",
+        project_dir / "project.lock",
+    )
+    if any(p.exists() for p in lock_paths):
+        return ("LOCKED_SKIP", "project lock present (active session?)")
 
     pj = project_dir / "project.json"
     if not pj.is_file():

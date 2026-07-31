@@ -84,7 +84,6 @@ import os
 import stat
 import tempfile
 import time
-from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
@@ -101,6 +100,10 @@ from lip_sync import (
     upscale_video_seedvr2,
 )
 from audio.dialogue import scene_characters as _scene_characters, shot_characters as _shot_characters
+from domain.optimizer_cache import (
+    sanitize_optimizer_cache,
+    sanitize_optimizer_spec,
+)
 from domain.provider_catalog import RuntimeSnapshot
 from domain.video_engine_policy import (
     VideoCandidateResult,
@@ -814,20 +817,10 @@ class ShotController:
         opt_enabled = settings.get("prompt_optimizer_enabled", False)
         opt_spec = None
         if opt_enabled:
-            cached_value = shot.get("optimizer_cache")
-            cached = (
-                cached_value
-                if isinstance(cached_value, Mapping)
-                else {}
-            )
+            cached = sanitize_optimizer_cache(shot.get("optimizer_cache"))
             # Re-optimize when the source prompt changed OR no cache exists
             if cached and cached.get("source_prompt") == full_prompt:
-                cached_spec = cached.get("spec")
-                opt_spec = (
-                    cached_spec
-                    if isinstance(cached_spec, Mapping)
-                    else None
-                )
+                opt_spec = cached.get("spec") or None
             else:
                 try:
                     from llm.prompt_optimizer import optimize_shot_prompt
@@ -846,16 +839,18 @@ class ShotController:
                         (scene.get("dialogue") or "").strip()
                         or shot.get("dialogue")
                     )
-                    opt_spec = optimize_shot_prompt(
-                        user_input=full_prompt,
-                        characters=shot_chars,
-                        objects=shot_objs,
-                        location=location,
-                        global_settings=settings,
-                        scene_context=f"Scene: {scene.get('title', '')}\nAction: {scene.get('action', '')[:300]}",
-                        has_dialogue=has_dialogue,
-                        intent_notes=shot.get("intent_notes", ""),
-                        cost_tracker=self.cost_tracker,
+                    opt_spec = sanitize_optimizer_spec(
+                        optimize_shot_prompt(
+                            user_input=full_prompt,
+                            characters=shot_chars,
+                            objects=shot_objs,
+                            location=location,
+                            global_settings=settings,
+                            scene_context=f"Scene: {scene.get('title', '')}\nAction: {scene.get('action', '')[:300]}",
+                            has_dialogue=has_dialogue,
+                            intent_notes=shot.get("intent_notes", ""),
+                            cost_tracker=self.cost_tracker,
+                        ),
                     )
                     # Persist optimizer output for regen + telemetry
                     def _stash_cache(_scene, project_shot):
@@ -1908,18 +1903,8 @@ class ShotController:
         # F1a: Read the optimizer cache to recover the purpose + suggested_video_api
         # that was computed during keyframe generation but not forwarded here.
         # The cache structure is: shot["optimizer_cache"]["spec"]["purpose"] / ["suggested_video_api"]
-        opt_cache_value = shot.get("optimizer_cache")
-        opt_cache = (
-            opt_cache_value
-            if isinstance(opt_cache_value, Mapping)
-            else {}
-        )
-        opt_spec_value = opt_cache.get("spec")
-        opt_spec_cached = (
-            opt_spec_value
-            if isinstance(opt_spec_value, Mapping)
-            else {}
-        )
+        opt_cache = sanitize_optimizer_cache(shot.get("optimizer_cache"))
+        opt_spec_cached = opt_cache.get("spec") or {}
         cached_purpose = opt_spec_cached.get("purpose", "")
         _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
         has_dialogue = cached_purpose in _dialogue_purposes

@@ -3575,3 +3575,59 @@ Evidence:
   `tests/unit/test_web_server_video_targets.py`;
   `tests/unit/test_project_manager.py`;
   `tests/unit/test_optimizer_cache_boundary.py`.
+
+## ADR-073 — Delegate lock hardening to upstream filelock; sibling lock path; shared optimizer-cache module
+
+- **Date:** 2026-07-31
+- **Status:** Accepted; supersedes the ADR-072 mechanism detail "a
+  no-parent-creation lock implementation" (the custom `FileLock._acquire`
+  subclass). The ADR-072 *invariants* — no resurrection of a deleted project,
+  no cross-project write, typed public cache boundary — are unchanged and
+  remain pinned by the same tests.
+- **Context.** ADR-072 landed a vendored `FileLock` subclass carrying
+  `O_NOFOLLOW`, an `st_nlink == 0` unlinked-inode discard, and no parent-dir
+  creation. Upstream `filelock` (verified in-tree at 3.29.0,
+  `filelock/_unix.py:_acquire`/`_release`) natively provides all three
+  protections plus delete-on-release cleanup; the vendored copy duplicated
+  upstream line-for-line minus `ensure_directory_exists`. Separately, the
+  public optimizer-cache validator lived privately in `web_server.py` while
+  both controller consumers re-implemented permissive historical reads
+  inline.
+- **Decision.**
+  - Drop the vendored subclass; use stock `filelock.FileLock` with
+    `mode=0o600` and bound `filelock>=3.24.3,<4` in `requirements.txt` — the
+    version line proven to carry the hardening the subclass provided.
+  - Neutralize upstream's parent-dir creation by **geometry** instead of
+    code: the lock file is a sibling of the project directory
+    (`projects/<pid>.lock` via `_project_lock_path`), so its parent is the
+    projects root, `delete_project`'s rmtree can never unlink a held lock,
+    and the unlink race cannot produce two same-path holders on different
+    inodes. `is_safe_project_id` rejects `.`, so no project can collide with
+    a `*.lock` name and `list_projects` skips lock entries. (Refined from the
+    in-flight `domain/.projects-<pid>.lock` draft: a sibling inside the
+    gitignored `projects/*` space never appears as untracked noise in a
+    tracked package directory.)
+  - Extract the optimizer-cache contract to `domain/optimizer_cache.py`:
+    `optimizer_cache_is_valid` (strict public boundary),
+    `sanitize_optimizer_cache`/`sanitize_optimizer_spec` (permissive
+    historical reads that drop malformed known fields individually while
+    retaining unknown fields). `web_server.py` and both controller consumers
+    import the shared module.
+- **Consequences.**
+  - Lock hardening is owned by the dependency and expressed as a version
+    bound, not duplicated code; transient lock files self-clean on release.
+  - A deletion between preflight and acquisition still yields a 404 with no
+    project-directory resurrection; the transient sibling lock created in
+    that race window is removed on release.
+  - `scripts/clean_test_fixtures.py` treats either lock location (current
+    sibling or legacy in-directory residue) as an active-session skip signal.
+- **Evidence.** `tests/unit/test_project_manager.py` (delete-race no-artifact
+  with the stock lock; sibling-geometry pin; unsafe-ID rejection);
+  `tests/unit/test_web_server_video_targets.py` (Q3 boundary lock assertion
+  repointed at `_project_lock_path` so it cannot go vacuous; optimizer
+  field-coverage pin repointed at `OPTIMIZER_SPEC_FIELD_TYPES`);
+  `tests/unit/test_optimizer_cache.py` (direct sanitize/validate pins);
+  `tests/unit/test_optimizer_cache_boundary.py` (real consumers, unchanged).
+- **Cross-ref:** ADR-072; `domain/project_manager.py`;
+  `domain/optimizer_cache.py`; `requirements.txt`;
+  `scripts/clean_test_fixtures.py`.

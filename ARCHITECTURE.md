@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:83](web_server.py:83) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:92](web_server.py:92) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:84](web_server.py:84) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:121](web_server.py:121) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:122](web_server.py:122) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2126](web_server.py:2126)) does
+  `api_stream` ([web_server.py:2084](web_server.py:2084)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:322](web_server.py:322)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:280](web_server.py:280)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -547,16 +547,22 @@ seeds these `global_settings`:
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
-**Filelock:** 10s default timeout via `FileLock(project.lock, timeout=10)`.
-Creation-capable paths (`save_project`, project creation, and explicit
-`project_lock`) create the parent first. Existing-target `load_project` and
-`mutate_project` instead perform a read-only existence/stored-ID preflight and
-use a no-parent-creation lock, then re-read under lock. A missing or
-concurrently deleted project therefore stays absent. The stored project ID
-must equal the route/path ID before lock and under lock, and `mutate_project`
-reasserts it after the callback before save/snapshot sync, preventing a
-route-scoped callback or corrupt file from redirecting
-`_save_project_unlocked`.
+**Filelock:** 10s default timeout via stock `filelock.FileLock` (bounded
+`>=3.24.3,<4` — that line natively provides `O_NOFOLLOW`, the unlinked-inode
+`st_nlink` discard, and delete-on-release cleanup, so no local lock subclass
+exists). The lock file is a **sibling** of the project directory
+(`projects/<pid>.lock`, mode `0o600`), so `delete_project`'s rmtree can never
+unlink an actively held lock, and `list_projects` skips it because `.` fails
+`is_safe_project_id`. Creation-capable paths (`save_project`, project
+creation, and explicit `project_lock`) create the project directory first.
+Existing-target `load_project` and `mutate_project` instead perform a
+read-only existence/stored-ID preflight, acquire the sibling lock, then
+re-read and recheck under lock. A missing or concurrently deleted project
+therefore stays absent (the transient sibling lock file is removed on
+release). The stored project ID must equal the route/path ID before lock and
+under lock, and `mutate_project` reasserts it after the callback before
+save/snapshot sync, preventing a route-scoped callback or corrupt file from
+redirecting `_save_project_unlocked`.
 
 **Storage:** `domain/projects/<12-hex-id>/` with `project.json`,
 `characters/<cid>/`, `locations/<lid>/`, `shots/<sid>/`, `exports/`, `temp/`.
@@ -662,7 +668,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1904](web_server.py:1904) — uses the
+`api_generate_dialogue` at [web_server.py:1862](web_server.py:1862) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1776,7 +1782,7 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:703`; call at :995) and `diagnose_clip`
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:706`; call at :995) and `diagnose_clip`
   (`cinema/shots/controller.py:2660`; call at :2712); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`

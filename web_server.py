@@ -53,6 +53,7 @@ from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
 from domain.models import DirectorialIntent, Project, Shot
+from domain.optimizer_cache import optimizer_cache_is_valid
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -128,30 +129,6 @@ _PUBLIC_SHOT_COMPATIBILITY_TYPES = {
     "keyframe_review": dict,
     "scene_location": str,
 }
-_PUBLIC_OPTIMIZER_CACHE_FIELD_TYPES = {
-    "source_prompt": str,
-}
-_PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES = {
-    # Every currently consumed/written optimizer value is pinned to its
-    # truthful JSON type. Unknown keys remain forward-compatible, but the
-    # mapping and known values can never reach controller `.get()` calls with
-    # list/scalar shapes.
-    "image_prompt": str,
-    "video_prompt": str,
-    "purpose": str,
-    "shot_type": str,
-    "suggested_image_api": str,
-    "suggested_video_api": str,
-    "suggested_lipsync": (str, type(None)),
-    "negative_constraints": str,
-    "identity_anchor": str,
-    "camera": str,
-    "lighting": str,
-    "color_palette": str,
-    "reasoning": str,
-}
-
-
 def _parse_ip_adapter_weight(value) -> float:
     if isinstance(value, bool):
         raise ValueError("ip_adapter_weight must be a finite number")
@@ -167,25 +144,6 @@ def _parse_ip_adapter_weight(value) -> float:
 def _json_object_or_none():
     data = request.get_json(silent=True)
     return data if isinstance(data, dict) else None
-
-
-def _public_optimizer_cache_is_valid(cache) -> bool:
-    if not isinstance(cache, dict):
-        return False
-    if any(
-        field in cache and not isinstance(cache[field], expected_type)
-        for field, expected_type in _PUBLIC_OPTIMIZER_CACHE_FIELD_TYPES.items()
-    ):
-        return False
-    if "spec" not in cache:
-        return True
-    spec = cache["spec"]
-    if not isinstance(spec, dict):
-        return False
-    return all(
-        field not in spec or isinstance(spec[field], expected_type)
-        for field, expected_type in _PUBLIC_OPTIMIZER_SPEC_FIELD_TYPES.items()
-    )
 
 
 def _video_policy_runtime_snapshot() -> RuntimeSnapshot:
@@ -1744,7 +1702,7 @@ def api_update_scene(pid, sid):
                 return jsonify({
                     "error": f"shots[{index}] does not match the shot schema",
                 }), 400
-            if not _public_optimizer_cache_is_valid(
+            if not optimizer_cache_is_valid(
                 shot.get("optimizer_cache", {}),
             ):
                 return jsonify({
