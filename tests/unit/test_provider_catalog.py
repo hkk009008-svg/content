@@ -102,8 +102,10 @@ def test_legacy_projection_status_is_fail_closed_and_date_effective() -> None:
     assert before["SORA_2"]["status"] == "retired"
     # Slice 3 re-admitted GEMINI_OMNI (LIMITED, dispatchable=True) — the
     # legacy projection has no runtime snapshot to gate on, so its status is
-    # the catalog-truth "live" now, not "disabled". KLING_LIPSYNC_2 (still
-    # KNOWN_BROKEN, non-dispatchable, non-retired) takes over as the
+    # the catalog-truth "live" now, not "disabled". KLING_LIPSYNC_2's
+    # ProductSupport is NOT_IMPLEMENTED (not KNOWN_BROKEN) — still one of the
+    # denied-support states test_denied_support_and_retired_entries_fail_
+    # closed pins as non-dispatchable/non-retired — so it takes over as the
     # "disabled" example.
     assert before["GEMINI_OMNI"]["status"] == "live"
     assert before["KLING_LIPSYNC_2"]["status"] == "disabled"
@@ -117,8 +119,9 @@ def test_auto_is_the_only_non_dispatchable_live_legacy_sentinel() -> None:
     projected = project_legacy_registry(API_REGISTRY, on_date=PRE_SUNSET)
     auto = projected["AUTO"]
     # Slice 3 re-admitted GEMINI_OMNI's catalog projection to dispatchable
-    # live, so it no longer contrasts with AUTO here — KLING_LIPSYNC_2 (still
-    # KNOWN_BROKEN) takes over as the non-dispatchable/non-live neighbor.
+    # live, so it no longer contrasts with AUTO here — KLING_LIPSYNC_2 (its
+    # ProductSupport is NOT_IMPLEMENTED, not KNOWN_BROKEN) takes over as the
+    # non-dispatchable/non-live neighbor.
     neighboring_denied_engine = projected["KLING_LIPSYNC_2"]
 
     assert auto["selectable"] is True
@@ -501,8 +504,13 @@ def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
 
     # Slice 3 re-admitted GEMINI_OMNI: it is dispatchable now (LIMITED, with
     # real runtime_options), so it no longer belongs to the non-dispatchable
-    # family this test pins. KLING_LIPSYNC_2 (still KNOWN_BROKEN) takes over
-    # its slot in the loop.
+    # family this test pins. KLING_LIPSYNC_2 takes over its slot in the loop
+    # — its ProductSupport is ProductSupport.NOT_IMPLEMENTED (not
+    # KNOWN_BROKEN), one of the denied-support states
+    # (_UNSUPPORTED_PRODUCT_STATES, domain/video_engine_policy.py) that fail
+    # closed to empty runtime_options regardless of runtime snapshot. That is
+    # what makes it the canonical non-dispatchable example here: with no
+    # runtime_options to begin with, full_snapshot can't make it dispatchable.
     for key in ("KLING_LIPSYNC_2", "SORA_2", "OPENAI_AUDIO", "RUNWAY_ACT_ONE"):
         assert CATALOG[key].runtime_options == ()
         result = runtime_availability(key, full_snapshot, on_date=PRE_SUNSET)

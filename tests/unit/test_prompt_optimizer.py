@@ -973,14 +973,45 @@ def test_fallback_disabled_top_ranked_engine_not_suggested():
 
 
 def test_fallback_aspect_incompatible_engine_not_suggested(monkeypatch):
+    """A project-aspect-incompatible top-ranked engine must not reach the
+    fallback spec's suggested_video_api.
+
+    Narrows the real PORTRAIT_CAPABLE_VIDEO_ENGINES allowlist by one engine
+    (mirrors tests/unit/test_scene_decomposer.py::test_competitive_decompose_
+    scene_coerces_aspect_incompatible_engine_via_real_policy) instead of
+    monkeypatching is_video_aspect_compatible module-wide. The module-wide
+    monkeypatch was unsound: the top-rank selection path
+    (_top_live_api_for_purpose -> rank_apis_for_purpose ->
+    resolve_video_ranking) calls evaluate_shot_target without an
+    aspect_ratio (defaults to None), so a predicate that returns False
+    regardless of its aspect argument rejects every candidate at the RANKING
+    stage too. _top_live_api_for_purpose then returns "AUTO" directly from
+    an empty ranking, and the assertion below passed whether or not the R3
+    evaluate_shot_target wrap under test was even present (mock bleed).
+    Narrowing the real allowlist data instead leaves the ranking stage
+    (aspect_ratio=None, so the narrowed engine is still compatible there)
+    untouched and only makes the wrap's own aspect_ratio="9:16" call reject
+    the pick.
+    """
     import domain.video_engine_policy as video_engine_policy
+    from llm.prompt_optimizer import _fallback_optimize, _top_live_api_for_purpose
 
     monkeypatch.setattr(
         video_engine_policy,
-        "is_video_aspect_compatible",
-        lambda _key, _aspect: False,
+        "PORTRAIT_CAPABLE_VIDEO_ENGINES",
+        video_engine_policy.PORTRAIT_CAPABLE_VIDEO_ENGINES - {"KLING_3_0"},
     )
-    from llm.prompt_optimizer import _fallback_optimize
+
+    # Confirm the un-coerced ranking pick really would have been KLING_3_0
+    # under this runtime state (the ranking stage's own evaluate_shot_target
+    # call passes no aspect_ratio, so narrowing the allowlist doesn't affect
+    # it), so the assertion below actually exercises the wrap under test
+    # rather than a ranking accident.
+    uncoerced = _top_live_api_for_purpose(
+        "static_portrait", "video",
+        snapshot=_fal_snapshot(), on_date=PRE_SUNSET,
+    )
+    assert uncoerced == "KLING_3_0"
 
     result = _fallback_optimize(
         user_input="a woman stands in a corridor",
@@ -991,6 +1022,8 @@ def test_fallback_aspect_incompatible_engine_not_suggested(monkeypatch):
         on_date=PRE_SUNSET,
         aspect_ratio="9:16",
     )
+    assert result["purpose"] == "static_portrait"
+    assert result["suggested_video_api"] != "KLING_3_0"
     assert result["suggested_video_api"] == "AUTO"
 
 

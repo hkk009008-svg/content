@@ -265,11 +265,17 @@ def test_generate_video_returns_none_on_file_processing_failed(tmp_path):
     """URI failed terminal: the Files API resource itself can reach FAILED
     state (distinct from the interaction's own status). Pre-fix, the poll
     loop only checked `!= "ACTIVE"`, so a FAILED file spun until the 20-minute
-    poll budget exhausted instead of being classified immediately."""
+    poll budget exhausted instead of being classified immediately.
+
+    This failure occurs AFTER the interaction reached "completed" status (the
+    file-processing poll only starts once a completed interaction points at a
+    uri-delivered video) — the provider has already billed, so on_billed must
+    still fire even though this path returns None."""
     api = GeminiOmniAPI.__new__(GeminiOmniAPI)
     api._model = "gemini-omni-flash-preview"
     api.client = MagicMock()
     api.client.interactions.create.return_value = _completed_interaction(with_inline_data=False)
+    on_billed = MagicMock()
 
     failed_file = MagicMock()
     failed_file.state = "FAILED"
@@ -286,11 +292,16 @@ def test_generate_video_returns_none_on_file_processing_failed(tmp_path):
     with patch("gemini_omni_native.time.sleep", return_value=None):
         result = api.generate_video(
             image_path=str(image_path), prompt="hello", output_path=output_path,
+            on_billed=on_billed,
         )
 
     assert result is None
     api.client.files.download.assert_not_called()
     assert not os.path.exists(output_path)
+    # Post-billing retrieval failure: on_billed must still fire exactly once
+    # (money-gate class) — this would FAIL if on_billed were moved to after
+    # the (never-reached, on this path) download step.
+    on_billed.assert_called_once()
     # The discriminating assertion: pre-fix, FAILED was indistinguishable from
     # "still processing" so the loop kept polling files.get() up to
     # max_polls+1 times before giving up via TimeoutError. Fixed code
@@ -305,11 +316,17 @@ def test_generate_video_returns_none_on_file_processing_failed(tmp_path):
 def test_generate_video_returns_none_when_active_file_has_no_download_uri(tmp_path):
     """An ACTIVE file with no download_uri (e.g. an uploaded, non-generated
     file) must be classified explicitly rather than raising out of
-    files.download() into the generic blanket-exception path."""
+    files.download() into the generic blanket-exception path.
+
+    Like the FAILED-file-state case, this is reached only after the
+    interaction itself reached "completed" status, so the provider has
+    already billed — on_billed must still fire even though this path
+    returns None."""
     api = GeminiOmniAPI.__new__(GeminiOmniAPI)
     api._model = "gemini-omni-flash-preview"
     api.client = MagicMock()
     api.client.interactions.create.return_value = _completed_interaction(with_inline_data=False)
+    on_billed = MagicMock()
 
     active_file = MagicMock()
     active_file.state = "ACTIVE"
@@ -322,11 +339,16 @@ def test_generate_video_returns_none_when_active_file_has_no_download_uri(tmp_pa
 
     result = api.generate_video(
         image_path=str(image_path), prompt="hello", output_path=output_path,
+        on_billed=on_billed,
     )
 
     assert result is None
     api.client.files.download.assert_not_called()
     assert not os.path.exists(output_path)
+    # Post-billing retrieval failure: on_billed must still fire exactly once
+    # (money-gate class) — this would FAIL if on_billed were moved to after
+    # the (never-reached, on this path) download step.
+    on_billed.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
