@@ -22,6 +22,39 @@ import pytest
 from domain.provider_catalog import RuntimeSnapshot
 
 
+@pytest.fixture(autouse=True)
+def _restore_phase_c_ffmpeg_identity():
+    """Undo this file's `sys.modules.pop("phase_c_ffmpeg", None)` calls.
+
+    The pops are deliberate WITHIN a test: phase_c_ffmpeg lazy-imports provider
+    SDKs inside its dispatch branches, so forcing a reimport is how this file
+    makes those branches pick up its stubs. What was missing is the other half.
+    A bare pop is not self-healing the way an attribute-less stub is — the next
+    `import phase_c_ffmpeg` builds a NEW module object, so a later file's
+    `patch("phase_c_ffmpeg.<attr>")` decorates one object while the code under
+    test executes the other. The patch silently does nothing, and the traceback
+    names the innocent later file.
+
+    Observed cost before this fix: test_budget_pre_spend_gate.py::
+    test_real_aspect_reject_never_selects_leftover_or_existing_destination
+    failed roughly 43 percent of shuffled file orders, because its patched
+    probe_final_media never took effect — so _accept_or_reject fell into
+    "could not probe dims — accepting" (phase_c_ffmpeg.py:2306) and let a
+    1920x1080 clip through a 9:16 project all the way to _finalize_motion_take.
+
+    This file already knew the rule: its own finally block says "Restore, not
+    just pop" and restores veo_native. It just never applied it to
+    phase_c_ffmpeg, which it pops 6 times.
+    """
+    saved = sys.modules.get("phase_c_ffmpeg")
+    try:
+        yield
+    finally:
+        if saved is not None:
+            sys.modules["phase_c_ffmpeg"] = saved
+        else:
+            sys.modules.pop("phase_c_ffmpeg", None)
+
 def _ctx(aspect: str):
     from cinema.context import PipelineContext
     return PipelineContext(global_settings={"aspect_ratio": aspect})
