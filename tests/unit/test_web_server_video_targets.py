@@ -2032,3 +2032,71 @@ def test_generated_shot_validation_calls_the_same_policy_evaluator(
     )
     assert validated["target_api"] == "AUTO"
     assert validated["_target_api_policy_reason"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# ADR-080 — the per-engine settings schema declares only what the program reads
+# ---------------------------------------------------------------------------
+
+# The only keys any reader in the program takes off an api_engines entry. Each
+# is proven live by executing its real reader below, so this set cannot quietly
+# decay into a list of things nothing reads — the exact defect ADR-080 closed
+# (5 inert sub-fields survived 2026-05-28 → 2026-07-31 because only prose said
+# they were dead, and prose does not fail a build).
+_LIVE_API_ENGINE_KEYS = {"enabled", "storyboard_mode"}
+
+
+def test_api_engine_defaults_declares_no_unread_subfields():
+    """Every declared per-engine key must be one the program actually reads.
+
+    Re-adding a decorative field (duration / resolution / generate_audio /
+    face_consistency / camera_motion_native) fails here. To make one
+    legitimate: wire a reader first, prove it in the companion test, then
+    widen ``_LIVE_API_ENGINE_KEYS`` — in that order.
+    """
+    import web_server
+
+    declared = {
+        key
+        for config in web_server._API_ENGINE_DEFAULTS.values()
+        for key in config
+    }
+    unread = sorted(declared - _LIVE_API_ENGINE_KEYS)
+    assert not unread, (
+        f"per-engine sub-field(s) declared but read by nothing: {unread}. "
+        f"Wire a reader or drop the field — see ADR-080."
+    )
+
+    # ...and every engine keeps the toggle, or the UI loses its only control.
+    missing = sorted(
+        engine
+        for engine, config in web_server._API_ENGINE_DEFAULTS.items()
+        if "enabled" not in config
+    )
+    assert not missing, f"engine(s) missing the enabled toggle: {missing}"
+
+
+def test_api_engine_defaults_allowed_keys_are_each_live():
+    """Execute the real reader for every allowed key so the pin can't go vacuous.
+
+    Guards the opposite direction from the test above: if a reader is deleted
+    or stops responding to its key, the key is no longer live and must leave
+    both ``_LIVE_API_ENGINE_KEYS`` and the defaults catalog.
+    """
+    from cinema.phases.motion_render import _get_storyboard_mode
+    from domain.video_engine_policy import _is_project_disabled
+
+    # `enabled` — the single funnel every api_engines consumer routes through.
+    assert _is_project_disabled("LTX", {"LTX": {"enabled": False}}) is True
+    assert _is_project_disabled("LTX", {"LTX": {"enabled": True}}) is False
+
+    # `storyboard_mode` — KLING_NATIVE only.
+    def _project(mode: bool) -> dict:
+        return {
+            "global_settings": {
+                "api_engines": {"KLING_NATIVE": {"storyboard_mode": mode}},
+            },
+        }
+
+    assert _get_storyboard_mode(_project(True)) is True
+    assert _get_storyboard_mode(_project(False)) is False

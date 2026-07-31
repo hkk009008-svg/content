@@ -1,5 +1,5 @@
 import { Section, Badge, Toggle } from '../../ui'
-import type { AppConfig } from '../../../types/project'
+import type { AppConfig, ApiEngineConfig } from '../../../types/project'
 import { cascadeEngineOptions } from '../../../lib/engines'
 import { isPodGated } from '../../../lib/podGating'
 import { RangeRow, ToggleRow, SelectRow } from './controls'
@@ -36,16 +36,30 @@ const COLOR_GRADE_PRESETS = [
  * marked primary. Each row's cloud-vs-pod badge is derived from
  * `isPodGated` — provider-keyed, so a future pod-billed video engine
  * surfaces ⚙ Pod without a code change here. Enable state writes the whole
- * nested `api_engines` object (settings write contract).
+ * nested `api_engines` object (settings write contract), with the touched
+ * engine's entry narrowed to the fields the backend reads — see
+ * `setEngineEnabled` and ADR-080.
  */
 export function VideoSection({ s, config, update }: Props) {
   const engines = cascadeEngineOptions(config)
   const engineState = s.api_engines ?? {}
 
+  // Enable/disable is the only per-engine write path. Rebuild the touched
+  // entry from the fields the backend actually reads rather than spreading
+  // `existing` wholesale: a project saved before the ADR-080 schema trim can
+  // still hold inert keys (duration/resolution/generate_audio/...) on disk,
+  // and a blind spread would re-persist them on every toggle. Only the
+  // toggled key is rebuilt — sweeping every engine off one click would be a
+  // silent migration hiding in a click handler.
   const setEngineEnabled = (key: string, enabled: boolean) => {
     const current = s.api_engines ?? config?.api_engine_defaults ?? {}
-    const existing = current[key] ?? config?.api_engine_defaults?.[key] ?? { enabled: true }
-    update('api_engines', { ...current, [key]: { ...existing, enabled } })
+    const existing: ApiEngineConfig | undefined =
+      current[key] ?? config?.api_engine_defaults?.[key]
+    const next: ApiEngineConfig = { enabled }
+    if (existing?.storyboard_mode !== undefined) {
+      next.storyboard_mode = existing.storyboard_mode
+    }
+    update('api_engines', { ...current, [key]: next })
   }
 
   const sceneTransitions = s.scene_transitions === true

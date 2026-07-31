@@ -810,7 +810,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:2651](web_server.py:2651) — uses the
+`api_generate_dialogue` at [web_server.py:2656](web_server.py:2656) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -978,13 +978,17 @@ flag (default OFF), via an additive `auto_research: bool = False` param on
 `get_location_reference` is currently unconsumed; a location influences
 generation today via `prompt_fragment` text + deterministic seed only.
 
-**Known follow-up (on-switch coherence):** the flag's UI default is declared in
-`api_engine_defaults` (`/api/config`) but read at runtime from
-`project["global_settings"]["location_research"]`; the settings-save path that
-persists the toggle must target `global_settings` for the opt-in to take effect
-end-to-end. Resolve alongside Part 2 / the api-engine toggle wiring.
+**Known follow-up (no operator control):** the namespace mismatch this section
+previously described is resolved — `location_research` is no longer declared in
+`api_engine_defaults` (`tests/unit/test_location_research.py` pins it out of
+that namespace) and is read at runtime from
+`project["global_settings"]["location_research"]`, default OFF
+(`web_server.py:1517`). What remains is the opposite gap: **no UI writes it.**
+The flag has zero references in `web/src` after the 2026-07 Resolve redesign,
+so the opt-in is reachable only by editing project settings directly. Give it a
+Setup control alongside Part 2.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-08-01*
 
 ---
 
