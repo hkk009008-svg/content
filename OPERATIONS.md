@@ -342,6 +342,24 @@ collected count). The `@unittest.skip` entries formerly in
 `test_project_persistence.py` were removed when the `domain.*` namespace
 fix un-skipped them (ARCHITECTURE.md §16, 2026-06-09).
 
+**Prerequisites — a venv alone is not enough.** The unit suite needs the
+frontend dev-dependencies installed as well:
+
+```bash
+cd web && npm install
+```
+
+Without them the `test_product_surface_inventory.py` tests fail with
+`TypeScript compiler unavailable: Cannot find module 'typescript'` — the
+inventory walks `web/src` with the real TypeScript compiler. CI installs them
+for the same reason (`dcc7b048`).
+
+The suite does **not** need API credentials. `tests/conftest.py` supplies
+placeholder values for every provider key, so a checkout with no `.env` runs
+identically to one with real keys — every affected test mocks its client, and
+nothing is sent anywhere. A real environment or `.env` still wins. (Contrast
+the integration tests below, which do need real credentials.)
+
 ### TypeScript
 
 ```bash

@@ -8,6 +8,60 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
+# Placeholder credentials — keep the suite hermetic
+# ---------------------------------------------------------------------------
+# Runs at conftest IMPORT time, which is before any test module (and therefore
+# before ``config.settings``) is imported. That ordering is load-bearing:
+# ``config/settings.py`` builds a frozen ``Settings`` singleton at import behind
+# ``@lru_cache(maxsize=1)``, so a value set after that point would be ignored.
+#
+# WHY this exists. Production code changes SHAPE when a credential is absent,
+# and a surprising number of fully-mocked unit tests depend on the credentialed
+# shape without ever saying so:
+#   * phase_c_vision.validate_shot_quality_vision returns a default
+#     ``{"score": 7, "pass": True}`` before it ever constructs the (mocked)
+#     OpenAI client, so ``assert result["score"] == 8`` sees 7.
+#   * domain.provider_catalog.build_runtime_snapshot reads these keys off the
+#     settings singleton, so with none present EVERY video engine reports
+#     ``runtime_unavailable`` and the mocked client is never called at all
+#     (``call_args`` is None -> "cannot unpack non-iterable NoneType").
+# Without this block those tests fail on a bare bootstrap and pass only because
+# the developer happens to have a gitignored ``.env`` — i.e. the suite's result
+# depended on a private file. That is the defect; the red was the symptom.
+#
+# These are NOT a way to reach a live provider. Every affected test mocks its
+# client, so the value is never sent anywhere; the strings are deliberately
+# self-describing so that if one ever DID escape to a real API the failure
+# reads as an obvious test placeholder rather than a mysterious auth error.
+#
+# ``setdefault`` (not assignment) so a real environment always wins, and
+# ``config/settings.py``'s ``load_dotenv(..., override=True)`` still overrides
+# these for a developer who has a real ``.env``.
+_PLACEHOLDER_CREDENTIAL_ENV = (
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "KLING_ACCESS_KEY",
+    "KLING_SECRET_KEY",
+    "FAL_KEY",
+    "LTX_API_KEY",
+    "RUNWAYML_API_SECRET",
+    "ELEVENLABS_API_KEY",
+    "CARTESIA_API_KEY",
+    "STABILITY_API_KEY",
+    "SUNO_API_KEY",
+    "VIGGLE_API_KEY",
+    "FIRECRAWL_API_KEY",
+    "TAVILY_API_KEY",
+)
+
+for _name in _PLACEHOLDER_CREDENTIAL_ENV:
+    os.environ.setdefault(_name, f"test-placeholder-not-a-real-{_name}")
+del _name
+
+
+# ---------------------------------------------------------------------------
 # Custom markers for tiered test execution
 # ---------------------------------------------------------------------------
 

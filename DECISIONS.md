@@ -3757,3 +3757,69 @@ Evidence:
   `AttributeError: module 'cv2' has no attribute 'CascadeClassifier'`.
 - **Cross-ref:** `requirements.txt:36-52` (the pin and its comment);
   `requirements-lock-py39.txt:92` (already `==4.13.0.92`, inside the cap).
+
+## ADR-076 — The unit suite supplies placeholder credentials instead of skipping without them
+
+- **Date:** 2026-08-01
+- **Status:** Accepted.
+- **Context.** On a checkout with no `.env`, 33 unit tests failed across
+  `test_f1b_dialogue_lipsync.py` (8), `test_generate_ai_video_params.py` (15)
+  and `test_phase_c_vision.py` (10). They read as ordinary red, so a fresh
+  bootstrap looked broken. Every one of them is **fully mocked** and needs no
+  network access; they failed because *production changes shape* when a
+  credential is absent, and the mock is then never reached:
+  - `phase_c_vision.validate_shot_quality_vision` (`phase_c_vision.py:187-190`)
+    returns a default `{"score": 7, "pass": True}` before it constructs the
+    (patched) OpenAI client, so `assert result["score"] == 8` observes `7`.
+  - `build_runtime_snapshot` reads the provider keys off the settings
+    singleton, so with none present every video engine reports
+    `runtime_unavailable`; `generate_ai_video` returns early and the mocked
+    client is never invoked at all (`call_args is None` →
+    `TypeError: cannot unpack non-iterable NoneType object`).
+  The real defect is that **the suite's result depended on a private,
+  gitignored file**. The red was the symptom.
+- **Decision.** `tests/conftest.py` sets a self-describing placeholder for each
+  provider credential at conftest import time — before any test module (and so
+  before `config.settings`) is imported, which matters because `Settings` is
+  frozen behind `@lru_cache(maxsize=1)` at import. `os.environ.setdefault`, not
+  assignment, so a real environment wins; `config/settings.py`'s
+  `load_dotenv(..., override=True)` still overrides them for a developer with a
+  real `.env`.
+- **Alternative rejected — `skipif` when credentials are absent.** This was the
+  obvious-looking fix and it is the wrong one. CI has no secrets either, so the
+  tests would skip *there too*, and the vision-QA response parsing, LTX
+  resolution routing and overlay wiring they cover would silently stop being
+  tested — the vacuous-test shape this repo already has doctrine about. A skip
+  also hides a live finding: `validate_shot_quality_vision` **fails open** with
+  no key, returning `pass: True`. Green-by-skipping would have concealed it.
+- **Consequences.**
+  - The 33 tests **pass** rather than skip: coverage is retained, and it now
+    runs identically with and without `.env`.
+  - Ambient credential *absence* is no longer a usable test condition. That is
+    intended, and it matches the convention these files already follow —
+    absence is constructed explicitly (`_no_openai_settings()`,
+    `_no_anthropic_settings()` in `tests/unit/test_phase_c_vision.py`), never
+    inherited from the environment. New tests must do the same.
+  - A partially-populated `.env` now behaves like a full one for the keys it
+    omits. This makes local runs match CI instead of varying per developer.
+  - No test reaches a provider: each mocks its client, and the placeholder
+    strings are self-identifying so an escaped call would fail as an obvious
+    test artifact rather than a puzzling auth error.
+- **Evidence.** Per-file, run in isolation to avoid the `sys.modules`
+  `ltx_native` stub leakage that appears when these files are run together:
+  `8 failed / 15 failed / 10 failed` → `37 passed / 15 passed / 60 passed`.
+  Full bare-bootstrap suite, same tree, before → after:
+  `115 failed, 4425 passed, 2 skipped` → `82 failed, 4458 passed, 2 skipped`
+  — exactly 33 converted from failing to **passing**, zero regressions, and
+  wall-clock unchanged (256.19s → 259.13s), which is the check that no test
+  started reaching the network on the strength of a placeholder key.
+  All 82 residual failures are in one unrelated file:
+  `test_product_surface_inventory.py` needs `web/node_modules`
+  (`TypeScript compiler unavailable: Cannot find module 'typescript'`), which
+  CI installs (`dcc7b048`) and OPERATIONS.md now documents as a prerequisite.
+  With that prerequisite met and **still no `.env` present**, the suite is
+  `4540 passed, 2 skipped, 0 failed` — so OPERATIONS.md's "all pass, 0 failed"
+  is now true for a bootstrap that needs no secrets at all.
+- **Cross-ref:** `tests/conftest.py` (the block and its rationale);
+  OPERATIONS.md "Unit tests" (prerequisites); ADR-075 (the other half of the
+  same bare-bootstrap red).
