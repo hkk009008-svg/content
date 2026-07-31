@@ -533,16 +533,110 @@ def test_decompose_scene_threads_project_disabled_state_from_global_settings(
     )
 
 
-def test_competitive_decompose_scene_threads_aspect_state_from_global_settings(
+def test_competitive_decompose_scene_calls_evaluator_with_project_settings(
     monkeypatch,
 ):
+    """Spy proof: competitive_decompose_scene must call the shared policy
+    evaluator, once per raw shot, with the ``api_engines``/``aspect_ratio``
+    sourced from the project's ``global_settings`` — the same evaluator
+    ``test_generated_shot_validation_calls_the_same_policy_evaluator`` in
+    ``test_web_server_video_targets.py`` spies on at the authoring boundary.
+    Unlike a monkeypatched compatibility predicate, this stays RED if the
+    threading is ever dropped from ``_enrich_validated_shots``'s call.
+    """
+    from domain.video_engine_policy import VideoTargetDecision
+
+    _mock_llm_scaffolding(monkeypatch)
+    scene = {
+        "id": "scene_b",
+        "title": "B Scene",
+        "action": "Bob runs.",
+        "duration_seconds": 5,  # target_shots == 2
+    }
+    characters = [{"id": "char_b", "name": "Bob"}]
+    location = {"description": "a street"}
+    global_settings = {
+        "aspect_ratio": "9:16",
+        "api_engines": {"SEEDANCE": {"enabled": False}},
+    }
+
+    class FixedEnsemble:
+        def __init__(self, **kwargs):
+            pass
+
+        def competitive_generate(self, **kwargs):
+            return SimpleNamespace(
+                winner_index=0,
+                winner_content={
+                    "shots": [_valid_shot("KLING_3_0"), _valid_shot("SEEDANCE")]
+                },
+                scores=[1.0],
+                reasoning="best",
+                models_used=["gpt-4o"],
+            )
+
+    monkeypatch.setattr(sd, "LLMEnsemble", FixedEnsemble)
+
+    evaluator = MagicMock(
+        side_effect=lambda requested, **kwargs: VideoTargetDecision(
+            requested=requested if isinstance(requested, str) else "",
+            target=requested if isinstance(requested, str) else "AUTO",
+            accepted=True,
+        )
+    )
+    monkeypatch.setattr(sd, "evaluate_shot_target", evaluator)
+
+    shots = sd.competitive_decompose_scene(
+        scene,
+        characters,
+        location,
+        global_settings,
+        runtime_snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+    )
+
+    assert len(shots) == 2
+    assert evaluator.call_count == 2
+    evaluator.assert_any_call(
+        "KLING_3_0",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines=global_settings["api_engines"],
+        aspect_ratio=global_settings["aspect_ratio"],
+    )
+    evaluator.assert_any_call(
+        "SEEDANCE",
+        snapshot=_fal_snapshot(),
+        on_date=PRE_SUNSET,
+        api_engines=global_settings["api_engines"],
+        aspect_ratio=global_settings["aspect_ratio"],
+    )
+
+
+def test_competitive_decompose_scene_coerces_aspect_incompatible_engine_via_real_policy(
+    monkeypatch,
+):
+    """End-to-end proof through the REAL policy (no monkeypatched
+    predicate): a 9:16 project plus an aspect-incompatible engine in the raw
+    LLM output must coerce to AUTO with the policy reason recorded, mirroring
+    the aspect_incompatible cases already exercised for engine choice in
+    ``test_web_server_video_targets.py``
+    (``test_project_config_applies_project_aspect_policy`` /
+    ``test_direct_shot_write_applies_latest_project_policy``).
+
+    ``is_video_aspect_compatible`` itself is never stubbed — only the
+    portrait-capability allowlist DATA it reads is narrowed by one engine, so
+    the real compatibility arithmetic (``aspect_ratio != "9:16" or key in
+    PORTRAIT_CAPABLE_VIDEO_ENGINES``) still runs and genuinely decides the
+    outcome from the threaded aspect_ratio.
+    """
     import domain.video_engine_policy as video_engine_policy
 
     _mock_llm_scaffolding(monkeypatch)
     monkeypatch.setattr(
         video_engine_policy,
-        "is_video_aspect_compatible",
-        lambda _key, _aspect: False,
+        "PORTRAIT_CAPABLE_VIDEO_ENGINES",
+        video_engine_policy.PORTRAIT_CAPABLE_VIDEO_ENGINES - {"KLING_3_0"},
     )
     scene = {
         "id": "scene_b",
