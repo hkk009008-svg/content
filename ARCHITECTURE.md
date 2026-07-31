@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:460](web_server.py:460)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:450](web_server.py:450)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -668,7 +668,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:2489](web_server.py:2489) — uses the
+`api_generate_dialogue` at [web_server.py:2456](web_server.py:2456) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 

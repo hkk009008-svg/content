@@ -15,9 +15,14 @@ CATALOG:
     web_server.py:1402 + domain/project_manager.py:1081 — reorder_scenes now
     preserves any scene absent from the posted scene_ids (survivor pass); a
     partial list reorders, never deletes. Kept as a live regression test below.
-  confirmed[15] W2:MAJOR:http-addchar-float-unguarded
-    web_server.py:567,1053 — bare float() on ip_adapter_weight with no guard ->
-    ValueError 500 on non-numeric input (e.g. "abc").
+  confirmed[15] W2:MAJOR:http-addchar-float-unguarded — CLOSED BY REMOVAL
+    Was: bare float() on ip_adapter_weight with no guard -> ValueError 500 on
+    non-numeric input (e.g. "abc"). Guarded by _parse_ip_adapter_weight, then
+    the field itself was deleted end to end (9d removal follow-up) because it
+    had no production reader at any layer. No numeric field remains on these
+    four mutators, so the unguarded-float class is gone rather than fixed.
+    The surviving pin below covers the removal's own risk: an old client that
+    still sends the key must be ignored inertly, not 500 and not persisted.
   confirmed[16] W2:MEDIUM:http-null-json-body
     web_server.py:1966,2610,2656 — request.json None -> None.get() AttributeError
     500 when caller sends Content-Type: application/json with body null.
@@ -234,90 +239,25 @@ def test_reorder_scenes_partial_list_preserves_unlisted_scenes(tmp_path, monkeyp
 
 
 # ---------------------------------------------------------------------------
-# confirmed[15] — W2:MAJOR:http-addchar-float-unguarded
+# confirmed[15] — W2:MAJOR:http-addchar-float-unguarded (CLOSED BY REMOVAL)
+#
+# The original six pins asserted 400 for non-numeric / non-finite / boolean
+# ip_adapter_weight at the four character+object mutators. The field has since
+# been deleted end to end, so there is no value to validate and no float() to
+# guard — those pins would now assert a contract that cannot exist.
+#
+# What replaces them is the risk the DELETION introduces: a stale client (an
+# old cached UI bundle, an operator script) that still sends the key. It must
+# be ignored inertly — never a 500 from an unexpected field, and never written
+# back into the record, since a persisted-but-unread value is exactly the
+# decorative state this removal exists to eliminate.
 # ---------------------------------------------------------------------------
 
-def test_add_character_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
-    """Submitting ip_adapter_weight='abc' must yield 400, not 500."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
-
-    resp = client.post(
-        f"/api/projects/{pid}/characters",
-        data={
-            "name": "Test Char",
-            "description": "desc",
-            "ip_adapter_weight": "abc",
-        },
-        content_type="multipart/form-data",
-    )
-    # CURRENT behaviour (bug): 500 (uncaught ValueError from bare float("abc"))
-    # FIXED behaviour: 400 with a JSON error
-    assert resp.status_code == 400, (
-        f"Expected 400 for non-numeric ip_adapter_weight, got {resp.status_code}: {resp.data!r}"
-    )
-
-
-def test_add_object_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
-    """Submitting ip_adapter_weight='abc' via /objects must yield 400, not 500."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
-
-    resp = client.post(
-        f"/api/projects/{pid}/objects",
-        data={
-            "name": "Test Object",
-            "description": "desc",
-            "ip_adapter_weight": "abc",
-        },
-        content_type="multipart/form-data",
-    )
-    # CURRENT behaviour (bug): 500 (uncaught ValueError from bare float("abc"))
-    # FIXED behaviour: 400 with a JSON error
-    assert resp.status_code == 400, (
-        f"Expected 400 for non-numeric ip_adapter_weight in /objects, "
-        f"got {resp.status_code}: {resp.data!r}"
-    )
-
-
-def test_update_character_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
-    """Submitting ip_adapter_weight='abc' via character update must yield 400."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
-    cid = _add_character_record(pid, monkeypatch, tmp_path)
-
-    resp = client.put(
-        f"/api/projects/{pid}/characters/{cid}",
-        json={"ip_adapter_weight": "abc"},
-    )
-    assert resp.status_code == 400, (
-        f"Expected 400 for non-numeric ip_adapter_weight in character update, "
-        f"got {resp.status_code}: {resp.data!r}"
-    )
-
-
-def test_update_object_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
-    """Submitting ip_adapter_weight='abc' via object update must yield 400."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
-    oid = _add_object_record(pid, monkeypatch, tmp_path)
-
-    resp = client.put(
-        f"/api/projects/{pid}/objects/{oid}",
-        json={"ip_adapter_weight": "abc"},
-    )
-    assert resp.status_code == 400, (
-        f"Expected 400 for non-numeric ip_adapter_weight in object update, "
-        f"got {resp.status_code}: {resp.data!r}"
-    )
-
-
-def test_ip_adapter_weight_rejects_non_finite_values_on_all_mutators(client, tmp_path, monkeypatch):
-    """NaN/inf ip_adapter_weight values must be rejected at every write site."""
+def test_removed_ip_adapter_weight_is_ignored_not_persisted_on_all_mutators(
+    client, tmp_path, monkeypatch,
+):
+    """A stale client sending ip_adapter_weight must get a success, and the
+    value must not survive into the stored record at any of the four mutators."""
     from domain import project_manager
     monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
     pid, _ = _make_project_dir(tmp_path, monkeypatch)
@@ -329,69 +269,44 @@ def test_ip_adapter_weight_rejects_non_finite_values_on_all_mutators(client, tmp
             "add character",
             client.post,
             f"/api/projects/{pid}/characters",
-            {"data": {"name": "Bad Char", "description": "desc", "ip_adapter_weight": "nan"}},
+            {"data": {"name": "Stale Char", "description": "desc",
+                      "ip_adapter_weight": "0.85"}},
         ),
         (
             "add object",
             client.post,
             f"/api/projects/{pid}/objects",
-            {"data": {"name": "Bad Object", "description": "desc", "ip_adapter_weight": "inf"}},
+            {"json": {"name": "Stale Object", "description": "desc",
+                      "ip_adapter_weight": 0.85}},
         ),
         (
             "update character",
             client.put,
             f"/api/projects/{pid}/characters/{cid}",
-            {"json": {"ip_adapter_weight": "-inf"}},
+            {"json": {"ip_adapter_weight": 0.85}},
         ),
         (
             "update object",
             client.put,
             f"/api/projects/{pid}/objects/{oid}",
-            {"json": {"ip_adapter_weight": "nan"}},
+            {"json": {"ip_adapter_weight": 0.85}},
         ),
     ]
     for label, method, url, kwargs in cases:
         resp = method(url, **kwargs)
-        assert resp.status_code == 400, (
-            f"Expected 400 for non-finite ip_adapter_weight on {label}, "
-            f"got {resp.status_code}: {resp.data!r}"
+        assert resp.status_code < 400, (
+            f"A stale ip_adapter_weight must be ignored, not rejected, on "
+            f"{label}; got {resp.status_code}: {resp.data!r}"
         )
 
-
-def test_ip_adapter_weight_rejects_boolean_json_values(client, tmp_path, monkeypatch):
-    """JSON booleans are not numeric operator weights even though float(True) works."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
-    cid = _add_character_record(pid, monkeypatch, tmp_path)
-    oid = _add_object_record(pid, monkeypatch, tmp_path)
-
-    cases = [
-        (
-            "add object",
-            client.post,
-            f"/api/projects/{pid}/objects",
-            {"json": {"name": "Bool Object", "description": "desc", "ip_adapter_weight": True}},
-        ),
-        (
-            "update character",
-            client.put,
-            f"/api/projects/{pid}/characters/{cid}",
-            {"json": {"ip_adapter_weight": False}},
-        ),
-        (
-            "update object",
-            client.put,
-            f"/api/projects/{pid}/objects/{oid}",
-            {"json": {"ip_adapter_weight": True}},
-        ),
-    ]
-    for label, method, url, kwargs in cases:
-        resp = method(url, **kwargs)
-        assert resp.status_code == 400, (
-            f"Expected 400 for boolean ip_adapter_weight on {label}, "
-            f"got {resp.status_code}: {resp.data!r}"
-        )
+    # The key must not have been written into ANY stored character or object.
+    stored = project_manager.load_project(pid)
+    records = list(stored.get("characters", [])) + list(stored.get("objects", []))
+    assert records, "fixture produced no character/object records to inspect"
+    offenders = [r.get("name") for r in records if "ip_adapter_weight" in r]
+    assert not offenders, (
+        f"ip_adapter_weight was persisted despite removal, on: {offenders}"
+    )
 
 
 # ---------------------------------------------------------------------------

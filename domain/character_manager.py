@@ -127,7 +127,6 @@ def create_character_with_images(
     description: str,
     reference_image_paths: Optional[List[str]] = None,
     voice_id: str = "",
-    ip_adapter_weight: float = 0.85,
     commit_timeout: float = 10,
     gender: str = "",
     cost_tracker=None,
@@ -147,7 +146,6 @@ def create_character_with_images(
     character = make_character(
         name, description,
         voice_id=voice_id,
-        ip_adapter_weight=ip_adapter_weight,
         gender=gender,
     )
     cid = character["id"]

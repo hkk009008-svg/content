@@ -1117,14 +1117,15 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 
 | Knob | Default | Range | Effect | File |
 |---|---|---|---|---|
-| `ip_adapter_weight` | 0.85 | 0.5–1.0 | PuLID face-lock strength (per-character and per-object) | `global_settings` |
-| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation | `domain/project_manager.py:324`, `cinema/shots/controller.py:672` |
-| `identity_threshold` | 0.55 | 0.4–0.8 | Per-shot face-similarity threshold | `global_settings` |
+| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation; the project-wide override for the per-shot threshold below | `domain/project_manager.py:324`, `cinema/shots/controller.py:672` |
+| `identity_threshold` | per shot type | — | Per-shot face-similarity threshold. **Not operator-settable** — derived from the shot type, then overridden project-wide by `identity_strictness` | `domain/continuity_engine.py`, `identity/types.py` |
 | `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:538`, `workflow_selector.py:337` |
 | `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:285` |
 | `char_lora_paths` | {} | dict | Legacy read-only LoRA registry snapshot; cannot be changed or consumed by current product paths | `global_settings` |
 
 Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:96`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
+
+**There is no per-character PuLID weight to set.** The PuLID face-lock weight on ComfyUI node `100` is resolved entirely by the machine: `workflow_selector`'s shot-type template supplies the base (portrait 1.0, medium 0.9, action 0.8, wide 0.65, landscape 0.0 — PuLID off), and `adaptive_pulid` then nudges it from rolling ArcFace stats. A per-character `ip_adapter_weight` field used to be stored and shown in the UI but was never read by generation; it was deleted end to end (audit 2026-07-30, slice 9d + removal follow-up) because a single per-character scalar is the wrong shape for a weight whose measured value is shot-type dependent — pinning it would flatten that curve. To bias identity lock, use `identity_strictness` and reference-image quality, not a face-lock number.
 
 **LoRA availability is inactive by policy.** `POST .../characters/<cid>/train-lora` returns a stable 409 before it can load trainer/project dependencies, and project updates reject changes to the legacy `char_lora_paths`, `char_lora_strengths`, and `char_lora_triggers` snapshots. `GET .../characters/<cid>/lora-status` remains only to read historical sidecars; it reports `training_available=false`, `registration_available=false`, `consumer_available=false`, and `policy="dormant"`. Those fields are diagnostics, never reactivation flags. The active identity path is reference-based: upload clear multi-angle reference images for Gemini multi-reference (the default primary), with PuLID reference conditioning on the ComfyUI fallback.
 
@@ -1205,7 +1206,7 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2139`) or auto-reco
 1. Use the default `identity_backend="gemini_multiref"` so Gemini binds identity from the character's reference set; keep the ComfyUI/RunPod PuLID path available as its reference-conditioned fallback. (There is no longer a `quality_tier="max"` switch — it was retired in WS1 Task 4.)
 2. Upload many clear real reference photos per character, with front, three-quarter, and profile coverage; let the multi-angle reference expansion run.
 3. Confirm every in-frame character has a canonical reference and useful multi-angle references. Per-character LoRA is policy-inactive and is not part of this recipe.
-4. `identity_strictness=0.70`, `ip_adapter_weight≈0.90` for the PuLID fallback, and keep `adaptive_pulid=true`.
+4. `identity_strictness=0.70`, and keep `adaptive_pulid=true` so the PuLID fallback self-calibrates its face-lock weight from the shot-type base. (There is no operator-settable face-lock weight — see §B.)
 5. Keep `img2img_denoise` low (0.2–0.3) for consecutive same-scene shots so the prior approved keyframe anchors identity.
 
 **To get a clean, controlled background (no smear, no stray figures):**
@@ -1829,8 +1830,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 |---|---|---|---|
 | `quality_tier` | `"production"` | Informational only — the `"max"` fork was retired in WS1 Task 4; production is the sole tier | `"production"` |
 | `identity_strictness` | `0.60` | Face-similarity threshold post-keyframe | `0.70–0.75` for portraits |
-| `adaptive_pulid` | `True` | Rolling-stats PuLID self-calibration | keep `True` |
-| `ip_adapter_weight` | `0.85` | PuLID face-lock strength (per-char & per-object) | `0.85–0.95` |
+| `adaptive_pulid` | `True` | Rolling-stats PuLID self-calibration — the only face-lock-strength control; the per-character `ip_adapter_weight` field was removed as reader-less | keep `True` |
 | `prompt_optimizer_enabled` | `True`¹ | LLM rewrites prompt pre-gen, cached on `optimizer_cache` | `True` |
 | `char_lora_paths` | `{}` | Legacy read-only LoRA registry snapshot | preserve old values unchanged; current identity uses Gemini multi-reference / PuLID references |
 | `style_reference_paths` | `[]` | Style-board images (fed FLUX Redux in the retired max tier; now threaded but dormant) | provide a style board |

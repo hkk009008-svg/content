@@ -29,7 +29,6 @@ function makeObject(overrides: Partial<ProductObject> = {}): ProductObject {
     branding_constraints: 'logo always visible, centered',
     scale_reference: 'fits in adult hand, ~24cm tall',
     texture_anchor: "gold 'Aurora' wordmark",
-    ip_adapter_weight: 0.85,
     embedding_cache: '',
     ...overrides,
   }

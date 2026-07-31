@@ -67,7 +67,7 @@ class TestGuidedProjectLedger(GuidedPipelineTestCase):
     def test_character_fragment_keeps_identity_out_of_prompt_details(self):
         project = project_manager.make_project("Continuity")
         project["characters"] = [
-            project_manager.make_character("Mina", "Lead", reference_images=[], voice_id="", ip_adapter_weight=0.85)
+            project_manager.make_character("Mina", "Lead", reference_images=[], voice_id="")
         ]
         project["characters"][0]["id"] = "char_mina"
         project["characters"][0]["physical_traits"] = "green eyes, black hair, heart-shaped face"

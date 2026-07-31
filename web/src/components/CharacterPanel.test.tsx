@@ -14,7 +14,6 @@ function makeProject(id = 'project-lora-history'): Project {
       reference_images: Array.from({ length: 25 }, (_, i) => `/refs/${i}.jpg`),
       canonical_reference: '/refs/0.jpg',
       voice_id: '',
-      ip_adapter_weight: 0.85,
       physical_traits: '',
       embedding_cache: '',
     }],
@@ -249,32 +248,34 @@ describe('CharacterPanel dormant LoRA history', () => {
 })
 
 // ---------------------------------------------------------------------------
-// ip_adapter_weight (PuLID face-lock strength) is stored but has no
-// production consumer (audit 2026-07-30; plan slice 9d). generate_ai_broll's
-// PuLID node weight comes from workflow_selector's shot-type template or the
-// adaptive_pulid gate — never from Character.ip_adapter_weight. Rather than
-// leave a slider that silently does nothing, the control is removed and the
-// stored value is surfaced read-only with the reason, mirroring this file's
-// existing dormant-LoRA pattern.
+// ip_adapter_weight (PuLID face-lock strength) had no production consumer at
+// any layer (audit 2026-07-30; plan slice 9d, then this removal follow-up).
+// generate_ai_broll's PuLID node ("100") weight comes from workflow_selector's
+// shot-type template or the adaptive_pulid gate — never from the character
+// record. Slice 9d labeled the control read-only; it is now deleted end to end
+// (UI, API, and the make_character/make_object factories) because a
+// per-character scalar is the wrong SHAPE for a weight whose measured value is
+// shot-type dependent (portrait 1.0 → wide 0.65 → landscape 0.0): making the
+// stored value the base would flatten that measured curve.
+//
+// These pins guard the removal — they fail if a decorative control or a
+// phantom payload field is reintroduced.
 // ---------------------------------------------------------------------------
-describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
-  it('shows the stored PuLID value as read-only text with an explanatory reason', async () => {
+describe('CharacterPanel has no ip_adapter_weight surface (9d removal)', () => {
+  it('shows no PuLID text or slider on a stored character', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
 
     render(<CharacterPanel project={makeProject()} config={null} onRefresh={vi.fn()} />)
 
-    expect(screen.getByText('PuLID stored: 0.85')).toBeInTheDocument()
-    expect(screen.getByText(
-      'PuLID strength · not used by production — generation applies the shot-type '
-      + 'PuLID template and the adaptive face-lock gate instead.',
-    )).toBeInTheDocument()
+    expect(screen.queryByText(/PuLID/i)).toBeNull()
+    expect(screen.queryByRole('slider')).toBeNull()
 
     // Flush the LoRA-status GET this component always issues on mount so its
     // state update lands inside act() instead of after the test returns.
     await act(async () => { await Promise.resolve() })
   })
 
-  it('offers no slider or other editable control for ip_adapter_weight in the add form', () => {
+  it('offers no editable control for ip_adapter_weight in the add form', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
     const project = makeProject()
     project.characters = []
@@ -287,7 +288,7 @@ describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
     expect(screen.queryByText(/PuLID/i)).toBeNull()
   })
 
-  it('offers no slider or other editable control for ip_adapter_weight in the inline edit form', async () => {
+  it('offers no editable control for ip_adapter_weight in the inline edit form', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(historyPayload())))
 
     render(<CharacterPanel project={makeProject()} config={null} onRefresh={vi.fn()} />)
@@ -299,7 +300,7 @@ describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
     await act(async () => { await Promise.resolve() })
   })
 
-  it('resubmits the unchanged stored value on save rather than a UI-driven edit', async () => {
+  it('omits ip_adapter_weight from the update payload entirely', async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) => response(historyPayload()),
     )
@@ -315,6 +316,6 @@ describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
 
     const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!
     const body = JSON.parse(putCall[1]!.body as string)
-    expect(body.ip_adapter_weight).toBe(0.85)
+    expect(body).not.toHaveProperty('ip_adapter_weight')
   })
 })

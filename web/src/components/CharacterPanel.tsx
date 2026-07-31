@@ -109,7 +109,7 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(true)
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
+  const [form, setForm] = useState({ name: '', description: '', voice_id: '' })
   const [files, setFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [loraLoads, setLoraLoads] = useState<Record<string, HistoricalLoraLoad>>({})
@@ -159,13 +159,12 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
     fd.append('name', form.name)
     fd.append('description', form.description)
     fd.append('voice_id', form.voice_id)
-    fd.append('ip_adapter_weight', form.ip_adapter_weight)
     if (files) {
       Array.from(files).forEach(f => fd.append('reference_images', f))
     }
 
     await fetch(`${API}/projects/${project.id}/characters`, { method: 'POST', body: fd })
-    setForm({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
+    setForm({ name: '', description: '', voice_id: '' })
     setFiles(null)
     setAdding(false)
     setSubmitting(false)
@@ -182,7 +181,7 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const startEdit = (c: any) => {
     setEditingId(c.id)
     setEditFiles(null)
-    setForm({ name: c.name, description: c.description || '', voice_id: c.voice_id || '', ip_adapter_weight: String(c.ip_adapter_weight || 0.85) })
+    setForm({ name: c.name, description: c.description || '', voice_id: c.voice_id || '' })
   }
 
   const handleSaveEdit = async () => {
@@ -195,14 +194,13 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
       fd.append('name', form.name)
       fd.append('description', form.description)
       fd.append('voice_id', form.voice_id)
-      fd.append('ip_adapter_weight', form.ip_adapter_weight)
       Array.from(editFiles).forEach(f => fd.append('reference_images', f))
       await fetch(`${API}/projects/${project.id}/characters/${editingId}`, { method: 'PUT', body: fd })
     } else {
       await fetch(`${API}/projects/${project.id}/characters/${editingId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, description: form.description, voice_id: form.voice_id, ip_adapter_weight: parseFloat(form.ip_adapter_weight) }),
+        body: JSON.stringify({ name: form.name, description: form.description, voice_id: form.voice_id }),
       })
     }
     setEditingId(null)
@@ -307,9 +305,6 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                       <div className="font-medium text-tx text-sm">{c.name}</div>
                       <div className="text-mut text-xs mt-0.5 line-clamp-2">{c.description}</div>
                       <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                        <span className="text-eyebrow bg-panel px-1.5 py-0.5 rounded text-mut">
-                          PuLID stored: {c.ip_adapter_weight}
-                        </span>
                         {c.canonical_reference && (
                           <span className="text-eyebrow bg-green-900/30 text-ok px-1.5 py-0.5 rounded">
                             Face locked
@@ -326,15 +321,6 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                           </span>
                         )}
                       </div>
-                      {/* Read-only: PuLID face-lock strength is stored per character (round-trips
-                          old projects) but generation currently applies the shot-type PuLID
-                          template + adaptive face-lock gate, never this per-character value.
-                          No editable control is offered so the operator isn't misled into
-                          thinking the slider changes anything (audit 2026-07-30, slice 9d). */}
-                      <p className="text-eyebrow-sm text-dim mt-1" data-policy="informational">
-                        PuLID strength · not used by production — generation applies the shot-type
-                        PuLID template and the adaptive face-lock gate instead.
-                      </p>
                     </div>
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 shrink-0">
                       <button onClick={() => startEdit(c)} className="text-acc hover:text-acc text-xs">

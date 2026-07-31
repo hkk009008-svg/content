@@ -63,18 +63,19 @@ class TestMakeCharacter:
         assert ch["description"] == "A brave hero"
         assert ch["reference_images"] == []
         assert ch["voice_id"] == ""
-        assert ch["ip_adapter_weight"] == 0.85
+        # ip_adapter_weight was removed end to end (9d removal follow-up): it
+        # had no production reader at any layer, and the PuLID node weight is
+        # resolved from the shot-type template / adaptive gate instead.
+        assert "ip_adapter_weight" not in ch
 
     def test_custom_fields(self):
         ch = project_manager.make_character(
             "Bob", "Villain",
             reference_images=["img1.png"],
             voice_id="v42",
-            ip_adapter_weight=0.5,
         )
         assert ch["reference_images"] == ["img1.png"]
         assert ch["voice_id"] == "v42"
-        assert ch["ip_adapter_weight"] == 0.5
 
     def test_unique_ids(self):
         ids = {project_manager.make_character("c", "d")["id"] for _ in range(50)}
