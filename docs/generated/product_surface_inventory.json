@@ -180,6 +180,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "apiPut",
+      "id": "frontend-operation:23a57f932ef74eef",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 72,
+        "path": "web/src/components/edit/ShotBin.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "assemblePromptSections",
       "id": "frontend-operation:26bed98a584c475c",
       "kind": "unknown_wrapper_call",
@@ -209,6 +225,22 @@
       },
       "transport_id": null,
       "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:333bfb22656846e1",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/characters",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 192,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/characters"
     },
     {
       "backend_route_ids": [],
@@ -302,7 +334,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 28,
+        "line": 35,
         "path": "web/src/components/pages/EditPage.tsx"
       },
       "transport_id": null,
@@ -323,23 +355,6 @@
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_update_project:4de0aade993f8606"
-      ],
-      "id": "frontend-operation:4a0d0660412d06e5",
-      "kind": "direct_transport",
-      "method": "PUT",
-      "path_shape": "/api/projects/{1}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 37,
-        "path": "web/src/components/setup/SettingsInspector.tsx"
-      },
-      "transport_id": "frontend-transport:8c862baef67de0dc",
-      "url_template": "/api/projects/{1}"
     },
     {
       "backend_route_ids": [],
@@ -390,23 +405,6 @@
       "url_template": null
     },
     {
-      "backend_route_ids": [
-        "route:api_update_character:f63c1dfe4fa9002d"
-      ],
-      "id": "frontend-operation:4c459e386e6b78c7",
-      "kind": "direct_transport",
-      "method": "PUT",
-      "path_shape": "/api/projects/{1}/characters/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 202,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "transport_id": "frontend-transport:72b68c98338c5fb5",
-      "url_template": "/api/projects/{1}/characters/{2}"
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "apiPut",
       "id": "frontend-operation:4f94614bccedb928",
@@ -454,6 +452,22 @@
       },
       "transport_id": null,
       "url_template": "/api/projects/{1}/cancel"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:5574e837ece94259",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/style-rules",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 131,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/style-rules"
     },
     {
       "backend_route_ids": [],
@@ -521,6 +535,22 @@
       "url_template": null
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:5b2ca2bf73829eb9",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 226,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
       "backend_route_ids": [
         "route:api_update_object:2720ef76155f563a"
       ],
@@ -552,6 +582,22 @@
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
       "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPost",
+      "id": "frontend-operation:6492e783f1e52a7b",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/cost-estimate",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 39,
+        "path": "web/src/components/settings/CostEstimatorSection.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/cost-estimate"
     },
     {
       "backend_route_ids": [],
@@ -855,26 +901,10 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 167,
+        "line": 173,
         "path": "web/src/components/shared/Filmstrip.tsx"
       },
       "transport_id": null,
-      "url_template": null
-    },
-    {
-      "backend_route_ids": [],
-      "expanded_wrapper": "handleDelete",
-      "id": "frontend-operation:8f2a758e2cf1467a",
-      "kind": "unknown_wrapper_call",
-      "method": "DELETE",
-      "path_shape": null,
-      "query_keys": [],
-      "route_match": "unknown",
-      "source": {
-        "line": 343,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "transport_id": "frontend-transport:12c287d81f870250",
       "url_template": null
     },
     {
@@ -1006,23 +1036,6 @@
       "url_template": null
     },
     {
-      "backend_route_ids": [
-        "route:api_cost_estimate:0b28a387a0a62a25"
-      ],
-      "id": "frontend-operation:a40e51b474ae385b",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/cost-estimate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 26,
-        "path": "web/src/components/settings/CostEstimatorSection.tsx"
-      },
-      "transport_id": "frontend-transport:762c39ae3109f0e4",
-      "url_template": "/api/cost-estimate"
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "apiRequest",
       "id": "frontend-operation:a5b7640490106f83",
@@ -1080,7 +1093,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 25,
+        "line": 52,
         "path": "web/src/components/edit/ShotViewer.tsx"
       },
       "transport_id": null,
@@ -1187,21 +1200,20 @@
       "url_template": "/api/projects/{1}/scenes/{2}"
     },
     {
-      "backend_route_ids": [
-        "route:api_add_character:46bcb34585739e28"
-      ],
-      "id": "frontend-operation:b6e2630716a1ae48",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/characters",
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiPut",
+      "id": "frontend-operation:b7615a219eadfa65",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}",
       "query_keys": [],
-      "route_match": "matched",
+      "route_match": "unknown",
       "source": {
-        "line": 167,
-        "path": "web/src/components/CharacterPanel.tsx"
+        "line": 77,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
       },
-      "transport_id": "frontend-transport:9d7f69eb1915fde5",
-      "url_template": "/api/projects/{1}/characters"
+      "transport_id": null,
+      "url_template": "/api/projects/{1}"
     },
     {
       "backend_route_ids": [],
@@ -1213,7 +1225,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 64,
+        "line": 108,
         "path": "web/src/components/edit/ShotBin.tsx"
       },
       "transport_id": null,
@@ -1298,23 +1310,6 @@
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_update_character:f63c1dfe4fa9002d"
-      ],
-      "id": "frontend-operation:bdeded298f4eeea3",
-      "kind": "direct_transport",
-      "method": "PUT",
-      "path_shape": "/api/projects/{1}/characters/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 200,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "transport_id": "frontend-transport:d78d83c0b38eb521",
-      "url_template": "/api/projects/{1}/characters/{2}"
     },
     {
       "backend_route_ids": [],
@@ -1431,23 +1426,6 @@
       "url_template": "/api/projects/{1}/shots/{2}/upload-driving-video"
     },
     {
-      "backend_route_ids": [
-        "route:api_generate_style_rules:90cfb97f206104fb"
-      ],
-      "id": "frontend-operation:db6921d8ab0a817b",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/projects/{1}/style-rules",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 78,
-        "path": "web/src/components/setup/SettingsInspector.tsx"
-      },
-      "transport_id": "frontend-transport:cfee29dfc302c06e",
-      "url_template": "/api/projects/{1}/style-rules"
-    },
-    {
       "backend_route_ids": [],
       "expanded_wrapper": "getSceneGuidance",
       "id": "frontend-operation:dd9784c65f743e24",
@@ -1489,7 +1467,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 141,
+        "line": 143,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "transport_id": "frontend-transport:f72fe25a94cb2bcf",
@@ -1529,6 +1507,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "apiPut",
+      "id": "frontend-operation:e5d6f92e6995cba8",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 227,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "videoEngines",
       "id": "frontend-operation:e8ba6403ef9b8fe0",
       "kind": "unknown_wrapper_call",
@@ -1553,7 +1547,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 42,
+        "line": 49,
         "path": "web/src/components/setup/SceneCueSheet.tsx"
       },
       "transport_id": null,
@@ -1645,6 +1639,22 @@
       },
       "transport_id": "frontend-transport:1bc3fdf0fdfe8792",
       "url_template": "/api/projects"
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiDelete",
+      "id": "frontend-operation:f71f133b2ebf5877",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/projects/{1}/characters/{2}",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 207,
+        "path": "web/src/components/CharacterPanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/projects/{1}/characters/{2}"
     },
     {
       "backend_route_ids": [],
@@ -1741,26 +1751,6 @@
       },
       "url_expression": "`${API}/projects/${project.id}/locations/${editingId}`",
       "url_template": "/api/projects/{1}/locations/{2}"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_remove_character:fbd1680d60d08895"
-      ],
-      "enclosing_function": "handleDelete",
-      "id": "frontend-transport:12c287d81f870250",
-      "kind": "fetch",
-      "method": "DELETE",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/characters/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 176,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/characters/${cid}`",
-      "url_template": "/api/projects/{1}/characters/{2}"
     },
     {
       "backend_route_ids": [
@@ -2005,46 +1995,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_update_character:f63c1dfe4fa9002d"
-      ],
-      "enclosing_function": "handleSaveEdit",
-      "id": "frontend-transport:72b68c98338c5fb5",
-      "kind": "fetch",
-      "method": "PUT",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/characters/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 202,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
-      "url_template": "/api/projects/{1}/characters/{2}"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_cost_estimate:0b28a387a0a62a25"
-      ],
-      "enclosing_function": "CostEstimatorSection",
-      "id": "frontend-transport:762c39ae3109f0e4",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/cost-estimate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 26,
-        "path": "web/src/components/settings/CostEstimatorSection.tsx"
-      },
-      "url_expression": "`${API}/cost-estimate`",
-      "url_template": "/api/cost-estimate"
-    },
-    {
-      "backend_route_ids": [
         "route:api_add_location:4522f1083c852069"
       ],
       "enclosing_function": "handleAdd",
@@ -2085,26 +2035,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_update_project:4de0aade993f8606"
-      ],
-      "enclosing_function": "update",
-      "id": "frontend-transport:8c862baef67de0dc",
-      "kind": "fetch",
-      "method": "PUT",
-      "non_2xx_observation": "observed",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 37,
-        "path": "web/src/components/setup/SettingsInspector.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}`",
-      "url_template": "/api/projects/{1}"
-    },
-    {
-      "backend_route_ids": [
         "route:api_update_location:4c4e5e22465a2b60"
       ],
       "enclosing_function": "handleSaveEdit",
@@ -2140,26 +2070,6 @@
       },
       "url_expression": "input",
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_add_character:46bcb34585739e28"
-      ],
-      "enclosing_function": "handleAdd",
-      "id": "frontend-transport:9d7f69eb1915fde5",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/characters",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 167,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/characters`",
-      "url_template": "/api/projects/{1}/characters"
     },
     {
       "backend_route_ids": [
@@ -2281,46 +2191,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_generate_style_rules:90cfb97f206104fb"
-      ],
-      "enclosing_function": "generateStyleRules",
-      "id": "frontend-transport:cfee29dfc302c06e",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/style-rules",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 78,
-        "path": "web/src/components/setup/SettingsInspector.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/style-rules`",
-      "url_template": "/api/projects/{1}/style-rules"
-    },
-    {
-      "backend_route_ids": [
-        "route:api_update_character:f63c1dfe4fa9002d"
-      ],
-      "enclosing_function": "handleSaveEdit",
-      "id": "frontend-transport:d78d83c0b38eb521",
-      "kind": "fetch",
-      "method": "PUT",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/projects/{1}/characters/{2}",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 200,
-        "path": "web/src/components/CharacterPanel.tsx"
-      },
-      "url_expression": "`${API}/projects/${project.id}/characters/${editingId}`",
-      "url_template": "/api/projects/{1}/characters/{2}"
-    },
-    {
-      "backend_route_ids": [
         "route:api_remove_object:ddc8fd9d84190a80"
       ],
       "enclosing_function": "handleDelete",
@@ -2393,7 +2263,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 97,
+        "line": 98,
         "path": "web/src/components/CharacterPanel.tsx"
       },
       "url_expression": "`${API}/projects/${projectId}/characters/${characterId}/lora-status`",
@@ -2429,7 +2299,7 @@
       "path_shape": "/",
       "rule": "/",
       "source": {
-        "line": 774,
+        "line": 775,
         "path": "web_server.py"
       }
     },
@@ -2441,7 +2311,7 @@
       "path_shape": "/api/cleanup-all",
       "rule": "/api/cleanup-all",
       "source": {
-        "line": 4160,
+        "line": 4207,
         "path": "web_server.py"
       }
     },
@@ -2453,7 +2323,7 @@
       "path_shape": "/api/config",
       "rule": "/api/config",
       "source": {
-        "line": 935,
+        "line": 936,
         "path": "web_server.py"
       }
     },
@@ -2465,7 +2335,7 @@
       "path_shape": "/api/cost-estimate",
       "rule": "/api/cost-estimate",
       "source": {
-        "line": 1075,
+        "line": 1076,
         "path": "web_server.py"
       }
     },
@@ -2477,7 +2347,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 1093,
+        "line": 1094,
         "path": "web_server.py"
       }
     },
@@ -2489,7 +2359,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 1098,
+        "line": 1099,
         "path": "web_server.py"
       }
     },
@@ -2501,7 +2371,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1536,
+        "line": 1560,
         "path": "web_server.py"
       }
     },
@@ -2513,7 +2383,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1106,
+        "line": 1107,
         "path": "web_server.py"
       }
     },
@@ -2525,7 +2395,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1446,
+        "line": 1470,
         "path": "web_server.py"
       }
     },
@@ -2537,7 +2407,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1362,
+        "line": 1386,
         "path": "web_server.py"
       }
     },
@@ -2549,7 +2419,7 @@
       "path_shape": "/api/projects/{1}/apply-language-defaults",
       "rule": "/api/projects/<pid>/apply-language-defaults",
       "source": {
-        "line": 1011,
+        "line": 1012,
         "path": "web_server.py"
       }
     },
@@ -2561,7 +2431,7 @@
       "path_shape": "/api/projects/{1}/assemble",
       "rule": "/api/projects/<pid>/assemble",
       "source": {
-        "line": 3727,
+        "line": 3774,
         "path": "web_server.py"
       }
     },
@@ -2573,7 +2443,7 @@
       "path_shape": "/api/projects/{1}/assemble/re-assemble",
       "rule": "/api/projects/<pid>/assemble/re-assemble",
       "source": {
-        "line": 3924,
+        "line": 3971,
         "path": "web_server.py"
       }
     },
@@ -2585,7 +2455,7 @@
       "path_shape": "/api/projects/{1}/assemble/screen",
       "rule": "/api/projects/<pid>/assemble/screen",
       "source": {
-        "line": 3749,
+        "line": 3796,
         "path": "web_server.py"
       }
     },
@@ -2597,7 +2467,7 @@
       "path_shape": "/api/projects/{1}/cancel",
       "rule": "/api/projects/<pid>/cancel",
       "source": {
-        "line": 3003,
+        "line": 3050,
         "path": "web_server.py"
       }
     },
@@ -2609,7 +2479,7 @@
       "path_shape": "/api/projects/{1}/capability-scorecard",
       "rule": "/api/projects/<pid>/capability-scorecard",
       "source": {
-        "line": 1114,
+        "line": 1115,
         "path": "web_server.py"
       }
     },
@@ -2621,7 +2491,7 @@
       "path_shape": "/api/projects/{1}/characters",
       "rule": "/api/projects/<pid>/characters",
       "source": {
-        "line": 1552,
+        "line": 1576,
         "path": "web_server.py"
       }
     },
@@ -2633,7 +2503,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 1729,
+        "line": 1762,
         "path": "web_server.py"
       }
     },
@@ -2645,7 +2515,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 1603,
+        "line": 1627,
         "path": "web_server.py"
       }
     },
@@ -2657,7 +2527,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/lora-status",
       "rule": "/api/projects/<pid>/characters/<cid>/lora-status",
       "source": {
-        "line": 1872,
+        "line": 1905,
         "path": "web_server.py"
       }
     },
@@ -2669,7 +2539,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}/train-lora",
       "rule": "/api/projects/<pid>/characters/<cid>/train-lora",
       "source": {
-        "line": 1760,
+        "line": 1793,
         "path": "web_server.py"
       }
     },
@@ -2681,7 +2551,7 @@
       "path_shape": "/api/projects/{1}/checkpoint",
       "rule": "/api/projects/<pid>/checkpoint",
       "source": {
-        "line": 2840,
+        "line": 2887,
         "path": "web_server.py"
       }
     },
@@ -2693,7 +2563,7 @@
       "path_shape": "/api/projects/{1}/cleanup",
       "rule": "/api/projects/<pid>/cleanup",
       "source": {
-        "line": 4112,
+        "line": 4159,
         "path": "web_server.py"
       }
     },
@@ -2705,7 +2575,7 @@
       "path_shape": "/api/projects/{1}/cost-live",
       "rule": "/api/projects/<pid>/cost-live",
       "source": {
-        "line": 4134,
+        "line": 4181,
         "path": "web_server.py"
       }
     },
@@ -2717,7 +2587,7 @@
       "path_shape": "/api/projects/{1}/disk-usage",
       "rule": "/api/projects/<pid>/disk-usage",
       "source": {
-        "line": 4127,
+        "line": 4174,
         "path": "web_server.py"
       }
     },
@@ -2729,7 +2599,7 @@
       "path_shape": "/api/projects/{1}/export",
       "rule": "/api/projects/<pid>/export",
       "source": {
-        "line": 4172,
+        "line": 4219,
         "path": "web_server.py"
       }
     },
@@ -2741,7 +2611,7 @@
       "path_shape": "/api/projects/{1}/file",
       "rule": "/api/projects/<pid>/file",
       "source": {
-        "line": 3035,
+        "line": 3082,
         "path": "web_server.py"
       }
     },
@@ -2753,7 +2623,7 @@
       "path_shape": "/api/projects/{1}/generate",
       "rule": "/api/projects/<pid>/generate",
       "source": {
-        "line": 2756,
+        "line": 2803,
         "path": "web_server.py"
       }
     },
@@ -2765,7 +2635,7 @@
       "path_shape": "/api/projects/{1}/locations",
       "rule": "/api/projects/<pid>/locations",
       "source": {
-        "line": 2223,
+        "line": 2264,
         "path": "web_server.py"
       }
     },
@@ -2777,7 +2647,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 2345,
+        "line": 2392,
         "path": "web_server.py"
       }
     },
@@ -2789,7 +2659,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 2270,
+        "line": 2311,
         "path": "web_server.py"
       }
     },
@@ -2801,7 +2671,7 @@
       "path_shape": "/api/projects/{1}/objects",
       "rule": "/api/projects/<pid>/objects",
       "source": {
-        "line": 2048,
+        "line": 2081,
         "path": "web_server.py"
       }
     },
@@ -2813,7 +2683,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 2203,
+        "line": 2244,
         "path": "web_server.py"
       }
     },
@@ -2825,7 +2695,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 2118,
+        "line": 2156,
         "path": "web_server.py"
       }
     },
@@ -2837,7 +2707,7 @@
       "path_shape": "/api/projects/{1}/pause",
       "rule": "/api/projects/<pid>/pause",
       "source": {
-        "line": 3521,
+        "line": 3568,
         "path": "web_server.py"
       }
     },
@@ -2849,7 +2719,7 @@
       "path_shape": "/api/projects/{1}/pipeline-state",
       "rule": "/api/projects/<pid>/pipeline-state",
       "source": {
-        "line": 3541,
+        "line": 3588,
         "path": "web_server.py"
       }
     },
@@ -2861,7 +2731,7 @@
       "path_shape": "/api/projects/{1}/preview/{2}",
       "rule": "/api/projects/<pid>/preview/<sid>",
       "source": {
-        "line": 4181,
+        "line": 4228,
         "path": "web_server.py"
       }
     },
@@ -2873,7 +2743,7 @@
       "path_shape": "/api/projects/{1}/proceed-assembly",
       "rule": "/api/projects/<pid>/proceed-assembly",
       "source": {
-        "line": 3728,
+        "line": 3775,
         "path": "web_server.py"
       }
     },
@@ -2885,7 +2755,7 @@
       "path_shape": "/api/projects/{1}/resume",
       "rule": "/api/projects/<pid>/resume",
       "source": {
-        "line": 3531,
+        "line": 3578,
         "path": "web_server.py"
       }
     },
@@ -2897,7 +2767,7 @@
       "path_shape": "/api/projects/{1}/scenes",
       "rule": "/api/projects/<pid>/scenes",
       "source": {
-        "line": 2364,
+        "line": 2411,
         "path": "web_server.py"
       }
     },
@@ -2909,7 +2779,7 @@
       "path_shape": "/api/projects/{1}/scenes/reorder",
       "rule": "/api/projects/<pid>/scenes/reorder",
       "source": {
-        "line": 2583,
+        "line": 2630,
         "path": "web_server.py"
       }
     },
@@ -2921,7 +2791,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 2568,
+        "line": 2615,
         "path": "web_server.py"
       }
     },
@@ -2933,7 +2803,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 2390,
+        "line": 2437,
         "path": "web_server.py"
       }
     },
@@ -2945,7 +2815,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
       "rule": "/api/projects/<pid>/scenes/<sid>/decompose",
       "source": {
-        "line": 2639,
+        "line": 2686,
         "path": "web_server.py"
       }
     },
@@ -2957,7 +2827,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
       "rule": "/api/projects/<pid>/scenes/<sid>/generate-dialogue",
       "source": {
-        "line": 2603,
+        "line": 2650,
         "path": "web_server.py"
       }
     },
@@ -2969,7 +2839,7 @@
       "path_shape": "/api/projects/{1}/screening/approve",
       "rule": "/api/projects/<pid>/screening/approve",
       "source": {
-        "line": 3835,
+        "line": 3882,
         "path": "web_server.py"
       }
     },
@@ -2981,7 +2851,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}",
       "rule": "/api/projects/<pid>/shots/<shot_id>",
       "source": {
-        "line": 3424,
+        "line": 3471,
         "path": "web_server.py"
       }
     },
@@ -2993,7 +2863,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/correct",
       "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
       "source": {
-        "line": 3694,
+        "line": 3741,
         "path": "web_server.py"
       }
     },
@@ -3005,7 +2875,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
       "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
       "source": {
-        "line": 3714,
+        "line": 3761,
         "path": "web_server.py"
       }
     },
@@ -3017,7 +2887,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
       "source": {
-        "line": 3201,
+        "line": 3248,
         "path": "web_server.py"
       }
     },
@@ -3029,7 +2899,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
       "source": {
-        "line": 3128,
+        "line": 3175,
         "path": "web_server.py"
       }
     },
@@ -3041,7 +2911,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
       "source": {
-        "line": 3153,
+        "line": 3200,
         "path": "web_server.py"
       }
     },
@@ -3053,7 +2923,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
       "source": {
-        "line": 3182,
+        "line": 3229,
         "path": "web_server.py"
       }
     },
@@ -3065,7 +2935,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance",
       "rule": "/api/projects/<pid>/shots/<sid>/performance",
       "source": {
-        "line": 1953,
+        "line": 1986,
         "path": "web_server.py"
       }
     },
@@ -3077,7 +2947,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
       "source": {
-        "line": 3164,
+        "line": 3211,
         "path": "web_server.py"
       }
     },
@@ -3089,7 +2959,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
       "source": {
-        "line": 3103,
+        "line": 3150,
         "path": "web_server.py"
       }
     },
@@ -3101,7 +2971,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
       "source": {
-        "line": 3115,
+        "line": 3162,
         "path": "web_server.py"
       }
     },
@@ -3113,7 +2983,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/prompt",
       "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
       "source": {
-        "line": 3387,
+        "line": 3434,
         "path": "web_server.py"
       }
     },
@@ -3125,7 +2995,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
       "source": {
-        "line": 3635,
+        "line": 3682,
         "path": "web_server.py"
       }
     },
@@ -3137,7 +3007,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
       "source": {
-        "line": 3315,
+        "line": 3362,
         "path": "web_server.py"
       }
     },
@@ -3149,7 +3019,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/restart",
       "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
       "source": {
-        "line": 3587,
+        "line": 3634,
         "path": "web_server.py"
       }
     },
@@ -3161,7 +3031,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
       "source": {
-        "line": 3212,
+        "line": 3259,
         "path": "web_server.py"
       }
     },
@@ -3173,7 +3043,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
       "rule": "/api/projects/<pid>/shots/<sid>/upload-driving-video",
       "source": {
-        "line": 1883,
+        "line": 1916,
         "path": "web_server.py"
       }
     },
@@ -3185,7 +3055,7 @@
       "path_shape": "/api/projects/{1}/stream",
       "rule": "/api/projects/<pid>/stream",
       "source": {
-        "line": 2933,
+        "line": 2980,
         "path": "web_server.py"
       }
     },
@@ -3197,7 +3067,7 @@
       "path_shape": "/api/projects/{1}/style-board",
       "rule": "/api/projects/<pid>/style-board",
       "source": {
-        "line": 1995,
+        "line": 2028,
         "path": "web_server.py"
       }
     },
@@ -3209,7 +3079,7 @@
       "path_shape": "/api/projects/{1}/style-rules",
       "rule": "/api/projects/<pid>/style-rules",
       "source": {
-        "line": 2696,
+        "line": 2743,
         "path": "web_server.py"
       }
     },
@@ -3221,7 +3091,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:path>",
       "source": {
-        "line": 779,
+        "line": 780,
         "path": "web_server.py"
       }
     },
@@ -3233,7 +3103,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:filename>",
       "source": {
-        "line": 77,
+        "line": 78,
         "path": "web_server.py"
       }
     }
@@ -3297,6 +3167,18 @@
   "unresolved": [
     {
       "domain": "frontend",
+      "expression": "`${API}/projects/${project.id}/style-rules`",
+      "id": "unresolved:02d8d3b160c07254",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 131,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "config",
       "id": "unresolved:05e919e5ae5879ee",
       "kind": "unknown_wrapper_call",
@@ -3333,13 +3215,25 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:0d81e0e48aacb3eb",
+      "expression": "'/api/cost-estimate'",
+      "id": "unresolved:0f2af7482b34dbb1",
       "kind": "unknown_wrapper_call",
-      "owner": "handleDelete",
-      "reason": "wrapper URL parameter is transformed",
+      "owner": "apiPost",
+      "reason": "imported wrapper call",
       "source": {
-        "line": 343,
+        "line": 39,
+        "path": "web/src/components/settings/CostEstimatorSection.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:0f675e5309367660",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 226,
         "path": "web/src/components/CharacterPanel.tsx"
       }
     },
@@ -3441,18 +3335,6 @@
     },
     {
       "domain": "frontend",
-      "expression": "",
-      "id": "unresolved:29d3702485fc9d75",
-      "kind": "unknown_wrapper_call",
-      "owner": "handleDelete",
-      "reason": "wrapper URL parameter is transformed",
-      "source": {
-        "line": 172,
-        "path": "web/src/components/LocationPanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
       "expression": "`/api/projects/${pid}/pipeline-state`",
       "id": "unresolved:2d77ce61086a5d3f",
       "kind": "unknown_wrapper_call",
@@ -3495,7 +3377,7 @@
       "owner": "usePage",
       "reason": "imported wrapper call",
       "source": {
-        "line": 28,
+        "line": 35,
         "path": "web/src/components/pages/EditPage.tsx"
       }
     },
@@ -3615,7 +3497,7 @@
       "owner": "fileUrl",
       "reason": "imported wrapper call",
       "source": {
-        "line": 167,
+        "line": 173,
         "path": "web/src/components/shared/Filmstrip.tsx"
       }
     },
@@ -3681,6 +3563,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "`${base}/projects/${projectId}/scenes/${scene.id}`",
+      "id": "unresolved:80549fab1cc97c48",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPut",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 72,
+        "path": "web/src/components/edit/ShotBin.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "shot",
       "id": "unresolved:8085d456b8dac024",
       "kind": "unknown_wrapper_call",
@@ -3713,6 +3607,30 @@
       "source": {
         "line": 62,
         "path": "web/src/components/GenerationPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:8354ec249783a973",
+      "kind": "unknown_wrapper_call",
+      "owner": "handleDelete",
+      "reason": "wrapper URL parameter is transformed",
+      "source": {
+        "line": 194,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:85e540323054482d",
+      "kind": "unknown_wrapper_call",
+      "owner": "handleDelete",
+      "reason": "wrapper URL parameter is transformed",
+      "source": {
+        "line": 165,
+        "path": "web/src/components/ObjectPanel.tsx"
       }
     },
     {
@@ -3814,18 +3732,6 @@
     {
       "domain": "frontend",
       "expression": "",
-      "id": "unresolved:9612d9555261395d",
-      "kind": "unknown_wrapper_call",
-      "owner": "handleDelete",
-      "reason": "wrapper URL parameter is transformed",
-      "source": {
-        "line": 165,
-        "path": "web/src/components/ObjectPanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
       "id": "unresolved:97606e9063d00272",
       "kind": "unknown_wrapper_call",
       "owner": "handleUpdate",
@@ -3833,6 +3739,18 @@
       "source": {
         "line": 227,
         "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "`${API}/projects/${project.id}`",
+      "id": "unresolved:98b9607e9610608f",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPut",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 77,
+        "path": "web/src/components/setup/SettingsInspector.tsx"
       }
     },
     {
@@ -3897,6 +3815,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "",
+      "id": "unresolved:a8044b42c8eb03eb",
+      "kind": "unknown_wrapper_call",
+      "owner": "handleDelete",
+      "reason": "wrapper URL parameter is transformed",
+      "source": {
+        "line": 172,
+        "path": "web/src/components/LocationPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "url",
       "id": "unresolved:a84e6d2b270283e2",
       "kind": "unknown_wrapper_call",
@@ -3945,13 +3875,25 @@
     },
     {
       "domain": "frontend",
+      "expression": "`${API}/projects/${project.id}/characters/${cid}`",
+      "id": "unresolved:bbc653a17a3e7b36",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiDelete",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 207,
+        "path": "web/src/components/CharacterPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:bbe3a9a899954b25",
       "kind": "unknown_wrapper_call",
       "owner": "loadHistoricalLoraStatus",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 141,
+        "line": 143,
         "path": "web/src/components/CharacterPanel.tsx"
       }
     },
@@ -3994,18 +3936,6 @@
     {
       "domain": "frontend",
       "expression": "",
-      "id": "unresolved:cb3681ea854fdb9c",
-      "kind": "unknown_wrapper_call",
-      "owner": "handleDelete",
-      "reason": "wrapper URL parameter is transformed",
-      "source": {
-        "line": 194,
-        "path": "web/src/components/ScenePanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "",
       "id": "unresolved:cf08a54d60a6bb7c",
       "kind": "unknown_wrapper_call",
       "owner": "usePage",
@@ -4029,6 +3959,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "url",
+      "id": "unresolved:d0316ef294cbfe38",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiPut",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 227,
+        "path": "web/src/components/CharacterPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "shot",
       "id": "unresolved:d0adfd8e824e2137",
       "kind": "unknown_wrapper_call",
@@ -4047,7 +3989,7 @@
       "owner": "classifyShotType",
       "reason": "imported wrapper call",
       "source": {
-        "line": 64,
+        "line": 108,
         "path": "web/src/components/edit/ShotBin.tsx"
       }
     },
@@ -4059,7 +4001,7 @@
       "owner": "fileUrl",
       "reason": "imported wrapper call",
       "source": {
-        "line": 25,
+        "line": 52,
         "path": "web/src/components/edit/ShotViewer.tsx"
       }
     },
@@ -4149,6 +4091,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "`${API}/projects/${project.id}/characters`",
+      "id": "unresolved:ee75a6a05b05765a",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 192,
+        "path": "web/src/components/CharacterPanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "config",
       "id": "unresolved:eea6109b809c7b7b",
       "kind": "unknown_wrapper_call",
@@ -4215,7 +4169,7 @@
       "owner": "usePage",
       "reason": "imported wrapper call",
       "source": {
-        "line": 42,
+        "line": 49,
         "path": "web/src/components/setup/SceneCueSheet.tsx"
       }
     }

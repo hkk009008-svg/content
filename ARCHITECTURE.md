@@ -143,9 +143,9 @@ headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:378](web_server.py:378) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:378](web_server.py:378) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:408](web_server.py:408) |
+| `_progress_queues: dict[pid, Queue]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:379](web_server.py:379) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | `_pipelines_lock` (writes; reads are lock-free GIL-atomic `dict.get`) | [web_server.py:379](web_server.py:379) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:409](web_server.py:409) |
 | `_lora_training_threads` | `_lora_training_lock` | Legacy implementation registry retained below the unconditional dormant-policy denial; no current request inserts a job ([web_server.py](web_server.py)). |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
@@ -160,7 +160,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:2957](web_server.py:2957)) does
+  `api_stream` ([web_server.py:2981](web_server.py:2981)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -204,7 +204,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:575](web_server.py:575)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:576](web_server.py:576)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -668,7 +668,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:2627](web_server.py:2627) — uses the
+`api_generate_dialogue` at [web_server.py:2651](web_server.py:2651) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
