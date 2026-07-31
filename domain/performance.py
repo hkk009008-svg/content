@@ -137,9 +137,15 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
             return ENGINE_LIVE_PORTRAIT
         return ENGINE_ACT_ONE
 
-    # 3. VIGGLE — action without dialogue, full-body motion
+    # 3. VIGGLE — action without dialogue, full-body motion.
+    # CONTAINED (Slice 6c, 2026-07-31): the adapter targets Viggle's
+    # pre-official endpoint shape and provably mismatches the now-official
+    # API (catalog entry VIGGLE = KNOWN_BROKEN, source docs.viggle.ai), so
+    # auto-routing here guaranteed a failed capture. Action motion comes from
+    # the video engines natively; SKIP until the adapter-repair slice lands,
+    # at which point this branch returns ENGINE_VIGGLE again.
     if not has_dlg and st == SHOT_TYPE_ACTION:
-        return ENGINE_VIGGLE
+        return ENGINE_SKIP
 
     # 4. Dialogue in any other framing still benefits from ACT_ONE
     if has_dlg:

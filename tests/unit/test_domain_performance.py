@@ -75,9 +75,13 @@ class TestLivePortraitRouting:
 
 
 class TestViggleRouting:
-    def test_action_no_dialogue_routes_viggle(self):
+    def test_action_no_dialogue_skips_while_viggle_contained(self):
+        # Slice 6c containment: the Viggle adapter provably mismatches the
+        # now-official API (catalog KNOWN_BROKEN), so the auto-route returns
+        # SKIP — action motion comes from the video engines natively. Flips
+        # back to ENGINE_VIGGLE when the adapter-repair slice lands.
         shot = _shot(shot_type="action", dialogue="")
-        assert route_performance_engine(shot, None) == ENGINE_VIGGLE
+        assert route_performance_engine(shot, None) == ENGINE_SKIP
 
     def test_action_with_dialogue_routes_act_one(self):
         shot = _shot(shot_type="action", dialogue="Charge!")
@@ -107,9 +111,12 @@ class TestShotNeedsDrivingVideo:
         shot = _shot(shot_type="portrait", performance_budget_mode="cheap")
         assert shot_needs_driving_video(shot) is True
 
-    def test_viggle_needs_driving_video(self):
+    def test_contained_viggle_route_needs_no_driving_video(self):
+        # Slice 6c containment: action/no-dialogue routes SKIP (see
+        # TestViggleRouting), so no Mode-B driving video is synthesized for
+        # it. Flips back with the Viggle adapter-repair slice.
         shot = _shot(shot_type="action", dialogue="")
-        assert shot_needs_driving_video(shot) is True
+        assert shot_needs_driving_video(shot) is False
 
     def test_skip_does_not_need_driving_video(self):
         assert shot_needs_driving_video(_shot(characters_in_frame=[])) is False

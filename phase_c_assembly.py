@@ -13,8 +13,6 @@ from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAU
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from cinema.context import get_project_setting
 
-PEXELS_API_KEY = settings.pexels_api_key
-
 
 class ImageGenResult(NamedTuple):
     """Provenance-carrying result of an image-generation backend.

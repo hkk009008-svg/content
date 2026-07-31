@@ -80,7 +80,6 @@ class Settings:
 
     # Research / web
     firecrawl_api_key: str
-    pexels_api_key: str
     tavily_api_key: str
 
     # ComfyUI
@@ -122,7 +121,6 @@ class Settings:
             google_cloud_project=_env("GOOGLE_CLOUD_PROJECT"),
             google_cloud_location=_env("GOOGLE_CLOUD_LOCATION", "us-central1"),
             firecrawl_api_key=_env("FIRECRAWL_API_KEY"),
-            pexels_api_key=_env("PEXELS_API_KEY"),
             tavily_api_key=_env("TAVILY_API_KEY"),
             comfyui_server_url=_env("COMFYUI_SERVER_URL", "http://127.0.0.1:8188"),
             project_root=_PROJECT_ROOT,

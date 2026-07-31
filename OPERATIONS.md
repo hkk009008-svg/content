@@ -132,7 +132,6 @@ Authoritative list (every variable consumed by the pipeline):
 |---|---|---|
 | `FIRECRAWL_API_KEY` | Optional | Style director + scene decomposer cinematography research |
 | `TAVILY_API_KEY` | Optional | Same as above; preferred |
-| `PEXELS_API_KEY` | Optional | Stock footage fallback (rarely hit) |
 
 ### Infrastructure
 

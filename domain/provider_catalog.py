@@ -72,6 +72,7 @@ class Provider(StrEnum):
     STABILITY = "stability"
     ADOBE = "adobe"
     TOPAZ = "topaz"
+    VIGGLE = "viggle"
 
 
 class RequirementKind(StrEnum):
@@ -1127,6 +1128,58 @@ _CATALOG_ROWS = (
         Provider.RUNPOD_COMFYUI,
         (False, False, False),
         source=_source(kind=SourceKind.REPO_EVIDENCE),
+    ),
+    _entry(
+        # Slice 6c3: prior audits claimed Viggle had "no official contract" —
+        # that is stale. Viggle now publishes a developer API at
+        # https://docs.viggle.ai (verified 2026-07-31; viggle.ai itself 403s
+        # bots, so docs.viggle.ai is the only fetchable source). The live
+        # adapter (performance/viggle.py) provably mismatches that contract:
+        #   adapter                                  docs.viggle.ai
+        #   --------------------------------------   ---------------------------
+        #   https://api.viggle.ai/v1/motion-transfer  https://apis.viggle.ai/v1/renders
+        #   https://api.viggle.ai/v1/jobs/{job_id}     GET /v1/renders/{id}
+        #   files={"character_image", "motion_video"}  {"image"/"image_url",
+        #                                                "motion_video"/"motion_video_url"}
+        #   background_mode: white|green|transparent   background_mode: original|solid|
+        #                                                transparent (+ bg_color)
+        # i.e. wrong subdomain, wrong path, wrong polling shape, and two of
+        # three field names differ — this is not a credentials gap, it is a
+        # broken integration. KNOWN_BROKEN here is catalog-only (there is no
+        # "VIGGLE" row in domain.scene_decomposer.API_REGISTRY to project
+        # from — Viggle motion-retargeting was never routed through the
+        # legacy shot-generation registry; it's a Mode-A "performance
+        # capture" engine, a separate axis governed by
+        # domain/performance.py's ENGINE_VIGGLE + performance/_router.py).
+        # Added the same catalog-only way FAL_SVD was (legacy_visible=False).
+        #
+        # IMPORTANT — this entry does NOT yet gate performance/_router.py:
+        # verified by grep that neither domain/performance.py nor
+        # performance/_router.py import anything from domain.provider_catalog
+        # (only workflow_selector.py, phase_c_ffmpeg.py, web_server.py,
+        # llm/prompt_optimizer.py, cinema/phases/motion_render.py,
+        # cinema/shots/controller.py, domain/scene_decomposer.py, and
+        # domain/video_engine_policy.py consult this module). So today the
+        # Mode-A dispatcher (performance/_router.py:78-83) will still call
+        # performance.viggle.generate_viggle_performance() unconditionally
+        # when ENGINE_VIGGLE is selected — this KNOWN_BROKEN row records
+        # catalog truth (fails closed for anything that DOES consult
+        # effective_policy/runtime_availability, mirroring RUNWAY_ACT_ONE)
+        # but is NOT yet wired into the Mode-A dispatch path itself. Wiring
+        # domain/performance.py's engine selection to consult this catalog
+        # entry (so ENGINE_VIGGLE is never chosen, and _router.py refuses to
+        # dispatch it) is the dedicated repair slice referenced above — out
+        # of this slice's owned pathspec (domain/provider_catalog.py only).
+        "VIGGLE",
+        "Viggle (motion retargeting)",
+        Modality.VIDEO,
+        Maturity.UNKNOWN,
+        Lifecycle.ACTIVE,
+        ProductSupport.KNOWN_BROKEN,
+        Provider.VIGGLE,
+        (False, False, False),
+        source=_source("https://docs.viggle.ai", SourceKind.LIFECYCLE_NOTICE),
+        legacy_visible=False,
     ),
 )
 

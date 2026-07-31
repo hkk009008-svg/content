@@ -961,9 +961,14 @@ class TestPerformancePreSpendBudgetGate:
                 "characters_present": ["char_1"],
                 "shots": [{
                     "id": "shot_1_0",
-                    "prompt": "Action shot",
+                    # Dialogue medium shot routes ACT_ONE — a REAL engine, so
+                    # the pre-spend gate under test is actually engaged.
+                    # (Action/no-dialogue now routes SKIP under the Slice 6c
+                    # Viggle containment, which would bypass the gate.)
+                    "prompt": "Dialogue shot",
                     "plan_status": "approved",
-                    "shot_type": "action",
+                    "shot_type": "medium",
+                    "dialogue": "We hold the line.",
                     "characters_in_frame": ["char_1"],
                     "approved_keyframe_take_id": "kf_t1",
                     "driving_video_path": str(driving),
@@ -982,10 +987,10 @@ class TestPerformancePreSpendBudgetGate:
 
         assert result.get("success") is False
         assert result.get("error_kind") == "budget"
-        assert result.get("engine") == "VIGGLE"
+        assert result.get("engine") == "ACT_ONE"
         dispatch.assert_not_called()
         lifecycle.pause.assert_called_once()
-        cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
+        cost_tracker.would_exceed.assert_called_once_with("ACT_ONE")
         events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
         assert "BUDGET_EXCEEDED" in events
 
@@ -1008,7 +1013,7 @@ class TestPerformancePreSpendBudgetGate:
         assert result.get("success") is True
         dispatch.assert_called_once()
         lifecycle.pause.assert_not_called()
-        cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
+        cost_tracker.would_exceed.assert_called_once_with("ACT_ONE")
 
     def test_mode_b_refuses_when_combined_driving_and_engine_cost_exceeds_budget(self, tmp_path):
         """Correct behavior: refuse before Mode-B synth when combined spend exceeds cap."""

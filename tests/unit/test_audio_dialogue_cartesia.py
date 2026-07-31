@@ -104,6 +104,62 @@ class TestGenerateCartesiaSuccess:
         assert "Cartesia-Version" in headers
         assert headers["Content-Type"] == "application/json"
 
+    def test_pinned_current_request_shape_2026_03_01(self, tmp_path):
+        """Fixture-pin: exact wire shape sent to POST /tts/bytes under the
+        current documented Cartesia-Version (2026-03-01, per
+        https://docs.cartesia.ai/build-with-cartesia/tts-models/api-changes).
+
+        Slice 6c1: the header must track the current default version (the
+        old 2024-06-10 snapshot is not the live default). The wire shape
+        itself (voice.mode="id", output_format.container/sample_rate/
+        bit_rate, top-level model_id/transcript/language) is UNCHANGED by
+        that bump — Cartesia's only breaking change since 2024-06-10 was
+        retiring ``voice.mode="embedding"`` (sunset 2026-06-01), and this
+        adapter already only ever sent ``mode="id"``. model_id stays
+        "sonic-2" per project decision (Korean-prosody quality question
+        needs R-MEASURE evidence before any model swap — not a version-pin
+        question).
+        """
+        from audio.dialogue import generate_cartesia
+
+        output = str(tmp_path / "pinned.mp3")
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.content = b"fake"
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test_pin"
+
+        with patch("audio.dialogue.requests.post", return_value=mock_response) as mock_post, \
+             patch("audio.dialogue.settings", mock_settings):
+            generate_cartesia(
+                text="hi",
+                voice_id="vid_pin",
+                output_path=output,
+                language="ko",
+            )
+
+        call = mock_post.call_args
+        headers = call.kwargs.get("headers") or call[1]["headers"]
+        json_body = call.kwargs.get("json") or call[1]["json"]
+
+        assert call.args[0] == "https://api.cartesia.ai/tts/bytes" or \
+            call.kwargs.get("url") == "https://api.cartesia.ai/tts/bytes"
+        assert headers["Cartesia-Version"] == "2026-03-01"
+        assert headers["X-API-Key"] == "sk_test_pin"
+        assert headers["Content-Type"] == "application/json"
+        assert json_body == {
+            "model_id": "sonic-2",
+            "transcript": "hi",
+            "voice": {"mode": "id", "id": "vid_pin"},
+            "output_format": {
+                "container": "mp3",
+                "sample_rate": 44100,
+                "bit_rate": 128000,
+            },
+            "language": "ko",
+        }
+
     def test_custom_model_id_propagated(self, tmp_path):
         """A non-default model_id is sent through unchanged."""
         from audio.dialogue import generate_cartesia

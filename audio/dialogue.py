@@ -149,14 +149,23 @@ def generate_cartesia(
         output_path: where to write the mp3
         language: ISO language code; ``"ko"`` for Korean, ``"en"`` for English.
             Cartesia accepts language hints to bias prosody.
-        model_id: Cartesia model identifier (default ``"sonic-2"``)
+        model_id: Cartesia model identifier (default ``"sonic-2"``). KEPT at
+            ``"sonic-2"`` deliberately (Slice 6c1): swapping to ``"sonic-3.5"``
+            (Cartesia's current recommended default) is a Korean-prosody
+            QUALITY question that needs R-MEASURE evidence, not a version-pin
+            decision — do not change this default on provider marketing claims
+            alone. NOTE: per
+            https://docs.cartesia.ai/build-with-cartesia/tts-models/api-changes
+            (verified 2026-07-31), ``sonic-2`` is scheduled for sunset
+            2026-10-20 — a measurement + migration slice is needed before then.
 
     Returns:
         ``True`` on success, ``False`` on missing key / HTTP error / timeout /
         format issue. **Never raises** — caller's fallback strategy is to
         route to ElevenLabs on any False return.
 
-    Endpoint: https://docs.cartesia.ai/api-reference/tts/bytes
+    Endpoint: https://docs.cartesia.ai/api-reference/tts/bytes (current
+    Cartesia-Version header default: 2026-03-01, verified 2026-07-31).
     """
     # Caller-controlled cache hit
     if os.path.exists(output_path):
@@ -172,7 +181,17 @@ def generate_cartesia(
         url = "https://api.cartesia.ai/tts/bytes"
         headers = {
             "X-API-Key": api_key,
-            "Cartesia-Version": "2024-06-10",
+            # Current documented default per
+            # https://docs.cartesia.ai/build-with-cartesia/tts-models/api-changes
+            # (verified 2026-07-31). The only breaking change on /tts/bytes
+            # between 2024-06-10 and 2026-03-01 is the retirement of
+            # ``voice.mode="embedding"`` (sunset 2026-06-01) — this adapter
+            # already only ever sends ``mode="id"`` below, so no request-shape
+            # change is needed beyond this version bump. NOTE: sonic-2 itself
+            # is scheduled for sunset 2026-10-20 per the same page — tracked
+            # as a follow-up, not addressed by this version bump (see
+            # generate_cartesia's model_id default below).
+            "Cartesia-Version": "2026-03-01",
             "Content-Type": "application/json",
         }
         payload = {

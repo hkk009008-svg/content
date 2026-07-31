@@ -115,7 +115,7 @@ _LEGACY_API_REGISTRY_SEED = {
     "SD3_5_LARGE":   {"label": "Stable Diffusion 3.5 Large", "category": "image_gen", "description": "8B params, strong prompt adherence, alternative refiner", "modality": "image", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.05, "quality_score": 0.84, "latency_s": 40, "status": "planned"},
 
     # --- MUSIC ---
-    "SUNO_V5":       {"label": "Suno V5",              "category": "music",     "description": "Generative music with vocals — current SOTA for full songs. Requires SUNO_API_KEY env.", "modality": "music", "best_for": ["music_score"], "per_shot_cost": 0.10, "quality_score": 0.91, "latency_s": 60, "status": "live"},
+    "SUNO_V5":       {"label": "Suno V5",              "category": "music",     "description": "Generative music with vocals — current SOTA for full songs. Reached via the SunoAPI.org third-party proxy (no official Suno developer API), base https://api.sunoapi.org; requires SUNO_API_KEY env (that proxy's key, not a Suno-issued credential).", "modality": "music", "best_for": ["music_score"], "per_shot_cost": 0.10, "quality_score": 0.91, "latency_s": 60, "status": "live"},
     "ELEVENLABS_MUSIC":{"label": "ElevenLabs Music",   "category": "music",     "description": "ElevenLabs' new music endpoint — instrumental + vocal, prompt-driven", "modality": "music", "best_for": ["music_score"], "per_shot_cost": 0.12, "quality_score": 0.88, "latency_s": 45, "status": "planned"},
     "STABLE_AUDIO_2":{"label": "Stable Audio 2.0",     "category": "music",     "description": "Stability — 3min stereo, instrumental focus, audio-to-audio remix", "modality": "music", "best_for": ["music_score", "foley"], "per_shot_cost": 0.04, "quality_score": 0.81, "latency_s": 25, "status": "planned"},
 

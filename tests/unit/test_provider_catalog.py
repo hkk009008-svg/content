@@ -37,14 +37,45 @@ SUNSET = date(2026, 9, 24)
 
 
 def test_catalog_exactly_covers_legacy_registry_plus_fal_svd_mutation_pin() -> None:
-    expected = set(API_REGISTRY) | {"FAL_SVD"}
+    # Slice 6c3 added a second catalog-only row (VIGGLE, mirroring the
+    # FAL_SVD pattern): Viggle motion-retargeting was never routed through
+    # domain.scene_decomposer.API_REGISTRY (it's a Mode-A performance-capture
+    # engine, not a shot-generation API), so it has no legacy row to project
+    # from — same as FAL_SVD.
+    expected = set(API_REGISTRY) | {"FAL_SVD", "VIGGLE"}
 
     assert isinstance(CATALOG, MappingProxyType)
     assert len(API_REGISTRY) == 40
-    assert len(CATALOG) == 41
+    assert len(CATALOG) == 42
     assert set(CATALOG) == expected
     assert "FAL_SVD" in CATALOG
     assert CATALOG["FAL_SVD"].legacy_visible is False
+    assert "VIGGLE" in CATALOG
+    assert CATALOG["VIGGLE"].legacy_visible is False
+
+
+def test_viggle_is_known_broken_and_fails_closed() -> None:
+    """Slice 6c3: Viggle's adapter (performance/viggle.py) targets
+    api.viggle.ai/v1/motion-transfer with files={character_image,
+    motion_video} — the official developer API at docs.viggle.ai (verified
+    2026-07-31) is apis.viggle.ai/v1/renders with fields {image,
+    motion_video}. KNOWN_BROKEN must fail closed (selectable/dispatchable/
+    spendable all False), same shape as the RUNWAY_ACT_ONE precedent, and
+    must cite the real docs URL as its source.
+    """
+    entry = CATALOG["VIGGLE"]
+    assert entry.product_support is ProductSupport.KNOWN_BROKEN
+    assert entry.selectable is False
+    assert entry.dispatchable is False
+    assert entry.spendable is False
+    assert entry.runtime_options == ()
+    assert entry.source.url == "https://docs.viggle.ai"
+    assert entry.source.kind is SourceKind.LIFECYCLE_NOTICE
+
+    policy = effective_policy("VIGGLE")
+    assert policy.selectable is False
+    assert policy.dispatchable is False
+    assert policy.spendable is False
 
 
 def test_catalog_mapping_and_entries_are_immutable() -> None:
