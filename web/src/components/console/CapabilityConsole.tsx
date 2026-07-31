@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Project, CapabilityScorecard, CapabilityDimension, ScorecardMedia } from '../../types/project'
+import type { Project, CapabilityScorecard, CapabilityDimension, CapabilityComponent, ScorecardMedia } from '../../types/project'
 import { Badge, Meter, StatusDot, Section, MICRO_LABEL, type BadgeVariant, type MeterTone, type Status } from '../ui'
 
 interface Props { project: Project | null }
@@ -14,20 +14,43 @@ function scoreClass(value: number | null, bar: number | null): string {
   return value >= bar ? 'text-ok' : 'text-fail'
 }
 
-function componentDot(status: string): Status {
-  if (status === 'live' || status === 'wired') return 'ok'
-  if (status === 'stubbed' || status === 'parked') return 'warn'
-  if (status === 'inactive') return 'idle'
-  if (status === 'dead') return 'fail'
-  return 'idle'
+/** Human badge/dot for one capability row. A component's AUTHORED `status`
+ *  (live/wired) is never trusted on its own — `engaged_static` is the
+ *  server-validated fact (real consumer + passing evidence test on file).
+ *  A status that CLAIMS engagement but fails that check renders as
+ *  "unavailable", never as if it were live/wired. */
+function componentDisplay(c: CapabilityComponent): { dot: Status; badge: BadgeVariant; label: string } {
+  const claimsEngagement = c.status === 'live' || c.status === 'wired'
+  if (claimsEngagement && !c.engaged_static) {
+    return { dot: 'fail', badge: 'fail', label: 'unavailable' }
+  }
+  if (claimsEngagement && c.runtime_availability === 'unavailable') {
+    return { dot: 'warn', badge: 'warn', label: `${c.status} · unavailable now` }
+  }
+  if (claimsEngagement) return { dot: 'ok', badge: 'ok', label: c.status }
+  if (c.status === 'stubbed' || c.status === 'parked') return { dot: 'warn', badge: 'warn', label: c.status }
+  if (c.status === 'dead') return { dot: 'fail', badge: 'fail', label: c.status }
+  if (c.status === 'inactive') return { dot: 'idle', badge: 'neutral', label: c.status }
+  return { dot: 'idle', badge: 'neutral', label: c.status || 'unknown' }
 }
 
-function componentBadge(status: string): BadgeVariant {
-  if (status === 'live' || status === 'wired') return 'ok'
-  if (status === 'stubbed' || status === 'parked') return 'warn'
-  if (status === 'inactive') return 'neutral'
-  if (status === 'dead') return 'fail'
-  return 'neutral'
+const SPEND_LABEL: Record<CapabilityComponent['spend_kind'], string> = {
+  none: 'no spend',
+  compute_local: 'local compute',
+  paid_api: 'paid API',
+  pod_gpu: 'GPU pod',
+}
+
+/** `KLING_NATIVE` -> `Kling Native`, `SORA_2` -> `Sora 2`, empty -> `—`.
+ *  Engine identifiers are internal routing constants, not operator-facing
+ *  labels — never render the raw uppercase/underscore token on the page. */
+function humanizeEngineId(raw: string): string {
+  if (!raw) return '—'
+  return raw
+    .split('_')
+    .filter(Boolean)
+    .map((w) => (w.length > 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .join(' ')
 }
 
 function fmt(v: number | null): string {
@@ -190,7 +213,7 @@ function PerShotTable({ sc }: { sc: CapabilityScorecard }) {
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.coherence, coherenceBar)}`}>{fmt(row.coherence)}</td>
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.motion, motionBar)}`}>{fmt(row.motion)}</td>
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.lipsync, lipsyncBar)}`}>{fmt(row.lipsync)}</td>
-              <td className="py-1 pl-3 text-dim">{row.engine || '—'}</td>
+              <td className="py-1 pl-3 text-dim">{humanizeEngineId(row.engine)}</td>
             </tr>
           ))}
         </tbody>
@@ -214,9 +237,9 @@ function CascadeProvenance({ sc }: { sc: CapabilityScorecard }) {
           <div key={row.shot_id} className="flex flex-wrap items-center gap-2 border-b border-line/40 py-0.5">
             <span className="text-dim">{row.shot_id}</span>
             <span className="text-dim">·</span>
-            <span className="text-tx">{row.engine || '—'}</span>
+            <span className="text-tx">{humanizeEngineId(row.engine)}</span>
             {showChain && row.attempts.length > 0 && (
-              <span className="text-mut">[{row.attempts.join(' → ')}]</span>
+              <span className="text-mut">[{row.attempts.map(humanizeEngineId).join(' → ')}]</span>
             )}
             {row.fallback && <Badge variant="fail">silent fallback</Badge>}
           </div>
@@ -293,7 +316,38 @@ function LoraSummary({ sc }: { sc: CapabilityScorecard }) {
   )
 }
 
-// ── Section: Component status (Task 7) ───────────────────────────────────────
+// ── Section: Component status (Task 7, evidence-backed Slice 12) ────────────
+
+/** One capability chip. Shows the human title + a status badge computed
+ *  from the server-validated `engaged_static`/`runtime_availability` (never
+ *  the authored `status` string alone — see componentDisplay). The `title`
+ *  attribute and the visible caption both carry only `reason`: a human
+ *  next-action sentence. Raw anchors/ids/hashes/dev notes are diagnostic-only
+ *  and never reach this component — the server's operator projection
+ *  (cinema.capability_manifest.to_operator_view) already strips them. */
+function ComponentChip({ c }: { c: CapabilityComponent }) {
+  const disp = componentDisplay(c)
+  const showReason = !c.engaged_static || c.runtime_availability === 'unavailable'
+  const reasonText = c.engaged_static ? c.runtime_reason : c.reason
+  return (
+    <div
+      title={c.reason}
+      className="flex max-w-[240px] flex-col gap-0.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
+    >
+      <div className="flex items-center gap-1.5">
+        <StatusDot status={disp.dot} />
+        <span className="text-tx">{c.title}</span>
+        <Badge variant={disp.badge}>{disp.label}</Badge>
+      </div>
+      <div className="flex items-center gap-1.5 text-[10px] text-dim">
+        <span>{SPEND_LABEL[c.spend_kind] ?? c.spend_kind}</span>
+        <span>·</span>
+        <span>{c.exposure}</span>
+      </div>
+      {showReason && reasonText && <div className="text-[10px] text-mut">{reasonText}</div>}
+    </div>
+  )
+}
 
 function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
   if (sc.components.length === 0) return <div className="text-[11px] italic text-dim">No component manifest</div>
@@ -301,15 +355,7 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
   return (
     <div className="flex flex-wrap gap-2">
       {sc.components.map((c) => (
-        <div
-          key={c.id}
-          title={c.note || c.title}
-          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
-        >
-          <StatusDot status={componentDot(c.status)} />
-          <span className="text-tx">{c.id}</span>
-          <Badge variant={componentBadge(c.status)}>{c.status}</Badge>
-        </div>
+        <ComponentChip key={c.id} c={c} />
       ))}
     </div>
   )
@@ -323,7 +369,11 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
  *  is a live, unconditional scene step. */
 function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
   const curated: { id: string; label: string; note: string; pod: boolean }[] = [
-    { id: 'comfy_max_keyframe', label: 'ComfyUI max keyframe', note: 'FLUX + PuLID keyframe fallback — needs the RunPod pod running.', pod: true },
+    // Priority-1 fallback in generate_ai_broll's chain (phase_c_assembly.py) —
+    // there is no separate "max" tier to fall back to; WS1 retired that fork,
+    // so the label must not imply one still exists (comprehensive-unification
+    // audit: stale "max"-tier claims).
+    { id: 'comfy_pulid_keyframe_fallback', label: 'ComfyUI + PuLID keyframe (pod fallback)', note: 'Arc-gated fallback behind Nano Banana — needs the RunPod pod running.', pod: true },
   ]
 
   const stubbedComponents = sc.components.filter((c) => c.status === 'stubbed' || c.status === 'parked')
@@ -344,7 +394,7 @@ function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
       {stubbedComponents.map((c) => (
         <div
           key={c.id}
-          title={c.note || c.title}
+          title={c.reason}
           className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
         >
           <StatusDot status="idle" />
@@ -381,7 +431,11 @@ export default function CapabilityConsole({ project }: Props) {
   }
   useEffect(load, [projectId])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const engagedCount = sc ? sc.components.filter((c) => c.status === 'live' || c.status === 'wired').length : 0
+  // engaged_static, NOT the authored status string — a component claiming
+  // "live"/"wired" without a server-verified consumer + evidence test must
+  // not count toward this headline (comprehensive-unification audit: claims
+  // advertised as wired on syntactic anchors alone).
+  const engagedCount = sc ? sc.components.filter((c) => c.engaged_static).length : 0
   const totalComponents = sc ? sc.components.length : 0
   const measuredDims = sc ? sc.dimensions.filter((d) => d.value !== null) : []
   const overallScore = measuredDims.length > 0
@@ -406,7 +460,16 @@ export default function CapabilityConsole({ project }: Props) {
         <div className="flex items-center gap-3">
           {sc && (
             <span className="flex items-center gap-2 font-mono text-[11px] text-dim">
-              <Badge variant="pri">{sc.tier.toUpperCase()}</Badge>
+              {/* "max" is a retired, pre-WS1 tier value that may still be
+                  persisted on old projects; production/pulid.json is the only
+                  pipeline now (workflow_selector.py), so a legacy "max" value
+                  is labeled as history, not shown as if it still selects a
+                  distinct, currently-active tier. */}
+              <span title={sc.tier === 'max' ? 'Legacy value — runs identically to production; the max tier was retired.' : undefined}>
+                <Badge variant={sc.tier === 'max' ? 'neutral' : 'pri'}>
+                  {sc.tier === 'max' ? 'MAX (legacy)' : sc.tier.toUpperCase()}
+                </Badge>
+              </span>
               {sc.summary.shots_clearing_all_bars}/{sc.summary.shots_total} clear all bars
             </span>
           )}

@@ -7,13 +7,12 @@ component-wiring status. No mutation, no Flask.
 """
 from __future__ import annotations
 import logging
-import tomllib
 from collections import Counter
-from pathlib import Path
 from statistics import mean
 from typing import Optional
 
 from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
+from cinema.capability_manifest import build_manifest, to_operator_view
 from cinema.context import _finite_or
 from prep.lora_policy import lora_dormant_status_fields
 
@@ -26,7 +25,6 @@ EXPECTED_VCODEC: str = "h264"
 EXPECTED_ACODEC: str = "aac"
 
 logger = logging.getLogger(__name__)
-REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _all_shots(project: dict) -> list[dict]:
@@ -174,7 +172,10 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
                            "attempts": attempts, "fallback": bool(cas.get("fallback"))})
 
     dimensions = [
-        _dimension("identity", "Identity · ArcFace", ident_v, identity_bar),
+        # identity/validator.py:EMBED_MODEL defaults to "GhostFaceNet" (DeepFace
+        # model_name); "ArcFace" is only the loss function it was trained
+        # with, not the model — ARCHITECTURE.md §11 naming clarification.
+        _dimension("identity", "Identity · GhostFaceNet", ident_v, identity_bar),
         _dimension("coherence", "Coherence", coh_v, coherence_bar),
         _dimension("motion", "Motion fidelity", motion_v, None),
         _dimension("lipsync", "Lipsync · SyncNet", lip_v, lipsync_bar),
@@ -269,12 +270,21 @@ def _lora_summary(project: dict, project_dir: str) -> list[dict]:
 
 
 def _components() -> list[dict]:
-    path = REPO_ROOT / "docs" / "pipeline_status.toml"
+    """Operator-safe capability rows for the Capability page.
+
+    Delegates to cinema.capability_manifest, which mechanically enforces
+    that a component may not render as engaged (`engaged_static`) without a
+    real, currently-resolving production consumer AND evidence test — a
+    `status = "wired"` claim alone is never sufficient. The returned rows
+    contain human labels/next-action `reason` text only; raw anchors,
+    producer/consumer strings, and the internal dev `note` (which may
+    contain commit hashes, §section refs, or file:line citations) stay in
+    the diagnostic view (cinema.capability_manifest.to_diagnostic_view),
+    which this page never renders or transmits.
+    """
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        components = build_manifest()
     except Exception:
-        logger.debug("capability scorecard: failed to read pipeline_status.toml", exc_info=True)
+        logger.debug("capability scorecard: failed to build capability manifest", exc_info=True)
         return []
-    return [{"id": c.get("id"), "title": c.get("title"), "status": c.get("status"), "note": c.get("note")}
-            for c in data.get("component", [])]
+    return to_operator_view(components)

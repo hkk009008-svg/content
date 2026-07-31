@@ -23,12 +23,35 @@
 # Adding an entry: pick a stable `def`/`class`/module-const SYMBOL as the anchor
 # and run `.venv/bin/python scripts/check_doc_claims.py` (or status.py) to confirm
 # it resolves. Grows over time; v1 is a verified starter, not exhaustive.
+#
+# Evidence-backed fields (Slice 12, cinema/capability_manifest.py) — a `status`
+# of `live`/`wired` is a CLAIM; `cinema.capability_manifest.validate_manifest`
+# mechanically rejects the claim (forces `engaged_static = False`, with a
+# human reason) unless BOTH of the following resolve to real code/tests:
+#   consumer       — `file:SYMBOL` of the real production call site that
+#                     invokes the `anchor` (producer). Empty for components
+#                     that never claim engagement (stubbed/parked/inactive/dead).
+#   evidence_tests — array of test paths (optionally `path::test_symbol`) that
+#                     prove the capability. Empty for the same non-engaging set.
+# Two more fields are informational (not consumer/test-gated) but kept as
+# separate, never-collapsed facts per the product invariant "do not collapse
+# independent truths":
+#   exposure    — how an operator reaches this: "ui" | "api" | "internal"
+#   spend_kind  — cost profile if invoked: "none" | "compute_local" |
+#                 "paid_api" | "pod_gpu"
+# `runtime_credential` (optional) names a comma-separated env var (or vars)
+# whose PRESENCE (never value) gates RUNTIME availability independently of
+# `engaged_static` — see cinema/capability_manifest.py:_runtime_state.
 
 [[component]]
 id = "scene_transitions"
 title = "Opt-in cross-dissolve at scene boundaries"
 status = "wired"
 anchor = "phase_c_ffmpeg.py:xfade_concat"
+consumer = "cinema_pipeline.py:_assemble_final"
+evidence_tests = ["tests/unit/test_xfade_transitions.py", "tests/unit/test_guided_pipeline.py"]
+exposure = "ui"
+spend_kind = "compute_local"
 note = "Cycle-17 MVP (9e75373/cc8dec6). Default-off flag `scene_transitions`; when on, _assemble_final routes per-scene concat through xfade_concat, else byte-identical hard-cut."
 
 [[component]]
@@ -36,6 +59,10 @@ id = "final_assembly"
 title = "Final video assembly (per-scene concat + bgm)"
 status = "live"
 anchor = "cinema_pipeline.py:_assemble_final"
+consumer = "cinema_pipeline.py:_assemble_approved_takes_core"
+evidence_tests = ["tests/unit/test_guided_pipeline.py"]
+exposure = "internal"
+spend_kind = "compute_local"
 note = "Core assembly step; always runs at end of pipeline. Hosts the scene_transitions ON/OFF branch + fallback to hard-cut concat."
 
 [[component]]
@@ -43,13 +70,20 @@ id = "storyboard_mode"
 title = "Batched 6-shot latent storyboard path"
 status = "wired"
 anchor = "cinema/phases/motion_render.py:_run_storyboard_scene"
-note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyboard_scene (:100) -> KlingNativeAPI.generate_storyboard. Covered by tests/unit/test_f2b_storyboard_mode.py."
+consumer = "cinema/phases/motion_render.py:run"
+evidence_tests = ["tests/unit/test_f2b_storyboard_mode.py", "tests/unit/test_f2a_storyboard_primitives.py"]
+exposure = "api"
+spend_kind = "paid_api"
+runtime_credential = "KLING_ACCESS_KEY,KLING_SECRET_KEY"
+note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyboard_scene (:100) -> KlingNativeAPI.generate_storyboard. Covered by tests/unit/test_f2b_storyboard_mode.py. Settable only via global_settings.api_engines.KLING_NATIVE.storyboard_mode (no dedicated UI control)."
 
 [[component]]
 id = "lora_validation"
 title = "Historical LoRA validation records"
 status = "inactive"
 anchor = "prep/lora_policy.py:LORA_POLICY"
+exposure = "internal"
+spend_kind = "none"
 note = "Dormant policy boundary. Trainer/validator code, prior status sidecars, and legacy registry snapshots are retained only for historical/read-only compatibility; current product paths cannot start work, mutate the registry, or consume the artifacts."
 
 [[component]]
@@ -57,6 +91,8 @@ id = "batch_scene_optimize"
 title = "Cross-shot batched prompt optimization"
 status = "stubbed"
 anchor = "llm/prompt_optimizer.py:batch_optimize_scene"
+exposure = "internal"
+spend_kind = "paid_api"
 note = "§10 F-A.3: zero callers; per-shot optimization currently loses cross-shot context. Refactor candidate (brief P1-6)."
 
 [[component]]
@@ -64,4 +100,6 @@ id = "multi_identity_validation"
 title = "Multi-character identity continuity check"
 status = "stubbed"
 anchor = "domain/continuity_engine.py:validate_multi_identity"
+exposure = "internal"
+spend_kind = "compute_local"
 note = "§10 F-A.4: zero callers; only single-char validate_shot is wired. Wire when multi-char reaches Tier D (brief P2-2)."

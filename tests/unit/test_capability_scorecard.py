@@ -189,29 +189,36 @@ class TestIdentityMulti:
         card = build_capability_scorecard(proj, project_dir="/tmp/x")
         assert "identity_multi" not in card["per_shot"][0]
 
-    def test_identity_multi_surfaces_max_tier_multi_lora(self):
-        """PIN (Task 8): MAX_TIER_MULTI_LORA mechanism_tag surfaces through
-        build_capability_scorecard unchanged — generic read at scorecard.py:165-169
-        requires no special-casing for this tag.
+    def test_identity_multi_surfaces_unknown_mechanism_tag_generically(self):
+        """Generic-read regression pin: scorecard.py's per_shot["identity_multi"]
+        projection (scorecard.py:164-170) copies whatever mechanism_tag is
+        present without special-casing any particular value.
+
+        Originally pinned MAX_TIER_MULTI_LORA (Task 8) — that per-secondary
+        LoRA mechanism was retired with quality_max.py (WS1 Task 4;
+        cinema/shots/controller.py's _resolve_identity_strategy now emits
+        only PRIMARY_ONLY / KONTEXT_MULTI_CHAR / NO_IDENTITY_ASSET /
+        GEMINI_MULTIREF_*), so asserting that retired tag here would itself
+        be a stale "max" claim (comprehensive-unification audit). Re-pinned
+        against a made-up forward-compat tag: the point under test is
+        generic passthrough, not any one mechanism's continued existence.
         """
         project = self._project_with_shot({
             "identity_score": 0.8,
             "identity_per_char": {"char_a": 0.8, "char_b": 0.61},
             "identity_strategy": {
-                "mechanism_tag": "MAX_TIER_MULTI_LORA",
+                "mechanism_tag": "SOME_FUTURE_MECHANISM",
                 "primary_char_id": "char_a",
                 "conditioned_chars": [
                     {"char_id": "char_a", "fidelity": "pulid"},
-                    {"char_id": "char_b", "fidelity": "lora"},
+                    {"char_id": "char_b", "fidelity": "reference"},
                 ],
                 "unconditioned_chars": [],
             },
         })
         card = build_capability_scorecard(project, project_dir="/tmp/x")
         multi = card["per_shot"][0]["identity_multi"]
-        assert multi["mechanism"] == "MAX_TIER_MULTI_LORA"
-        # operator Lane-V 23:05:51Z fold: per-char + unconditioned asserted
-        # for the MAX tag specifically (not just via the KONTEXT sibling).
+        assert multi["mechanism"] == "SOME_FUTURE_MECHANISM"
         assert multi["per_char"] == {"char_a": 0.8, "char_b": 0.61}
         assert multi["unconditioned"] == []
 
