@@ -490,6 +490,28 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave-1 round-2 verdicts (wf_232e9282) + round-3 fixes
+
+fixup-S2C `a20c8b68` lane-v **GO** (mutation re-proved). fixup-tests
+`384d45f2` lane-v **GO** (all three claims mutation-verified; the old
+aspect test's vacuity independently re-demonstrated). Slice 4 `932135f8`
+synthesized **FAIL-band** — IMPORTANT: dispatch default is 8s but the flat
+LTX cost entry encodes the 6s figure (~33% spend under-record); MINORs:
+LTXContractViolation demoted by the dispatcher blanket-except, duplicated
+duration enum, transition helpers unvalidated. Slice 5b `8b04bc6b`
+synthesized **FAIL-band** — IMPORTANT: `_to_data_uri_or_path` passes local
+paths as SDK `uri` values (happy path suspect); IMPORTANT:
+`domain/performance.py` audio-only preconditions confirmed twice with a
+green test pinning the false assumption; plus an act_one staleness cluster
+(ARCHITECTURE :107/:1320, PROGRAM-MANUAL, OPERATIONS, package docstrings,
+cost-table comment, legacy seed row). Fix implementers dispatched
+(`wf_029e39d3`): fix-S4-money (owns cost_tracker.py wholly) + fix-S5B.
+
+CORRECTION to `8b04bc6b`'s commit body: the catalog `(6,8,10)` duration
+constraint predates slice 4 — it landed in `cf25eee3` (slice 2a). The
+"carries slice 4's catalog hunks" sentence is wrong; the provider_catalog
+hunks in that commit are Runway-only.
+
 ### Wave-1 round-1 verdicts (wf_dec8ec5e, resumed post-limit)
 
 I2 **GO** (NIT: Map/Set-typed imports over-included — disclosed trade). R3
