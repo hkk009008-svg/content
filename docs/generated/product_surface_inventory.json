@@ -10,7 +10,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 173,
+        "line": 179,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -26,7 +26,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 34,
+        "line": 37,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -59,7 +59,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 217,
+        "line": 219,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": null,
@@ -110,7 +110,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 74,
+        "line": 80,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:b7908258403a5ebe",
@@ -132,23 +132,6 @@
       },
       "transport_id": "frontend-transport:117011303ba31daa",
       "url_template": "/api/projects/{1}/locations/{2}"
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "id": "frontend-operation:0be6f7a89888d5e8",
-      "kind": "direct_transport",
-      "method": "GET",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 58,
-        "path": "web/src/components/pipeline/ShotRow.tsx"
-      },
-      "transport_id": "frontend-transport:3ad536ad08dd6d5f",
-      "url_template": "/api/config"
     },
     {
       "backend_route_ids": [
@@ -220,23 +203,6 @@
     },
     {
       "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "id": "frontend-operation:1ae9d7e4e6c0bc25",
-      "kind": "direct_transport",
-      "method": "GET",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 41,
-        "path": "web/src/App.tsx"
-      },
-      "transport_id": "frontend-transport:5ec9c917c21dfd7f",
-      "url_template": "/api/config"
-    },
-    {
-      "backend_route_ids": [
         "route:api_update_scene:717f20841c7eadb0"
       ],
       "id": "frontend-operation:1bceb7baade62743",
@@ -246,7 +212,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 342,
+        "line": 344,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:88f35f0ee5a3fd0d",
@@ -342,7 +308,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 192,
+        "line": 194,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:0b66216fb9f21a98",
@@ -358,7 +324,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 181,
+        "line": 187,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -444,7 +410,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 179,
+        "line": 185,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -517,6 +483,22 @@
       "url_template": null
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "videoEngines",
+      "id": "frontend-operation:47a9f1854bf22273",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 24,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
       "backend_route_ids": [
         "route:api_update_project:4de0aade993f8606"
       ],
@@ -543,7 +525,23 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 81,
+        "line": 94,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "videoEngines",
+      "id": "frontend-operation:4b87d41ebcd5e09f",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 97,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       },
       "transport_id": null,
@@ -559,7 +557,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 333,
+        "line": 335,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": null,
@@ -625,7 +623,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 68,
+        "line": 74,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:b8037d3236d9c0c4",
@@ -658,7 +656,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 268,
+        "line": 270,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -727,7 +725,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 279,
+        "line": 281,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -744,7 +742,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 67,
+        "line": 80,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       },
       "transport_id": "frontend-transport:dd29d1f81f5cb77e",
@@ -777,7 +775,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 33,
+        "line": 36,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -793,7 +791,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 178,
+        "line": 184,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -809,11 +807,30 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 108,
+        "line": 114,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
       "url_template": null
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:6c671f14e82a31fc",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 47,
+        "path": "web/src/App.tsx"
+      },
+      "transport_id": "frontend-transport:92a09f59cc3a0b53",
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [],
@@ -825,7 +842,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 35,
+        "line": 40,
         "path": "web/src/components/setup/inspector/VideoSection.tsx"
       },
       "transport_id": null,
@@ -859,7 +876,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 112,
+        "line": 114,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:2d89c53d8127f23c",
@@ -908,7 +925,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 417,
+        "line": 418,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:cec43b24fd29092c",
@@ -924,7 +941,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 239,
+        "line": 241,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -958,7 +975,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 177,
+        "line": 183,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -974,7 +991,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 183,
+        "line": 189,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -990,10 +1007,26 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "humanizeEngineReason",
+      "id": "frontend-operation:893658fab1841bd6",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 389,
+        "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
       "url_template": null
     },
     {
@@ -1088,8 +1121,24 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 129,
+        "line": 131,
         "path": "web/src/components/ScenePanel.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
+      "expanded_wrapper": "humanizeEngineReason",
+      "id": "frontend-operation:9469b56cb3fcbf46",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 149,
+        "path": "web/src/components/edit/ShotInspector.tsx"
       },
       "transport_id": null,
       "url_template": null
@@ -1112,6 +1161,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "humanizeEngineReason",
+      "id": "frontend-operation:9a484cf7b319cb2a",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 116,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "isPodGated",
       "id": "frontend-operation:9c937b668b95b3dc",
       "kind": "unknown_wrapper_call",
@@ -1120,7 +1185,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 55,
+        "line": 60,
         "path": "web/src/components/setup/inspector/VideoSection.tsx"
       },
       "transport_id": null,
@@ -1136,7 +1201,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 185,
+        "line": 191,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1168,7 +1233,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 175,
+        "line": 181,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1201,7 +1266,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 258,
+        "line": 260,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -1217,7 +1282,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 80,
+        "line": 93,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       },
       "transport_id": null,
@@ -1234,7 +1299,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 26,
+        "line": 28,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:425514cbd72c2a53",
@@ -1250,28 +1315,11 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 225,
+        "line": 227,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "id": "frontend-operation:b0cb32da9dcc18ad",
-      "kind": "direct_transport",
-      "method": "GET",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 28,
-        "path": "web/src/components/pipeline/PromptEditor.tsx"
-      },
-      "transport_id": "frontend-transport:37484d3c8bee35c8",
-      "url_template": "/api/config"
     },
     {
       "backend_route_ids": [
@@ -1291,6 +1339,22 @@
       "url_template": "/api/projects/{1}/assemble/re-assemble"
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "humanizeEngineReason",
+      "id": "frontend-operation:b3f3df2198b3bd08",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": null,
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 170,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": null,
+      "url_template": null
+    },
+    {
       "backend_route_ids": [
         "route:api_update_scene:717f20841c7eadb0"
       ],
@@ -1301,7 +1365,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 357,
+        "line": 359,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:cb0ab228faa986ca",
@@ -1350,7 +1414,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 87,
+        "line": 101,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       },
       "transport_id": null,
@@ -1382,7 +1446,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 334,
+        "line": 336,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": null,
@@ -1433,7 +1497,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 289,
+        "line": 291,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -1455,6 +1519,25 @@
       },
       "transport_id": "frontend-transport:a4d268f35367f819",
       "url_template": "/api/projects/{1}/screening/approve"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:bf850c41bdcb0c94",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 31,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "transport_id": "frontend-transport:53f8b91ea681a5b0",
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [
@@ -1484,7 +1567,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 440,
+        "line": 441,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:e715b122db4102a3",
@@ -1518,7 +1601,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 207,
+        "line": 209,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:9de4123e538bdee5",
@@ -1550,7 +1633,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 176,
+        "line": 182,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1600,7 +1683,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 172,
+        "line": 178,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1616,7 +1699,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 295,
+        "line": 297,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": null,
@@ -1647,7 +1730,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 188,
+        "line": 194,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1663,7 +1746,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 31,
+        "line": 34,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -1728,7 +1811,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 36,
+        "line": 39,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       },
       "transport_id": null,
@@ -1778,7 +1861,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 174,
+        "line": 180,
         "path": "web/src/App.tsx"
       },
       "transport_id": "frontend-transport:66e55f0bf775368e",
@@ -1800,6 +1883,25 @@
       },
       "transport_id": "frontend-transport:3bd97e5ecea49be8",
       "url_template": "/api/projects/{1}/objects"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "id": "frontend-operation:f3b0018528437b1e",
+      "kind": "direct_transport",
+      "method": "GET",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 70,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "transport_id": "frontend-transport:1a63fd87653c4084",
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [
@@ -1863,7 +1965,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 479,
+        "line": 480,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "transport_id": "frontend-transport:cd13ee0f8a6b7e9b",
@@ -1906,7 +2008,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 46,
+        "line": 48,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${sid}`",
@@ -2012,6 +2114,28 @@
     },
     {
       "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "ShotRow",
+      "id": "frontend-transport:1a63fd87653c4084",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 70,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      },
+      "url_expression": "`/api/config?project_id=${encodeURIComponent(projectId)}`",
+      "url_template": "/api/config?project_id={1}"
+    },
+    {
+      "backend_route_ids": [
         "route:api_list_projects:bfa304ff09694c73"
       ],
       "enclosing_function": "ProjectSelector",
@@ -2084,31 +2208,11 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 112,
+        "line": 114,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/reorder`",
       "url_template": "/api/projects/{1}/scenes/reorder"
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "enclosing_function": "PromptEditor",
-      "id": "frontend-transport:37484d3c8bee35c8",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 28,
-        "path": "web/src/components/pipeline/PromptEditor.tsx"
-      },
-      "url_expression": "'/api/config'",
-      "url_template": "/api/config"
     },
     {
       "backend_route_ids": [
@@ -2129,26 +2233,6 @@
       },
       "url_expression": "`/api/projects/${projectId}/resume`",
       "url_template": "/api/projects/{1}/resume"
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "enclosing_function": "ShotRow",
-      "id": "frontend-transport:3ad536ad08dd6d5f",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 58,
-        "path": "web/src/components/pipeline/ShotRow.tsx"
-      },
-      "url_expression": "'/api/config'",
-      "url_template": "/api/config"
     },
     {
       "backend_route_ids": [
@@ -2222,11 +2306,33 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 26,
+        "line": 28,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes`",
       "url_template": "/api/projects/{1}/scenes"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "PromptEditor",
+      "id": "frontend-transport:53f8b91ea681a5b0",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 31,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      },
+      "url_expression": "`/api/config?project_id=${encodeURIComponent(projectId)}`",
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [
@@ -2267,26 +2373,6 @@
       },
       "url_expression": "`/api/projects/${projectId}/capability-scorecard`",
       "url_template": "/api/projects/{1}/capability-scorecard"
-    },
-    {
-      "backend_route_ids": [
-        "route:get_config:f8c39cee070cf94b"
-      ],
-      "enclosing_function": "AppInner",
-      "id": "frontend-transport:5ec9c917c21dfd7f",
-      "kind": "fetch",
-      "method": "GET",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/config",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 41,
-        "path": "web/src/App.tsx"
-      },
-      "url_expression": "`${API}/config`",
-      "url_template": "/api/config"
     },
     {
       "backend_route_ids": [
@@ -2342,7 +2428,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 45,
+        "line": 51,
         "path": "web/src/App.tsx"
       },
       "url_expression": "`${API}/projects/${id}`",
@@ -2462,7 +2548,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 342,
+        "line": 344,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${scene.id}`",
@@ -2487,6 +2573,28 @@
       },
       "url_expression": "`${API}/projects/${project.id}`",
       "url_template": "/api/projects/{1}"
+    },
+    {
+      "backend_route_ids": [
+        "route:get_config:f8c39cee070cf94b"
+      ],
+      "enclosing_function": "AppInner",
+      "id": "frontend-transport:92a09f59cc3a0b53",
+      "kind": "fetch",
+      "method": "GET",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/config",
+      "query_keys": [
+        "project_id"
+      ],
+      "route_match": "matched",
+      "source": {
+        "line": 47,
+        "path": "web/src/App.tsx"
+      },
+      "url_expression": "`${API}/config?project_id=${encodeURIComponent(project.id)}`",
+      "url_template": "/api/config?project_id={1}"
     },
     {
       "backend_route_ids": [
@@ -2582,7 +2690,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 37,
+        "line": 39,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${sid}`",
@@ -2658,7 +2766,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 74,
+        "line": 80,
         "path": "web/src/App.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/cancel`",
@@ -2678,7 +2786,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 68,
+        "line": 74,
         "path": "web/src/App.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/generate`",
@@ -2698,7 +2806,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 64,
+        "line": 66,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${sid}/generate-dialogue`",
@@ -2736,7 +2844,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 357,
+        "line": 359,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${scene.id}`",
@@ -2756,7 +2864,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 81,
+        "line": 83,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/scenes/${sid}/decompose`",
@@ -2776,7 +2884,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 417,
+        "line": 418,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/shots/${shot.id}/performance`",
@@ -2856,7 +2964,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 67,
+        "line": 80,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       },
       "url_expression": "`/api/projects/${projectId}/shots/${shot.id}`",
@@ -2896,7 +3004,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 440,
+        "line": 441,
         "path": "web/src/components/ScenePanel.tsx"
       },
       "url_expression": "`${API}/projects/${project.id}/shots/${shot.id}/upload-driving-video`",
@@ -3808,6 +3916,30 @@
   "unresolved": [
     {
       "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:05e919e5ae5879ee",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 39,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "e.reason",
+      "id": "unresolved:060322896e6ec02a",
+      "kind": "unknown_wrapper_call",
+      "owner": "humanizeEngineReason",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 116,
+        "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:0d81e0e48aacb3eb",
       "kind": "unknown_wrapper_call",
@@ -3826,7 +3958,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 178,
+        "line": 184,
         "path": "web/src/App.tsx"
       }
     },
@@ -3838,7 +3970,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 207,
+        "line": 209,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3862,7 +3994,7 @@
       "owner": "getSceneGuidance",
       "reason": "imported wrapper call",
       "source": {
-        "line": 295,
+        "line": 297,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3874,7 +4006,7 @@
       "owner": "getShotTemplate",
       "reason": "imported wrapper call",
       "source": {
-        "line": 334,
+        "line": 336,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3886,7 +4018,7 @@
       "owner": "getSceneGuidance",
       "reason": "imported wrapper call",
       "source": {
-        "line": 129,
+        "line": 131,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3910,7 +4042,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 268,
+        "line": 270,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3934,7 +4066,7 @@
       "owner": "isPodGated",
       "reason": "imported wrapper call",
       "source": {
-        "line": 55,
+        "line": 60,
         "path": "web/src/components/setup/inspector/VideoSection.tsx"
       }
     },
@@ -3946,7 +4078,7 @@
       "owner": "handleGenerateDialogue",
       "reason": "wrapper reaches multiple transports through local wrapper dependencies",
       "source": {
-        "line": 217,
+        "line": 219,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -3958,7 +4090,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 180,
+        "line": 186,
         "path": "web/src/App.tsx"
       }
     },
@@ -3988,6 +4120,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:4eb6a0a23db08cf7",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 24,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "shot",
       "id": "unresolved:5a09b7dd6a2c2f66",
       "kind": "unknown_wrapper_call",
@@ -4000,13 +4144,25 @@
     },
     {
       "domain": "frontend",
+      "expression": "e.reason",
+      "id": "unresolved:5b206d6566fcca8e",
+      "kind": "unknown_wrapper_call",
+      "owner": "humanizeEngineReason",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 149,
+        "path": "web/src/components/edit/ShotInspector.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:656ea925b8eaf5e7",
       "kind": "unknown_wrapper_call",
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 174,
+        "line": 180,
         "path": "web/src/App.tsx"
       }
     },
@@ -4024,13 +4180,25 @@
     },
     {
       "domain": "frontend",
+      "expression": "e.reason",
+      "id": "unresolved:7387db1ca4da27bc",
+      "kind": "unknown_wrapper_call",
+      "owner": "humanizeEngineReason",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 389,
+        "path": "web/src/components/ScenePanel.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:73bc95fc0d51af16",
       "kind": "unknown_wrapper_call",
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 176,
+        "line": 182,
         "path": "web/src/App.tsx"
       }
     },
@@ -4042,7 +4210,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 258,
+        "line": 260,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4054,7 +4222,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 175,
+        "line": 181,
         "path": "web/src/App.tsx"
       }
     },
@@ -4066,7 +4234,7 @@
       "owner": "classifyShotType",
       "reason": "imported wrapper call",
       "source": {
-        "line": 80,
+        "line": 93,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       }
     },
@@ -4084,13 +4252,25 @@
     },
     {
       "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:84b60e7bfd8008eb",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 40,
+        "path": "web/src/components/setup/inspector/VideoSection.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:864b1f5ad1a60c38",
       "kind": "unknown_wrapper_call",
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 185,
+        "line": 191,
         "path": "web/src/App.tsx"
       }
     },
@@ -4102,20 +4282,8 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 289,
+        "line": 291,
         "path": "web/src/components/ScenePanel.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "config",
-      "id": "unresolved:8a7830cb143791a0",
-      "kind": "unknown_wrapper_call",
-      "owner": "videoEngines",
-      "reason": "imported wrapper call",
-      "source": {
-        "line": 36,
-        "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
     {
@@ -4126,7 +4294,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 181,
+        "line": 187,
         "path": "web/src/App.tsx"
       }
     },
@@ -4156,14 +4324,38 @@
     },
     {
       "domain": "frontend",
+      "expression": "e.reason",
+      "id": "unresolved:8f9ab5178963011d",
+      "kind": "unknown_wrapper_call",
+      "owner": "humanizeEngineReason",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 170,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "",
       "id": "unresolved:90c757c49be5af0c",
       "kind": "unknown_wrapper_call",
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 179,
+        "line": 185,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:9295053659e3ac57",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 145,
+        "path": "web/src/components/edit/ShotInspector.tsx"
       }
     },
     {
@@ -4174,7 +4366,7 @@
       "owner": "classifyShotType",
       "reason": "imported wrapper call",
       "source": {
-        "line": 333,
+        "line": 335,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4198,7 +4390,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 225,
+        "line": 227,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4210,7 +4402,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 239,
+        "line": 241,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4222,8 +4414,20 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 177,
+        "line": 183,
         "path": "web/src/App.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "config",
+      "id": "unresolved:a15f5fc5490de92e",
+      "kind": "unknown_wrapper_call",
+      "owner": "videoEngines",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 97,
+        "path": "web/src/components/pipeline/ShotRow.tsx"
       }
     },
     {
@@ -4246,20 +4450,8 @@
       "owner": "refreshProject",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 108,
+        "line": 114,
         "path": "web/src/App.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
-      "expression": "config",
-      "id": "unresolved:b5e8c82147319b3c",
-      "kind": "unknown_wrapper_call",
-      "owner": "videoEngines",
-      "reason": "imported wrapper call",
-      "source": {
-        "line": 145,
-        "path": "web/src/components/edit/ShotInspector.tsx"
       }
     },
     {
@@ -4270,7 +4462,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 188,
+        "line": 194,
         "path": "web/src/App.tsx"
       }
     },
@@ -4282,7 +4474,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 173,
+        "line": 179,
         "path": "web/src/App.tsx"
       }
     },
@@ -4300,25 +4492,13 @@
     },
     {
       "domain": "frontend",
-      "expression": "config",
-      "id": "unresolved:c2070ad59cde5b3f",
-      "kind": "unknown_wrapper_call",
-      "owner": "videoEngines",
-      "reason": "imported wrapper call",
-      "source": {
-        "line": 35,
-        "path": "web/src/components/setup/inspector/VideoSection.tsx"
-      }
-    },
-    {
-      "domain": "frontend",
       "expression": "sections",
       "id": "unresolved:c48f7e5cc06bbcff",
       "kind": "unknown_wrapper_call",
       "owner": "assemblePromptSections",
       "reason": "imported wrapper call",
       "source": {
-        "line": 31,
+        "line": 34,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4330,7 +4510,7 @@
       "owner": "handleUpdate",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 279,
+        "line": 281,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4342,7 +4522,7 @@
       "owner": "handleDelete",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 192,
+        "line": 194,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
@@ -4366,7 +4546,7 @@
       "owner": "classifyShotType",
       "reason": "imported wrapper call",
       "source": {
-        "line": 33,
+        "line": 36,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4378,7 +4558,7 @@
       "owner": "getShotTemplate",
       "reason": "imported wrapper call",
       "source": {
-        "line": 81,
+        "line": 94,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       }
     },
@@ -4402,7 +4582,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 183,
+        "line": 189,
         "path": "web/src/App.tsx"
       }
     },
@@ -4438,7 +4618,7 @@
       "owner": "getShotTemplate",
       "reason": "imported wrapper call",
       "source": {
-        "line": 34,
+        "line": 37,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
       }
     },
@@ -4450,7 +4630,7 @@
       "owner": "parsePromptSections",
       "reason": "imported wrapper call",
       "source": {
-        "line": 87,
+        "line": 101,
         "path": "web/src/components/pipeline/ShotRow.tsx"
       }
     },
@@ -4462,7 +4642,7 @@
       "owner": "withRefresh",
       "reason": "wrapper reaches transport through another local wrapper",
       "source": {
-        "line": 172,
+        "line": 178,
         "path": "web/src/App.tsx"
       }
     },
@@ -4486,7 +4666,7 @@
       "owner": "handleDecompose",
       "reason": "wrapper URL parameter is transformed",
       "source": {
-        "line": 479,
+        "line": 480,
         "path": "web/src/components/ScenePanel.tsx"
       }
     },
