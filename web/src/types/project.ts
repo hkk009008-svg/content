@@ -111,14 +111,20 @@ export interface Scene {
   shots: Shot[]
 }
 
+/**
+ * Per-engine project override. Intentionally NARROW — mirrors
+ * `_API_ENGINE_DEFAULTS` (web_server.py), the source of truth for shape.
+ * The backend reads exactly `enabled` (domain/video_engine_policy.py
+ * `_is_project_disabled`) plus KLING_NATIVE's `storyboard_mode`
+ * (cinema/phases/motion_render.py `_get_storyboard_mode`).
+ *
+ * Engine duration / resolution / audio / camera params are derived per shot
+ * at dispatch (phase_c_ffmpeg.py), NOT configured here. Don't re-add fields
+ * nothing reads — a typed field is a promise of configurability (ADR-074).
+ */
 export interface ApiEngineConfig {
   enabled: boolean
-  duration?: string | number
-  resolution?: string
-  face_consistency?: boolean
   storyboard_mode?: boolean
-  generate_audio?: boolean
-  camera_motion_native?: boolean
 }
 
 export type HaltRule = 'composite_only' | 'conjunctive' | 'budget_only'

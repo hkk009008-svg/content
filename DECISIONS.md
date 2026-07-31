@@ -3631,3 +3631,63 @@ Evidence:
 - **Cross-ref:** ADR-072; `domain/project_manager.py`;
   `domain/optimizer_cache.py`; `requirements.txt`;
   `scripts/clean_test_fixtures.py`.
+
+---
+
+## ADR-074 — The per-engine settings schema declares only what the program reads
+
+- **Date:** 2026-08-01
+- **Status:** Accepted. Closes TIER-F-AUDIT cycle-17 NEW-1 (+ 5 siblings),
+  open since 2026-05-28.
+- **Context.** `_API_ENGINE_DEFAULTS` (`web_server.py`) and its mirror type
+  `ApiEngineConfig` (`web/src/types/project.ts`) declared seven per-engine
+  sub-fields — `duration`, `resolution`, `face_consistency`,
+  `generate_audio`, `camera_motion_native`, `storyboard_mode`, `enabled`.
+  Verified at `8dde7576`: exactly three sites repo-wide index a per-engine
+  config dict — `web_server.py:477`, `cinema/phases/motion_render.py:73`,
+  `domain/video_engine_policy.py:273` — and between them they read **two**
+  keys: `enabled` and `storyboard_mode`. `camera_motion_native` appeared
+  exactly twice in the tree: the default declaring it and the field typing
+  it. No test pinned any dead field; no UI control rendered one (the old
+  `ApiEnginesSection.tsx` lapsed in the 2026-07 Resolve redesign). The
+  frontend's `setEngineEnabled` spread the whole prior entry, so merely
+  toggling an engine re-persisted the inert keys into project settings.
+  Found independently twice — 2026-05-28 mailbox convergence ("all
+  user-visible UI lies") and 2026-07-31 slice 9b.
+- **Decision.** Trim the declaration to what is read: `enabled`, plus
+  `storyboard_mode` on `KLING_NATIVE`. Rebuild the touched entry in
+  `setEngineEnabled` from live fields instead of spreading the old one, so a
+  project holding pre-trim keys sheds them on next toggle. Do **not** wire
+  the removed fields to real overrides.
+  - *Why not wire them instead.* Two reasons, and the second is the binding
+    one. (1) Duration today is derived per shot from `shot_type` (portrait 4s,
+    action 8s); a flat per-engine override does not add capability on top of
+    that, it flattens it. (2) Duration is a **money source**, not a free knob:
+    `SEEDANCE_DURATIONS` is module-level precisely because the per-clip cost
+    record recomputes from it (`phase_c_ffmpeg.py:54-59`), and the 2026-07-11
+    money-gate review measured a 38% under-record when the two diverged. A
+    settings-side duration forks the figure the budget gate trusts — the
+    money-loss gate-source-mismatch class this program keeps paying for.
+- **Consequences.**
+  - The schema no longer promises configurability that does not exist; a
+    field appearing here is now evidence of a reader.
+  - Behavior is unchanged: every removed key had zero readers, so no dispatch,
+    routing, or cost path observes the trim. Existing projects with persisted
+    dead keys are unaffected (readers ignore unknown keys) and shed them on
+    the next engine toggle.
+  - **Deferred capability, deliberately kept on the books:** an operator-facing
+    *draft duration cap* (shorten every clip for cheap iteration) is genuinely
+    wanted and is NOT what was deleted here. Its correct shape is one global
+    setting flowing through **both** dispatch and cost estimation, not a
+    per-engine dict field — it must land with the cost-path wiring or it
+    reintroduces the fork above.
+- **Evidence.** `grep -rn "api_engines\.get(\|api_engines\[" --include='*.py'
+  --include='*.ts' --include='*.tsx' .` → 3 non-test sites, reading
+  `enabled` ×3 and `storyboard_mode` ×1; `grep -rn camera_motion_native` → 2
+  hits, both declarations. Gates: `scripts/ci_smoke.py`, `tsc`, vitest,
+  `tests/unit/test_f2b_storyboard_mode.py` (the surviving `storyboard_mode`
+  reader, unchanged).
+- **Cross-ref:** `web_server.py` (`_API_ENGINE_DEFAULTS`);
+  `web/src/types/project.ts` (`ApiEngineConfig`);
+  `web/src/components/setup/inspector/VideoSection.tsx`;
+  `domain/project_manager.py`; `docs/TIER-F-AUDIT-cycle17-2026-05-28.md`.

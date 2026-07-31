@@ -412,30 +412,35 @@ def serve_static(path):
 # Configuration — exposed parameters for the UI
 # ---------------------------------------------------------------------------
 
+# Per-engine project overrides — the shape/default catalog served at
+# /api/config and seeded into global_settings.api_engines on settings-save.
+#
+# Deliberately NARROW, and it must stay that way. Exactly two keys are read
+# anywhere in the program:
+#   enabled         → domain/video_engine_policy.py _is_project_disabled
+#                     (the single funnel every api_engines consumer routes
+#                     through: web_server, scene_decomposer, workflow_selector,
+#                     prompt_optimizer, phase_c_ffmpeg)
+#   storyboard_mode → cinema/phases/motion_render.py _get_storyboard_mode
+#                     (KLING_NATIVE only)
+# Engine duration / resolution / audio / camera params are NOT configured
+# here — each dispatch branch in phase_c_ffmpeg.py derives them per shot from
+# shot_type, which is the behavior we want (an action beat and a portrait beat
+# need different lengths; a flat per-engine override would flatten that).
+#
+# Do NOT re-add decorative sub-fields (ADR-074). `duration` especially is a
+# money source, not a free knob: the per-clip cost record recomputes from the
+# dispatch-side tables (SEEDANCE_DURATIONS in phase_c_ffmpeg.py), so a
+# settings-side duration would fork the figure the budget gate trusts — the
+# 38%-under-record failure the 2026-07-11 money-gate review caught.
 _API_ENGINE_DEFAULTS = {
-    "KLING_3_0": {
-        "enabled": True, "duration": "5",
-    },
-    "SEEDANCE": {
-        "enabled": True, "resolution": "720p",
-    },
-    "KLING_NATIVE": {
-        "enabled": True, "duration": "5", "face_consistency": True,
-        "storyboard_mode": False,
-    },
-    "SORA_NATIVE": {
-        "enabled": True, "duration": 4, "resolution": "1080p",
-    },
-    "VEO_NATIVE": {
-        "enabled": True, "duration": "6s", "generate_audio": False,
-    },
-    "LTX": {
-        "enabled": True, "resolution": "1080p",
-        "camera_motion_native": True,
-    },
-    "RUNWAY_GEN4": {
-        "enabled": True, "duration": 10, "resolution": "1080p",
-    },
+    "KLING_3_0": {"enabled": True},
+    "SEEDANCE": {"enabled": True},
+    "KLING_NATIVE": {"enabled": True, "storyboard_mode": False},
+    "SORA_NATIVE": {"enabled": True},
+    "VEO_NATIVE": {"enabled": True},
+    "LTX": {"enabled": True},
+    "RUNWAY_GEN4": {"enabled": True},
 }
 
 
