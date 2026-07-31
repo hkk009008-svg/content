@@ -39,7 +39,7 @@ class TestSemaphoreEnforcement:
                 in_flight -= 1
             return str(tmp_path / "out.mp4")
 
-        with patch("performance.act_one.generate_act_one_performance", slow_stub):
+        with patch("performance.act_two.generate_act_two_performance", slow_stub):
             threads = [
                 threading.Thread(target=lambda i=i: dispatch(
                     "ACT_ONE",

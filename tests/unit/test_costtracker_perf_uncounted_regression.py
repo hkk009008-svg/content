@@ -10,7 +10,7 @@ contract:
   (b) ``record_api_call()`` incremented ``spent_usd`` itself AND called ``log_api()``,
       so once the increment moves to the ``log()`` chokepoint the old ``record_api_call``
       increment must be removed or it double-counts.
-  (c) the 4 performance phases (live_portrait / viggle / act_one / driving_video) each
+  (c) the 4 performance phases (live_portrait / viggle / act_two / driving_video) each
       constructed a THROWAWAY ``CostTracker()`` and logged onto it — the increment landed
       on a discarded instance, never the shared one the gate reads.
   (d) the controller dispatched performance without passing its shared tracker.
@@ -116,13 +116,13 @@ def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch):
               poll_timeout_s=300, cost_tracker=None):
         received["tracker"] = cost_tracker
         if cost_tracker is not None:
-            cost_tracker.log_api(provider="runway", model="act_one",
+            cost_tracker.log_api(provider="runway", model="act_two",
                                  operation="perf", cost_usd=0.25)
         return output_mp4
 
-    # _dispatch_inner imports generate_act_one_performance lazily inside the branch,
+    # _dispatch_inner imports generate_act_two_performance lazily inside the branch,
     # so patching the module attribute is picked up at call time.
-    monkeypatch.setattr("performance.act_one.generate_act_one_performance", _stub)
+    monkeypatch.setattr("performance.act_two.generate_act_two_performance", _stub)
 
     before = shared.spent_usd
     out = _router.dispatch(
@@ -144,7 +144,7 @@ def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch):
 def test_perf_cost_log_uses_passed_tracker(tmp_path):
     """Each phase's _cost_log must log onto the passed shared tracker, not a throwaway."""
     from cost_tracker import CostTracker
-    from performance import live_portrait, viggle, act_one, driving_video
+    from performance import live_portrait, viggle, act_two, driving_video
 
     # live_portrait._cost_log(duration_s, shot_id, video_id, cost_tracker=...)
     t1 = CostTracker(db_path=str(tmp_path / "c1.db"), budget_usd=100.0)
@@ -156,9 +156,9 @@ def test_perf_cost_log_uses_passed_tracker(tmp_path):
     viggle._cost_log("", "", cost_tracker=t2)
     assert t2.spent_usd > 0.0
 
-    # act_one._cost_log(operation, duration_s, shot_id, video_id, cost_tracker=...)
+    # act_two._cost_log(operation, duration_s, shot_id, video_id, cost_tracker=...)
     t3 = CostTracker(db_path=str(tmp_path / "c3.db"), budget_usd=100.0)
-    act_one._cost_log("performance_capture", 5.0, "", "", cost_tracker=t3)
+    act_two._cost_log("performance_capture", 5.0, "", "", cost_tracker=t3)
     assert t3.spent_usd > 0.0
 
     # driving_video._cost_log(provider, duration_s, shot_id, video_id, cost_tracker=...)
@@ -177,7 +177,7 @@ def test_dispatch_without_cost_tracker_is_backward_compatible(tmp_path, monkeypa
         assert cost_tracker is None  # no tracker supplied -> phase falls back to throwaway
         return output_mp4
 
-    monkeypatch.setattr("performance.act_one.generate_act_one_performance", _stub)
+    monkeypatch.setattr("performance.act_two.generate_act_two_performance", _stub)
     out = _router.dispatch(
         ENGINE_ACT_ONE,
         keyframe_path=str(tmp_path / "k.png"),

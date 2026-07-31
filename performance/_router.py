@@ -53,8 +53,8 @@ def _dispatch_inner(
         return None
 
     if engine == ENGINE_ACT_ONE:
-        from performance.act_one import generate_act_one_performance
-        return generate_act_one_performance(
+        from performance.act_two import generate_act_two_performance
+        return generate_act_two_performance(
             keyframe_path, audio_path or "", output_mp4,
             driving_video_path=driving_video_path,
             duration_s=duration_s,

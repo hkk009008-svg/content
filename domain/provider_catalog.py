@@ -466,6 +466,17 @@ _VEO_PARAMETERS = (
 )
 
 _RUNWAY_GEN4_PARAMETERS = (
+    # Re-verified 2026-07-30 (slice 5b, Act-Two migration audit) against the
+    # installed runwayml SDK's Gen4Turbo TypedDict: `prompt_image` is typed
+    # Union[str, Iterable[...]] — the SDK CAN accept several reference
+    # images — but phase_c_ffmpeg.py's RUNWAY_GEN4 branch only ever
+    # constructs and sends a single base64 image (`prompt_image=data_uri`).
+    # max_items=1 pins that IMPLEMENTATION reality, not the SDK's ceiling —
+    # this is the source of truth for "single reference image" labeling;
+    # there is no multi-reference/"style lock with 3 refs" behavior to
+    # remove here, that claim lived only in comments/docstrings (fixed in
+    # phase_c_ffmpeg.py) and in domain.scene_decomposer.API_REGISTRY's
+    # RUNWAY_GEN4 description (out of this slice's owned files).
     ParameterConstraint("model", allowed_values=("gen4_turbo",)),
     ParameterConstraint("input_images", max_items=1),
     ParameterConstraint("duration", allowed_values=(10,)),
@@ -887,6 +898,18 @@ _CATALOG_ROWS = (
         (False, False, False),
     ),
     _entry(
+        # Confirmed KNOWN_BROKEN/RETIRED against the installed runwayml SDK
+        # (v4.14.0, 2026-07-30, slice 5b): RunwayML().character_performance
+        # .create()'s `model` param is typed Literal["act_two"] — "act_one"
+        # is not a constructible request on this endpoint any more. The
+        # replacement adapter (performance/act_two.py) targets the live
+        # act_two model; this entry intentionally stays retired/broken under
+        # the OLD "RUNWAY_ACT_ONE" key rather than being renamed, because the
+        # key must keep mirroring domain.scene_decomposer.API_REGISTRY's key
+        # (test_catalog_exactly_covers_legacy_registry_plus_fal_svd_
+        # mutation_pin pins CATALOG's key set to API_REGISTRY's) — renaming
+        # it here without also updating that legacy registry (out of this
+        # slice's owned files) would desync the two.
         "RUNWAY_ACT_ONE",
         "Runway Act-One",
         Modality.LIPSYNC,
