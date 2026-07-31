@@ -60,9 +60,12 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof AppShell>> = {
     directorReview: null,
     isPaused: false,
     failedShots: [],
+    allowedActions: [],
+    checkpoint: null,
     onBack: noop,
     onPause: noop,
     onResume: noop,
+    onResumeFromCheckpoint: noop,
     onApproveShotPlan: asyncNoop,
     onRejectShotPlan: asyncNoop,
     onGenerateKeyframe: asyncNoop,
@@ -79,12 +82,16 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof AppShell>> = {
   }
 }
 
-function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> = {}) {
-  return render(
+function shellElement(overrides: Partial<React.ComponentProps<typeof AppShell>> = {}) {
+  return (
     <PageProvider>
       <AppShell {...makeProps(overrides)} />
-    </PageProvider>,
+    </PageProvider>
   )
+}
+
+function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> = {}) {
+  return render(shellElement(overrides))
 }
 
 describe('AppShell', () => {
@@ -132,5 +139,36 @@ describe('AppShell', () => {
   it('does NOT render the budget banner when budgetHalt is null', () => {
     renderShell({ budgetHalt: null })
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
+
+describe('AppShell -- isGenerating derives from backend truth, not SSE connectivity (Slice 11b)', () => {
+  // `_pipeline_action_authority`'s own docstring: "a client can disconnect
+  // from the SSE stream while generation keeps running, and vice versa, so
+  // transport state is never job truth." `generating` (App.tsx's `running
+  // || starting`) is that backend truth; `isStreaming` is transport only.
+
+  it('a transport drop (isStreaming false) does not flip a truthful "generating" state to idle', () => {
+    const { container, rerender } = renderShell({ generating: true, isStreaming: true })
+    expect(container.textContent).toContain('running')
+    expect(container.textContent).not.toContain('idle')
+
+    rerender(shellElement({ generating: true, isStreaming: false }))
+    expect(container.textContent).toContain('running')
+    expect(container.textContent).not.toContain('idle')
+  })
+
+  it('live SSE connectivity (isStreaming true) cannot manufacture a "generating" state the backend has not confirmed', () => {
+    const { container } = renderShell({ generating: false, isStreaming: true })
+    expect(container.textContent).toContain('idle')
+    expect(container.textContent).not.toContain('running')
+  })
+
+  it('isGenerating tracks generating in both directions regardless of isStreaming', () => {
+    const { container, rerender } = renderShell({ generating: false, isStreaming: false })
+    expect(container.textContent).toContain('idle')
+
+    rerender(shellElement({ generating: true, isStreaming: false }))
+    expect(container.textContent).toContain('running')
   })
 })

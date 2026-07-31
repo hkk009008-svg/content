@@ -27,6 +27,20 @@ export function useSSE(projectId: string | null) {
   const activeProjectRef = useRef<string | null>(projectId)
   const committedProjectRef = useRef<string | null>(projectId)
   const closedSourcesRef = useRef<WeakSet<EventSource>>(new WeakSet())
+  // Slice 11b: the highest event `id` seen so far THIS run (11a's wire
+  // contract inlines it into every data-bearing event's JSON body -- see
+  // web_server.py's `_sse_format`; control frames GAP/HEARTBEAT/END never
+  // carry one). A reconnect's brand-new EventSource sends it back as
+  // `?last_event_id=` (this hook's own backoff/reconnect constructs a
+  // fresh EventSource rather than relying on the browser's native
+  // lastEventId bookkeeping, which that reconnect path bypasses -- see the
+  // module comment in web_server.py above `_ProjectEventBus`), so the
+  // server can replay exactly the suffix this client missed instead of
+  // either replaying nothing or the whole run. Reset to null whenever a
+  // FRESH run begins (`start()`) or the project identity changes --
+  // ids are scoped to one server-side bus/run and are never valid
+  // against a different one (see `_ProjectEventBus.__init__`).
+  const lastEventIdRef = useRef<number | null>(null)
 
   const clearRetry = useCallback(() => {
     if (retryTimerRef.current !== null) {
@@ -53,6 +67,7 @@ export function useSSE(projectId: string | null) {
     attemptRef.current = 0
 
     if (clearEventState) {
+      lastEventIdRef.current = null
       if (updateState && mountedRef.current) {
         setEvents([])
         setLatest(null)
@@ -81,7 +96,15 @@ export function useSSE(projectId: string | null) {
     ) return
 
     const connectionGeneration = generationRef.current
-    const es = new EventSource(`/api/projects/${projectId}/stream`)
+    // Slice 11b: resume from the last seen id on a reconnect (11a's replay
+    // contract) -- a fresh subscriber (no id yet) omits the param entirely,
+    // which the server treats as "no known position" (its own snapshot
+    // path), exactly matching pre-11b behavior.
+    const lastEventId = lastEventIdRef.current
+    const streamUrl = lastEventId !== null
+      ? `/api/projects/${projectId}/stream?last_event_id=${lastEventId}`
+      : `/api/projects/${projectId}/stream`
+    const es = new EventSource(streamUrl)
     sourceRef.current = es
 
     const isCurrentConnection = () => (
@@ -95,7 +118,15 @@ export function useSSE(projectId: string | null) {
     es.onmessage = (e) => {
       if (!isCurrentConnection()) return
       try {
-        const data: ProgressEvent = JSON.parse(e.data)
+        // Slice 11a inlines the SSE `id:` framing line into every
+        // data-bearing event's JSON body too (both live deliveries and
+        // reconnect-replayed/snapshot ones carry their real id;
+        // GAP/HEARTBEAT/END never do) -- track it so the NEXT reconnect
+        // can resume from exactly here instead of replaying nothing.
+        const data: ProgressEvent & { id?: number; replayed?: boolean } = JSON.parse(e.data)
+        if (typeof data.id === 'number' && Number.isFinite(data.id)) {
+          lastEventIdRef.current = data.id
+        }
         // Any real message means the connection is healthy — reset backoff.
         if (data.stage !== 'HEARTBEAT') {
           attemptRef.current = 0
@@ -162,6 +193,12 @@ export function useSSE(projectId: string | null) {
     // leaks into the new run's UI until the first event arrives — e.g. a
     // stale 'VIA <engine>' marquee fragment after a cancel (wf_9877b1d1).
     setLatest(null)
+    // Slice 11b: a fresh run gets a fresh server-side bus with ids
+    // restarting at 1 (see the module comment in web_server.py above
+    // `_ProjectEventBus`) -- a stale id from the PREVIOUS run must never
+    // be sent as this run's `last_event_id` (mirrors the events/latest
+    // reset above, same "don't leak the old run" reasoning).
+    lastEventIdRef.current = null
     setIsStreaming(true)
     attemptRef.current = 0
     stoppedRef.current = false

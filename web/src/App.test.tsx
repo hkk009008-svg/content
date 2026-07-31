@@ -24,6 +24,7 @@ vi.mock('./components/AppShell', () => ({
       <div data-testid="generating">{String(props.generating)}</div>
       <div data-testid="budget-halt">{props.budgetHalt ? props.budgetHalt.stage : 'none'}</div>
       <button onClick={props.onGenerate}>do-generate</button>
+      <button onClick={props.onResumeFromCheckpoint}>do-resume-checkpoint</button>
       <button onClick={props.onCancel}>do-cancel</button>
       <button onClick={props.onBackToProjects}>back-to-projects</button>
       <button onClick={props.onRefreshProject}>do-refresh</button>
@@ -299,5 +300,56 @@ describe('App -- truthful generate/cancel (never paint optimistic success)', () 
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     await waitFor(() => expect(screen.getByTestId('generating')).toHaveTextContent('true'))
+  })
+})
+
+describe('App -- explicit resume-vs-new-run choice (Slice 11c)', () => {
+  it('handleResumeFromCheckpoint POSTs {resume: true} -- it never silently discards the checkpoint', async () => {
+    const fetchMock = stubFetch({ generate: { ok: true } })
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+
+    fireEvent.click(screen.getByText('do-resume-checkpoint'))
+    await waitFor(() => expect(screen.getByTestId('generating')).toHaveTextContent('true'))
+
+    const generateCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/generate'))
+    expect(generateCall).toBeDefined()
+    const init = generateCall![1] as RequestInit
+    expect(JSON.parse(init.body as string)).toEqual({ resume: true })
+  })
+
+  it('handleGenerate ("start new") never sends resume: true -- it never silently resumes', async () => {
+    const fetchMock = stubFetch({ generate: { ok: true } })
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+
+    fireEvent.click(screen.getByText('do-generate'))
+    await waitFor(() => expect(screen.getByTestId('generating')).toHaveTextContent('true'))
+
+    const generateCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/generate'))
+    expect(generateCall).toBeDefined()
+    const init = generateCall![1] as RequestInit | undefined
+    // No body at all (matches today's behavior exactly -- resume defaults
+    // to false server-side when the request isn't JSON).
+    expect(init?.body).toBeUndefined()
+  })
+
+  it('a rejected resume-from-checkpoint (stale click racing another client) surfaces an error and refreshes rather than painting success', async () => {
+    stubFetch({ generate: { ok: false, status: 409, body: { error: 'Generation already in progress' } } })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+
+    fireEvent.click(screen.getByText('do-resume-checkpoint'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Generation already in progress')
+    await waitFor(() => expect(screen.getByTestId('generating')).toHaveTextContent('false'))
   })
 })

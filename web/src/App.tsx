@@ -40,7 +40,7 @@ function AppInner() {
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
     stages, activeStage, shotStates, directorReview, processEvent,
-    isPaused, failedShots, running, refreshPipelineState,
+    isPaused, failedShots, running, allowedActions, checkpoint, refreshPipelineState,
     pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
@@ -129,12 +129,25 @@ function AppInner() {
     setProject(null)
   }, [])
 
-  const handleGenerate = async () => {
+  // Slice 11c: handleGenerate ("start new") and handleResumeFromCheckpoint
+  // ("resume") are the explicit resume-vs-new-run choice -- both dispatch
+  // through this ONE shared body, differing ONLY in the `resume` flag sent
+  // to POST /generate (web_server.py:api_generate is the sole route for
+  // both). Neither silently does the other's job: `startGeneration(false)`
+  // never threads `resume: true` (no silent resume), and
+  // `startGeneration(true)` always does (no silent checkpoint discard).
+  // Truthful either way -- a rejected request (e.g. a stale click racing
+  // another client that already started/resumed the same pid) surfaces
+  // actionError and refreshes rather than painting a generating state.
+  const startGeneration = async (resume: boolean) => {
     if (!project) return
     setActionError(null)
     setBudgetHalt(null) // new run: the previous halt is history
     setStarting(true)
-    const result = await apiPost<{ error?: string }>(`${API}/projects/${project.id}/generate`)
+    const result = await apiPost<{ error?: string }>(
+      `${API}/projects/${project.id}/generate`,
+      resume ? { resume: true } : undefined,
+    )
     setStarting(false)
     if (result.ok) {
       setPage('run')  // Switch to the Run page (replaces the old mode='pipeline')
@@ -144,6 +157,9 @@ function AppInner() {
     }
     await refreshPipelineState() // authoritative truth either way
   }
+
+  const handleGenerate = () => startGeneration(false)
+  const handleResumeFromCheckpoint = () => startGeneration(true)
 
   const handleCancel = async () => {
     if (!project) return
@@ -270,12 +286,15 @@ function AppInner() {
         directorReview={directorReview}
         isPaused={isPaused}
         failedShots={failedShots}
+        allowedActions={allowedActions}
+        checkpoint={checkpoint}
         pipelineError={pipelineError}
         pipelineLoadingLabel={pipelineLoadingLabel}
         // ── Pipeline callbacks (withRefresh-wrapped except onDiagnoseShot / onReassemble) ──
         onBack={handleBackToSetup}
         onPause={pausePipeline}
         onResume={resumePipeline}
+        onResumeFromCheckpoint={handleResumeFromCheckpoint}
         onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
         onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
         onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}

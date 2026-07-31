@@ -428,9 +428,28 @@ export interface ProgressEvent {
   budget?: number
 }
 
-/** Subset of {"start","cancel","pause","resume"} the server currently
- *  considers legal for a project (`web_server.py:_pipeline_action_authority`). */
-export type PipelineAction = 'start' | 'cancel' | 'pause' | 'resume'
+/** Subset of {"start","resume_checkpoint","cancel","pause","resume"} the
+ *  server currently considers legal for a project
+ *  (`web_server.py:_pipeline_action_authority`). "resume_checkpoint" (Slice
+ *  11c) only ever appears alongside "start" -- both idle, both dispatched
+ *  through `POST /generate`, distinguished only by the request body's
+ *  `resume` flag. It is a DIFFERENT action from plain "resume", which
+ *  un-pauses an already-running pipeline via `POST /resume`. */
+export type PipelineAction = 'start' | 'resume_checkpoint' | 'cancel' | 'pause' | 'resume'
+
+/** Resume-info summary for an on-disk checkpoint -- identical shape from
+ *  both `GET /checkpoint` and the `checkpoint` key `GET /pipeline-state`
+ *  threads onto its idle branch (Slice 11c;
+ *  `cinema.services.checkpoint_info`). Only `resumable` is guaranteed;
+ *  every other field is present exactly when `resumable` is true. */
+export interface CheckpointInfo {
+  resumable: boolean
+  completed_scenes?: number
+  total_scenes?: number
+  stage?: string
+  shots_done?: number
+  shots_failed?: number
+}
 
 export interface PipelineState {
   paused: boolean
@@ -452,6 +471,12 @@ export interface PipelineState {
    *  error shape, which this interface does not model. */
   running: boolean
   allowed_actions: PipelineAction[]
+  /** Slice 11c -- additive on the disk-snapshot (idle) branch ONLY; a
+   *  live pipeline's response does not carry this key (see
+   *  `web_server.py:api_pipeline_state`'s docstring). Optional here
+   *  because of that branch split, not because the idle branch itself
+   *  ever omits it. */
+  checkpoint?: CheckpointInfo
 }
 
 export interface GateStatus {

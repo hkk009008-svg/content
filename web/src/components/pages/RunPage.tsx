@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { Project, ProgressEvent, ShotState, PipelineStage, DirectorReview } from '../../types/project'
+import type { Project, ProgressEvent, ShotState, PipelineStage, DirectorReview, PipelineAction, CheckpointInfo } from '../../types/project'
 import PipelineStageRail from '../pipeline/PipelineStageRail'
 import ReviewStage from '../pipeline/ReviewStage'
 import ScreeningStage from '../pipeline/ScreeningStage'
@@ -41,6 +41,20 @@ import { ErrorState, LoadingState, MICRO_LABEL } from '../ui'
  * Indigo design tokens throughout (bg-app, bg-head, border-line,
  * text-tx/-mut/-dim). The reused legacy components now use these same tokens —
  * the editorial- and console- palettes were retired.
+ *
+ * Header run controls (Slice 11c) — Resume/Pause/Cancel are gated on the
+ * server-derived `allowedActions` (`web_server.py:_pipeline_action_authority`
+ * via `GET /pipeline-state`) instead of the locally-derived
+ * `isPaused`/`isGenerating` booleans, so the UI never offers an action the
+ * current snapshot does not report as legal (product invariant #2 — the
+ * server remains the sole authority). When the project is idle with a
+ * resumable on-disk checkpoint (`allowedActions` includes
+ * "resume_checkpoint"), the header instead shows the explicit
+ * resume-vs-new-run choice: "Resume" (continues the checkpoint via
+ * `onResumeFromCheckpoint`, which POSTs `{resume: true}`) and "Start new"
+ * (`onGenerate`, the SAME fresh-run action the AppShell footer button
+ * uses — always `resume: false`, so it never silently resumes). Neither
+ * button silently defaults to the other's behavior.
  */
 
 const REVIEW_STAGES = ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW']
@@ -65,10 +79,22 @@ export interface Props {
   isGenerating: boolean
   isPaused: boolean
   failedShots: string[]
+  /** Slice 11c: server-derived action authority — see the file doc above. */
+  allowedActions: PipelineAction[]
+  /** Slice 11c: on-disk checkpoint summary (idle branch only); null while
+   *  running/paused or before one exists. */
+  checkpoint: CheckpointInfo | null
   onBack: () => void
   onCancel: () => void
   onPause: () => void
   onResume: () => void
+  /** Slice 11c: explicit "resume from checkpoint" — POSTs `{resume: true}`.
+   *  Distinct from `onResume`, which un-pauses an already-running pipeline. */
+  onResumeFromCheckpoint: () => void
+  /** The same "start a fresh run" action the AppShell footer button uses
+   *  (always `resume: false`) — surfaced here too so "Start new" is
+   *  reachable right next to "Resume" when a checkpoint exists. */
+  onGenerate: () => void
   onApproveShotPlan: (shotId: string) => Promise<any>
   onRejectShotPlan: (shotId: string, reason?: string) => Promise<any>
   onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
@@ -99,7 +125,9 @@ export interface Props {
 export default function RunPage({
   project, events, latest, stages, activeStage,
   shotStates, directorReview, isGenerating, isPaused, failedShots,
-  onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
+  allowedActions, checkpoint,
+  onBack, onCancel, onPause, onResume, onResumeFromCheckpoint, onGenerate,
+  onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
   onRefreshProject, onIterate, onApproveFinalCut, onReassemble,
@@ -128,6 +156,17 @@ export default function RunPage({
     (s) => s.status === 'complete' || s.status === 'post_processing' || s.status === 'image_review',
   ).length
   const statusWord = isPaused ? 'held' : isGenerating ? 'running' : 'idle'
+
+  /* ── Header run controls (Slice 11c) — server-derived, not synthesized ──
+     `allowedActions` is the sole authority for which of these render; see
+     the file doc above for the full resume-vs-new-run contract. */
+  const canResumeCheckpoint = allowedActions.includes('resume_checkpoint')
+  const checkpointSummary = checkpoint?.resumable
+    ? `Checkpoint: ${checkpoint.completed_scenes ?? 0}/${checkpoint.total_scenes ?? 0} scenes done` +
+      (checkpoint.shots_failed
+        ? `, ${checkpoint.shots_failed} shot${checkpoint.shots_failed === 1 ? '' : 's'} failed`
+        : '')
+    : ''
 
   /* ── Center content — routed on activeStage EXACTLY as PipelineLayout ──
      Do not reorder or alter these branches: the approval/screening gates
@@ -209,12 +248,25 @@ export default function RunPage({
           </span>
         </div>
         <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-wide">
-          {isPaused ? (
-            <button onClick={onResume} className="text-pri hover:text-tx">Resume</button>
-          ) : isGenerating ? (
-            <button onClick={onPause} className="text-mut hover:text-tx">Pause</button>
-          ) : null}
-          <button onClick={onCancel} className="text-mut hover:text-fail">Cancel</button>
+          {canResumeCheckpoint ? (
+            <>
+              <span className="normal-case tracking-normal text-dim">{checkpointSummary}</span>
+              <button onClick={onResumeFromCheckpoint} className="text-pri hover:text-tx">Resume</button>
+              <button onClick={onGenerate} className="text-mut hover:text-tx">Start new</button>
+            </>
+          ) : (
+            <>
+              {allowedActions.includes('resume') && (
+                <button onClick={onResume} className="text-pri hover:text-tx">Resume</button>
+              )}
+              {allowedActions.includes('pause') && (
+                <button onClick={onPause} className="text-mut hover:text-tx">Pause</button>
+              )}
+              {allowedActions.includes('cancel') && (
+                <button onClick={onCancel} className="text-mut hover:text-fail">Cancel</button>
+              )}
+            </>
+          )}
           <button onClick={onBack} className="text-mut hover:text-tx">Back</button>
         </div>
       </div>

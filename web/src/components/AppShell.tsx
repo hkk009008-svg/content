@@ -39,10 +39,14 @@ interface AppShellProps
     | 'directorReview'
     | 'isPaused'
     | 'failedShots'
+    // ── Slice 11c: server-derived action authority + checkpoint summary ──
+    | 'allowedActions'
+    | 'checkpoint'
     // ── Run-page callbacks (wrapped in withRefresh up in App.tsx) ──
     | 'onBack'
     | 'onPause'
     | 'onResume'
+    | 'onResumeFromCheckpoint'
     | 'onApproveShotPlan'
     | 'onRejectShotPlan'
     | 'onGenerateKeyframe'
@@ -66,6 +70,9 @@ interface AppShellProps
   config: AppConfig | null
   events: ProgressEvent[]
   latest: ProgressEvent | null
+  /** SSE transport connectivity only -- NEVER job truth (Slice 11b). Kept
+   *  in the prop contract for parity with App.tsx's call site; `isGenerating`
+   *  below deliberately derives from `generating` alone. */
   isStreaming: boolean
   generating: boolean
   onBackToProjects: () => void
@@ -119,9 +126,12 @@ export default function AppShell({
   directorReview,
   isPaused,
   failedShots,
+  allowedActions,
+  checkpoint,
   onBack,
   onPause,
   onResume,
+  onResumeFromCheckpoint,
   onApproveShotPlan,
   onRejectShotPlan,
   onGenerateKeyframe,
@@ -142,7 +152,20 @@ export default function AppShell({
 }: AppShellProps) {
   const { page, setPage } = usePage()
 
-  const isGenerating = generating || isStreaming
+  // Slice 11b: `isGenerating` must derive ONLY from backend truth --
+  // `generating` is App.tsx's `running || starting` (slice 8a's
+  // server-confirmed `running`, OR'd with this session's own in-flight
+  // /generate POST). `isStreaming` is SSE TRANSPORT connectivity, never
+  // job truth (mirrors `_pipeline_action_authority`'s own docstring on
+  // the backend: "a client can disconnect from the SSE stream while
+  // generation keeps running, and vice versa"). A momentary reconnect
+  // must never flip a truthful "running" to "idle", and a live-but-idle
+  // stream must never manufacture a "running" the backend hasn't
+  // confirmed -- both were possible while this was `generating ||
+  // isStreaming`. `isStreaming` remains an accepted prop (App.tsx's call
+  // site still passes it; other pages may still want raw connectivity
+  // later) but is deliberately NOT read here anymore.
+  const isGenerating = generating
   const reelNumber = project.id.slice(0, 4).toUpperCase()
 
   /* ── Shot tally (bottom-left runstat) ─────────────────────────── */
@@ -221,10 +244,14 @@ export default function AppShell({
             isGenerating={isGenerating}
             isPaused={isPaused}
             failedShots={failedShots}
+            allowedActions={allowedActions}
+            checkpoint={checkpoint}
             onBack={onBack}
             onCancel={onCancel}
             onPause={onPause}
             onResume={onResume}
+            onResumeFromCheckpoint={onResumeFromCheckpoint}
+            onGenerate={onGenerate}
             onApproveShotPlan={onApproveShotPlan}
             onRejectShotPlan={onRejectShotPlan}
             onGenerateKeyframe={onGenerateKeyframe}
