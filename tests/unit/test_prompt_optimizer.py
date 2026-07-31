@@ -473,6 +473,125 @@ def test_product_fallback_is_parseable_and_preserves_product_detail():
     assert all(parsed[tag].strip() for tag in parsed)
 
 
+# ---------------------------------------------------------------------------
+# scale_reference reaches BOTH optimizer paths
+#
+# scale_reference is stored on every ProductObject (domain/project_manager.py
+# make_object, web_server.py api_add_object/api_update_object) beside
+# material_traits/surface_type/branding_constraints/texture_anchor. Audit
+# 2026-07-30 (slice 9d) found it was the one sibling with no production reader
+# — a decorative write. These two tests are reciprocal on purpose: the
+# optimizer has two independent paths (heuristic `_fallback_optimize` and the
+# LLM `optimize_shot_prompt` user_prompt), and the pipeline switches to the
+# fallback on any LLM failure, so wiring only one would silently half-work.
+# ---------------------------------------------------------------------------
+
+def test_product_fallback_carries_scale_reference_into_object_anchor():
+    from llm.prompt_optimizer import (
+        _fallback_optimize,
+        _normalize_structured_image_prompt,
+    )
+    from phase_c_assembly import _parse_structured_prompt
+
+    scale_detail = "scale-sentinel-6cm"
+    result = _fallback_optimize(
+        user_input="chronometer on white marble",
+        characters=[],
+        location={"description": "studio", "lighting": "controlled light"},
+        global_settings={},
+        objects=[
+            {
+                "name": "Chronometer",
+                "brand": "Lumex",
+                "surface_type": "metallic",
+                "material_traits": "steel",
+                "texture_anchor": "sapphire crown",
+                "scale_reference": scale_detail,
+            },
+        ],
+        primary_subject="object",
+    )
+
+    prompt = result["image_prompt"]
+    assert _normalize_structured_image_prompt(prompt) == prompt
+    parsed = _parse_structured_prompt(prompt)
+    assert scale_detail in parsed["OUTFIT"], (
+        "scale_reference belongs in the product-styling identity anchor "
+        "alongside brand/material/texture_anchor; got OUTFIT="
+        f"{parsed['OUTFIT']!r}"
+    )
+
+
+def test_scale_reference_present_in_llm_user_prompt():
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    scale_detail = "scale-sentinel-fits-in-adult-hand"
+    ensemble_mock = _minimal_ensemble_mock(_valid_spec())
+
+    optimize_shot_prompt(
+        user_input="a chronometer on white marble",
+        objects=[
+            {
+                "name": "Chronometer",
+                "brand": "Lumex",
+                "material_traits": "steel",
+                "surface_type": "metallic",
+                "texture_anchor": "sapphire crown",
+                "branding_constraints": "wordmark legible",
+                "scale_reference": scale_detail,
+            },
+        ],
+        primary_subject="object",
+        ensemble=ensemble_mock,
+    )
+
+    user_prompt_arg = ensemble_mock.competitive_generate.call_args.kwargs.get(
+        "user_prompt", ""
+    )
+    assert f"scale={scale_detail}" in user_prompt_arg, (
+        "scale_reference should appear in the OBJECTS IN FRAME block beside "
+        f"brand/material/surface/hero_features/branding; got:\n{user_prompt_arg!r}"
+    )
+
+
+def test_scale_reference_reaches_generated_spec_through_public_entry():
+    """Contract pin: the stored value reaches the RETURNED spec, not merely the
+    prompt handed to the LLM.
+
+    Driven through the public entry point with a failing ensemble, because on
+    the LLM path the spec comes back from the model — a mocked winner_content
+    can only prove what we fed it. The LLM-failure route makes
+    optimize_shot_prompt generate a real spec, so the assertion is on output
+    the code actually produced.
+    """
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    failing_ensemble = MagicMock()
+    failing_ensemble.competitive_generate.side_effect = RuntimeError("LLM timeout")
+
+    scale_detail = "scale-sentinel-spec-6cm"
+    result = optimize_shot_prompt(
+        user_input="chronometer on white marble",
+        objects=[
+            {
+                "name": "Chronometer",
+                "brand": "Lumex",
+                "surface_type": "metallic",
+                "material_traits": "steel",
+                "scale_reference": scale_detail,
+            },
+        ],
+        primary_subject="object",
+        ensemble=failing_ensemble,
+    )
+
+    assert isinstance(result, dict)
+    assert scale_detail in result["image_prompt"], (
+        "scale_reference must survive into the generated spec through the "
+        f"public entry point; got: {result['image_prompt']!r}"
+    )
+
+
 def test_optimizer_system_prompt_requires_exact_five_section_contract():
     from llm.prompt_optimizer import _OPTIMIZER_SYSTEM_PROMPT
 

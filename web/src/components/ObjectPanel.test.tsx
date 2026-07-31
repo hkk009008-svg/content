@@ -5,13 +5,13 @@ import type { Project, ProductObject } from '../types/project'
 
 // ---------------------------------------------------------------------------
 // scale_reference is stored on every ProductObject (domain/project_manager.py
-// make_object, web_server.py api_add_object/api_update_object) but — unlike
-// its siblings material_traits/surface_type/branding_constraints/
-// texture_anchor, which llm/prompt_optimizer.py reads back into the object
-// anchor/prompt (see obj_anchor / obj_lines) — nothing reads scale_reference
-// back out. Audit 2026-07-30 flagged this as a decorative write; plan slice
-// 9d. The field is presented read-only with a visible reason rather than
-// left as a silently-inert editable control.
+// make_object, web_server.py api_add_object/api_update_object) and is now read
+// back by llm/prompt_optimizer.py on BOTH optimizer paths — the heuristic
+// obj_anchor in _fallback_optimize and the obj_lines block of the LLM
+// user_prompt — alongside its siblings material_traits/surface_type/
+// branding_constraints/texture_anchor. Audit 2026-07-30 (slice 9d) found it
+// reader-less and presented it read-only; the reader landed in the follow-up,
+// so the control is editable again and these tests pin that it round-trips.
 // ---------------------------------------------------------------------------
 
 const SCALE_PLACEHOLDER = 'fits in adult hand, ~24cm tall, hand-sized'
@@ -61,41 +61,42 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('ObjectPanel scale_reference is read-only (slice 9d)', () => {
-  it('renders the stored scale_reference as read-only with a visible reason', () => {
+describe('ObjectPanel scale_reference is editable and wired', () => {
+  it('renders the stored scale_reference as an editable field', () => {
     vi.stubGlobal('fetch', fetchOkJson())
     render(<ObjectPanel project={makeProject()} onRefresh={vi.fn()} />)
 
     fireEvent.click(screen.getByText('Edit'))
 
     const input = screen.getByPlaceholderText(SCALE_PLACEHOLDER) as HTMLInputElement
-    expect(input.readOnly).toBe(true)
+    expect(input.readOnly).toBe(false)
     expect(input.value).toBe('fits in adult hand, ~24cm tall')
-    expect(screen.getByText('(read-only)')).toBeInTheDocument()
-    expect(screen.getByText(
-      'Stored for reference only — not currently read by the generation prompt or camera '
-      + 'framing, unlike the fields above.',
-    )).toBeInTheDocument()
+    expect(screen.queryByText('(read-only)')).toBeNull()
+    expect(screen.queryByText(/stored for reference only/i)).toBeNull()
   })
 
-  it('ignores attempted edits to the read-only scale_reference field', () => {
+  it('accepts edits to the scale_reference field', () => {
     vi.stubGlobal('fetch', fetchOkJson())
     render(<ObjectPanel project={makeProject()} onRefresh={vi.fn()} />)
 
     fireEvent.click(screen.getByText('Edit'))
     const input = screen.getByPlaceholderText(SCALE_PLACEHOLDER) as HTMLInputElement
 
-    fireEvent.change(input, { target: { value: 'attempted edit' } })
+    fireEvent.change(input, { target: { value: 'palm-sized, ~9cm tall' } })
 
-    expect(input.value).toBe('fits in adult hand, ~24cm tall')
+    expect(input.value).toBe('palm-sized, ~9cm tall')
   })
 
-  it('still submits the existing stored scale_reference unchanged on save', async () => {
+  it('submits the edited scale_reference on save', async () => {
     const fetchMock = fetchOkJson()
     vi.stubGlobal('fetch', fetchMock)
     render(<ObjectPanel project={makeProject()} onRefresh={vi.fn()} />)
 
     fireEvent.click(screen.getByText('Edit'))
+    fireEvent.change(
+      screen.getByPlaceholderText(SCALE_PLACEHOLDER),
+      { target: { value: 'palm-sized, ~9cm tall' } },
+    )
     fireEvent.click(screen.getByText('Save'))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -104,7 +105,7 @@ describe('ObjectPanel scale_reference is read-only (slice 9d)', () => {
     ))
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const body = JSON.parse(init.body as string)
-    expect(body.scale_reference).toBe('fits in adult hand, ~24cm tall')
+    expect(body.scale_reference).toBe('palm-sized, ~9cm tall')
   })
 })
 
