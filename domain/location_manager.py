@@ -38,6 +38,77 @@ def _loc_dir(project_id: str, loc_id: str) -> str:
     return d
 
 
+def _to_project_relative(project_dir: str, absolute_path: str) -> str:
+    """Convert a freshly-written location reference-image path to a
+    project-relative form for persistence (Product invariant #6: portable
+    persistence -- mirrors slice 10's ``ShotController._to_project_relative``,
+    which applies the same invariant to take/shot paths). Location
+    reference images are the same class of project-owned output as takes
+    and were one of the gaps slice 10's own acceptance criterion left
+    uncovered (FIX-REFS).
+
+    Delegates to the ONE implementation via a duck-typed shim exposing only
+    ``project_dir`` (the sole attribute that method reads) -- same reuse
+    shape as ``_resolve_stored_media_path`` below and
+    ``cinema.screening._resolve_manifest_media_path``. This module has no
+    controller ``self``, so it can't use ``ReviewController``'s bound-alike
+    reuse shape and instead borrows the module-level duck-typed-shim shape.
+    Local import keeps ShotController's heavier transitive surface
+    (phase_c_vision / lip_sync / etc.) off the location-manager import
+    path, and is cycle-safe the same way ``domain.character_manager``'s
+    identical helper is (see that module's docstring for the full
+    argument): a lazy, call-time import never races the module-load order.
+    """
+    if not absolute_path:
+        return absolute_path
+    from cinema.shots.controller import ShotController
+
+    class _PathCtx:
+        pass
+
+    ctx = _PathCtx()
+    ctx.project_dir = project_dir
+    return ShotController._to_project_relative(ctx, absolute_path)
+
+
+def _resolve_stored_media_path(project: dict, stored_path: str) -> str:
+    """Resolve a location reference-image path read back from persisted
+    state to a real, directly-openable absolute path under the CURRENT
+    project directory. Read-side counterpart to ``_to_project_relative``
+    above.
+
+    ``get_location_reference`` must route the raw stored string through
+    this before ``os.path.exists`` / opening the file. Without it, a
+    project-relative path (this module's current persistence shape) is
+    checked against the process CWD instead of the project directory, and a
+    legacy absolute path baked in before a repo move silently 404s instead
+    of being re-rooted under the current project directory (FIX-REFS).
+
+    Module-level sibling of ``cinema.screening._resolve_manifest_media_path``
+    (itself modeled on ``ReviewController._resolve_stored_media_path``):
+    this module has no controller ``self`` exposing ``.project`` /
+    ``.project_dir``, so it borrows the ONE migration implementation
+    (``ShotController._resolve_stored_media_path`` -- relative-join,
+    legacy-absolute re-root, never fabricating an escape outside the
+    project) via a tiny duck-typed shim carrying the two attributes that
+    method reads, instead of copying the migration logic here.
+    """
+    if not stored_path:
+        return stored_path
+    project_id = project.get("id") or ""
+    if not project_id:
+        return stored_path
+    from cinema.shots.controller import ShotController
+
+    class _PathCtx:
+        pass
+
+    ctx = _PathCtx()
+    ctx.project = project
+    ctx.project_dir = get_project_dir(project_id)
+    return ShotController._resolve_stored_media_path(ctx, stored_path)
+
+
 def create_location_with_images(
     project: dict,
     name: str,
@@ -70,6 +141,7 @@ def create_location_with_images(
     )
     lid = location["id"]
     loc_path = _loc_dir(pid, lid)
+    project_dir = get_project_dir(pid)
 
     # Copy user-provided reference images
     stored_refs = []
@@ -103,6 +175,16 @@ def create_location_with_images(
 
     # Generate the prompt fragment
     location["prompt_fragment"] = build_location_prompt_fragment(location)
+
+    # Persist reference-image paths project-relative (Product invariant #6,
+    # FIX-REFS) -- mirrors slice 10's take/shot persistence so an exact repo
+    # move doesn't strand the location reference behind a now-stale
+    # absolute path. Converted here, after every local absolute-path use
+    # above (the copy2/download calls against the real dst files) has
+    # already happened.
+    location["reference_images"] = [
+        _to_project_relative(project_dir, p) for p in location.get("reference_images", [])
+    ]
 
     try:
         add_location(project, location, timeout=commit_timeout)
@@ -208,7 +290,10 @@ def get_location_reference(project: dict, loc_id: str) -> Optional[str]:
     loc = get_location(project, loc_id)
     if not loc:
         return None
+    # FIX-REFS: resolve through the slice-10 migration chokepoint before
+    # checking existence -- see _resolve_stored_media_path's docstring.
     for ref in loc.get("reference_images", []):
-        if os.path.exists(ref):
-            return ref
+        resolved = _resolve_stored_media_path(project, ref)
+        if os.path.exists(resolved):
+            return resolved
     return None

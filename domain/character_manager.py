@@ -102,6 +102,87 @@ def _char_dir(project_id: str, char_id: str) -> str:
     return d
 
 
+def _to_project_relative(project_dir: str, absolute_path: str) -> str:
+    """Convert a freshly-written character reference/canonical/embedding/
+    multi-angle path to a project-relative form for persistence (Product
+    invariant #6: portable persistence -- mirrors slice 10's
+    ``ShotController._to_project_relative``, which applies the same
+    invariant to take/shot paths). Character reference images are the same
+    class of project-owned output as takes and were the one gap slice 10's
+    own acceptance criterion left uncovered (FIX-REFS).
+
+    Delegates to the ONE implementation via a duck-typed shim exposing only
+    ``project_dir`` (the sole attribute that method reads) -- same reuse
+    shape as ``_resolve_stored_media_path`` below and
+    ``cinema.screening._resolve_manifest_media_path``. This module has no
+    controller ``self``, so it can't use ``ReviewController``'s bound-alike
+    reuse shape (calling the unbound method with an existing controller
+    instance) and instead borrows the module-level duck-typed-shim shape.
+    Local import keeps ShotController's heavier transitive surface
+    (phase_c_vision / lip_sync / etc.) off the character-manager import
+    path -- and is cycle-safe: ``cinema.shots.controller`` imports
+    ``get_reference_image`` from this module at MODULE level (line ~92,
+    long before its own ``ShotController`` class is defined), so a
+    module-level import back here would deadlock the graph; a lazy,
+    call-time import never collides because by the time any caller in this
+    file actually invokes this helper, both modules have long finished
+    their top-level exec.
+    """
+    if not absolute_path:
+        return absolute_path
+    from cinema.shots.controller import ShotController
+
+    class _PathCtx:
+        pass
+
+    ctx = _PathCtx()
+    ctx.project_dir = project_dir
+    return ShotController._to_project_relative(ctx, absolute_path)
+
+
+def _resolve_stored_media_path(project: dict, stored_path: str) -> str:
+    """Resolve a character reference/canonical/embedding/multi-angle path
+    read back from persisted state to a real, directly-openable absolute
+    path under the CURRENT project directory. Read-side counterpart to
+    ``_to_project_relative`` above.
+
+    Every reader that treats a stored character path as a real filesystem
+    path -- PuLID face-locking input (``get_reference_image``), identity
+    embedding (``get_character_embedding``), Kling multi-angle subject
+    binding (``get_multi_angle_refs``) -- must route the raw string through
+    this before ``os.path.exists`` / opening the file. Without it, a
+    project-relative path (this module's current persistence shape) is
+    checked against the process CWD instead of the project directory, and a
+    legacy absolute path baked in before a repo move silently 404s instead
+    of being re-rooted under the current project directory (FIX-REFS).
+
+    Module-level sibling of ``cinema.screening._resolve_manifest_media_path``
+    (itself modeled on ``ReviewController._resolve_stored_media_path``):
+    this module has no controller ``self`` exposing ``.project`` /
+    ``.project_dir``, so it borrows the ONE migration implementation
+    (``ShotController._resolve_stored_media_path`` -- relative-join,
+    legacy-absolute re-root, never fabricating an escape outside the
+    project) via a tiny duck-typed shim carrying the two attributes that
+    method reads, instead of copying the migration logic here. Local
+    import for the same cycle-safety reason documented on
+    ``_to_project_relative`` above.
+    """
+    if not stored_path:
+        return stored_path
+    project_id = project.get("id") or ""
+    if not project_id:
+        return stored_path
+    from cinema.shots.controller import ShotController
+
+    class _PathCtx:
+        pass
+
+    ctx = _PathCtx()
+    ctx.project = project
+    ctx.project_dir = get_project_dir(project_id)
+    return ShotController._resolve_stored_media_path(ctx, stored_path)
+
+
 def _budget_usd_from_project(project: dict) -> Optional[object]:
     budget_usd = (project.get("global_settings") or {}).get("budget_limit_usd")
     if budget_usd is None:
@@ -152,6 +233,7 @@ def create_character_with_images(
     )
     cid = character["id"]
     char_path = _char_dir(pid, cid)
+    project_dir = get_project_dir(pid)
 
     # 1. Copy reference images into project
     stored_refs = []
@@ -233,6 +315,28 @@ def create_character_with_images(
     # 6. Physical traits + identity anchor
     character["physical_traits"] = description
     character["identity_anchor"] = build_identity_anchor(character)
+
+    # 7. Persist every reference/canonical/embedding/multi-angle path
+    # project-relative (Product invariant #6, FIX-REFS) -- mirrors slice
+    # 10's take/shot persistence so an exact repo move doesn't strand the
+    # PuLID face-lock, Kling multi-angle subject binding, or identity
+    # embedding behind a now-stale absolute path. Converted here, at the
+    # very end, after every LOCAL absolute-path use above (face detection,
+    # angle generation, embedding compute) has already happened against the
+    # real dst files -- so none of those in-function reads see a
+    # project-relative string resolved against the wrong cwd.
+    character["reference_images"] = [
+        _to_project_relative(project_dir, p) for p in character.get("reference_images", [])
+    ]
+    character["canonical_reference"] = _to_project_relative(
+        project_dir, character.get("canonical_reference", "")
+    )
+    character["multi_angle_refs"] = [
+        _to_project_relative(project_dir, p) for p in character.get("multi_angle_refs", [])
+    ]
+    character["embedding_cache"] = _to_project_relative(
+        project_dir, character.get("embedding_cache", "")
+    )
 
     try:
         add_character(project, character, timeout=commit_timeout)
@@ -448,11 +552,15 @@ def get_character_embedding(project: dict, char_id: str) -> Optional[np.ndarray]
     if not char:
         return None
 
-    cache_path = char.get("embedding_cache", "")
+    # FIX-REFS: resolve through the slice-10 migration chokepoint -- the
+    # stored value may be project-relative (current persistence shape) or a
+    # legacy absolute path from before a repo move; raw os.path.exists on
+    # the unresolved string silently "misses" in either case.
+    cache_path = _resolve_stored_media_path(project, char.get("embedding_cache", ""))
     if cache_path and os.path.exists(cache_path):
         return np.load(cache_path)
 
-    canonical = char.get("canonical_reference", "")
+    canonical = _resolve_stored_media_path(project, char.get("canonical_reference", ""))
     if canonical and os.path.exists(canonical):
         return compute_face_embedding(canonical)
 
@@ -539,13 +647,16 @@ def get_reference_image(project: dict, char_id: str) -> Optional[str]:
     char = get_character(project, char_id)
     if not char:
         return None
-    canonical = char.get("canonical_reference", "")
+    # FIX-REFS: resolve through the slice-10 migration chokepoint before
+    # checking existence -- see get_character_embedding for why.
+    canonical = _resolve_stored_media_path(project, char.get("canonical_reference", ""))
     if canonical and os.path.exists(canonical):
         return canonical
     refs = char.get("reference_images", [])
     for r in refs:
-        if os.path.exists(r):
-            return r
+        resolved = _resolve_stored_media_path(project, r)
+        if os.path.exists(resolved):
+            return resolved
     return None
 
 
@@ -589,14 +700,20 @@ def get_multi_angle_refs(project: dict, char_id: str) -> List[str]:
     if not char:
         return []
 
+    # FIX-REFS: resolve through the slice-10 migration chokepoint before
+    # checking existence -- see get_character_embedding for why. Returns
+    # the RESOLVED (real, openable) paths -- these feed Kling subject
+    # binding directly, same contract as the pre-fix return value.
     refs = char.get("multi_angle_refs", [])
-    valid = [r for r in refs if os.path.exists(r)]
+    resolved_refs = [_resolve_stored_media_path(project, r) for r in refs]
+    valid = [r for r in resolved_refs if os.path.exists(r)]
 
     # Fallback to canonical + uploads if no multi-angle refs
     if not valid:
-        canonical = char.get("canonical_reference", "")
+        canonical = _resolve_stored_media_path(project, char.get("canonical_reference", ""))
         if canonical and os.path.exists(canonical):
             return [canonical]
-        return [r for r in char.get("reference_images", []) if os.path.exists(r)]
+        uploads = [_resolve_stored_media_path(project, r) for r in char.get("reference_images", [])]
+        return [r for r in uploads if os.path.exists(r)]
 
     return valid
