@@ -1,4 +1,5 @@
 import type { Project } from '../types/project'
+import MediaAsset from './ui/MediaAsset'
 
 const API = '/api'
 
@@ -13,15 +14,15 @@ export default function PreviewPanel({ project }: Props) {
 
       {/* Final Export */}
       <div className="mb-4">
-        <video
+        <MediaAsset
           key={`final-${project.id}`}
+          kind="video"
+          url={`${API}/projects/${project.id}/export`}
+          className="w-full rounded-lg aspect-video"
+          objectFit="contain"
+          emptyLabel="Final video will appear here after generation."
           controls
-          className="w-full rounded-lg bg-black aspect-video"
-          src={`${API}/projects/${project.id}/export`}
-          poster=""
-        >
-          <p className="text-mut text-xs text-center p-4">Final video will appear here after generation.</p>
-        </video>
+        />
         <div className="flex justify-between items-center mt-2">
           <span className="text-eyebrow text-mut">Final Export</span>
           <a href={`${API}/projects/${project.id}/export`} download
@@ -38,10 +39,13 @@ export default function PreviewPanel({ project }: Props) {
           <div className="space-y-2">
             {project.scenes.map((scene, idx) => (
               <div key={scene.id} className="bg-app border border-line rounded-lg overflow-hidden">
-                <video
+                <MediaAsset
+                  kind="video"
+                  url={`${API}/projects/${project.id}/preview/${scene.id}`}
+                  className="w-full aspect-video"
+                  objectFit="contain"
+                  emptyLabel="Scene preview will appear here after generation."
                   controls
-                  className="w-full aspect-video bg-black"
-                  src={`${API}/projects/${project.id}/preview/${scene.id}`}
                 />
                 <div className="px-2 py-1.5 flex justify-between items-center">
                   <span className="text-eyebrow text-mut">

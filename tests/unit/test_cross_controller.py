@@ -507,6 +507,101 @@ def _make_empty_setup(tmpdir: str, lifecycle=None):
     return host, runstate, core, lifecycle
 
 
+def _relative_paths_project(tmpdir: str) -> dict:
+    """Project fixture using project-relative take ``path`` values -- the
+    post-slice-10 persistence shape (Product invariant #6). Distinct from
+    _sample_project / _richer_project (both store tmpdir-ABSOLUTE paths,
+    the legacy pre-slice-10 shape the resolver's early-return already
+    handled even before the FIX-MEDIA chokepoint fix) so this fixture
+    actually exercises the relative-path-join branch of
+    ShotController._resolve_stored_media_path via
+    ReviewController._resolve_take_path, not just its no-op
+    already-absolute-and-exists path.
+
+    sh1 has an approved keyframe (exercises _resolve_take_path's primary
+    lookup). sh2 has NO approved_keyframe_take_id, so
+    _rebuild_review_clips must fall through to the "latest keyframe take"
+    branch -- a second, independent raw ``path`` read that must ALSO be
+    resolved.
+    """
+    return {
+        "id": "relpath_project",
+        "global_settings": {},
+        "scenes": [
+            {
+                "id": "sc1",
+                "shots": [
+                    {
+                        "id": "sh1",
+                        "plan_status": "approved",
+                        "keyframe_takes": [
+                            {
+                                "id": "tk_kf_1", "kind": "keyframe",
+                                # Mirrors ShotController._take_output_path's
+                                # shape: shots/<shot_id>/outputs/<take_id><ext>.
+                                "path": os.path.join("shots", "sh1", "outputs", "tk_kf_1.jpg"),
+                                "source_take_id": "", "status": "generated",
+                                "created_at": "", "metadata": {},
+                            },
+                        ],
+                        "motion_takes": [
+                            {
+                                "id": "tk_m_1", "kind": "motion",
+                                "path": os.path.join("shots", "sh1", "outputs", "tk_m_1.mp4"),
+                                "source_take_id": "tk_kf_1", "status": "generated",
+                                "created_at": "", "metadata": {},
+                            },
+                        ],
+                        "postprocess_variants": [],
+                        "approved_keyframe_take_id": "tk_kf_1",
+                        "approved_final_take_id": "",
+                    },
+                    {
+                        "id": "sh2",
+                        "plan_status": "approved",
+                        "keyframe_takes": [
+                            {
+                                "id": "tk_kf_2", "kind": "keyframe",
+                                "path": os.path.join("shots", "sh2", "outputs", "tk_kf_2.jpg"),
+                                "source_take_id": "", "status": "generated",
+                                "created_at": "", "metadata": {},
+                            },
+                        ],
+                        "motion_takes": [],
+                        "postprocess_variants": [],
+                        "approved_keyframe_take_id": "",  # not yet approved
+                        "approved_final_take_id": "",
+                    },
+                ],
+            }
+        ],
+        "characters": [],
+        "locations": [],
+    }
+
+
+def _make_relative_setup(tmpdir: str, lifecycle=None):
+    """Like _make_setup, but backs _relative_paths_project: asset files
+    live under shots/<shot_id>/outputs/ (mirrors _take_output_path) and
+    the takes' stored ``path`` values are project-relative to match."""
+    for shot_id, filename in (
+        ("sh1", "tk_kf_1.jpg"),
+        ("sh1", "tk_m_1.mp4"),
+        ("sh2", "tk_kf_2.jpg"),
+    ):
+        outputs_dir = os.path.join(tmpdir, "shots", shot_id, "outputs")
+        os.makedirs(outputs_dir, exist_ok=True)
+        open(os.path.join(outputs_dir, filename), "w").close()
+
+    project = _relative_paths_project(tmpdir)
+    core = FakeCore(project, tmpdir)
+    if lifecycle is None:
+        lifecycle = NullLifecycle()
+    runstate = RunState()
+    host = WiredHost(core, lifecycle, runstate)
+    return host, runstate, core, lifecycle
+
+
 # ---------------------------------------------------------------------------
 # Tests. Each one creates its own tmpdir so they're independently runnable.
 # ---------------------------------------------------------------------------
@@ -545,6 +640,80 @@ def test_review_rebuild_review_clips_full_chain():
         assert "sh1" in manifest
         assert manifest["sh1"]["image"].endswith("kf1.jpg")
         assert manifest["sh1"]["video"].endswith("m1.mp4")
+        assert runstate.review_clips == manifest
+
+
+# ---------------------------------------------------------------------------
+# FIX-MEDIA: _resolve_take_path is the chokepoint every consumer of a stored
+# take path routes through (this file's _rebuild_review_clips,
+# CinemaPipeline._resolve_take_path -> _build_scene_packages for final
+# assembly, and MotionRenderPhase._scene_keyframes for storyboard
+# eligibility). Slice 10 made ShotController._to_project_relative persist
+# NEW take paths project-relative; these tests prove _resolve_take_path
+# resolves that shape (and keeps the legacy absolute shape working) instead
+# of handing back the raw stored string for a caller to os.path.exists()
+# against the wrong base directory.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_take_path_resolves_project_relative_stored_path():
+    """A take persisted with a project-relative `path` (slice 10's current
+    persistence shape) must resolve to a real, existing absolute path --
+    not the bare relative string the take dict carries.
+
+    RED against the pre-fix chokepoint: the old `_resolve_take_path` body
+    (`return take.get("path", "") if take else ""`) returned the raw
+    relative string unchanged, which every internal os.path.exists()
+    consumer would then check against the process CWD, not project_dir.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, _, core, _ = _make_relative_setup(tmpdir)
+        shot = core.project["scenes"][0]["shots"][0]
+        path = host._review_ctrl._resolve_take_path(shot, "tk_kf_1")
+        assert os.path.isabs(path), f"expected an absolute path, got {path!r}"
+        assert os.path.exists(path), f"resolved path does not exist: {path!r}"
+        assert path == os.path.normpath(
+            os.path.join(tmpdir, "shots", "sh1", "outputs", "tk_kf_1.jpg")
+        )
+
+
+def test_resolve_take_path_keeps_legacy_absolute_path_working():
+    """Legacy pre-slice-10 (or pre-this-fix) takes stored an absolute path
+    outright; _resolve_take_path must keep serving those unchanged --
+    Product invariant #6's stated backward-compat guarantee."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, _, core, _ = _make_setup(tmpdir)  # _sample_project: tmpdir-absolute paths
+        shot = core.project["scenes"][0]["shots"][0]
+        path = host._review_ctrl._resolve_take_path(shot, "tk_kf_1")
+        assert path == os.path.join(tmpdir, "kf1.jpg")
+        assert os.path.exists(path)
+
+
+def test_rebuild_review_clips_resolves_relative_stored_paths():
+    """_rebuild_review_clips's "image"/"video" manifest fields must be
+    resolved, existing absolute paths even when the underlying takes are
+    stored project-relative -- both the primary _resolve_take_path lookup
+    (sh1, which has an approved keyframe) and the "latest keyframe take"
+    fallback branch (sh2, which does NOT have one yet: _resolve_take_path
+    returns "" for it, so _rebuild_review_clips falls through to a SECOND,
+    independent raw take["path"] read that must also be resolved)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, runstate, _, _ = _make_relative_setup(tmpdir)
+        manifest = host._review_ctrl._rebuild_review_clips()
+
+        sh1_image = manifest["sh1"]["image"]
+        assert os.path.isabs(sh1_image) and os.path.exists(sh1_image), (
+            f"sh1 image not resolved: {sh1_image!r}"
+        )
+        sh1_video = manifest["sh1"]["video"]
+        assert os.path.isabs(sh1_video) and os.path.exists(sh1_video), (
+            f"sh1 video not resolved: {sh1_video!r}"
+        )
+
+        sh2_image = manifest["sh2"]["image"]
+        assert os.path.isabs(sh2_image) and os.path.exists(sh2_image), (
+            f"sh2 fallback-branch image not resolved: {sh2_image!r}"
+        )
         assert runstate.review_clips == manifest
 
 
@@ -1285,6 +1454,10 @@ _TESTS = [
     test_review_resolve_take_path_reaches_shot_via_host,
     test_review_candidate_take_walks_collections_via_host,
     test_review_rebuild_review_clips_full_chain,
+    # FIX-MEDIA -- _resolve_take_path chokepoint (relative + legacy paths)
+    test_resolve_take_path_resolves_project_relative_stored_path,
+    test_resolve_take_path_keeps_legacy_absolute_path_working,
+    test_rebuild_review_clips_resolves_relative_stored_paths,
     test_runstate_shared_across_all_controllers,
     test_update_progress_pointer_propagates,
     test_checkpoint_round_trip_via_runstate,

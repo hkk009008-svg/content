@@ -6,6 +6,7 @@ Serves the React frontend and exposes all project/character/location/scene endpo
 
 import logging
 import math
+import mimetypes
 import os
 import warnings
 from collections import Counter
@@ -794,7 +795,9 @@ def api_capability_scorecard(pid):
 
 
 # ---------------------------------------------------------------------------
-# Project settings — validated write contract (slice 9a)
+# Project settings — validated write contract (slice 9a; PUT's revision
+# guard hardened to fail-closed post-9a-review — see
+# _settings_revision_established below)
 #
 # The whole-object PUT below has historically round-tripped an entire
 # global_settings object with no per-key validation and no way to detect a
@@ -802,12 +805,23 @@ def api_capability_scorecard(pid):
 # settings object on every keystroke — see SettingsInspector.tsx / ShotInspector.tsx
 # `update()`) can race, and whichever response lands last silently wins even
 # though it started from older state. PATCH below adds a strict, partial,
-# revision-guarded alternative. PUT gains an opt-in revision check: enforced
-# only when the caller's own global_settings payload carries a "revision"
-# value, so existing callers that always spread the last-fetched
-# global_settings verbatim get the concurrency guard automatically the
-# moment they observe the field on a GET/PUT/PATCH response, without any
-# frontend change in this slice (web/src is out of scope here).
+# revision-guarded alternative that ALWAYS requires a matching revision.
+#
+# PUT keeps a compat window for callers that have never seen the field, but
+# the guard is FAIL-CLOSED rather than opt-in: once global_settings carries
+# an ESTABLISHED revision (any write — PUT or PATCH — already stamped one),
+# every subsequent PUT MUST echo a matching "revision", whether or not this
+# particular caller meant to opt in. Omitting the field is no longer a
+# silent bypass: the original opt-in design let a caller that simply never
+# echoes "revision" clobber newer revision-guarded state with a 200 and no
+# conflict (live-probed: A PATCHes rev 0->1, B PUTs a stale snapshot with no
+# "revision" key, A's change vanishes, revision advances, nobody is told).
+# Only a project whose settings have NEVER been stamped gets an
+# unconditional accept-and-stamp on this one bootstrapping write — the only
+# compat window, and it closes permanently the moment that first write
+# lands. A caller that supplies an explicit "revision" before one is
+# established is still held to it (existing behavior, preserved): claim a
+# revision, even an invented one, and get checked against it.
 # ---------------------------------------------------------------------------
 
 _SETTINGS_REVISION_KEY = "revision"
@@ -820,6 +834,30 @@ def _current_settings_revision(project: dict) -> int:
         return 0
     value = settings.get(_SETTINGS_REVISION_KEY, 0)
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _settings_revision_established(project: dict) -> bool:
+    """True once global_settings carries a real (int) revision counter.
+
+    Mirrors _current_settings_revision's own validity rule so "established"
+    and "the value a caller must match" never disagree: absent
+    global_settings, a non-dict value, or a malformed (non-int / bool)
+    stored "revision" are all "not established yet" — the one legacy/
+    bootstrap bucket that gets an unconditional accept-and-stamp on its next
+    write (see api_update_project's _mutate_project below). A project only
+    ever reaches "established" via that same stamp (PUT/PATCH always write
+    current_revision + 1, i.e. >= 1), so in practice this agrees with
+    ``_current_settings_revision(project) != 0`` — but it is not simply
+    that check: it stays correct even against a hand-edited or
+    fixture-seeded explicit ``"revision": 0``, which IS "carrying a
+    revision" by the letter of the write contract even though its value
+    happens to be the same as "absent".
+    """
+    settings = project.get("global_settings")
+    if not isinstance(settings, dict):
+        return False
+    value = settings.get(_SETTINGS_REVISION_KEY)
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _settings_revision_conflict_payload(current_revision: int, settings: object) -> dict:
@@ -895,14 +933,28 @@ def _validate_aspect_ratio_setting(value):
     return value
 
 
+def _validate_string_list_setting(value):
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("must be a list of strings")
+    return value
+
+
 # Per-key validators for the strict partial-write path (PATCH). Deliberately
 # narrower than every key the legacy whole-object PUT tolerates today —
 # web/src/components/setup/inspector/*.tsx and ShotInspector.tsx already
-# write several settings (identity_retry_max, cascade_retry_limit,
-# forced_alignment_enabled, dialogue_target_wpm, ...) with no reconciled
-# runtime consumer yet. Wiring those is slice 9b/9c/9d's "distinct consumer
-# families" work; extend this table there rather than loosening the
-# fail-closed default here.
+# write several settings with no reconciled runtime consumer yet. Wiring
+# those is slice 9b/9c/9d's "distinct consumer families" work; extend this
+# table there rather than loosening the fail-closed default here.
+#
+# VoiceSection.tsx + VideoSection.tsx's own settings (TTS/voice selection,
+# the lipsync cascade cluster, dialogue pace/mix, video-cascade + post-
+# process controls) are covered below — slice 9c wired both components into
+# the Setup page before this table caught up, so the new strict PATCH 400ed
+# on every key either section writes (a 9a<->9c integration gap). Fields
+# still NOT covered here (a different section's pathspec — not touched by
+# that gap fix): IdentitySection.tsx's identity_retry_max /
+# coherence_threshold, ImageSection.tsx's identity_backend / comfyui_sampler
+# / comfyui_steps / flux_guidance.
 #
 # The three char_lora_* registry fields (prep.lora_policy.PROTECTED_LORA_FIELDS,
 # ADR-065 dormant-LoRA containment) are deliberately absent: PATCH simply
@@ -928,6 +980,31 @@ _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     "prompt_optimizer_enabled": _validate_bool_setting,
     "auto_approve": _validate_object_setting,
     "api_engines": _validate_object_setting,
+    # VoiceSection.tsx — TTS provider + default voices.
+    "tts_provider": _validate_string_setting,
+    "default_male_voice": _validate_string_setting,
+    "default_female_voice": _validate_string_setting,
+    # VoiceSection.tsx — dialogue-quality toggles.
+    "dialogue_mode_enabled": _validate_bool_setting,
+    "forced_alignment_enabled": _validate_bool_setting,
+    # VoiceSection.tsx — lipsync cascade cluster (shared with
+    # AudioSyncSection.tsx's LipsyncPriorityList, embedded here).
+    "lip_sync_mode": _validate_string_setting,
+    "lipsync_engine_priority": _validate_string_list_setting,
+    "lipsync_quality_validation": _validate_bool_setting,
+    "lipsync_validation_threshold": _validate_unit_interval_setting,
+    # VoiceSection.tsx — dialogue pace + music mix.
+    "dialogue_target_wpm": _validate_nonneg_number_setting,
+    "music_mastering": _validate_string_setting,
+    # VideoSection.tsx — cascade + native-voice routing.
+    "cascade_retry_limit": _validate_int_setting,
+    "dialogue_voice_mode": _validate_string_setting,
+    # VideoSection.tsx — post-processing / color.
+    "color_grade_preset": _validate_string_setting,
+    "motion_quality_threshold": _validate_unit_interval_setting,
+    "scene_transitions": _validate_bool_setting,
+    "transition_duration": _validate_nonneg_number_setting,
+    "face_swap_enabled": _validate_bool_setting,
 }
 
 
@@ -990,14 +1067,28 @@ def api_update_project(pid):
         if has_incoming_gs and (changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs)):
             raise lora_policy.LoraActivationDormantError(changed_lora_fields)
         if has_incoming_gs:
-            # Opt-in optimistic-concurrency guard (slice 9a): only enforced
-            # when the caller's own payload echoes a "revision" — legacy
-            # callers unaware of the field are unaffected (compat).
+            # Fail-closed optimistic-concurrency guard (slice 9a; hardened
+            # post-9a-review — see the module comment above this route and
+            # _settings_revision_established). Once global_settings has an
+            # ESTABLISHED revision, the caller MUST echo a matching one —
+            # omitting "revision" no longer opts out of the check (that
+            # silent omission was the exact gap: a stale whole-object PUT
+            # with no "revision" key clobbered a newer revision-guarded
+            # write with 200 and no conflict). Before one is established,
+            # this route keeps its original opt-in behavior so a caller
+            # that DOES supply an (unsolicited, wrong) "revision" on a
+            # brand-new project is still held to it — only a payload that
+            # omits the key entirely gets the one-time bootstrap
+            # accept-and-stamp.
             current_revision = _current_settings_revision(project)
-            if (
-                _SETTINGS_REVISION_KEY in incoming_gs
-                and incoming_gs[_SETTINGS_REVISION_KEY] != current_revision
-            ):
+            key_present = _SETTINGS_REVISION_KEY in incoming_gs
+            mismatched = (
+                key_present and incoming_gs[_SETTINGS_REVISION_KEY] != current_revision
+            )
+            missing_while_established = (
+                _settings_revision_established(project) and not key_present
+            )
+            if mismatched or missing_while_established:
                 conflict = _settings_revision_conflict_payload(
                     current_revision, project.get("global_settings", {})
                 )
@@ -2438,21 +2529,91 @@ def api_cancel(pid):
 # Export / Preview
 # ---------------------------------------------------------------------------
 
+def _send_project_media(real_path: str, *, migrated: bool):
+    """Send a containment-checked, existing file for api_serve_file.
+
+    Uses mimetypes.guess_type instead of the old 2-extension ternary (which
+    silently mislabeled every non-.jpg/.mp4 file, including audio, as
+    "audio/mpeg") so PNG/WAV/MOV/etc. get their real MIME type; a genuinely
+    unrecognized extension falls back to the standard unknown-binary type
+    rather than a wrong, specific label. When the file was found via the
+    legacy-path suffix migration below, the response is tagged so the UI can
+    render an explicit "migrated" state instead of treating it identically
+    to a normal hit.
+    """
+    mimetype, _ = mimetypes.guess_type(real_path)
+    response = send_file(real_path, mimetype=mimetype or "application/octet-stream")
+    if migrated:
+        response.headers["X-Media-Migrated"] = "1"
+    return response
+
+
 @app.route("/api/projects/<pid>/file")
 def api_serve_file(pid):
-    """Serve a generated file (image/video) from the project directory."""
-    file_path = request.args.get("path", "")
-    if not file_path:
+    """Serve a generated file (image/video/audio) from the project directory.
+
+    `path` accepts either persistence shape a take/shot record carries
+    (Product invariant #6 -- portable persistence, slice 10):
+      - a project-relative path (current form for newly-generated output),
+        joined directly onto the project's CURRENT directory; or
+      - a legacy absolute path baked in before this fix (or before a repo
+        move) -- served as-is when it still resolves under the project
+        directory, or via a SAFE suffix migration when it doesn't: the
+        remainder from this project's own directory segment onward is
+        derived and re-rooted under the CURRENT project directory, so a
+        project relocated to a new repo root still serves its own media
+        instead of going dark behind the (correctly firing) root guard.
+
+    Every candidate -- relative-joined, as-given absolute, or migrated -- is
+    realpath-resolved and RE-CHECKED for containment within the project
+    directory before being served, so accepting the two extra shapes never
+    weakens the existing traversal/root guard: a path that isn't genuinely
+    this project's own (however it's spelled, including via a crafted
+    "legacy-looking" prefix followed by `..` components) still 403s.
+    """
+    raw_path = request.args.get("path", "")
+    if not raw_path:
         return jsonify({"error": "Invalid path"}), 400
-    # Security: resolve to real path and verify containment within project dir
-    real_path = os.path.realpath(file_path)
+
     project_dir = os.path.realpath(get_project_dir(pid))
-    if not real_path.startswith(project_dir + os.sep) and real_path != project_dir:
+
+    def _contained(candidate_real_path: str) -> bool:
+        return candidate_real_path == project_dir or candidate_real_path.startswith(project_dir + os.sep)
+
+    primary_candidate = raw_path if os.path.isabs(raw_path) else os.path.join(project_dir, raw_path)
+    primary_real = os.path.realpath(primary_candidate)
+
+    if _contained(primary_real) and os.path.exists(primary_real):
+        return _send_project_media(primary_real, migrated=False)
+
+    # The direct candidate is missing (or, for a legacy absolute path, may no
+    # longer even be contained here because the repo -- and so project_dir --
+    # moved since it was persisted). Attempt the safe suffix migration, only
+    # meaningful for an absolute input naming THIS project's own id segment;
+    # a relative path is already unambiguous and has no legacy form.
+    if os.path.isabs(raw_path):
+        anchor = f"{os.sep}{pid}{os.sep}"
+        idx = raw_path.rfind(anchor)
+        if idx != -1:
+            remainder = raw_path[idx + len(anchor):]
+            if remainder:
+                migrated_real = os.path.realpath(os.path.join(project_dir, remainder))
+                # Re-check containment on the RECONSTRUCTED candidate too --
+                # a crafted "/.../<pid>/../../../etc/passwd" must not use the
+                # migration path to escape the root the primary check just
+                # refused.
+                if _contained(migrated_real):
+                    if os.path.exists(migrated_real):
+                        return _send_project_media(migrated_real, migrated=True)
+                    # The pid anchor matched and the reconstruction is safely
+                    # rooted under THIS project -- it's our own stale
+                    # reference, just gone, not an escape attempt: "missing",
+                    # not "denied".
+                    return jsonify({"error": "File not found"}), 404
+
+    if not _contained(primary_real):
         return jsonify({"error": "Access denied"}), 403
-    if not os.path.exists(real_path):
-        return jsonify({"error": "File not found"}), 404
-    mimetype = "image/jpeg" if real_path.endswith(".jpg") else "video/mp4" if real_path.endswith(".mp4") else "audio/mpeg"
-    return send_file(real_path, mimetype=mimetype)
+    return jsonify({"error": "File not found"}), 404
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/plan/approve", methods=["POST"])

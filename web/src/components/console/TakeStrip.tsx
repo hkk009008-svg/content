@@ -17,6 +17,9 @@
  *   - Monitor (A3 — inline preview reel in Director's Console: all 4 panes)
  */
 
+import { fileUrl } from '../../lib/mediaUrl'
+import MediaAsset from '../ui/MediaAsset'
+
 /** Cascade decision metadata — mirrors TakeRecord.cascade_metadata (Session 6 P2-3). */
 interface CascadeMetadata {
   engine: string
@@ -83,20 +86,19 @@ export default function TakeStrip({
   drivingUrl,
   performanceUrl,
   motionUrl,
-  apiBase = '',
+  apiBase,
   projectId,
   labels,
   cascadeMetadata,
   lipsyncCascadeMetadata,
 }: TakeStripProps) {
-  const base = apiBase || '/api'
   const hasAny = Boolean(keyframeUrl || drivingUrl || performanceUrl || motionUrl)
   if (!hasAny) return null
 
-  const resolve = (path: string) =>
-    projectId
-      ? `${base}/projects/${projectId}/file?path=${encodeURIComponent(path)}`
-      : path
+  // fileUrl defaults apiBase to '/api' itself (via `??`, matching Filmstrip's
+  // convention) -- an explicit `= ''` default here would defeat that fallback
+  // (`'' ?? '/api'` stays `''`, unlike the old `'' || '/api'` this replaces).
+  const resolve = (path: string) => fileUrl(apiBase, projectId, path)
 
   const keyframeLabel = labels?.keyframe ?? 'Keyframe'
   const drivingLabel = labels?.driving ?? 'Driving reference'
@@ -108,9 +110,10 @@ export default function TakeStrip({
       {keyframeUrl ? (
         <div>
           <div className="text-eyebrow-lg uppercase text-mut mb-1">{keyframeLabel}</div>
-          <img
-            src={resolve(keyframeUrl)}
-            className="w-full rounded border border-line object-cover"
+          <MediaAsset
+            kind="image"
+            url={resolve(keyframeUrl)}
+            className="w-full aspect-video rounded border border-line"
           />
         </div>
       ) : null}
@@ -118,12 +121,13 @@ export default function TakeStrip({
       {drivingUrl ? (
         <div>
           <div className="text-eyebrow-lg uppercase text-mut mb-1">{drivingLabel}</div>
-          <video
-            src={resolve(drivingUrl)}
+          <MediaAsset
+            kind="video"
+            url={resolve(drivingUrl)}
+            className="w-full aspect-video rounded border border-line"
             controls
             muted
             loop
-            className="w-full rounded border border-line bg-black"
           />
         </div>
       ) : null}
@@ -131,12 +135,13 @@ export default function TakeStrip({
       {performanceUrl ? (
         <div>
           <div className="text-eyebrow-lg uppercase text-mut mb-1">{performanceLabel}</div>
-          <video
-            src={resolve(performanceUrl)}
+          <MediaAsset
+            kind="video"
+            url={resolve(performanceUrl)}
+            className="w-full aspect-video rounded border border-line"
             controls
             muted
             loop
-            className="w-full rounded border border-line bg-black"
           />
         </div>
       ) : null}
@@ -144,12 +149,13 @@ export default function TakeStrip({
       {motionUrl ? (
         <div>
           <div className="text-eyebrow-lg uppercase text-mut mb-1">{motionLabel}</div>
-          <video
-            src={resolve(motionUrl)}
+          <MediaAsset
+            kind="video"
+            url={resolve(motionUrl)}
+            className="w-full aspect-video rounded border border-line"
             controls
             muted
             loop
-            className="w-full rounded border border-line bg-black"
           />
           <CascadeChips meta={cascadeMetadata} />
           <CascadeChips meta={lipsyncCascadeMetadata} label="lipsync" />

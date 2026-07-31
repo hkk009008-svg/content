@@ -651,6 +651,70 @@ class ShotController:
         os.makedirs(output_dir, exist_ok=True)
         return os.path.join(output_dir, f"{take_id}{ext}")
 
+    def _to_project_relative(self, absolute_path: str) -> str:
+        """Convert a freshly-written output path to a project-relative form
+        for persistence (Product invariant #6: portable persistence -- never
+        a repo-location-dependent absolute path in take/shot dicts).
+
+        Write-side counterpart to ``_resolve_stored_media_path``. Falls back
+        to the original string unchanged when there's nothing safe to
+        relativize: empty input, an already-relative input, a path on a
+        different drive (Windows ``ValueError``), or a path that isn't
+        actually under ``self.project_dir`` (the relpath would climb out via
+        ``..`` -- true production outputs are always constructed under
+        project_dir via ``_take_output_path``; this guards test doubles and
+        any future caller that passes an unrelated path rather than emit a
+        confusing, non-portable ``../../..`` chain with no real benefit).
+        """
+        if not absolute_path or not os.path.isabs(absolute_path):
+            return absolute_path
+        try:
+            relative = os.path.relpath(absolute_path, self.project_dir)
+        except ValueError:
+            # e.g. different drive letters on Windows -- nothing to relativize.
+            return absolute_path
+        if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+            return absolute_path
+        return relative
+
+    def _resolve_stored_media_path(self, stored_path: str) -> str:
+        """Resolve a take/shot ``path`` value read back from persisted state
+        to a real, directly-openable absolute path under the CURRENT project
+        directory. Read-side counterpart to ``_to_project_relative`` --
+        every internal consumer that treats a stored take/shot path as a
+        real filesystem path (identity validation, ffmpeg/RIFE/lip-sync
+        inputs, coherence checks, scene-preview assembly) must route the raw
+        string returned by ``_find_take`` / ``host._resolve_take_path`` /
+        ``.get("path")`` through this before use.
+
+        Handles both persistence shapes:
+          - project-relative (current form) -- joined onto project_dir.
+          - a legacy absolute path baked in before a repo move (or before
+            this fix) -- returned as-is when it still exists; otherwise a
+            SAFE suffix migration derives the remainder from this project's
+            own directory segment onward and re-roots it under the CURRENT
+            project_dir (mirroring the /file endpoint's migration so a
+            resumed pipeline run can still find its own prior takes after a
+            repo move, not just the web preview).
+        """
+        if not stored_path:
+            return stored_path
+        if not os.path.isabs(stored_path):
+            return os.path.normpath(os.path.join(self.project_dir, stored_path))
+        if os.path.exists(stored_path):
+            return stored_path
+        project_id = self.project.get("id", "")
+        if not project_id:
+            return stored_path
+        anchor = f"{os.sep}{project_id}{os.sep}"
+        idx = stored_path.rfind(anchor)
+        if idx == -1:
+            return stored_path
+        remainder = stored_path[idx + len(anchor):]
+        if not remainder:
+            return stored_path
+        return os.path.normpath(os.path.join(self.project_dir, remainder))
+
     def _mutate_shot(self, shot_id: str, mutator, timeout: float = 10):
         # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
         # outer boundary validate on self.project + inner mutator-scope validate
@@ -697,7 +761,7 @@ class ShotController:
             return ""
         previous_shot = scene.get("shots", [])[shot_index - 1]
         take_id = previous_shot.get("approved_keyframe_take_id", "")
-        return self._host._resolve_take_path(previous_shot, take_id)
+        return self._resolve_stored_media_path(self._host._resolve_take_path(previous_shot, take_id))
 
     # ------------------------------------------------------------------
     # Public methods.
@@ -1017,7 +1081,7 @@ class ShotController:
                 per_char[spec_c.char_id] = sec_result.overall_score
             take["metadata"]["identity_per_char"] = per_char
 
-        take["path"] = img_path
+        take["path"] = self._to_project_relative(img_path)
 
         # S16: populate directorial iteration provenance when supplied.
         if parent_take_id:
@@ -1032,7 +1096,7 @@ class ShotController:
 
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("keyframe_takes", []).append(take)
-            project_shot["generated_image"] = img_path
+            project_shot["generated_image"] = self._to_project_relative(img_path)
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
@@ -1173,7 +1237,7 @@ class ShotController:
             return {"success": True, "skipped": True, "engine": "SKIP"}
 
         # --- 2. Resolve assets ---
-        source_image = self._host._resolve_take_path(shot, keyframe_take_id)
+        source_image = self._resolve_stored_media_path(self._host._resolve_take_path(shot, keyframe_take_id))
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
@@ -1211,7 +1275,12 @@ class ShotController:
             return {"success": True, "skipped": True, "engine": engine, "error": pre_err}
 
         duration_s = float(scene.get("duration_seconds", 5.0))
-        driving = (shot.get("driving_video_path") or "").strip()
+        # driving_video_path is an operator-uploaded reference (web_server.py's
+        # upload endpoint persists it as an absolute path -- outside this
+        # slice's owned write-site surface), not a take output. Read-side
+        # wrapping still applies the same safe suffix migration so it keeps
+        # resolving after a repo move, mirroring the take-path sites above.
+        driving = self._resolve_stored_media_path((shot.get("driving_video_path") or "").strip())
         source_mode = driving_video_source(shot)
         needs_mode_b_driving = not driving and source_mode == "tts_auto" and bool(audio_path)
 
@@ -1344,7 +1413,7 @@ class ShotController:
                     "error": "engine returned no output"}
 
         # --- 5. Persist the take + identity-gate the auto-approve ---
-        take["path"] = perf_path
+        take["path"] = self._to_project_relative(perf_path)
 
         # S16: populate directorial iteration provenance when supplied.
         if parent_take_id:
@@ -1795,14 +1864,18 @@ class ShotController:
 
         # 3b. Auto-RIFE smoothness pass (best-effort; may rebind take["path"]).
         video_path = self._maybe_auto_rife(video_path, take, shot_id, settings)
-        take["path"] = video_path
+        # Persist project-relative (Product invariant #6); final_vid stays the
+        # ABSOLUTE local value for shot_results/cost/RPC-return use below, so a
+        # repo move can never make an in-flight cost probe or checkpoint read
+        # a path it can't open in THIS session.
+        take["path"] = self._to_project_relative(video_path)
 
         # 4–5. Persist take via mutation
         final_vid = video_path
 
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("motion_takes", []).append(take)
-            project_shot["generated_video"] = final_vid
+            project_shot["generated_video"] = self._to_project_relative(final_vid)
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
@@ -1918,7 +1991,7 @@ class ShotController:
         if not keyframe_take_id:
             return {"success": False, "error": "Approved keyframe required before generating motion"}
 
-        source_image = self._host._resolve_take_path(shot, keyframe_take_id)
+        source_image = self._resolve_stored_media_path(self._host._resolve_take_path(shot, keyframe_take_id))
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
@@ -2111,7 +2184,9 @@ class ShotController:
         performance_take_id = shot.get("approved_performance_take_id", "")
         driving_video_path = ""
         if performance_take_id:
-            driving_video_path = self._host._resolve_take_path(shot, performance_take_id) or ""
+            driving_video_path = self._resolve_stored_media_path(
+                self._host._resolve_take_path(shot, performance_take_id) or ""
+            )
 
         # Build a lightweight PipelineContext so UI knobs (api_engines filter,
         # cascade_retry_limit) flow through to generate_ai_video. Same pattern
@@ -2696,11 +2771,15 @@ class ShotController:
         }
         id_result = None   # T6: hoisted so the deep block can reference it even if identity is skipped
         coh = None         # T6: hoisted so the deep block can reference it even if coherence is skipped
-        video_path = candidate.get("path", "") if candidate.get("kind") != "keyframe" else ""
-        image_path = candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._host._resolve_take_path(
-            shot,
-            shot.get("approved_keyframe_take_id", ""),
-        ) or (self._host._latest_take(shot, "keyframe_takes") or {}).get("path", "")
+        video_path = self._resolve_stored_media_path(
+            candidate.get("path", "") if candidate.get("kind") != "keyframe" else ""
+        )
+        image_path = self._resolve_stored_media_path(
+            candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._host._resolve_take_path(
+                shot,
+                shot.get("approved_keyframe_take_id", ""),
+            ) or (self._host._latest_take(shot, "keyframe_takes") or {}).get("path", "")
+        )
 
         # Identity validation
         # Align with fe2aa47: prefer in-frame chars so the score is about
@@ -2753,9 +2832,11 @@ class ShotController:
         if _coherence_enabled and image_path and os.path.exists(str(image_path)):
             if shot_index > 0:
                 previous_shot = scene.get("shots", [])[shot_index - 1]
-                prev_img = self._host._resolve_take_path(previous_shot, previous_shot.get("approved_keyframe_take_id", "")) or (
-                    self._host._latest_take(previous_shot, "keyframe_takes") or {}
-                ).get("path", "")
+                prev_img = self._resolve_stored_media_path(
+                    self._host._resolve_take_path(previous_shot, previous_shot.get("approved_keyframe_take_id", "")) or (
+                        self._host._latest_take(previous_shot, "keyframe_takes") or {}
+                    ).get("path", "")
+                )
                 if os.path.exists(prev_img):
                     from coherence_analyzer import assess_coherence
                     coh = assess_coherence(str(image_path), prev_img)
@@ -2859,7 +2940,9 @@ class ShotController:
         if base_take is None:
             return {"success": False, "error": "No take available to correct"}
 
-        video_path = base_take.get("path", "") if base_take.get("kind") != "keyframe" else ""
+        video_path = self._resolve_stored_media_path(
+            base_take.get("path", "") if base_take.get("kind") != "keyframe" else ""
+        )
         scene_id = scene.get("id", "")
 
         self.progress("CORRECTING", f"Applying {action} to {shot_id}", -1,
@@ -2888,8 +2971,16 @@ class ShotController:
                 # face_swap_enabled UI knob acts as a hard gate. When disabled,
                 # the operator action no-ops with a clear reason so the
                 # frontend can surface "face-swap is off in project settings".
+                # Default False (fail-closed): face_swap dispatches a billed
+                # FAL PixVerse / FaceFusion call, and this key is never
+                # scaffolded by domain.project_manager.make_project, so every
+                # project was silently defaulting to enabled=True while
+                # VideoSection's "Face swap" toggle displayed off — a
+                # spend-truth mismatch (product invariant: paid actions fail
+                # closed until the operator opts in; slice 9b audit,
+                # 2026-07-31).
                 _settings = self.project.get("global_settings", {})
-                if not _settings.get("face_swap_enabled", True):
+                if not _settings.get("face_swap_enabled", False):
                     return {"success": False, "error": "face_swap disabled in project settings"}
                 # Align with fe2aa47: use in-frame chars so we swap the face
                 # of the person actually visible, not scene-chars[0].
@@ -3005,6 +3096,11 @@ class ShotController:
             # [§3 audio-sibling family]
             _inherit_audio_flags_from_base(base_take, variant)
 
+            # Persist project-relative (Product invariant #6) -- done AFTER the
+            # exists check + audio-stream probe above, which need the real,
+            # directly-openable absolute path _take_output_path produced.
+            variant["path"] = self._to_project_relative(variant["path"])
+
             def _mutator(_scene: dict, project_shot: dict):
                 project_shot.setdefault("postprocess_variants", []).append(variant)
                 return MutationResult(variant, save=True)
@@ -3048,7 +3144,9 @@ class ShotController:
             clips = []
             for shot_typed in scene_typed.shots:
                 shot = shot_typed.model_dump()
-                final_path = self._host._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
+                final_path = self._resolve_stored_media_path(
+                    self._host._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
+                )
                 if final_path and os.path.exists(final_path):
                     clips.append(final_path)
             if not clips:

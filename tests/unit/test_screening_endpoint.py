@@ -357,3 +357,60 @@ class TestScreeningApproveEndpoint:
 
         # Still 200 -- the AttributeError is the documented no-op fallback.
         assert resp.status_code == 200
+
+
+class TestManifestResolvesStoredMediaPaths:
+    """Slice-10 follow-up: the manifest's verify_files existence check must
+    resolve PROJECT-RELATIVE stored take paths against the current project
+    dir. Pre-fix it called os.path.exists on the raw stored value, which
+    resolves against CWD — every shot in a relocated (or simply
+    relative-persisted) project looked deleted, silently emptying the
+    screening timeline."""
+
+    @staticmethod
+    def _project(stored_path: str) -> dict:
+        return {"id": "proj_manifest_paths", "scenes": [{"id": "s1", "shots": [{
+            "id": "sh1",
+            "approved_final_take_id": "t1",
+            "motion_takes": [{"id": "t1", "path": stored_path, "duration": 5}],
+        }]}]}
+
+    def test_relative_stored_path_is_included(self):
+        from cinema.screening import _build_timeline_manifest
+        with tempfile.TemporaryDirectory() as d:
+            pdir = os.path.join(d, "proj_manifest_paths")
+            os.makedirs(os.path.join(pdir, "shots"), exist_ok=True)
+            with open(os.path.join(pdir, "shots", "a.mp4"), "wb") as f:
+                f.write(b"x")
+            with patch("domain.project_manager.get_project_dir", return_value=pdir):
+                rows = _build_timeline_manifest(
+                    self._project("shots/a.mp4"), verify_files=True
+                )
+        assert [r["shot_id"] for r in rows] == ["sh1"], (
+            "a project-relative stored path must resolve against project_dir"
+        )
+
+    def test_legacy_absolute_stored_path_still_included(self):
+        from cinema.screening import _build_timeline_manifest
+        with tempfile.TemporaryDirectory() as d:
+            pdir = os.path.join(d, "proj_manifest_paths")
+            os.makedirs(os.path.join(pdir, "shots"), exist_ok=True)
+            abs_path = os.path.join(pdir, "shots", "a.mp4")
+            with open(abs_path, "wb") as f:
+                f.write(b"x")
+            with patch("domain.project_manager.get_project_dir", return_value=pdir):
+                rows = _build_timeline_manifest(
+                    self._project(abs_path), verify_files=True
+                )
+        assert [r["shot_id"] for r in rows] == ["sh1"]
+
+    def test_genuinely_missing_file_is_still_excluded(self):
+        from cinema.screening import _build_timeline_manifest
+        with tempfile.TemporaryDirectory() as d:
+            pdir = os.path.join(d, "proj_manifest_paths")
+            os.makedirs(pdir, exist_ok=True)
+            with patch("domain.project_manager.get_project_dir", return_value=pdir):
+                rows = _build_timeline_manifest(
+                    self._project("shots/gone.mp4"), verify_files=True
+                )
+        assert rows == [], "a real missing file must still be filtered out"

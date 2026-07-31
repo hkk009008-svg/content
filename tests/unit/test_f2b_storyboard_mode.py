@@ -286,6 +286,121 @@ class TestGetStoryboardMode:
 
 
 # ---------------------------------------------------------------------------
+# FIX-MEDIA: _scene_keyframes (storyboard eligibility) calls
+# self._gen._resolve_take_path(shot, kf_take_id) -- in production self._gen
+# IS CinemaPipeline, whose _resolve_take_path delegates directly to
+# ReviewController._resolve_take_path (the FIX-MEDIA chokepoint). Every
+# OTHER test in this file stubs _resolve_take_path with a MagicMock that
+# just echoes back a pre-set path (see _make_gen_mock's kf_paths dict),
+# which never exercises the real resolution behavior and would not have
+# caught the raw take.get("path") chokepoint bug. These tests wire a REAL
+# ReviewController (the actual production class, not a stub) behind
+# _resolve_take_path so a regression to the raw-path chokepoint fails here.
+# ---------------------------------------------------------------------------
+
+class TestSceneKeyframesResolvesStoredMediaPaths:
+    class _FindTakeHost:
+        """Minimal ReviewControllerHost stand-in exposing ONLY _find_take --
+        the one host method _resolve_take_path needs. Mirrors
+        ShotController._find_take's trivial collection scan (NOT the
+        media-path migration logic itself, which stays the single
+        implementation on ShotController._resolve_stored_media_path,
+        reached via ReviewController's real delegation)."""
+
+        def _find_take(self, shot, take_id):
+            for collection in (
+                "keyframe_takes", "performance_takes",
+                "motion_takes", "postprocess_variants",
+            ):
+                for take in shot.get(collection, []) or []:
+                    if take.get("id") == take_id:
+                        return collection, take
+            return None, None
+
+    def _make_real_resolver_gen(self, project: dict, project_dir: str):
+        """Build a shot_generator-shaped stand-in whose _resolve_take_path
+        is bound to a REAL ReviewController -- mirrors CinemaPipeline's own
+        `_resolve_take_path` delegate (cinema_pipeline.py:326-327:
+        `return self._review_ctrl._resolve_take_path(*args, **kwargs)`)."""
+        from cinema.lifecycle import NullLifecycle
+        from cinema.review.controller import ReviewController
+        from cinema.runstate import RunState
+
+        core = types.SimpleNamespace(project=project, project_dir=project_dir)
+        review_ctrl = ReviewController(
+            core, NullLifecycle(), self._FindTakeHost(), RunState()
+        )
+        return types.SimpleNamespace(_resolve_take_path=review_ctrl._resolve_take_path)
+
+    def test_relative_stored_keyframe_path_is_eligible(self, tmp_path):
+        """Slice 10 persists a NEW keyframe take's path project-relative.
+        _scene_keyframes must still find it (RED against the pre-fix
+        chokepoint: the raw relative string fails os.path.exists() against
+        the test's CWD, not project_dir)."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        rel_path = os.path.join("shots", "sh1", "outputs", "tk_kf_1.jpg")
+        outputs_dir = tmp_path / "shots" / "sh1" / "outputs"
+        outputs_dir.mkdir(parents=True)
+        (outputs_dir / "tk_kf_1.jpg").write_bytes(b"offline-media-stub")
+
+        shot = _make_shot("sh1", kf_take_id="tk_kf_1")
+        shot["keyframe_takes"] = [
+            {"id": "tk_kf_1", "kind": "keyframe", "path": rel_path}
+        ]
+        project = _make_project([_make_scene("sc1", [shot])])
+        gen = self._make_real_resolver_gen(project, str(tmp_path))
+        phase = MotionRenderPhase(shot_generator=gen, project=project)
+
+        pairs = phase._scene_keyframes([shot])
+
+        assert pairs is not None, "expected the relative-path keyframe to be eligible"
+        resolved_path = pairs[0][1]
+        assert os.path.isabs(resolved_path)
+        assert resolved_path == os.path.normpath(str(outputs_dir / "tk_kf_1.jpg"))
+
+    def test_legacy_absolute_stored_keyframe_path_is_still_eligible(self, tmp_path):
+        """Legacy pre-slice-10 keyframe takes stored an absolute path
+        outright; _scene_keyframes must keep finding those too."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        abs_path = str(tmp_path / "legacy_kf.jpg")
+        (tmp_path / "legacy_kf.jpg").write_bytes(b"offline-media-stub")
+
+        shot = _make_shot("sh1", kf_take_id="tk_kf_1")
+        shot["keyframe_takes"] = [
+            {"id": "tk_kf_1", "kind": "keyframe", "path": abs_path}
+        ]
+        project = _make_project([_make_scene("sc1", [shot])])
+        gen = self._make_real_resolver_gen(project, str(tmp_path))
+        phase = MotionRenderPhase(shot_generator=gen, project=project)
+
+        pairs = phase._scene_keyframes([shot])
+
+        assert pairs is not None, "expected the legacy absolute-path keyframe to be eligible"
+        assert pairs[0][1] == abs_path
+
+    def test_unresolvable_missing_keyframe_still_ineligible(self, tmp_path):
+        """Sanity check: a take whose file genuinely doesn't exist anywhere
+        (not a resolution-shape issue) must still make the scene
+        ineligible -- the fix must not paper over real missing media."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shot = _make_shot("sh1", kf_take_id="tk_kf_1")
+        shot["keyframe_takes"] = [
+            {
+                "id": "tk_kf_1", "kind": "keyframe",
+                "path": os.path.join("shots", "sh1", "outputs", "never_written.jpg"),
+            }
+        ]
+        project = _make_project([_make_scene("sc1", [shot])])
+        gen = self._make_real_resolver_gen(project, str(tmp_path))
+        phase = MotionRenderPhase(shot_generator=gen, project=project)
+
+        assert phase._scene_keyframes([shot]) is None
+
+
+# ---------------------------------------------------------------------------
 # Typed pre-dispatch admission for the direct KLING_NATIVE batch path
 # ---------------------------------------------------------------------------
 

@@ -16,10 +16,18 @@ This wires a best-effort auto-RIFE pass into the finalize step:
 
 All tests are fully offline — no real APIs, no GPU. `assess_motion_quality` and
 `generate_rife_interpolation` are patched at their resolved symbols.
+
+Slice 10 (portable media persistence): `take["path"]` / `generated_video` are
+now persisted PROJECT-RELATIVE (Product invariant #6), so assertions compare
+against `os.path.relpath(<absolute produced path>, ctrl.project_dir)` rather
+than the raw absolute string. `result["video"]` stays the ABSOLUTE local
+value (decoupled RPC return, mirroring generate_keyframe_take's "image" key)
+and is asserted unchanged.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from unittest.mock import MagicMock, patch
@@ -127,10 +135,11 @@ class TestAutoRifeFires:
         assert result["success"] is True
         m_assess.assert_called_once()
         m_rife.assert_called_once()
-        # take path rebound to the interpolated output, and generated_video too
-        assert take["path"] == str(rife_out)
+        # take path rebound to the interpolated output, and generated_video too --
+        # persisted PROJECT-RELATIVE (slice 10); the RPC "video" value stays absolute.
+        assert take["path"] == os.path.relpath(str(rife_out), ctrl.project_dir)
         assert result["video"] == str(rife_out)
-        assert stored["project_shot"]["generated_video"] == str(rife_out)
+        assert stored["project_shot"]["generated_video"] == os.path.relpath(str(rife_out), ctrl.project_dir)
         # metadata reflects the decision
         assert take["metadata"]["auto_rife_applied"] is True
         assert take["metadata"]["smoothness_score"] == pytest.approx(0.2)
@@ -152,7 +161,7 @@ class TestAutoRifeSkipped:
             result = _finalize(ctrl, scene, shot, take, vid, {"auto_rife_smoothness_threshold": 0.4})
 
         m_rife.assert_not_called()
-        assert take["path"] == vid
+        assert take["path"] == os.path.relpath(vid, ctrl.project_dir)
         assert result["video"] == vid
         # smoothness still recorded for the director UI
         assert take["metadata"]["smoothness_score"] == pytest.approx(0.8)
@@ -167,7 +176,7 @@ class TestAutoRifeSkipped:
 
         m_assess.assert_not_called()
         m_rife.assert_not_called()
-        assert take["path"] == vid
+        assert take["path"] == os.path.relpath(vid, ctrl.project_dir)
         assert "smoothness_score" not in take["metadata"]
 
     def test_auto_rife_default_threshold_runs_assessment(self, tmp_path):
@@ -192,7 +201,7 @@ class TestAutoRifeBestEffort:
             result = _finalize(ctrl, scene, shot, take, vid, {"auto_rife_smoothness_threshold": 0.4})
 
         assert result["success"] is True
-        assert take["path"] == vid
+        assert take["path"] == os.path.relpath(vid, ctrl.project_dir)
         assert result["video"] == vid
         assert "auto_rife_applied" not in take["metadata"]
 
@@ -209,7 +218,7 @@ class TestAutoRifeBestEffort:
             result = _finalize(ctrl, scene, shot, take, vid, {"auto_rife_smoothness_threshold": 0.4})
 
         m_rife.assert_not_called()
-        assert take["path"] == vid
+        assert take["path"] == os.path.relpath(vid, ctrl.project_dir)
         assert take["metadata"]["smoothness_score"] == pytest.approx(0.0)
         assert "auto_rife_applied" not in take["metadata"]
 
@@ -222,7 +231,7 @@ class TestAutoRifeBestEffort:
             result = _finalize(ctrl, scene, shot, take, vid, {"auto_rife_smoothness_threshold": 0.4})
 
         assert result["success"] is True
-        assert take["path"] == vid
+        assert take["path"] == os.path.relpath(vid, ctrl.project_dir)
         assert "auto_rife_applied" not in take["metadata"]
 
 

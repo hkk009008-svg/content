@@ -154,8 +154,13 @@ def test_face_swap_success_uses_in_frame_character_and_records_postprocess_varia
     assert result["take"]["kind"] == "postprocess"
     assert result["take"]["source_take_id"] == "take_base"
     assert result["take"]["metadata"] == {"action": "face_swap", "params": {"strength": 0.8}}
+    # result["take"]["path"] is the PERSISTED postprocess variant path --
+    # project-relative (slice 10, Product invariant #6). result["video"] is
+    # the same value (apply_correction returns the persisted variant's own
+    # path, unlike generate_keyframe_take's decoupled absolute "image" key).
     assert result["video"] == result["take"]["path"]
-    assert Path(result["video"]).exists()
+    assert not Path(result["video"]).is_absolute()
+    assert (Path(controller.project_dir) / result["video"]).exists()
     assert captured["mutation_result"].save is True
     assert captured["mutation_result"].value is result["take"]
 
@@ -171,3 +176,38 @@ def test_face_swap_success_uses_in_frame_character_and_records_postprocess_varia
     assert ready_kwargs["shot_id"] == "shot_1_0"
     assert ready_kwargs["take_id"] == result["take"]["id"]
     assert ready_kwargs["take_kind"] == "postprocess"
+
+
+def test_face_swap_defaults_disabled_when_setting_absent(tmp_path):
+    """Reciprocal-default test (slice 9b, spend-truth audit): a project that
+    never wrote ``face_swap_enabled`` (every project created via
+    domain.project_manager.make_project, which does not scaffold this key)
+    must gate the hard-fail closed, matching VideoSection's "Face swap"
+    toggle, which displays OFF by default (`s.face_swap_enabled === true`).
+    Before this fix, controller.py defaulted the ABSENT key to True — the
+    UI showed off while the runtime allowed the billed FAL/FaceFusion call.
+    """
+    controller, project, _base_take, _captured = _make_controller(tmp_path)
+    # _make_controller's fixture baseline sets face_swap_enabled=True for
+    # every OTHER test in this file; delete it here to reproduce the actual
+    # "operator never touched this project setting" state.
+    del project["global_settings"]["face_swap_enabled"]
+    assert "face_swap_enabled" not in project["global_settings"]
+
+    with patch("cinema.shots.controller.get_reference_image") as mock_ref, \
+         patch("cinema.shots.controller.face_swap_video_frames") as mock_swap:
+        result = controller.apply_correction(
+            "shot_1_0",
+            "face_swap",
+            take_id="take_base",
+        )
+
+    assert result == {
+        "success": False,
+        "error": "face_swap disabled in project settings",
+    }
+    # The hard gate must short-circuit before any lookup/dispatch — a
+    # billed provider call must never fire for a setting the operator never
+    # opted into.
+    mock_ref.assert_not_called()
+    mock_swap.assert_not_called()
