@@ -586,6 +586,23 @@
     },
     {
       "backend_route_ids": [
+        "route:api_cost_estimate:0b28a387a0a62a25"
+      ],
+      "id": "frontend-operation:6eeeb36936791987",
+      "kind": "direct_transport",
+      "method": "POST",
+      "path_shape": "/api/cost-estimate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 25,
+        "path": "web/src/components/setup/inspector/CostEstimatorSection.tsx"
+      },
+      "transport_id": "frontend-transport:c3186838766f15fa",
+      "url_template": "/api/cost-estimate"
+    },
+    {
+      "backend_route_ids": [
         "route:api_add_location:4522f1083c852069"
       ],
       "id": "frontend-operation:7020366ba4c69a1b",
@@ -987,23 +1004,6 @@
       },
       "transport_id": null,
       "url_template": null
-    },
-    {
-      "backend_route_ids": [
-        "route:api_cost_estimate:0b28a387a0a62a25"
-      ],
-      "id": "frontend-operation:a40e51b474ae385b",
-      "kind": "direct_transport",
-      "method": "POST",
-      "path_shape": "/api/cost-estimate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 26,
-        "path": "web/src/components/settings/CostEstimatorSection.tsx"
-      },
-      "transport_id": "frontend-transport:762c39ae3109f0e4",
-      "url_template": "/api/cost-estimate"
     },
     {
       "backend_route_ids": [],
@@ -2041,26 +2041,6 @@
     },
     {
       "backend_route_ids": [
-        "route:api_cost_estimate:0b28a387a0a62a25"
-      ],
-      "enclosing_function": "CostEstimatorSection",
-      "id": "frontend-transport:762c39ae3109f0e4",
-      "kind": "fetch",
-      "method": "POST",
-      "non_2xx_observation": "unknown",
-      "non_2xx_observation_applicability": "applicable",
-      "path_shape": "/api/cost-estimate",
-      "query_keys": [],
-      "route_match": "matched",
-      "source": {
-        "line": 26,
-        "path": "web/src/components/settings/CostEstimatorSection.tsx"
-      },
-      "url_expression": "`${API}/cost-estimate`",
-      "url_template": "/api/cost-estimate"
-    },
-    {
-      "backend_route_ids": [
         "route:api_add_location:4522f1083c852069"
       ],
       "enclosing_function": "handleAdd",
@@ -2252,6 +2232,26 @@
       },
       "url_expression": "`${base}/projects/${project.id}/characters/${primaryCharacter.id}`",
       "url_template": "{1}/projects/{2}/characters/{3}"
+    },
+    {
+      "backend_route_ids": [
+        "route:api_cost_estimate:0b28a387a0a62a25"
+      ],
+      "enclosing_function": "CostEstimatorSection",
+      "id": "frontend-transport:c3186838766f15fa",
+      "kind": "fetch",
+      "method": "POST",
+      "non_2xx_observation": "unknown",
+      "non_2xx_observation_applicability": "applicable",
+      "path_shape": "/api/cost-estimate",
+      "query_keys": [],
+      "route_match": "matched",
+      "source": {
+        "line": 25,
+        "path": "web/src/components/setup/inspector/CostEstimatorSection.tsx"
+      },
+      "url_expression": "`${API}/cost-estimate`",
+      "url_template": "/api/cost-estimate"
     },
     {
       "backend_route_ids": [
