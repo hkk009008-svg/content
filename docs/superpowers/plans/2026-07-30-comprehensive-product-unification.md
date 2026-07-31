@@ -169,13 +169,16 @@ catalog coherence tests.
   availability.
 - [ ] Keep the existing registry export as a read-only compatibility view while
   migrating consumers.
-- [ ] Limit selectable shot targets to `AUTO` or live, dispatchable video
+- [x] Limit selectable shot targets to `AUTO` or live, dispatchable video
   engines; reject planned, disabled, unknown, and non-video values at schema,
-  HTTP, optimizer, and dispatcher boundaries.
-- [ ] Retire unsupported FAL Sora immediately. Keep native Sora as a visibly
+  HTTP, optimizer, and dispatcher boundaries. (Landed via `2b-A`; reviews
+  owed — see ledger.)
+- [x] Retire unsupported FAL Sora immediately. Keep native Sora as a visibly
   deprecated, date-gated fallback through 2026-09-24, then make it
   non-dispatchable automatically; do not present it as a preferred/default
-  choice. Preserve cost/history data.
+  choice. Preserve cost/history data. (`SORA_2` catalogued
+  `RETIRED`/`UNSUPPORTED`, all capability flags false; legacy dispatch arm
+  in `phase_c_ffmpeg.py` is policy-unreachable, pruning deferred to Slice 15.)
 - [ ] Make every UI picker use the same server-provided selectable view.
 
 Acceptance: no orphan IDs across catalog, selector, rankings, cascade, pricing,
@@ -448,11 +451,15 @@ integration verification, but does not implement the production slices.
 
 | Slice/task | Base and owned scope | Call/write evidence and dependency | Implement/review evidence | Disposition |
 |---|---|---|---|---|
-| `0.1` deterministic product-surface inventory | `871c10f2`; `scripts/product_surface_inventory.py`, its unit test, generated JSON | Static Flask decorators plus `web/src` transports; no application imports | `ea59894c`, artifact refreshes `4dd28474`/`dd68ec56`; spec review currently `FAIL` on three conservative-parser gaps | Fix in progress; not yet evidence authority |
+| `0.1` deterministic product-surface inventory | `871c10f2`; `scripts/product_surface_inventory.py`, its unit test, generated JSON | Static Flask decorators plus `web/src` transports; no application imports | `ea59894c`, artifact refreshes `4dd28474`/`dd68ec56`; spec review `FAIL` gaps then addressed by `bee6f8cb`/`b16d8e1d`/`fb17322a`/`22dbbb5b`/`c459f89b`/`830704e1`/`67d09b6e`/`fa5dbbd3`/`aaab3658`/`7e2d6b6d`/`7b8b6786` (fail-closed inventory, TS-AST frontend transports, wrapper-chain resolution); **no recorded post-fix re-review verdict** | Landed; re-review owed before evidence authority |
 | `1a` dormant LoRA containment | `a0485546`; policy, trainer/quality boundaries, direct scripts, endpoint/write guards, focused tests/ADR | Training endpoint, raw trainer/subprocess/FAL/register entrypoints, locked `global_settings` mutation | `411146aa`, fixes `2e24346f`/`871c10f2`; independent spec `GO`; Lane V quality `GO`; 91 focused tests plus sibling/full verification | Landed and closed |
 | `1b` inactive/read-only LoRA product surface | `ea59894c`; character/identity/capability UI, scorecard/manifest/status, current docs/tests | Status GET only; scorecard projection; manifest renderer; zero remaining action/POST caller | `d686f2ca`, quality fix `7ac36338`; independent spec `GO`; Lane V quality `GO`; 60 frontend tests and production build | Landed and closed |
 | `2a` additive typed provider truth | `4dd28474`; `domain/provider_catalog.py` and its unit test only | Exact 40 legacy keys plus dispatch-only `FAL_SVD`; no production consumer import | `cf25eee3`, fixes `6319106c`/`960c044b`/`1e386c70`; independent spec `GO`; Lane V quality `GO`; 60 focused tests plus coherence verification | Landed and closed; consumer work prepared |
-| `2b-A` video authoring/ranking policy | start after `2a` quality GO; new video-policy adapter, decomposer, optimizer, workflow resolver and focused tests | `make_shot(target_api=...)`, optimizer suggestion writes, purpose rankings, workflow template consumers; depends on typed catalog | Fresh worker; independent spec then different quality review; mutation pins for retired/broken/runtime-unavailable candidates | Prepared; dispatch withheld |
+| `2b-A` video authoring/ranking policy | base `14ddd8b4`; `domain/video_engine_policy.py`, `llm/prompt_optimizer.py`, `workflow_selector.py`, scene schema, target-write HTTP fences | `make_shot(target_api=...)`, optimizer suggestion writes, purpose rankings, workflow template consumers; typed catalog | `8fc46759` plus `174c056a`/`1eb6f9e8`/`f76a0a01`/`292173f9`/`de14ef19`/`d4a464a9`/`f414e8a2`/`fd6646d1`/`34531d31`/`1a8e0a91`; verified in-tree: `SORA_2` catalogued `RETIRED`/`UNSUPPORTED` all-flags-false, selectable-target policy enforced at schema/HTTP/optimizer/dispatch; **no recorded independent reviews** | Landed (backend); reviews owed; `2c` UI selectors NOT started |
+| `5a` Firecrawl shared adapter | `firecrawl_adapter.py` (new), `web_research.py`, `research_engine.py`, `firecrawl>=3.0.2,<5` bound | Both research consumers migrated off `scrape_url(params=...)`; wheel-contract evidence in `c8327b34` body | `c8327b34` plus `8c8f8988`/`badc1217`/`37f65ec9`/`b631554f` (retry/URL bounds, public-target and private-host fences); **no recorded independent reviews** | Landed; reviews owed |
+| storyboard/motion spend truth (unplanned; invariant 1) | `cinema/phases/motion_render.py`, `cinema/storyboard.py`, `kling_native.py`, `phase_c_ffmpeg.py` and focused tests | Storyboard batch dispatch, segment timeline/stems, motion-output ownership | `0a035eef`/`86d0848c`/`628ae5f6`/`7790409e`/`956eb18a`/`fc9940cc`/`1d0f13a6`; **no recorded independent reviews** | Landed; reviews owed |
+| project identity boundaries (unplanned; invariant 2) | `web_server.py`, `domain/project_manager.py`; ADR-070/071/072 | Public project/scene/shot mutation routes; stored-ID equality; typed optimizer-cache boundary | `a83ab8ec`/`93f5a296` (+ fences above); **no recorded independent reviews** | Landed; reviews owed |
+| ADR-073 lock + optimizer-cache unification | completes the in-flight worktree draft left at `7b8b6786`; `domain/project_manager.py` sibling lock via stock `filelock>=3.24.3,<4`, `domain/optimizer_cache.py` extraction, stale-pin repairs, `scripts/clean_test_fixtures.py`, docs | Lock callers `_acquire_project_lock`/`_acquire_existing_project_lock`; cache consumers in `web_server.py` + both controller sites | Completed and reviewed in-session by the picking-up seat (Claude): vacuous Q3 lock pin repointed, sibling-geometry pin added, direct `optimizer_cache` unit tests added; focused files green (314), smoke OK, full matrix run at landing | Landed this session |
 
 ## Completion gate
 

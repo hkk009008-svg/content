@@ -283,15 +283,15 @@ the audit baseline.
 
 | Slice/task | Owned files (exact brief required before dispatch) | Dependency | Implementer/reviews | State |
 |---|---|---|---|---|
-| 0.1 mechanical surface inventory | `scripts/product_surface_inventory.py`, its test, generated active-surface artifact/check mode | plan commit; may follow urgent spend containment | fresh worker → spec reviewer → quality reviewer | OPEN |
-| 1a LoRA mechanism containment | `prep/lora_policy.py`, `prep/lora_quality.py`, `prep/lora_training.py`, `web_server.py`, three direct training/registration scripts, focused backend tests, appended ADR | plan commit | reserved worker `lora_containment_impl` → `lora_containment_spec` → `lora_containment_quality` | NEXT |
-| 1b LoRA product truth | character/identity/capability UI, pod-gating/type tests, capability scorecard/manifest, source comments, `ARCHITECTURE.md`, affected Program Manual sections | 1a GO | fresh UI/docs worker → independent spec reviewer → independent quality reviewer | OPEN |
-| 2a provider ledger + catalog types | checked-at modality ledger, typed static fields/runtime-availability projection, compatibility registry, coherence tests | Slice 1 for spend policy | fresh worker → two independent reviewers | OPEN |
-| 2b routing/schema/dispatch boundary | scene schema/validator, optimizer coercion, rankings/cascade, dispatcher fail-fast, cost/caller tests | 2a | fresh worker → two independent reviewers | OPEN |
+| 0.1 mechanical surface inventory | `scripts/product_surface_inventory.py`, its test, generated active-surface artifact/check mode | plan commit; may follow urgent spend containment | fresh worker → spec reviewer → quality reviewer | LANDED (`ea59894c`…`7b8b6786`); post-fix re-review owed |
+| 1a LoRA mechanism containment | `prep/lora_policy.py`, `prep/lora_quality.py`, `prep/lora_training.py`, `web_server.py`, three direct training/registration scripts, focused backend tests, appended ADR | plan commit | reserved worker `lora_containment_impl` → `lora_containment_spec` → `lora_containment_quality` | LANDED + reviewed GO (`411146aa`/`2e24346f`/`871c10f2`) |
+| 1b LoRA product truth | character/identity/capability UI, pod-gating/type tests, capability scorecard/manifest, source comments, `ARCHITECTURE.md`, affected Program Manual sections | 1a GO | fresh UI/docs worker → independent spec reviewer → independent quality reviewer | LANDED + reviewed GO (`d686f2ca`/`7ac36338`) |
+| 2a provider ledger + catalog types | checked-at modality ledger, typed static fields/runtime-availability projection, compatibility registry, coherence tests | Slice 1 for spend policy | fresh worker → two independent reviewers | LANDED + reviewed GO (`cf25eee3` + fixes) |
+| 2b routing/schema/dispatch boundary | scene schema/validator, optimizer coercion, rankings/cascade, dispatcher fail-fast, cost/caller tests | 2a | fresh worker → two independent reviewers | LANDED backend (`8fc46759` family); reviews owed; see plan ledger |
 | 2c config + all UI selectors | `/api/config`, `web/src/lib/engines.ts`, ScenePanel/ShotRow/PromptEditor/inspector selectors and tests | 2a/2b | fresh UI worker → two independent reviewers | OPEN |
 | 3 Gemini Omni | Gemini adapter, portrait declaration, focused tests/dependency constraint | Slice 2 catalog fields | fresh worker → two reviewers | OPEN |
 | 4 LTX | LTX adapter/dispatcher/config, safe download, focused tests | Slice 2 parameter contract | fresh worker → two reviewers | OPEN |
-| 5a Firecrawl | shared Firecrawl adapter, `web_research.py`, `research_engine.py`, dependency constraint and focused tests | Slice 2 lifecycle truth | fresh worker → two independent reviewers | OPEN |
+| 5a Firecrawl | shared Firecrawl adapter, `web_research.py`, `research_engine.py`, dependency constraint and focused tests | Slice 2 lifecycle truth | fresh worker → two independent reviewers | LANDED (`c8327b34` family); reviews owed |
 | 5b Runway performance | `performance/act_one.py` migration/rename, registry/labels, SDK/REST polling tests | Slice 2 lifecycle truth | fresh worker → two independent reviewers | OPEN |
 | 6a OpenAI LLM decision | exact configured IDs, one candidate Responses adapter, structured/tool/vision/cost evaluation artifacts | checked provider ledger | fresh worker → two independent reviewers | OPEN |
 | 6b Gemini image/text/vision | model IDs, media/structured-output fixtures, bounded SDK constraint | 2a and 3 | fresh worker → two independent reviewers | OPEN |
@@ -353,8 +353,9 @@ the audit baseline.
   `BASE..HEAD`.
 - **Quality reviewer:** reserved `lora_containment_quality`; starts only after
   spec GO; verdict pending.
-- **Disposition:** OPEN. One mechanism commit; Task 1b owns all UI/capability
-  and current-doc synchronization after Task 1a GO.
+- **Disposition:** CLOSED (historical). Landed as `411146aa` with fixes
+  `2e24346f`/`871c10f2`; independent spec GO and Lane V quality GO recorded
+  in the plan ledger. Task 1b landed subsequently (`d686f2ca`/`7ac36338`).
 
 ## Browser observations to reproduce after changes
 
