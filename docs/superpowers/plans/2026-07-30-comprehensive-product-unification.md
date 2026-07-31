@@ -490,6 +490,20 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave 2 opened — 6b research recorded (wf_e8552836)
+
+Exposed IDs (inventory, all sites file:line-mapped): `gemini-2.5-flash-image`
+(image PRIMARY, `gemini_image_native.py:51`, shutdown 2026-10-02);
+`gemini-2.5-flash` (`phase_c_vision.py:455` continuity vision gate, fail-open
+`default_pass` — known audited pattern, unchanged; shutdown 2026-10-16);
+`gemini-2.5-pro` (judge alias `llm/ensemble.py:148`, opt-in; 2026-10-16).
+`gemini-omni-flash-preview` is a distinct product line — NOT exposed.
+Successors (contracts agent, deprecations page + model pages + SDK 2.6.0):
+image → `gemini-3.1-flash-image` ("Nano Banana 2" — the deprecations table's
+literal `-preview` string 404s, discrepancy verified); flash →
+`gemini-3.6-flash`; pro → `gemini-3.1-pro-preview` (preview-tier — labels
+must say so). Migration implementer dispatched (`wf_4c5d1a2b`).
+
 ### Wave 1 CLOSED (2026-07-31, wf_30a56037 closing verdicts)
 
 fix-S4 `97a3504e` money-gate **GO** + lane-v **GO** (both convergently note

@@ -289,7 +289,7 @@ the audit baseline.
 | 2a provider ledger + catalog types | checked-at modality ledger, typed static fields/runtime-availability projection, compatibility registry, coherence tests | Slice 1 for spend policy | fresh worker → two independent reviewers | LANDED + reviewed GO (`cf25eee3` + fixes) |
 | 2b routing/schema/dispatch boundary | scene schema/validator, optimizer coercion, rankings/cascade, dispatcher fail-fast, cost/caller tests | 2a | fresh worker → two independent reviewers | LANDED backend (`8fc46759` family); reviews owed; see plan ledger |
 | 2c config + all UI selectors | `/api/config`, `web/src/lib/engines.ts`, ScenePanel/ShotRow/PromptEditor/inspector selectors and tests | 2a/2b | fresh UI worker → two independent reviewers | OPEN |
-| 3 Gemini Omni | Gemini adapter, portrait declaration, focused tests/dependency constraint | Slice 2 catalog fields | fresh worker → two reviewers | OPEN |
+| 3 Gemini Omni | Gemini adapter, portrait declaration, focused tests/dependency constraint | Slice 2 catalog fields | fresh worker → two reviewers | LANDED (`caad6bcf`, repaired + re-admitted; reviewed) |
 | 4 LTX | LTX adapter/dispatcher/config, safe download, focused tests | Slice 2 parameter contract | fresh worker → two reviewers | OPEN |
 | 5a Firecrawl | shared Firecrawl adapter, `web_research.py`, `research_engine.py`, dependency constraint and focused tests | Slice 2 lifecycle truth | fresh worker → two independent reviewers | LANDED (`c8327b34` family); reviews owed |
 | 5b Runway performance | `performance/act_one.py` migration/rename, registry/labels, SDK/REST polling tests | Slice 2 lifecycle truth | fresh worker → two independent reviewers | OPEN |
