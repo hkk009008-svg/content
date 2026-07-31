@@ -9,7 +9,7 @@ import math
 import os
 import warnings
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from functools import wraps
 
 # Suppress noisy warnings from google/urllib3 libraries
@@ -368,6 +368,54 @@ def _reject_if_project_busy_outside_gate(pid: str):
     if pid in _running_pipelines and not _pipeline_at_gate_stage(pid):
         return _project_busy_response(pid)
     return None
+
+
+def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
+    """Derive ``(running, allowed_actions)`` from the pipeline lifecycle
+    registry — the SAME ``_running_pipelines`` / ``_PIPELINE_PENDING``
+    mechanism that gates ``/generate``, ``/cancel``, ``/pause``, and
+    ``/resume``. Never inspects transport/SSE connectivity (``_progress_queues``,
+    ``/stream`` subscriber count, etc.) — a client can disconnect from the
+    SSE stream while generation keeps running, and vice versa, so
+    transport state is never job truth.
+
+    ``allowed_actions`` mirrors each control endpoint's own real gate
+    instead of being hardcoded, so the response tells the UI exactly
+    which of {"start", "cancel", "pause", "resume"} would currently
+    succeed:
+
+      - idle (pid absent from ``_running_pipelines``): running=False;
+        only "start" is legal — ``api_generate``'s
+        ``if pid in _running_pipelines`` check is the sole gate.
+      - pending-start (``_PIPELINE_PENDING`` sentinel present —
+        ``CinemaPipeline.__init__`` is constructing but hasn't registered
+        the real object yet): running=True; NO action is currently legal
+        — "start" would still 409 (pid is already ``in
+        _running_pipelines``), and cancel/pause/resume all 404
+        (``_get_running_pipeline`` returns None for the sentinel).
+        Reported as running so the UI does not repaint a start-again
+        affordance during this brief construction window.
+      - running (real pipeline object, not paused): running=True;
+        "cancel" and "pause" are legal.
+      - paused (real pipeline object, paused): running=True; "cancel"
+        and "resume" are legal.
+    """
+    if pid not in _running_pipelines:
+        return False, ["start"]
+    pipeline = _get_running_pipeline(pid)
+    if pipeline is None:
+        return True, []
+    try:
+        paused = bool(pipeline.paused)
+    except AttributeError:
+        # Defensive: mirrors _pipeline_at_gate_stage's tolerance for bare
+        # object() sentinels injected by tests / unexpected registry
+        # entries. Treat as "not paused" — the conservative branch that
+        # offers cancel/pause rather than asserting an unverifiable resume.
+        paused = False
+    if paused:
+        return True, ["cancel", "resume"]
+    return True, ["cancel", "pause"]
 
 
 def _project_lock_guard(fn):
@@ -745,6 +793,168 @@ def api_capability_scorecard(pid):
     return jsonify(scorecard)
 
 
+# ---------------------------------------------------------------------------
+# Project settings — validated write contract (slice 9a)
+#
+# The whole-object PUT below has historically round-tripped an entire
+# global_settings object with no per-key validation and no way to detect a
+# stale write: two browser tabs (or an inspector control that PUTs the full
+# settings object on every keystroke — see SettingsInspector.tsx / ShotInspector.tsx
+# `update()`) can race, and whichever response lands last silently wins even
+# though it started from older state. PATCH below adds a strict, partial,
+# revision-guarded alternative. PUT gains an opt-in revision check: enforced
+# only when the caller's own global_settings payload carries a "revision"
+# value, so existing callers that always spread the last-fetched
+# global_settings verbatim get the concurrency guard automatically the
+# moment they observe the field on a GET/PUT/PATCH response, without any
+# frontend change in this slice (web/src is out of scope here).
+# ---------------------------------------------------------------------------
+
+_SETTINGS_REVISION_KEY = "revision"
+
+
+def _current_settings_revision(project: dict) -> int:
+    """Read the settings revision counter; absent/legacy/malformed → 0."""
+    settings = project.get("global_settings")
+    if not isinstance(settings, dict):
+        return 0
+    value = settings.get(_SETTINGS_REVISION_KEY, 0)
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _settings_revision_conflict_payload(current_revision: int, settings: object) -> dict:
+    return {
+        "error": "Project settings changed since last read",
+        "code": "settings_revision_conflict",
+        "retryable": True,
+        "current_revision": current_revision,
+        "global_settings": dict(settings) if isinstance(settings, dict) else {},
+    }
+
+
+class _SettingsValidationError(ValueError):
+    """Fail-closed: a settings patch had an unknown key or an invalid value.
+
+    Carries every offending key at once (not just the first) so the 400
+    response can report the complete problem in one round trip.
+    """
+
+    def __init__(self, unknown_keys: list, invalid_keys: dict):
+        self.unknown_keys = unknown_keys
+        self.invalid_keys = invalid_keys
+        super().__init__("invalid project settings patch")
+
+
+def _validate_bool_setting(value):
+    if not isinstance(value, bool):
+        raise ValueError("must be a boolean")
+    return value
+
+
+def _validate_string_setting(value):
+    if not isinstance(value, str):
+        raise ValueError("must be a string")
+    return value
+
+
+def _validate_object_setting(value):
+    if not isinstance(value, dict):
+        raise ValueError("must be a JSON object")
+    return value
+
+
+def _validate_int_setting(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("must be an integer")
+    return value
+
+
+def _validate_nonneg_number_setting(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("must be a number")
+    if not math.isfinite(value):
+        raise ValueError("must be a finite number")
+    if value < 0:
+        raise ValueError("must be >= 0")
+    return value
+
+
+def _validate_unit_interval_setting(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("must be a number")
+    if not math.isfinite(value):
+        raise ValueError("must be a finite number")
+    if not (0.0 <= value <= 1.0):
+        raise ValueError("must be between 0 and 1")
+    return float(value)
+
+
+def _validate_aspect_ratio_setting(value):
+    if not isinstance(value, str) or not is_supported(value):
+        raise ValueError(f"unsupported aspect_ratio (supported: {SUPPORTED_ASPECT_RATIOS})")
+    return value
+
+
+# Per-key validators for the strict partial-write path (PATCH). Deliberately
+# narrower than every key the legacy whole-object PUT tolerates today —
+# web/src/components/setup/inspector/*.tsx and ShotInspector.tsx already
+# write several settings (identity_retry_max, cascade_retry_limit,
+# forced_alignment_enabled, dialogue_target_wpm, ...) with no reconciled
+# runtime consumer yet. Wiring those is slice 9b/9c/9d's "distinct consumer
+# families" work; extend this table there rather than loosening the
+# fail-closed default here.
+#
+# The three char_lora_* registry fields (prep.lora_policy.PROTECTED_LORA_FIELDS,
+# ADR-065 dormant-LoRA containment) are deliberately absent: PATCH simply
+# does not offer them (any attempt 400s as an unknown key), so the
+# dormant-activation guard stays enforced on its one existing checked path
+# (the PUT route's changed_protected_lora_fields call) instead of needing a
+# second copy of the same policy.
+_SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
+    "aspect_ratio": _validate_aspect_ratio_setting,
+    "music_mood": _validate_string_setting,
+    "color_palette": _validate_string_setting,
+    "language": _validate_string_setting,
+    "master_seed": _validate_int_setting,
+    "style_rules": _validate_object_setting,
+    "budget_limit_usd": _validate_nonneg_number_setting,
+    "identity_strictness": _validate_unit_interval_setting,
+    "creative_llm": _validate_string_setting,
+    "quality_judge_llm": _validate_string_setting,
+    "competitive_generation": _validate_bool_setting,
+    "adaptive_pulid": _validate_bool_setting,
+    "coherence_check_enabled": _validate_bool_setting,
+    "color_drift_sensitivity": _validate_unit_interval_setting,
+    "prompt_optimizer_enabled": _validate_bool_setting,
+    "auto_approve": _validate_object_setting,
+    "api_engines": _validate_object_setting,
+}
+
+
+def _validate_settings_patch(patch: dict) -> dict:
+    """Validate a partial global_settings write.
+
+    Fail closed: any unknown key or invalid value raises
+    _SettingsValidationError listing every problem found. Callers apply
+    nothing when this raises — the whole patch is atomic.
+    """
+    validated: dict = {}
+    unknown: list = []
+    invalid: dict = {}
+    for key, value in patch.items():
+        validator = _SETTINGS_KEY_VALIDATORS.get(key)
+        if validator is None:
+            unknown.append(key)
+            continue
+        try:
+            validated[key] = validator(value)
+        except ValueError as exc:
+            invalid[key] = str(exc)
+    if unknown or invalid:
+        raise _SettingsValidationError(sorted(unknown), invalid)
+    return validated
+
+
 @app.route("/api/projects/<pid>", methods=["PUT"])
 @_project_lock_guard
 def api_update_project(pid):
@@ -771,21 +981,135 @@ def api_update_project(pid):
         return jsonify({"error": "unsupported aspect_ratio", "value": incoming_gs["aspect_ratio"],
                         "supported": SUPPORTED_ASPECT_RATIOS}), 400
 
+    conflict = None
+
     def _mutate_project(project: dict):
         # Inner validation and protected-field comparison use the locked latest state.
+        nonlocal conflict
         Project.model_validate(project)
         if has_incoming_gs and (changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs)):
             raise lora_policy.LoraActivationDormantError(changed_lora_fields)
+        if has_incoming_gs:
+            # Opt-in optimistic-concurrency guard (slice 9a): only enforced
+            # when the caller's own payload echoes a "revision" — legacy
+            # callers unaware of the field are unaffected (compat).
+            current_revision = _current_settings_revision(project)
+            if (
+                _SETTINGS_REVISION_KEY in incoming_gs
+                and incoming_gs[_SETTINGS_REVISION_KEY] != current_revision
+            ):
+                conflict = _settings_revision_conflict_payload(
+                    current_revision, project.get("global_settings", {})
+                )
+                return MutationResult(None, save=False)
         if "name" in data:
             project["name"] = data["name"]
         if has_incoming_gs:
-            project["global_settings"].update(incoming_gs)
+            settings = project.setdefault("global_settings", {})
+            settings.update(incoming_gs)
+            # Recompute unconditionally so no caller (accidental or not) can
+            # set the counter directly through the merge above — the stored
+            # value always reflects this route's own bump, never the
+            # incoming payload's claim.
+            settings[_SETTINGS_REVISION_KEY] = current_revision + 1
         return project
 
     try:
         project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
     except lora_policy.LoraActivationDormantError as exc:
         return jsonify(exc.payload), 409
+    if conflict is not None:
+        return jsonify(conflict), 409
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify(project)
+
+
+@app.route("/api/projects/<pid>", methods=["PATCH"])
+@_project_lock_guard
+def api_patch_project_settings(pid):
+    """Strict partial write for project settings.
+
+    The revision-guarded counterpart to the compat whole-object PUT above.
+    Only the keys the caller sends are applied; each is validated against
+    _SETTINGS_KEY_VALIDATORS — an unknown or invalid key rejects the whole
+    request (400, no mutation). The caller MUST echo the last-observed
+    ``global_settings.revision``; a mismatch rejects the whole request (409,
+    no mutation) with the current revision so the caller can refetch and
+    retry — the conflict shape a typed API client can treat as non-2xx and
+    handle by refreshing authoritative state.
+    """
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    if "id" in data and data["id"] != pid:
+        return jsonify({
+            "error": "Body id must match route id",
+            "route_id": pid,
+        }), 400
+
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    incoming_gs = data.get("global_settings")
+    if not isinstance(incoming_gs, dict):
+        return jsonify({
+            "error": "global_settings must be a JSON object",
+            "code": "invalid_global_settings",
+            "retryable": False,
+        }), 400
+
+    patch = dict(incoming_gs)
+    if _SETTINGS_REVISION_KEY not in patch:
+        return jsonify({
+            "error": "global_settings.revision is required",
+            "code": "revision_required",
+            "retryable": False,
+        }), 400
+    expected_revision = patch.pop(_SETTINGS_REVISION_KEY)
+    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        return jsonify({
+            "error": "global_settings.revision must be an integer",
+            "code": "invalid_revision",
+            "retryable": False,
+        }), 400
+
+    try:
+        validated = _validate_settings_patch(patch)
+    except _SettingsValidationError as exc:
+        payload = {
+            "error": "Unknown or invalid project setting(s)",
+            "code": "invalid_setting_key",
+            "retryable": False,
+        }
+        if exc.unknown_keys:
+            payload["unknown_keys"] = exc.unknown_keys
+        if exc.invalid_keys:
+            payload["invalid_keys"] = exc.invalid_keys
+        return jsonify(payload), 400
+
+    conflict = None
+
+    def _mutate(project: dict):
+        nonlocal conflict
+        Project.model_validate(project)
+        current_revision = _current_settings_revision(project)
+        if expected_revision != current_revision:
+            conflict = _settings_revision_conflict_payload(
+                current_revision, project.get("global_settings", {})
+            )
+            return MutationResult(None, save=False)
+        settings = project.setdefault("global_settings", {})
+        settings.update(validated)
+        settings[_SETTINGS_REVISION_KEY] = current_revision + 1
+        return project
+
+    project = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+    if conflict is not None:
+        return jsonify(conflict), 409
     if not project:
         return jsonify({"error": "Project not found"}), 404
     return jsonify(project)
@@ -2571,16 +2895,36 @@ def api_resume(pid):
 
 @app.route("/api/projects/<pid>/pipeline-state")
 def api_pipeline_state(pid):
-    """Get current pipeline execution state."""
+    """Get current pipeline execution state.
+
+    Additive to the legacy shape (Slice 8a): every response that reflects
+    a real project also carries server-derived action authority so the
+    UI never has to guess —
+
+      running: bool             -- see _pipeline_action_authority.
+      allowed_actions: list[str] -- subset of {"start","cancel","pause",
+                                     "resume"} currently legal for pid.
+
+    The 404 "Project not found" shape is intentionally left unchanged —
+    there is no pid-scoped authority to report for a project that does
+    not exist.
+    """
+    running, allowed_actions = _pipeline_action_authority(pid)
     pipeline = _get_running_pipeline(pid)
     if pipeline:
-        return jsonify(pipeline.get_state())
+        state = pipeline.get_state()
+        state["running"] = running
+        state["allowed_actions"] = allowed_actions
+        return jsonify(state)
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found", "paused": False, "cancelled": False}), 404
     # Lightweight path — replicates get_state() shape without spinning
     # up CinemaPipeline's heavy ctor.
-    return jsonify(state_snapshot(pid))
+    state = state_snapshot(pid)
+    state["running"] = running
+    state["allowed_actions"] = allowed_actions
+    return jsonify(state)
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/restart", methods=["POST"])
