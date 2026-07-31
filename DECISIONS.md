@@ -4193,3 +4193,55 @@ so, rather than a blanket catch-all.
 
 Cross-ref: ADR-077 (skill-twin parity); `performance/viggle.py`;
 `performance/_router.py:78-83`; `domain/performance.py` rule 3.
+
+## ADR-083 — Delete the dormant LTX transition helpers (plan slice 15b)
+
+Date: 2026-08-01
+
+Status: Accepted. Closes slice 15b of the 2026-07-30 product-unification plan,
+which held the deletion "BLOCKED ON EVIDENCE" and then "READY TO DELETE —
+product call". The user-principal made that call on 2026-08-01.
+
+Context. `ltx_native.LTXVideoAPI` carried `_fal_transition` and
+`_native_transition` — two keyframe-to-keyframe transition generators — plus
+two helpers reachable only through them.
+
+Evidence, stronger than the audit's "zero production callers": these were
+private methods **never called from inside their own module**, and the class
+exposes no public transition entry point at all.
+  $ grep -nE "_fal_transition|_native_transition" ltx_native.py
+      276:    def _fal_transition(          <- definition only
+      453:    def _native_transition(       <- definition only
+  $ grep -nE "def (generate_)?transition" ltx_native.py   -> none
+Nothing could reach them by any route, including configuration.
+
+Meanwhile transitions ARE shipped, by a different mechanism entirely: ffmpeg
+`xfade_concat` (`cinema_pipeline.py:1487`), driven by the `transition_duration`
+setting, which is PATCH-validated at `web_server.py:1342`. So these were an
+abandoned ALTERNATIVE implementation, not a pending feature — and unlike
+`cinema/pipeline.py` (ADR-081) they had no ADR and no design note behind them.
+
+Removed (111 lines of method bodies plus 31 of transitively-orphaned helper):
+  _fal_transition           ltx_native.py:276-335
+  _native_transition        ltx_native.py:453-503
+  _native_request           ltx_native.py:505-525   (only caller: _native_transition)
+  _download_native_result   ltx_native.py:527-536   (only caller: _native_transition)
+
+Transitive-orphan check run BEFORE deleting, because this repo's dead-code
+claims have repeatedly been half-wrong. Two helpers the transitions call were
+KEPT because they have live callers:
+  _upload_to_fal   ltx_native.py:212 — also called at :227 (live fal path)
+  _fal_duration    ltx_native.py:75  — also called at :238 (live generate_video)
+And `NATIVE_BASE_URL` stays: `_native_generate` (live, called from
+`generate_video` at :192) builds its own URL from it at :390.
+
+The money-gate tests went with them, deliberately. Slice 4 had given both
+methods a reject-before-network duration gate after a money-gate finding. That
+hardening was correct and protected nothing: an unreachable path cannot
+overspend. If LTX transitions ever become a feature, the adapter would need
+re-verification against LTX's then-current contract anyway — exactly what
+Viggle just went through in ADR-082 — so carrying this saved no future work.
+
+verified via $ pytest tests/unit/test_ltx_native.py -q  -> 43 passed
+Cross-ref: ADR-081 (the sibling deletion this session); plan slice 15b;
+docs/AUDIT-product-unification-2026-07-30.md.

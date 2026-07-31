@@ -3,11 +3,11 @@
 Locks in CORRECT behaviour after Part-3 moderate/minor fixes.
 
 NOTE: _native_transition / _fal_transition / _download_native_result /
-_native_request are deliberately-kept DORMANT quality levers (not on the live
-generate_video path — grepped, zero callers anywhere in the repo). Their
-duration-contract gate (reject-before-any-network-call, mirroring
-generate_video) IS tested below (money-gate finding 2026-07-30); their
-provider-specific wire behavior beyond that gate is NOT.
+_native_request were DELETED 2026-08-01 (ADR-083). They were dormant — private
+methods with no caller anywhere, not even inside their own module — and the
+product ships transitions via ffmpeg xfade_concat, not LTX. Their
+duration-contract tests went with them: an unreachable code path cannot
+overspend, so the money-gate they carried protected nothing.
 """
 from __future__ import annotations
 
@@ -297,97 +297,6 @@ def test_valid_durations_do_not_raise(monkeypatch, tmp_path):
         assert api.generate_video(
             image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=valid,
         ) is None
-
-
-# ---------------------------------------------------------------------------
-# Transition duration contract (money-gate finding 2026-07-30): _fal_transition
-# and _native_transition are dormant (no live caller anywhere in the repo —
-# grepped) but previously computed duration via an OLD unvalidated path
-# (_fal_transition snapped a raw num_frames via _fal_duration; _native_transition
-# sent num_frames straight to the wire with no validation at all). Both now
-# take `duration` (seconds) and share generate_video's exact
-# reject-before-any-network-call contract, so a caller can no longer reach
-# either with an out-of-enum duration than it could reach generate_video with.
-# ---------------------------------------------------------------------------
-
-def test_fal_transition_invalid_duration_rejected_before_any_network_call(monkeypatch, tmp_path):
-    api = _make_api(fal_key="fal-key")
-    start = tmp_path / "start.jpg"
-    end = tmp_path / "end.jpg"
-    start.write_bytes(b"s")
-    end.write_bytes(b"e")
-
-    upload_mock = MagicMock()
-    monkeypatch.setattr(api, "_upload_to_fal", upload_mock)
-    subscribe_mock = MagicMock()
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-
-    with pytest.raises(ltx_native.LTXContractViolation):
-        api._fal_transition(str(start), str(end), "t", str(tmp_path / "o.mp4"), duration=5)
-
-    upload_mock.assert_not_called()
-    subscribe_mock.assert_not_called()
-
-
-def test_fal_transition_valid_duration_sends_duration_directly(monkeypatch, tmp_path):
-    """A pre-validated duration is sent AS-IS to the fal subscribe args — no
-    lossy frame-count roundtrip (the old num_frames->_fal_duration snap)."""
-    api = _make_api(fal_key="fal-key")
-    start = tmp_path / "start.jpg"
-    end = tmp_path / "end.jpg"
-    start.write_bytes(b"s")
-    end.write_bytes(b"e")
-
-    monkeypatch.setattr(api, "_upload_to_fal", lambda path: f"http://cdn/{path}")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api._fal_transition(
-        str(start), str(end), "t", str(tmp_path / "o.mp4"), duration=8,
-    )
-
-    assert result == str(tmp_path / "o.mp4")
-    args = subscribe_mock.call_args
-    subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    assert subscribe_arguments["duration"] == 8
-
-
-def test_native_transition_invalid_duration_rejected_before_any_network_call(monkeypatch, tmp_path):
-    api = _make_api(ltx_key="ltx-key")
-    start = tmp_path / "start.jpg"
-    end = tmp_path / "end.jpg"
-    # Files deliberately NOT written — proves the rejection happens before
-    # _native_transition ever tries to open() them.
-
-    request_mock = MagicMock()
-    monkeypatch.setattr(api, "_native_request", request_mock)
-
-    with pytest.raises(ltx_native.LTXContractViolation):
-        api._native_transition(str(start), str(end), "t", str(tmp_path / "o.mp4"), duration=4)
-
-    request_mock.assert_not_called()
-
-
-def test_native_transition_valid_duration_sends_correct_num_frames(monkeypatch, tmp_path):
-    api = _make_api(ltx_key="ltx-key")
-    start = tmp_path / "start.jpg"
-    end = tmp_path / "end.jpg"
-    start.write_bytes(b"s")
-    end.write_bytes(b"e")
-
-    request_mock = MagicMock(return_value={"video_url": "http://cdn/v.mp4"})
-    monkeypatch.setattr(api, "_native_request", request_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api._native_transition(
-        str(start), str(end), "t", str(tmp_path / "o.mp4"), duration=8,
-    )
-
-    assert result == str(tmp_path / "o.mp4")
-    endpoint, payload = request_mock.call_args.args
-    assert endpoint == "/transition"
-    assert payload["num_frames"] == 8 * 24
 
 
 # ---------------------------------------------------------------------------
