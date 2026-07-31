@@ -72,21 +72,25 @@ JOURNEY + OBSERVED STATE
    read_console_messages(onlyErrors) across the whole journey: NO console
    errors. (Plan acceptance criterion.)
 
-ARTIFACT STATUS — HONEST NOTE
------------------------------
-a11y.txt            PRESENT (npm --prefix web run test:a11y, 16 checks pass)
+ARTIFACT STATUS
+---------------
+a11y.txt            PRESENT  (npm --prefix web run test:a11y, 16 checks pass)
 e2e.txt             THIS FILE
-1440x1000/*.png     NOT CAPTURED
-1024x768/*.png      NOT CAPTURED
+1440x1000/*.png     PRESENT  (7 states, 2x retina)
+1024x768/*.png      PRESENT  (7 states, 2x retina)
 
-Reason: no scriptable browser is installed in this environment (playwright
-absent from the venv and from web/node_modules; no chromium/chrome binary on
-PATH). The journey above was driven through the in-app browser pane, which
-renders and inspects but cannot write PNG files to logs/.
+States captured per viewport: loading, project-selection, setup, edit,
+run-idle, capability, error.
 
-Capturing the named PNGs requires a deliberate tooling decision — adding
-playwright (~300MB with browsers) as a dev dependency. That is a real change
-to the project's dependency surface, so it is FLAGGED for the user-principal
-rather than silently added or silently skipped. Everything the screenshots
-were meant to evidence is recorded above as executed observations with the
-commands to reproduce them.
+Reproducible command (added 2026-08-01, closing the earlier gap):
+    .venv/bin/python web_server.py &        # or open Cinemaker.app
+    node scripts/capture_ui_states.mjs
+
+The script drives the REAL backend and built frontend, makes NO provider call
+and never clicks Generate, so a capture run costs nothing. It exits non-zero
+if the server is not answering rather than writing blank PNGs — an unreadable
+artifact that looks like evidence is worse than a missing one.
+
+playwright + chromium were added as a web/ devDependency to make this
+possible; that was previously flagged as a decision for the user-principal and
+has now been authorized.
