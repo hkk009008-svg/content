@@ -3631,3 +3631,67 @@ Evidence:
 - **Cross-ref:** ADR-072; `domain/project_manager.py`;
   `domain/optimizer_cache.py`; `requirements.txt`;
   `scripts/clean_test_fixtures.py`.
+
+## ADR-074 — Final assembly honors the color-grade setting; the mood fallback reads the real settings key
+
+- **Date:** 2026-08-01
+- **Status:** Accepted. Closes the slice-9b follow-up deferred out of that
+  slice's owned pathspec (`controller.py`, `phase_c_ffmpeg.py`,
+  `VideoSection.tsx` only — `cinema_pipeline.py` was out of scope).
+- **Context.** Two independent color-grading paths had drifted apart.
+  - The manual per-clip tool (`cinema/shots/controller.py:2980`,
+    `apply_correction("color_grade", ...)`) resolved
+    `params.preset > global_settings.color_grade_preset > "warm_cinema"`.
+  - The automatic final-assembly pass (`cinema_pipeline.py`, `_assemble_final`
+    step 4) never read `color_grade_preset` at all. The Setup "Color grade"
+    knob (`web/src/components/setup/inspector/VideoSection.tsx:100-105`) and
+    all four `PRODUCTION_PRESETS` in `web/src/lib/guidance.ts` write that key,
+    and the knob's own hint promises "Applied on final assembly. Auto-mapped
+    from mood if unset." The finished movie ignored it.
+  - The mood fallback was itself unreachable. It read `settings["mood"]`, a key
+    `GlobalSettings` does not define — the project-level field is `music_mood`
+    (`web/src/types/project.ts:130`); bare `mood` is a *Scene* field
+    (`:107`, written by `domain/project_manager.py:378`). Its `"cinematic"`
+    default is absent from the 15-entry map, so the map resolved to
+    `"warm_cinema"` for every UI-created project and the two documented
+    selectors were both inert.
+  - A stray `global_settings["mood"]` remains *possible* — `PUT
+    /api/projects/<pid>` merges the incoming dict unrestricted
+    (`web_server.py:782`) — so the pre-fix path was dead for UI-created
+    projects, not universally unreachable.
+- **Decision.**
+  - Resolve the assembly grade as `color_grade_preset` → mood map →
+    `"warm_cinema"`, mirroring the manual path's precedence rather than
+    inventing a second contract.
+  - Derive the mood as `settings["mood"] or settings["music_mood"]`. The legacy
+    bare key is honored **first** so any hand-crafted project keeps the grade it
+    already rendered with; `music_mood` makes the map reachable for every
+    project created through the UI.
+  - Reject an unknown `color_grade_preset` at assembly with a WARNING and fall
+    through to the mood tier. `apply_color_grade` would otherwise swallow it via
+    its own `.get(preset, warm_cinema)` (`phase_c_ffmpeg.py:2097`) and log the
+    *requested* preset as though it had been applied.
+  - Log `grade_source` (`"setting"` / `"mood"`) so which tier won is legible
+    after the fact.
+- **Consequences.**
+  - The Setup knob and the production presets now reach the finished movie —
+    the behavior the UI already claimed.
+  - **Renders change.** A project relying on the previous unconditional
+    `"warm_cinema"` will grade differently once it carries either key. This is
+    the point of the fix, but it is a visible output change, not a silent
+    refactor.
+  - Structural WARNING (once per assembly), not per-clip INFO, matching the
+    repo's silent-gate-degradation convention: a bad setting is a config defect.
+  - The 15-entry mood map becomes live code for the first time; each distinct
+    grade in it is now pinned by a test.
+- **Evidence.** `tests/unit/test_final_assembly_color_grade.py` (18 tests).
+  Executed RED→GREEN against pre-fix `cinema_pipeline.py` restored from HEAD:
+  **13 failed → 18 passed**. The 5 that pass in both states are the
+  backward-compatibility guards (legacy `mood`, unset defaults, unmapped mood),
+  proving the fix left pre-existing behavior alone. Pre-fix resolution measured
+  directly: `{'music_mood': 'action', 'color_grade_preset': 'high_contrast'}`
+  → `'warm_cinema'`; `{'color_grade_preset': 'cool_noir'}` → `'warm_cinema'`.
+- **Cross-ref:** D-post-1 in `docs/PROGRAM-MANUAL.md` (and its §966/§1852/§1928
+  claims, all of which documented `global_settings["mood"]` as the live
+  selector and were corrected in the same change);
+  `cinema/shots/controller.py:2980` (the mirrored path).

@@ -2193,13 +2193,26 @@ iterateTake, approveScreening, reassembleProject.
 
 ### 14.6 Settings sections
 
-`SettingsPanel.tsx:36-48` mounts **10 functional sections**:
-ProductionSection, MaxQualityTierSection, CostEstimatorSection, BudgetSection,
-AudioSection, AudioSyncSection, PostProcessingSection, QualitySection,
-ApiEnginesSection, AdvancedSection.
+`SettingsPanel.tsx` no longer exists — the Resolve-style redesign replaced it
+with [SettingsInspector.tsx](web/src/components/setup/SettingsInspector.tsx),
+mounted by [SetupPage.tsx:49](web/src/components/pages/SetupPage.tsx:49). It
+composes **6 sections**
+([SettingsInspector.tsx:47-52](web/src/components/setup/SettingsInspector.tsx:47)):
+Project, Video, Image, Identity, Voice, Budget. Project is defined locally
+([SettingsInspector.tsx:65](web/src/components/setup/SettingsInspector.tsx:65));
+the other five live in `web/src/components/setup/inspector/`, alongside the
+shared row primitives (`controls.tsx`) and the reorderable
+`LipsyncPriorityList.tsx` that the Voice section mounts.
 
-11 `.tsx` files total in `web/src/components/settings/` — the 11th is
-`SettingsSection.tsx` (shared header/container helper, not mounted directly).
+`web/src/components/settings/` **no longer exists.** Its last two survivors were
+folded into `setup/inspector/`: `CostEstimatorSection.tsx` moved there, still
+mounted inside Budget
+([BudgetSection.tsx:28](web/src/components/setup/inspector/BudgetSection.tsx:28)),
+and the single-consumer container helper `SettingsSection` was inlined into it as
+a module-private `CollapsibleSection`. Collapsible containers otherwise come from
+`ui/Section.tsx`; the estimator card keeps its own because it needs *controlled*
+expansion to gate the `/api/cost-estimate` fetch, which `Section`'s uncontrolled
+`defaultOpen` cannot express.
 
 ### 14.7 Dev/build
 
@@ -2210,7 +2223,7 @@ ApiEnginesSection, AdvancedSection.
 
 `web_server.py` serves `web/dist/` as its static folder.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-06-13 (§14.6 re-verified 2026-08-01)*
 
 ---
 

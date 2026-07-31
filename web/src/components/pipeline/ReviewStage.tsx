@@ -623,7 +623,7 @@ function ClipCard({
               <>
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="rounded bg-panel px-2 py-1.5">
-                    <div className="text-mut uppercase text-eyebrow-lg">Identity (ArcFace)</div>
+                    <div className="text-mut uppercase text-eyebrow-lg">Identity (GhostFaceNet)</div>
                     <div className="mt-0.5 font-mono">
                       {typeof performanceIdentity === 'number'
                         ? performanceIdentity.toFixed(3)

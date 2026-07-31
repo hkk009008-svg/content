@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { SettingsSection } from './SettingsSection'
-import { LoadingState, ErrorState } from '../ui'
-import { apiPost } from '../../lib/api'
+import { LoadingState, ErrorState } from '../../ui'
+import { apiPost } from '../../../lib/api'
 
 interface Props {
   s: any
@@ -62,7 +61,7 @@ export function CostEstimatorSection({ s }: Props) {
   )
 
   return (
-    <SettingsSection
+    <CollapsibleSection
       titleNode={titleNode}
       expanded={expanded}
       onToggle={setExpanded}
@@ -148,6 +147,44 @@ export function CostEstimatorSection({ s }: Props) {
       {!costEstimate && !costError && (
         <LoadingState label="Loading estimate" />
       )}
-    </SettingsSection>
+    </CollapsibleSection>
+  )
+}
+
+/**
+ * Controlled collapsible wrapper for the estimator card. Was the shared
+ * `settings/SettingsSection` back when a SettingsPanel monolith reused the
+ * toggle pattern 10×; that panel is gone and this is the last consumer, so it
+ * lives here trimmed to the props actually passed (titleNode + controlled
+ * expanded/onToggle). Deliberately NOT `ui/Section`: the estimator drives its
+ * `/api/cost-estimate` fetch off `expanded`, which needs controlled state that
+ * `Section`'s uncontrolled `defaultOpen` cannot provide.
+ */
+function CollapsibleSection({
+  titleNode,
+  expanded,
+  onToggle,
+  children,
+}: {
+  titleNode: ReactNode
+  expanded: boolean
+  onToggle: (next: boolean) => void
+  children: ReactNode
+}) {
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToggle(!expanded)}
+        className="flex items-center justify-between w-full mt-5 mb-3 group"
+        aria-expanded={expanded}
+      >
+        {titleNode}
+        <span className="flex items-center gap-2">
+          <span className="text-mut text-xs">{expanded ? '▾' : '▸'}</span>
+        </span>
+      </button>
+      {expanded && <div className="space-y-4">{children}</div>}
+    </div>
   )
 }

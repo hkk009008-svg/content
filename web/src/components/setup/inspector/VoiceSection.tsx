@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Section } from '../../ui'
 import type { AppConfig } from '../../../types/project'
-import { LipsyncPriorityList } from '../../settings/AudioSyncSection'
+import { LipsyncPriorityList } from './LipsyncPriorityList'
 import { apiPost } from '../../../lib/api'
 import { RangeRow, SelectRow, ToggleRow, NumberRow } from './controls'
 
@@ -45,8 +45,8 @@ const MUSIC_MASTERING = [
 
 /**
  * Voice section — TTS provider + default male/female voices, dialogue-quality
- * enhancers, lipsync cascade (reuses AudioSyncSection's reorderable
- * LipsyncPriorityList), the SyncNet validation gate, and dialogue pace.
+ * enhancers, the reorderable lipsync cascade ([LipsyncPriorityList]), the
+ * SyncNet validation gate, and dialogue pace.
  *
  * Pace is a target-WPM number (`dialogue_target_wpm`), applied via atempo
  * post-process — NOT a `speed` field, because eleven_v3 ignores speed.
