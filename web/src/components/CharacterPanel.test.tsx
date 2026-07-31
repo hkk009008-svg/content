@@ -48,10 +48,16 @@ function historyPayload(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function response(payload: unknown, ok = true): Response {
+/** `json` backs the raw-fetch LoRA-status GET; `text`/`status` back the
+ *  mutation paths, since `lib/api.ts`'s `apiRequest` reads the body via
+ *  `res.text()` (never `.json()`). */
+function response(payload: unknown, ok = true, status = ok ? 200 : 500): Response {
   return {
     ok,
+    status,
+    statusText: '',
     json: vi.fn(async () => payload),
+    text: vi.fn(async () => (payload === undefined ? '' : JSON.stringify(payload))),
   } as unknown as Response
 }
 
@@ -316,5 +322,197 @@ describe('CharacterPanel ip_adapter_weight is read-only (slice 9d)', () => {
     const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!
     const body = JSON.parse(putCall[1]!.body as string)
     expect(body.ip_adapter_weight).toBe(0.85)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Rule #13 symmetric-endpoint follow-up to the ShotInspector truthfulness fix.
+// Every mutation here used a raw `fetch` with no `.ok` check and called
+// `onRefresh()` unconditionally, so a rejected write was painted as a success:
+//   - the edit PUT (both the multipart and the JSON branch) ALSO tore down the
+//     inline editor, discarding the operator's edits;
+//   - the create POST cleared and closed the add form the same way;
+//   - the delete refreshed as though the character were gone.
+// All three endpoints reject routinely -- 404 on a missing character, 400 on a
+// bad ip_adapter_weight, and the 409 `project_busy` that `_reject_if_project_busy`
+// returns for the whole duration of a generation run. Contract pinned below:
+// a failure surfaces the banner, does NOT refresh, and does NOT discard input;
+// only a confirmed 2xx clears the banner, refreshes, and tears the form down.
+// ---------------------------------------------------------------------------
+
+/** The literal body `_project_busy_response` builds (web_server.py), which all
+ *  three character routes return via `_reject_if_project_busy` for the whole
+ *  duration of a generation run. Used verbatim so these tests pin the string an
+ *  operator actually sees: `lib/api.ts` reads `body.error`, NOT `body.code`. */
+const PROJECT_BUSY_BODY = {
+  code: 'project_busy',
+  retryable: true,
+  error: "Project 'project-lora-history' is busy with an active generation run. Retry shortly.",
+}
+
+type MutationOutcome =
+  | { ok?: boolean; status?: number; body?: unknown }
+  | { throws: string }
+
+/** Routes the mount-time LoRA-status GET to a well-formed success so the only
+ *  `role="alert"` a mutation test can match is the save banner, and gives the
+ *  mutation itself the requested outcome. */
+function stubMutationFetch(outcome: MutationOutcome) {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET') return response(historyPayload())
+    if ('throws' in outcome) throw new Error(outcome.throws)
+    const { ok = true, status = ok ? 200 : 500, body = {} } = outcome
+    return response(body, ok, status)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
+
+function openAddFormWithName(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: '+ Add Character' }))
+  fireEvent.change(screen.getByPlaceholderText('Character name'), { target: { value: name } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add Character' }))
+}
+
+describe('CharacterPanel -- truthful character mutations', () => {
+  it('surfaces a rejected JSON edit, keeps the editor open, and does not refresh', async () => {
+    stubMutationFetch({ ok: false, status: 409, body: PROJECT_BUSY_BODY })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Edit'))
+    fireEvent.change(screen.getByDisplayValue('Legacy Character'), {
+      target: { value: 'Renamed Character' },
+    })
+    fireEvent.click(screen.getByText('Save'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'is busy with an active generation run',
+    )
+    expect(onRefresh).not.toHaveBeenCalled()
+    // The edits survive the rejection instead of being thrown away.
+    expect(screen.getByDisplayValue('Renamed Character')).toBeInTheDocument()
+  })
+
+  it('surfaces a network failure on the edit PUT and does not refresh', async () => {
+    stubMutationFetch({ throws: 'network down' })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Edit'))
+    fireEvent.click(screen.getByText('Save'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('network down')
+    expect(onRefresh).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue('Legacy Character')).toBeInTheDocument()
+  })
+
+  it('surfaces a rejected multipart edit and keeps sending real FormData', async () => {
+    const fetchMock = stubMutationFetch({
+      ok: false, status: 400, body: { error: 'bad ip_adapter_weight' },
+    })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Edit'))
+    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['x'], 'face.png', { type: 'image/png' })] },
+    })
+    fireEvent.click(screen.getByText('Save'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('bad ip_adapter_weight')
+    expect(onRefresh).not.toHaveBeenCalled()
+
+    // Guards the reason this branch uses `apiRequest` and not `apiPut`: a
+    // JSON-encoding helper would stringify the body and pin a Content-Type,
+    // stripping the boundary the upload needs.
+    const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT')!
+    expect(putCall[1]!.body).toBeInstanceOf(FormData)
+    expect(putCall[1]!.headers).toBeUndefined()
+  })
+
+  it('closes the editor and refreshes only after a confirmed 2xx edit', async () => {
+    stubMutationFetch({ ok: true })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Edit'))
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByDisplayValue('Legacy Character')).toBeNull()
+  })
+
+  it('surfaces a rejected delete and does not refresh', async () => {
+    stubMutationFetch({ ok: false, status: 409, body: PROJECT_BUSY_BODY })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Remove'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'is busy with an active generation run',
+    )
+    expect(onRefresh).not.toHaveBeenCalled()
+  })
+
+  it('refreshes only after a confirmed 2xx delete', async () => {
+    stubMutationFetch({ ok: true })
+    const onRefresh = vi.fn()
+
+    render(<CharacterPanel project={makeProject()} config={null} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByText('Remove'))
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('surfaces a rejected create, keeps the add form open, and does not refresh', async () => {
+    stubMutationFetch({ ok: false, status: 400, body: { error: 'name required' } })
+    const onRefresh = vi.fn()
+    const project = makeProject()
+    project.characters = []
+
+    render(<CharacterPanel project={project} config={null} onRefresh={onRefresh} />)
+    openAddFormWithName('New Hero')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('name required')
+    expect(onRefresh).not.toHaveBeenCalled()
+    // The typed name survives instead of being reset to an empty form.
+    expect(screen.getByDisplayValue('New Hero')).toBeInTheDocument()
+  })
+
+  it('surfaces a network failure on the create POST and does not refresh', async () => {
+    stubMutationFetch({ throws: 'create unreachable' })
+    const onRefresh = vi.fn()
+    const project = makeProject()
+    project.characters = []
+
+    render(<CharacterPanel project={project} config={null} onRefresh={onRefresh} />)
+    openAddFormWithName('New Hero')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('create unreachable')
+    expect(onRefresh).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue('New Hero')).toBeInTheDocument()
+  })
+
+  it('clears and closes the add form only after a confirmed 2xx create', async () => {
+    const fetchMock = stubMutationFetch({ ok: true })
+    const onRefresh = vi.fn()
+    const project = makeProject()
+    project.characters = []
+
+    render(<CharacterPanel project={project} config={null} onRefresh={onRefresh} />)
+    openAddFormWithName('New Hero')
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByDisplayValue('New Hero')).toBeNull()
+    expect(screen.getByRole('button', { name: '+ Add Character' })).toBeInTheDocument()
+
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
+    expect(postCall[1]!.body).toBeInstanceOf(FormData)
+    expect(postCall[1]!.headers).toBeUndefined()
   })
 })

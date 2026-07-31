@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Project, AppConfig, LoraStatus } from '../types/project'
+import { apiDelete, apiPut, apiRequest, type ApiResult } from '../lib/api'
 
 const API = '/api'
 
@@ -112,6 +113,7 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [form, setForm] = useState({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
   const [files, setFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [loraLoads, setLoraLoads] = useState<Record<string, HistoricalLoraLoad>>({})
   const loraRequests = useRef(new Map<string, Promise<HistoricalLoraLoad>>())
   const characterStatusKey = JSON.stringify(project.characters.map((c) => c.id))
@@ -151,30 +153,58 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
     return () => { cancelled = true }
   }, [project.id, characterStatusKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleAdd = async () => {
-    if (!form.name.trim()) return
-    setSubmitting(true)
+  /** Shared truthfulness plumbing for every character mutation here — the
+   *  same check-then-refresh-or-surface shape ShotInspector's `runMutation`
+   *  uses for the sibling shot/character/project PUTs. A non-2xx or network
+   *  failure surfaces the inline banner and does NOT refresh: the server
+   *  state didn't change, so there is nothing new to pull. Only a confirmed
+   *  success clears the banner and re-fetches the authoritative project. */
+  const runMutation = async (request: Promise<ApiResult<unknown>>): Promise<boolean> => {
+    const result = await request
+    if (!result.ok) {
+      setSaveError(result.error)
+      return false
+    }
+    setSaveError(null)
+    onRefresh()
+    return true
+  }
 
+  /** Multipart body for the create/edit routes. Sent through `apiRequest`
+   *  rather than `apiPost`/`apiPut` because those JSON-encode: FormData must
+   *  reach `fetch` untouched so the browser sets its own multipart boundary. */
+  const buildCharacterFormData = (images: FileList | null): FormData => {
     const fd = new FormData()
     fd.append('name', form.name)
     fd.append('description', form.description)
     fd.append('voice_id', form.voice_id)
     fd.append('ip_adapter_weight', form.ip_adapter_weight)
-    if (files) {
-      Array.from(files).forEach(f => fd.append('reference_images', f))
+    if (images) {
+      Array.from(images).forEach(f => fd.append('reference_images', f))
     }
+    return fd
+  }
 
-    await fetch(`${API}/projects/${project.id}/characters`, { method: 'POST', body: fd })
+  const handleAdd = async () => {
+    if (!form.name.trim()) return
+    setSubmitting(true)
+
+    const ok = await runMutation(apiRequest(`${API}/projects/${project.id}/characters`, {
+      method: 'POST',
+      body: buildCharacterFormData(files),
+    }))
+    setSubmitting(false)
+    // On failure the form stays open with the operator's input intact --
+    // clearing it would discard work the server never accepted.
+    if (!ok) return
+
     setForm({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
     setFiles(null)
     setAdding(false)
-    setSubmitting(false)
-    onRefresh()
   }
 
   const handleDelete = async (cid: string) => {
-    await fetch(`${API}/projects/${project.id}/characters/${cid}`, { method: 'DELETE' })
-    onRefresh()
+    await runMutation(apiDelete(`${API}/projects/${project.id}/characters/${cid}`))
   }
 
   const [editFiles, setEditFiles] = useState<FileList | null>(null)
@@ -190,25 +220,26 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
     setSubmitting(true)
 
     // Use FormData if files are being uploaded, otherwise JSON
-    if (editFiles && editFiles.length > 0) {
-      const fd = new FormData()
-      fd.append('name', form.name)
-      fd.append('description', form.description)
-      fd.append('voice_id', form.voice_id)
-      fd.append('ip_adapter_weight', form.ip_adapter_weight)
-      Array.from(editFiles).forEach(f => fd.append('reference_images', f))
-      await fetch(`${API}/projects/${project.id}/characters/${editingId}`, { method: 'PUT', body: fd })
-    } else {
-      await fetch(`${API}/projects/${project.id}/characters/${editingId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, description: form.description, voice_id: form.voice_id, ip_adapter_weight: parseFloat(form.ip_adapter_weight) }),
-      })
-    }
+    const url = `${API}/projects/${project.id}/characters/${editingId}`
+    const ok = await runMutation(
+      editFiles && editFiles.length > 0
+        ? apiRequest(url, { method: 'PUT', body: buildCharacterFormData(editFiles) })
+        : apiPut(url, {
+          name: form.name,
+          description: form.description,
+          voice_id: form.voice_id,
+          ip_adapter_weight: parseFloat(form.ip_adapter_weight),
+        }),
+    )
+    setSubmitting(false)
+    // On failure the inline editor stays open with the edits intact. Closing
+    // it (the pre-fix behavior) discarded the operator's work AND painted a
+    // rejection -- a 404, a bad ip_adapter_weight, or the routine 409
+    // `project_busy` during a run -- as a successful save.
+    if (!ok) return
+
     setEditingId(null)
     setEditFiles(null)
-    setSubmitting(false)
-    onRefresh()
   }
 
   return (
@@ -224,6 +255,14 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
         </h2>
         <span className="text-mut text-xs" aria-hidden>{expanded ? '[-]' : '[+]'}</span>
       </button>
+
+      {/* Outside the `expanded` guard on purpose: collapsing the panel must
+          not hide the reason a write was rejected. */}
+      {saveError && (
+        <div role="alert" className="mb-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-xs text-fail">
+          Could not save: {saveError}
+        </div>
+      )}
 
       {expanded && (
         <>

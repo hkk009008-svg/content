@@ -7,6 +7,7 @@ import { ImageSection } from './inspector/ImageSection'
 import { IdentitySection } from './inspector/IdentitySection'
 import { VoiceSection } from './inspector/VoiceSection'
 import { BudgetSection } from './inspector/BudgetSection'
+import { apiPost, apiPut, type ApiResult } from '../../lib/api'
 
 const API = '/api'
 
@@ -29,22 +30,49 @@ const FALLBACK_MOODS = [
  * Settings write contract (shared by every section): read `s =
  * project.global_settings`, write via `update(key, value)` which PUTs the
  * merged `global_settings` then refreshes.
+ *
+ * Every write goes through `runMutation` below, so a rejection surfaces the
+ * inline banner instead of silently no-op'ing. That is a realistic outcome
+ * here, not a theoretical one: this route fails closed with 409
+ * `settings_revision_conflict` whenever the project's `global_settings`
+ * revision has moved on (web_server.py `api_update_project`), and the
+ * controls render from `project.global_settings` — so without the banner a
+ * rejected change just keeps showing the old value with no explanation.
  */
 export default function SettingsInspector({ project, config, onRefresh }: Props) {
   const s = project.global_settings as any
+  const [saveError, setSaveError] = useState<string | null>(null)
 
-  const update = async (key: string, value: any) => {
-    const res = await fetch(`${API}/projects/${project.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ global_settings: { ...s, [key]: value } }),
-    })
-    if (res.ok) onRefresh()
+  /** Sibling of ShotInspector's `runMutation` — same contract: surface and
+   *  don't refresh on failure, clear and refresh on a confirmed success. */
+  const runMutation = async (request: Promise<ApiResult<unknown>>): Promise<boolean> => {
+    const result = await request
+    if (!result.ok) {
+      setSaveError(result.error)
+      return false
+    }
+    setSaveError(null)
+    onRefresh()
+    return true
+  }
+
+  // Returns void rather than the boolean `runMutation` produces: the five
+  // child sections type `update` as `=> void | Promise<void>`, and their
+  // controls render straight from `project.global_settings` (server state),
+  // so there is no optimistic local value for them to revert -- the banner
+  // is the whole remedy.
+  const update = async (key: string, value: any): Promise<void> => {
+    await runMutation(apiPut(`${API}/projects/${project.id}`, { global_settings: { ...s, [key]: value } }))
   }
 
   return (
     <div>
-      <ProjectSection s={s} config={config} project={project} update={update} onRefresh={onRefresh} />
+      {saveError && (
+        <div role="alert" className="mx-3 mt-3 rounded border border-fail/50 bg-fail/10 px-3 py-2 text-[11px] text-fail">
+          Could not save: {saveError}
+        </div>
+      )}
+      <ProjectSection s={s} config={config} project={project} update={update} runMutation={runMutation} />
       <VideoSection s={s} config={config} update={update} />
       <ImageSection s={s} config={config} update={update} />
       <IdentitySection s={s} update={update} />
@@ -59,10 +87,12 @@ interface ProjectSectionProps {
   config: AppConfig | null
   project: Project
   update: (key: string, value: any) => void | Promise<void>
-  onRefresh: () => void
+  /** Threaded down instead of a bare `onRefresh` so the style-rules POST
+   *  reports through the parent's single banner rather than needing its own. */
+  runMutation: (request: Promise<ApiResult<unknown>>) => Promise<boolean>
 }
 
-function ProjectSection({ s, config, project, update, onRefresh }: ProjectSectionProps) {
+function ProjectSection({ s, config, project, update, runMutation }: ProjectSectionProps) {
   const [generating, setGenerating] = useState(false)
   const aspectRatios = config?.aspect_ratios ?? ['16:9']
   const moods = config?.music_moods?.length ? config.music_moods : FALLBACK_MOODS
@@ -75,17 +105,12 @@ function ProjectSection({ s, config, project, update, onRefresh }: ProjectSectio
 
   const generateStyleRules = async () => {
     setGenerating(true)
-    await fetch(`${API}/projects/${project.id}/style-rules`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mood: s.music_mood,
-        color_palette: s.color_palette,
-        music_mood: s.music_mood,
-      }),
-    })
+    await runMutation(apiPost(`${API}/projects/${project.id}/style-rules`, {
+      mood: s.music_mood,
+      color_palette: s.color_palette,
+      music_mood: s.music_mood,
+    }))
     setGenerating(false)
-    onRefresh()
   }
 
   return (
