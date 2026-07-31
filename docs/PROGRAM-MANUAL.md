@@ -597,7 +597,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `route_performance_engine` | `domain/performance.py:110` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → VIGGLE (action no-dialogue) → ACT_ONE (remaining dialogue) → SKIP. |
+| `route_performance_engine` | `domain/performance.py:110` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → SKIP (action no-dialogue — VIGGLE contained as KNOWN_BROKEN, Slice 6c) → ACT_ONE (remaining dialogue) → SKIP. |
 | `should_capture` | `domain/performance.py:72` | Pure gate (skip no-chars/landscape/wide-no-dialogue). |
 | `shot_needs_driving_video` | `domain/performance.py:94` | Whether the shot needs a driving video (all real engines do; only SKIP doesn't). |
 | `driving_video_source` | `domain/performance.py:152` | Driving-video source (`upload`/`tts_auto`/`none`). |
@@ -863,7 +863,7 @@ Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/aut
 |---|---|
 | no characters / wide-no-dialogue / landscape | `SKIP` |
 | dialogue + face-readable (`close_up`/`portrait`/`medium`) | `ACT_ONE` (or `LIVE_PORTRAIT` if `performance_budget_mode="budget"`) |
-| action, no dialogue | `VIGGLE` |
+| action, no dialogue | `SKIP` (VIGGLE contained — KNOWN_BROKEN, Slice 6c) |
 | any remaining dialogue | `ACT_ONE` |
 
 Driving-video mode (`driving_video_source`, `domain/performance.py:152`): `"upload"` when `driving_video_path` set; `"tts_auto"` when engine ≠ SKIP with dialogue; else `"none"`. ACT_ONE (Runway Act-Two, `performance/act_two.py`) requires a driving video by dispatch time — `precondition_error` accepts audio_path alone at this pre-check since Mode-B can still synthesize one from it before dispatch; LIVE_PORTRAIT/VIGGLE require an explicit driving video.
@@ -1782,7 +1782,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `VIGGLE_API_KEY` / `HEDRA_API_KEY` | Optional | — | Viggle Mode-A retarget / direct Hedra fallback |
 | `GOOGLE_CLOUD_PROJECT` | Req. for Veo/Vertex | — | Vertex AI project ID |
 | `GOOGLE_CLOUD_LOCATION` | Optional | `us-central1` | Vertex AI region |
-| `TAVILY_API_KEY` / `FIRECRAWL_API_KEY` / `PEXELS_API_KEY` | Optional | — | Web research / scraping / stock-footage fallback |
+| `TAVILY_API_KEY` / `FIRECRAWL_API_KEY` | Optional | — | Web research / scraping (Pexels config removed — unwired, Slice 6c) |
 
 #### 7.3.2 Environment variables — infrastructure & web
 

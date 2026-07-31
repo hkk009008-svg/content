@@ -10,7 +10,7 @@ Routing matrix (from PERFORMANCE_CAPTURE_HANDOFF.md §3):
   |--------------------------------------------------|---------------|
   | dialogue + (portrait|medium)                     | ACT_ONE       |
   | dialogue + close-up + budget priority            | LIVE_PORTRAIT |
-  | no dialogue + action shot type                   | VIGGLE        |
+  | no dialogue + action shot type                   | SKIP (VIGGLE contained, Slice 6c) |
   | wide / landscape (face sub-100px)                | SKIP          |
   | no characters                                    | SKIP          |
 
@@ -114,7 +114,9 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
       1. SKIP — no characters, or shot too wide for face to matter
       2. ACT_ONE — dialogue + (portrait | medium)
       3. LIVE_PORTRAIT — dialogue + close-up + explicit budget signal
-      4. VIGGLE — action shot type, no dialogue
+      4. action shot type, no dialogue — SKIP while the Viggle adapter is
+         contained (catalog KNOWN_BROKEN, Slice 6c); returns ENGINE_VIGGLE
+         again when the adapter-repair slice lands
       5. Default — ACT_ONE if dialogue, else SKIP
 
     `scene` is reserved for future scene-level routing signals; today only
