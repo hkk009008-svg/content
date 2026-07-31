@@ -93,10 +93,12 @@ function propertyName(node) {
 // A call whose callee is a member access (`client.request(id)`,
 // `client['request'](id)`) never resolves through symbol()'s identifier-only
 // lookup, so a callSymbol-keyed map (imports/wrappers) can never find it --
-// the object being a project-local namespace import is a fact about the
-// *object* expression, not the call expression itself. Surface that fact
-// separately so a namespace-import call site is not silently invisible to
-// the same opaque-import taxonomy plain `imported()` calls already get.
+// the object being a project-local import is a fact about the *object*
+// expression, not the call expression itself. Surface that fact separately
+// so a member-access call site is not silently invisible to the same
+// opaque-import taxonomy plain `imported()` calls already get. Returns the
+// object node too (not just its symbol) so a caller can inspect its
+// resolved type -- see isDataValueMemberTarget below.
 function namespaceMemberAccess(checker, node) {
   const value = unwrap(node);
   if (!value) return undefined;
@@ -113,7 +115,27 @@ function namespaceMemberAccess(checker, node) {
     return undefined;
   }
   const objectSymbol = symbol(checker, objectNode);
-  return objectSymbol ? { objectSymbol, member } : undefined;
+  return objectSymbol ? { objectSymbol, objectNode, member } : undefined;
+}
+// A named import bound to a plain JS value -- a primitive
+// (`import { MICRO_LABEL } from './index'`, a string) or an array/tuple
+// (`import { PROMPT_SECTION_TAGS } from './promptSections'`, a `const`
+// tuple) -- exposes its own builtin prototype methods (`.replace`,
+// `.toFixed`, `.map`, `.join`, ...) that are never a call into the imported
+// module, unlike a namespace import whose only properties ARE the module's
+// own exports. Filtering on the object's resolved TYPE (rather than trying
+// to enumerate builtin-method names) keeps this exact and idiom-agnostic:
+// any object/class/function-shaped import still qualifies, including the
+// axios-client idiom (`import { api } from './api'; api.get('/x')`). Both
+// false positives (MICRO_LABEL.replace, PROMPT_SECTION_TAGS.map) are real
+// call sites in this repo's own web/src, found by regenerating the
+// checked-in artifact against this exact discriminator.
+const PRIMITIVE_MEMBER_TARGET_FLAGS = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike |
+  ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike | ts.TypeFlags.ESSymbolLike;
+function isDataValueMemberTarget(checker, node) {
+  const type = checker.getTypeAtLocation(node);
+  if (type.flags & PRIMITIVE_MEMBER_TARGET_FLAGS) return true;
+  return checker.isArrayType(type) || checker.isTupleType(type);
 }
 function declaredName(node) {
   if (!node) return undefined;
@@ -339,16 +361,6 @@ function moduleFacts(checker, file) {
   // scoped to project-owned code without touching the existing literal-URL
   // classification, which never needed the distinction.
   const localImports = new Set();
-  // A namespace import (`import * as client from './client'`) is the only
-  // import shape where a property-access callee (`client.request(id)`) is
-  // itself the call site of an unresolvable module member. A named import
-  // of an ordinary value (`import { MICRO_LABEL } from './index'`) binds a
-  // string/object whose OWN methods (`.replace`, `.map`, ...) are not calls
-  // into the imported module at all; treating every local-import identifier
-  // the same way for member-access calls would misclassify built-in method
-  // calls on an imported constant as opaque wrapper calls. Tracked
-  // separately from `localImports` so that distinction survives.
-  const namespaceImports = new Set();
   for (const statement of file.statements) {
     if (ts.isVariableStatement(statement) && statement.declarationList.flags & ts.NodeFlags.Const) {
       for (const item of statement.declarationList.declarations) {
@@ -362,13 +374,10 @@ function moduleFacts(checker, file) {
     if (!ts.isImportDeclaration(statement) || !statement.importClause) continue;
     const clause = statement.importClause;
     const names = [];
-    const namespaceNames = new Set();
     if (clause.name) names.push(clause.name);
     if (clause.namedBindings) {
-      if (ts.isNamespaceImport(clause.namedBindings)) {
-        names.push(clause.namedBindings.name);
-        namespaceNames.add(clause.namedBindings.name);
-      } else names.push(...clause.namedBindings.elements.map((item) => item.name));
+      if (ts.isNamespaceImport(clause.namedBindings)) names.push(clause.namedBindings.name);
+      else names.push(...clause.namedBindings.elements.map((item) => item.name));
     }
     const specifier = ts.isStringLiteralLike(statement.moduleSpecifier)
       ? statement.moduleSpecifier.text
@@ -379,10 +388,9 @@ function moduleFacts(checker, file) {
       const importSymbol = checker.getSymbolAtLocation(name);
       imports.set(importSymbol, name.text);
       if (isLocal) localImports.add(importSymbol);
-      if (isLocal && namespaceNames.has(name)) namespaceImports.add(importSymbol);
     }
   }
-  return { constants, imports, localImports, namespaceImports };
+  return { constants, imports, localImports };
 }
 function unknown(root, file, node, kind, reason, expression, owner) {
   const row = { domain: "frontend", kind, reason,
@@ -413,7 +421,7 @@ function transportTarget(checker, expression, aliases, callKind) {
   return undefined;
 }
 function analyzeFile(root, file, checker) {
-  const { constants, imports, localImports, namespaceImports } = moduleFacts(checker, file);
+  const { constants, imports, localImports } = moduleFacts(checker, file);
   const functions = functionFacts(checker, file);
   const aliases = new Map();
   const unresolved = [];
@@ -993,22 +1001,31 @@ function analyzeFile(root, file, checker) {
       } else if (!callSymbol && !suspiciousNodes.has(node)) {
         // node.expression didn't resolve to a plain identifier symbol at
         // all -- the callee may still be an opaque call through a local
-        // namespace import reached via member access (`client.request(id)`
-        // where `import * as client from './client'`). symbol()/imports/
-        // wrappers are all keyed by the call's own identifier symbol, which
-        // a PropertyAccessExpression callee never has, so this case fell
-        // through every branch above and vanished. Recognize it separately
-        // by resolving the *object* expression's symbol instead of the
-        // call's -- scoped to namespaceImports (not the broader
-        // localImports) so a built-in method call on an imported constant
-        // (`MICRO_LABEL.replace(...)`) is never misread as a wrapper call.
+        // import reached via member access: a namespace import
+        // (`client.request(id)` from `import * as client from './client'`)
+        // or a named import bound to an object-with-methods (`api.get('/x')`
+        // from `import { api } from './api'` -- the axios-client idiom, very
+        // common in real React code). symbol()/imports/wrappers are all
+        // keyed by the call's own identifier symbol, which a
+        // PropertyAccessExpression callee never has, so both shapes fell
+        // through every branch above and vanished. Recognize them by
+        // resolving the *object* expression's symbol instead of the call's
+        // -- gated on localImports (a namespace import is one shape within
+        // it) so both cases qualify, but excluding a plain-data-typed
+        // object so a built-in method call on an imported constant
+        // (`MICRO_LABEL.replace(...)`, `PROMPT_SECTION_TAGS.map(...)`) is
+        // never misread as a wrapper call. One property hop only; a deeper
+        // chain (rebound namespace const, barrel export-star re-exports,
+        // .call/.apply, rebound identifier) is a disclosed limitation, not
+        // chased here.
         const access = namespaceMemberAccess(checker, node.expression);
-        const namespaceName = access ? imports.get(access.objectSymbol) : undefined;
+        const importedName = access ? imports.get(access.objectSymbol) : undefined;
         if (
-          access && namespaceName && namespaceImports.has(access.objectSymbol) &&
-          !aliases.has(access.objectSymbol)
+          access && importedName && localImports.has(access.objectSymbol) &&
+          !aliases.has(access.objectSymbol) &&
+          !isDataValueMemberTarget(checker, access.objectNode)
         ) {
-          emitOpaqueImportedCall(node, `${namespaceName}.${access.member}`);
+          emitOpaqueImportedCall(node, `${importedName}.${access.member}`);
         }
       }
     }

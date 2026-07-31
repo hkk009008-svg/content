@@ -731,6 +731,113 @@ export function run(id: string) {
     assert imported_rows[0]["owner"] == "client.request"
 
 
+def test_named_import_member_access_call_lands_in_unresolved(tmp_path: Path) -> None:
+    """A call through a local NAMED import bound to an object-with-methods,
+    reached via member access, must not vanish silently.
+
+    `import { api } from './api'; api.get(id)` is the axios-client idiom
+    (very common in real React code): the callee is a PropertyAccessExpression
+    whose object is a local NAMED import rather than a namespace import, so
+    it fell through the namespaceImports-gated branch added in cd82f01c and
+    vanished from both operations and unresolved -- the exact gap this
+    fixture exposes. Fixed by widening that branch's gate from
+    namespaceImports to localImports.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "api-client.ts",
+        """
+import { api } from './api'
+
+export function loadItem(id: string) {
+  return api.get(id)
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in unknown} == {"api.get"}
+    reasons = {row["reason"] for row in result["unresolved"]}
+    assert "imported wrapper call" in reasons
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["owner"] == "api.get"
+
+
+def test_named_import_data_value_method_call_stays_invisible(
+    tmp_path: Path,
+) -> None:
+    """Widening the member-access gate to localImports must not resurrect the
+    exact false positive the namespaceImports-only scoping in cd82f01c was
+    written to avoid, nor its array/tuple sibling.
+
+    `import { MICRO_LABEL } from './labels'; MICRO_LABEL.replace(...)` is a
+    real call shape in web/src/components/ui/ErrorState.tsx (MICRO_LABEL is a
+    plain string constant); `import { PROMPT_SECTION_TAGS } from
+    './tags'; PROMPT_SECTION_TAGS.map(...)` is a real call shape in
+    web/src/components/edit/ShotInspector.tsx (a `const`-asserted readonly
+    tuple). Neither `.replace` nor `.map` is a call into the imported
+    module -- they are String.prototype/Array.prototype methods. An
+    object-bound named import (`api.get`) appears alongside both so the
+    discriminator (the object's resolved TypeScript type) is exercised
+    directly: only the object case may surface.
+    """
+    root = _repo(tmp_path)
+    _frontend(
+        root,
+        "labels.ts",
+        """
+export const MICRO_LABEL = 'font-mono text-[10px]'
+""",
+    )
+    _frontend(
+        root,
+        "tags.ts",
+        """
+export const PROMPT_SECTION_TAGS = ['SHOT', 'SCENE'] as const
+""",
+    )
+    _frontend(
+        root,
+        "component.ts",
+        """
+import { api } from './api'
+import { MICRO_LABEL } from './labels'
+import { PROMPT_SECTION_TAGS } from './tags'
+
+export function tone() {
+  return MICRO_LABEL.replace('text-mut', 'text-fail')
+}
+
+export function tags() {
+  return PROMPT_SECTION_TAGS.map((tag) => tag)
+}
+
+export function loadItem(id: string) {
+  return api.get(id)
+}
+""",
+    )
+
+    result = _build(root)
+    unknown = [
+        row for row in result["frontend_operations"] if row["kind"] == "unknown_wrapper_call"
+    ]
+
+    assert {row["expanded_wrapper"] for row in unknown} == {"api.get"}
+    imported_rows = [
+        row for row in result["unresolved"] if row["reason"] == "imported wrapper call"
+    ]
+    assert {row["owner"] for row in imported_rows} == {"api.get"}
+
+
 def test_cross_file_opaque_wrapper_call_and_its_own_definition_both_surface(
     tmp_path: Path,
 ) -> None:
