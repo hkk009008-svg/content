@@ -225,7 +225,7 @@ flowchart TD
 | 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:660`/`:796`; called `cinema_pipeline.py:997-1068` |
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
 | 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1064` |
-| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:571`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
+| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 3.5 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:571`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
 | 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. (The former N=8 **max tier** was retired in WS1 Task 4 — production is the sole image tier.) | `phase_c_assembly.py:109`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
 | 4 | **PERFORMANCE_CAPTURE** | Per shot with an approved keyframe, retargets a performance onto the still: ACT_ONE / LIVE_PORTRAIT / VIGGLE, or SKIP (the domain router decides via `route_performance_engine`). Shots routed to SKIP are passed over with no generation. | `cinema/phases/performance.py:35`, `domain/performance.py:103`; called `cinema_pipeline.py:1119` |
 | 5 | **MOTION_RENDER** | Per shot, `generate_motion_take` turns the keyframe into a clip via the **video cascade** (`generate_ai_video`): Gemini-Omni→Veo-Native→Seedance→Kling-3.0→Sora-Native→…, filtering disabled engines and retrying on total exhaustion. Dialogue shots route first to **Gemini Omni** (it outranks Veo in `PURPOSE_API_RANKING`; both carry `native_audio=True`); non-embedded dialogue clips get a mandatory lip-sync pass. A storyboard batch path (Kling Native) handles 2–6-shot scenes in one call when all keyframes exist and the aspect is non-portrait (M-1 guard — portrait always takes the per-shot path). | `phase_c_ffmpeg.py:207`, `cinema/phases/motion_render.py:342`; called `cinema_pipeline.py:1166` |
@@ -633,7 +633,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `train_character_lora` | `prep/lora_training.py:439` | Retained ai-toolkit FLUX LoRA producer implementation; its entry path is unconditionally denied by `prep.lora_policy` and is not operational product capability. |
 | `prepare_character_lora_dataset` | `prep/lora_training.py:166` | Retained dataset-preparation implementation behind the same inactive policy; historical/status compatibility only. |
 | `upscale_with_topaz` | `prep/topaz_upscale.py:75` | Local Topaz CLI wrapper (no-op if CLI absent → caller falls back to SeedVR2). |
-| `generate_dialogue_voiceover` | `audio/dialogue.py:571` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 2 for Korean; optional `.alignment.json` sidecar. |
+| `generate_dialogue_voiceover` | `audio/dialogue.py:571` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 3.5 for Korean; optional `.alignment.json` sidecar. |
 | `generate_fal_bgm` | `audio/music.py:288` | FAL Stable Audio BGM (25+ vibes). |
 | `master_music` | `audio/music.py:392` | Mastering via AU/Pedalboard/ffmpeg presets (`MUSIC_MASTERING_PRESETS` at `:34`). |
 | `generate_stability_foley` | `audio/foley.py:110` | Stability AI Stable Audio 2.0 foley (15+ environment prompts). |
@@ -1158,7 +1158,7 @@ the default since 2026-06-03. This realizes a *consistent character voice* (Veo 
 | `lipsync_validation_threshold` | 0.65 | 0–1 | Raise to 0.8+ to force the cascade to try more engines until sync clears |
 | `dialogue_mode_enabled` | True | bool | ElevenLabs v3 Dialogue Mode for 2+ speaker scenes (best prosody continuity) (`audio/dialogue.py:419`) |
 | `forced_alignment_enabled` | False | bool | Emits word-level `.alignment.json` sidecars (WhisperX) for tighter sync (`audio/dialogue.py:419`) |
-| `language` | "English" | — | Korean routes TTS to Cartesia Sonic 2; sets a stricter 0.70 lip-sync gate (`audio/dialogue.py:208`) |
+| `language` | "English" | — | Korean routes TTS to Cartesia Sonic 3.5; sets a stricter 0.70 lip-sync gate (`audio/dialogue.py:208`) |
 
 > **To maximize dialogue quality:** keep `dialogue_voice_mode="overlay"` (default) and ensure `ELEVENLABS_API_KEY` is set for high-quality TTS. Set `dialogue_mode_enabled=true` for 2+ speaker scenes. Raise `lipsync_validation_threshold` to 0.80+ to push the cascade toward better sync engines. For non-English projects, call `POST .../apply-language-defaults` (`web_server.py:384`) for the right TTS provider + native-trained lip-sync ordering. The overlay approach was validated end-to-end at sync score 0.955 (`logs/veo_musetalk_v2studio.mp4`).
 
@@ -1776,7 +1776,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `LTX_API_KEY` | Optional | — | LTX native (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | — | Runway Gen-4 / gen3a_turbo, Act-Two performance |
 | `ELEVENLABS_API_KEY` | Yes (audio) | — | TTS narration + dialogue voiceover |
-| `CARTESIA_API_KEY` | Optional | — | Cartesia Sonic 2 (Korean dialogue) |
+| `CARTESIA_API_KEY` | Optional | — | Cartesia Sonic 3.5 (Korean dialogue) |
 | `STABILITY_API_KEY` | Optional | — | Stable Audio foley/BGM |
 | `SUNO_API_KEY` (alias `SUNO_TOKEN`) | Optional | — | Suno V5 BGM (`config/settings.py:117`) |
 | `SUNO_API_BASE` | Optional | `https://api.suno.ai/v1` | Suno endpoint override |

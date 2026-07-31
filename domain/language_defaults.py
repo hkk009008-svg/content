@@ -4,7 +4,7 @@ When a project's dialogue language is set, the BEST quality settings differ
 from English defaults:
 
   - Some TTS providers have native-language training (ElevenLabs v3 Korean,
-    Cartesia Sonic 2 Korean, etc.) — pick those over multilingual fallbacks.
+    Cartesia Sonic 3.5 Korean, etc.) — pick those over multilingual fallbacks.
   - Voice pool filter — surface only voices that sound native in the target
     language.
   - Lipsync engine priority — most are language-agnostic (audio-driven), but

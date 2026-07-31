@@ -134,9 +134,9 @@ def generate_cartesia(
     voice_id: str,
     output_path: str,
     language: str = "en",
-    model_id: str = "sonic-2",
+    model_id: str = "sonic-3.5",
 ) -> bool:
-    """Generate TTS via Cartesia Sonic 2 REST API. Returns True on success.
+    """Generate TTS via the Cartesia REST API. Returns True on success.
 
     Mirrors the per-line caching pattern of the ElevenLabs path: if
     ``output_path`` already exists this function returns True immediately
@@ -149,15 +149,31 @@ def generate_cartesia(
         output_path: where to write the mp3
         language: ISO language code; ``"ko"`` for Korean, ``"en"`` for English.
             Cartesia accepts language hints to bias prosody.
-        model_id: Cartesia model identifier (default ``"sonic-2"``). KEPT at
-            ``"sonic-2"`` deliberately (Slice 6c1): swapping to ``"sonic-3.5"``
-            (Cartesia's current recommended default) is a Korean-prosody
-            QUALITY question that needs R-MEASURE evidence, not a version-pin
-            decision — do not change this default on provider marketing claims
-            alone. NOTE: per
-            https://docs.cartesia.ai/build-with-cartesia/tts-models/api-changes
-            (verified 2026-07-31), ``sonic-2`` is scheduled for sunset
-            2026-10-20 — a measurement + migration slice is needed before then.
+        model_id: Cartesia model identifier (default ``"sonic-3.5"``).
+            MIGRATED from ``"sonic-2"`` on 2026-08-01, ahead of its
+            2026-10-20 sunset (docs.cartesia.ai/build-with-cartesia/
+            tts-models/api-changes). The swap was held until it had evidence,
+            because Korean prosody is product-critical here and a provider's
+            "current recommended default" is a marketing claim, not a
+            measurement.
+            Evidence: ``scripts/measure_cartesia_prosody.py`` (committed
+            instrument, R-MEASURE) + ``logs/cartesia-prosody-*.json``. On the
+            project's own Korean voice, sonic-3.5 renders the same line at
+            151.1 wpm vs sonic-2's 129.8, with silence ratio 0.128 vs 0.208 at
+            unchanged loudness; the English control moves identically, so the
+            difference is the MODEL, not Korean handling. 151 wpm also sits
+            near ``dialogue_target_wpm``'s 145 default, so the downstream
+            pacing pass has less stretching to do.
+            The numbers did not decide it: the retained .wav pairs under
+            ``logs/cartesia-prosody-20260801/`` were listened to, and the
+            user-principal chose sonic-3.5. Naturalness is a human call —
+            see the 2026-07-18 precedent where an audio proxy contradicted
+            the listener and the proxy was wrong.
+            NOTE the routing key ``CARTESIA_SONIC_2`` is deliberately
+            unchanged: it is a stable identifier for the Cartesia lane (same
+            pattern as ``ENGINE_ACT_ONE`` now dispatching the Act-Two
+            adapter), and renaming it would break stored project settings and
+            historical cost rows.
 
     Returns:
         ``True`` on success, ``False`` on missing key / HTTP error / timeout /

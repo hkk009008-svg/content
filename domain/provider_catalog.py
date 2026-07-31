@@ -952,7 +952,7 @@ _CATALOG_ROWS = (
     ),
     _entry(
         "CARTESIA_SONIC_2",
-        "Cartesia Sonic 2",
+        "Cartesia Sonic 3.5",
         Modality.TTS,
         Maturity.STABLE,
         Lifecycle.ACTIVE,

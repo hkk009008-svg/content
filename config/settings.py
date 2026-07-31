@@ -66,7 +66,7 @@ class Settings:
 
     # Audio / TTS
     elevenlabs_api_key: str
-    cartesia_api_key: str       # Sonic 2 — low-latency TTS, native Korean prosody
+    cartesia_api_key: str       # Sonic 3.5 — low-latency TTS, native Korean prosody
     stability_api_key: str      # Stable Audio 2 — foley + music generation
     suno_api_key: str           # Suno V5 — full song generation with vocals
     suno_api_base: str          # Suno V5 endpoint (override for self-hosted / fork)

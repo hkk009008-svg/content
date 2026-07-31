@@ -1,4 +1,4 @@
-"""Unit tests for audio/dialogue.py — Cartesia Sonic 2 path + language router.
+"""Unit tests for audio/dialogue.py — Cartesia Sonic 3.5 path + language router.
 
 All HTTP calls are mocked; zero network activity during test execution.
 
@@ -80,7 +80,7 @@ class TestGenerateCartesiaSuccess:
         assert json_body["voice"]["id"] == "vid_123"
         assert json_body["voice"]["mode"] == "id"
         assert json_body["output_format"]["container"] == "mp3"
-        assert json_body["model_id"] == "sonic-2"
+        assert json_body["model_id"] == "sonic-3.5"
         assert json_body["transcript"] == "hi"
 
     def test_headers_carry_api_key_and_version(self, tmp_path):
@@ -115,10 +115,11 @@ class TestGenerateCartesiaSuccess:
         bit_rate, top-level model_id/transcript/language) is UNCHANGED by
         that bump — Cartesia's only breaking change since 2024-06-10 was
         retiring ``voice.mode="embedding"`` (sunset 2026-06-01), and this
-        adapter already only ever sent ``mode="id"``. model_id stays
-        "sonic-2" per project decision (Korean-prosody quality question
-        needs R-MEASURE evidence before any model swap — not a version-pin
-        question).
+        adapter already only ever sent ``mode="id"``. model_id is
+        "sonic-3.5" since 2026-08-01: the swap was held until it had
+        R-MEASURE evidence (scripts/measure_cartesia_prosody.py +
+        logs/cartesia-prosody-*.json) and a human listening decision, ahead
+        of sonic-2's 2026-10-20 sunset.
         """
         from audio.dialogue import generate_cartesia
 
@@ -149,7 +150,7 @@ class TestGenerateCartesiaSuccess:
         assert headers["X-API-Key"] == "sk_test_pin"
         assert headers["Content-Type"] == "application/json"
         assert json_body == {
-            "model_id": "sonic-2",
+            "model_id": "sonic-3.5",
             "transcript": "hi",
             "voice": {"mode": "id", "id": "vid_pin"},
             "output_format": {
