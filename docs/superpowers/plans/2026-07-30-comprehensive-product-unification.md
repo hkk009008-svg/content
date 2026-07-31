@@ -490,6 +490,37 @@ dead in production (S7 review finding — dedicated wiring slice).
 Wave-1 slice roster (3/4/5b/2c/7) fully landed; Wave 2 opens next
 (6b Gemini 2.5 migrations first — 2026-10 shutdown deadline).
 
+### Wave 8 (slice 15) — EVIDENCE GATHERED, NO DELETIONS MADE
+
+The plan blocks every 15x deletion on full-scope caller evidence. That evidence
+was produced (read-only, no production edits) and it CHANGES the disposition of
+the headline candidate:
+
+- **15a `cinema/pipeline.py:CinemaPipeline` — DO NOT DELETE.** Zero callers is
+  confirmed at full scope, but this was ALREADY litigated: `DECISIONS.md:766-769`
+  (2026-06-03) reclassified this exact symbol from prune-candidate to KEEP —
+  ARCHITECTURE §4.8 documents it as a "preserved primitive" and §15.9 makes the
+  zero-caller state a deliberate GUARD invariant, with `cinema/phases/`
+  referencing it as the future phase-scaffold orchestrator. Deleting it would
+  remove a documented design artifact and a truth-doc invariant. Reversing that
+  is a director/product decision, not a mechanical prune. The "0 callers"
+  signal alone would have led straight into it.
+- **15b ltx_native `_fal_transition`/`_native_transition`** — zero production
+  callers confirmed at full scope including dynamic/getattr dispatch. Note they
+  were given the reject-before-network duration gate in slice 4, so they are
+  currently correct-but-unreachable.
+- 15c/15d/15e/15g evidence gathered in the same pass.
+
+METHOD NOTE worth keeping: `git grep` (tracked files only) is the right tool
+here — it auto-excludes `.claude/worktrees/` and `node_modules/`, which a naive
+`grep -r` would have polluted with 17 sessions' worth of worktree copies.
+
+**No deletion is landed in this session.** The campaign's own rule is that a
+deletion recommendation without full-scope proof is worse than none, and this
+repo has been burned by exactly that twice now: the AudioSyncSection "dead
+component" that exported the only UI writer for a validated settings key, and
+now 15a. Both were caught before the delete.
+
 ### Wave 6 landed + converged with origin/main (2026-08-01)
 
 Slice 12 (`ddc17e28` — capability "engaged" is now PROVEN: a live/wired status
