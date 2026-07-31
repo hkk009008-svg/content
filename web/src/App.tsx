@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import type { Project, AppConfig, ProgressEvent } from './types/project'
 import { usePipelineState } from './hooks/usePipelineState'
 import { ErrorBoundary } from './components/ui'
@@ -93,14 +93,41 @@ function AppInner() {
     return () => { cancelled = true }
   }, [project?.id])
 
+  // Guards the ROOT project identity against an out-of-order arrival --
+  // same epoch/generation discipline `usePipelineState`'s `epochRef` uses
+  // for its own (project-scoped) state, applied one level up at the
+  // `project` object itself. `loadProject` is the ONLY thing that ever
+  // calls `setProject` with fetched data (both the initial ProjectSelector
+  // pick and every `refreshProject` re-fetch funnel through it), so bumping
+  // here is a single choke point: a fresh `loadProject` call -- for a NEW
+  // id, or a re-confirming refresh of the SAME id -- invalidates whatever
+  // request was already in flight. Without this, a slow refresh for
+  // project A that is still in flight when the user switches to project B
+  // would resolve later and stomp B's project object with A's (the exact
+  // leak class Slice 8b closed inside the hook, still open here at root).
+  const projectEpochRef = useRef(0)
+
   const loadProject = useCallback(async (id: string) => {
+    projectEpochRef.current += 1
+    const myEpoch = projectEpochRef.current
     const result = await apiGet<Project>(`${API}/projects/${id}`)
+    if (projectEpochRef.current !== myEpoch) return // superseded by a newer load/switch
     if (result.ok) setProject(result.data)
   }, [])
 
   const refreshProject = useCallback(async () => {
     if (project) await loadProject(project.id)
   }, [project, loadProject])
+
+  // Explicit "leave this project" path (back to ProjectSelector) does not
+  // go through `loadProject`, so it must invalidate the epoch itself --
+  // mirrors the hook's own `!projectId` early-bump branch -- otherwise a
+  // straggling refresh for the project just left would resolve after
+  // `setProject(null)` and silently drag the UI back into it.
+  const handleBackToProjects = useCallback(() => {
+    projectEpochRef.current += 1
+    setProject(null)
+  }, [])
 
   const handleGenerate = async () => {
     if (!project) return
@@ -227,7 +254,7 @@ function AppInner() {
         latest={latest}
         isStreaming={isStreaming}
         generating={running || starting}
-        onBackToProjects={() => setProject(null)}
+        onBackToProjects={handleBackToProjects}
         onGenerate={handleGenerate}
         onCancel={handleCancel}
         onRefreshProject={refreshProject}

@@ -26,6 +26,7 @@ vi.mock('./components/AppShell', () => ({
       <button onClick={props.onGenerate}>do-generate</button>
       <button onClick={props.onCancel}>do-cancel</button>
       <button onClick={props.onBackToProjects}>back-to-projects</button>
+      <button onClick={props.onRefreshProject}>do-refresh</button>
     </div>
   ),
 }))
@@ -76,6 +77,16 @@ function response(payload: unknown, ok = true, status = ok ? 200 : 500): Respons
     statusText: ok ? 'OK' : 'Error',
     text: vi.fn(async () => JSON.stringify(payload)),
   } as unknown as Response
+}
+
+/** Same shape as the `deferred<T>()` helper in usePipelineState.test.ts --
+ *  lets a test resolve a specific in-flight fetch on demand, so an
+ *  out-of-order (stale-wins-the-race) scenario can be driven deterministically
+ *  instead of guessed at with timers. */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => { resolve = res })
+  return { promise, resolve }
 }
 
 function idlePipelineState(overrides: { running?: boolean; allowed_actions?: string[] } = {}) {
@@ -161,6 +172,84 @@ describe('App -- PID boundary reset on project switch', () => {
 
     // Project B must not inherit A's halt.
     expect(screen.getByTestId('budget-halt')).toHaveTextContent('none')
+  })
+})
+
+describe('App -- root project-identity race (CRITICAL: epoch/generation guard)', () => {
+  // Before the fix, `loadProject`/`refreshProject` had no epoch guard at
+  // all: whichever `GET /api/projects/<id>` happened to resolve LAST won,
+  // regardless of which one the user actually meant to land on. Both tests
+  // below REDDEN on the pre-fix App.tsx (the stale response overwrites the
+  // newer one) and pass once `loadProject` bumps/checks `projectEpochRef`.
+  it('a stale in-flight load for A resolving AFTER a switch to B must not install A over B', async () => {
+    const gateA = deferred<Response>()
+    const gateB = deferred<Response>()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/config')) return response({ camera_motions: [], visual_effects: [], video_engines: [], api_registry: {} })
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) return gateA.promise
+      if (url.endsWith('/api/projects/proj-B')) return gateB.promise
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    // Both fire while still at the selector -- `project` stays null until
+    // one of these resolves, so clicking both in a row (e.g. picking A,
+    // then immediately changing to B before A's slow request returns) is a
+    // real, reachable sequence, not a contrived one.
+    fireEvent.click(screen.getByText('select-A'))
+    fireEvent.click(screen.getByText('select-B'))
+
+    // B's request -- the user's real, later selection -- resolves first.
+    await act(async () => {
+      gateB.resolve(response(makeProject('proj-B')))
+    })
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-B'))
+
+    // A's stale request finally resolves LAST and must be dropped.
+    await act(async () => {
+      gateA.resolve(response(makeProject('proj-A')))
+    })
+    expect(screen.getByTestId('project-id')).toHaveTextContent('proj-B')
+  })
+
+  it('a stale in-flight refresh resolving AFTER "back to projects" must not drag the user back into the left project', async () => {
+    const gateRefresh = deferred<Response>()
+    let projectAFetchCount = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/config')) return response({ camera_motions: [], visual_effects: [], video_engines: [], api_registry: {} })
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) {
+        projectAFetchCount += 1
+        // The initial select resolves right away; the SECOND request (the
+        // refresh fired just before backing out) is held open.
+        return projectAFetchCount === 1 ? response(makeProject('proj-A')) : gateRefresh.promise
+      }
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+
+    // Kick off a refresh and leave it in flight (held by gateRefresh).
+    fireEvent.click(screen.getByText('do-refresh'))
+    await waitFor(() => expect(projectAFetchCount).toBe(2))
+
+    // The user backs out to the selector before that refresh returns.
+    fireEvent.click(screen.getByText('back-to-projects'))
+    expect(screen.getByTestId('mock-project-selector')).toBeInTheDocument()
+
+    // The stale refresh resolves now -- it must not resurrect project A.
+    await act(async () => {
+      gateRefresh.resolve(response(makeProject('proj-A')))
+    })
+    expect(screen.getByTestId('mock-project-selector')).toBeInTheDocument()
+    expect(screen.queryByTestId('mock-appshell')).toBeNull()
   })
 })
 

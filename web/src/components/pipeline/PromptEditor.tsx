@@ -3,7 +3,7 @@ import type { AppConfig, Shot } from '../../types/project'
 import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 import { parsePromptSections, assemblePromptSections, SECTION_LABELS } from '../../lib/promptSections'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
-import { apiPut } from '../../lib/api'
+import { apiGet, apiPut } from '../../lib/api'
 
 interface Props {
   shot: Shot
@@ -30,7 +30,15 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
     // project_id scopes the response's `video_engines` server-selectable
     // view (web_server.py:_project_video_engine_rows reads per-project
     // api_engines overrides + persisted shot targets) — see lib/engines.ts.
-    fetch(`/api/config?project_id=${encodeURIComponent(projectId)}`).then(r => r.json()).then(setConfig).catch(() => {})
+    // Routed through the typed client for consistency with App.tsx's
+    // identical-purpose GET; guarded the same way against a stale response
+    // landing after this editor unmounts/re-targets a different project.
+    let cancelled = false
+    apiGet<AppConfig>(`/api/config?project_id=${encodeURIComponent(projectId)}`).then((result) => {
+      if (cancelled) return
+      if (result.ok) setConfig(result.data)
+    })
+    return () => { cancelled = true }
   }, [projectId])
 
   const livePrompt = useMemo(() => assemblePromptSections(sections), [sections])
