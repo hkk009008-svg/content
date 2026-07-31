@@ -1097,7 +1097,7 @@ in `workflow_selector.py`/`cinema/context.py` are archaeology, not a live import
 These values are **historical order seeds, not executable truth**.
 `GEMINI_OMNI` remains at the head for compatibility/evidence, but the typed
 catalog marks it known-broken, so
-`filter_dispatch_candidates` ([domain/video_engine_policy.py:289](domain/video_engine_policy.py:289))
+`filter_dispatch_candidates` ([domain/video_engine_policy.py:292](domain/video_engine_policy.py:292))
 always rejects it. `ShotController.generate_motion_take` prepends a cached
 optimizer suggestion when present, filters the whole ordered seed once using
 the current UTC date, symbolic runtime snapshot, project `api_engines`, and

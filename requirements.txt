@@ -15,7 +15,12 @@
 # --- LLM clients ---
 anthropic>=0.40
 openai>=1.50
-google-genai>=1.0
+# gemini_omni_native.py dispatches through client.interactions.{create,get}
+# (the Interactions API backing Gemini Omni Flash), added in google-genai
+# 1.55.0 (2025-12-11) — a bare >=1.0 floor would silently resolve to a
+# pre-Interactions release and AttributeError out of the adapter's own
+# broad except, degrading every Omni call to a graceful-looking None.
+google-genai>=1.55
 
 # --- Audio: TTS + mastering + foley + transcription ---
 elevenlabs>=2.0

@@ -100,17 +100,26 @@ def test_legacy_projection_status_is_fail_closed_and_date_effective() -> None:
     assert before["SORA_NATIVE"]["status"] == "live"
     assert at_sunset["SORA_NATIVE"]["status"] == "retired"
     assert before["SORA_2"]["status"] == "retired"
-    assert before["GEMINI_OMNI"]["status"] == "disabled"
+    # Slice 3 re-admitted GEMINI_OMNI (LIMITED, dispatchable=True) — the
+    # legacy projection has no runtime snapshot to gate on, so its status is
+    # the catalog-truth "live" now, not "disabled". KLING_LIPSYNC_2 (still
+    # KNOWN_BROKEN, non-dispatchable, non-retired) takes over as the
+    # "disabled" example.
+    assert before["GEMINI_OMNI"]["status"] == "live"
+    assert before["KLING_LIPSYNC_2"]["status"] == "disabled"
     assert before["RUNWAY_ACT_ONE"]["status"] == "retired"
     assert before["ELEVENLABS_DIALOGUE"]["status"] == "beta"
-    for key in ("SORA_2", "GEMINI_OMNI", "RUNWAY_ACT_ONE"):
+    for key in ("SORA_2", "KLING_LIPSYNC_2", "RUNWAY_ACT_ONE"):
         assert before[key]["status"] != "live"
 
 
 def test_auto_is_the_only_non_dispatchable_live_legacy_sentinel() -> None:
     projected = project_legacy_registry(API_REGISTRY, on_date=PRE_SUNSET)
     auto = projected["AUTO"]
-    neighboring_denied_engine = projected["GEMINI_OMNI"]
+    # Slice 3 re-admitted GEMINI_OMNI's catalog projection to dispatchable
+    # live, so it no longer contrasts with AUTO here — KLING_LIPSYNC_2 (still
+    # KNOWN_BROKEN) takes over as the non-dispatchable/non-live neighbor.
+    neighboring_denied_engine = projected["KLING_LIPSYNC_2"]
 
     assert auto["selectable"] is True
     assert auto["dispatchable"] is False
@@ -490,11 +499,22 @@ def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
         services={"google_adc", "comfyui_readiness"},
     )
 
-    for key in ("GEMINI_OMNI", "SORA_2", "OPENAI_AUDIO", "RUNWAY_ACT_ONE"):
+    # Slice 3 re-admitted GEMINI_OMNI: it is dispatchable now (LIMITED, with
+    # real runtime_options), so it no longer belongs to the non-dispatchable
+    # family this test pins. KLING_LIPSYNC_2 (still KNOWN_BROKEN) takes over
+    # its slot in the loop.
+    for key in ("KLING_LIPSYNC_2", "SORA_2", "OPENAI_AUDIO", "RUNWAY_ACT_ONE"):
         assert CATALOG[key].runtime_options == ()
         result = runtime_availability(key, full_snapshot, on_date=PRE_SUNSET)
         assert result.state is RuntimeAvailabilityState.NOT_DISPATCHABLE
         assert result.missing_options == ()
+
+    # GEMINI_OMNI joins the dispatchable family instead: with full
+    # credentials/modules present it resolves to AVAILABLE.
+    assert CATALOG["GEMINI_OMNI"].runtime_options != ()
+    gemini_result = runtime_availability("GEMINI_OMNI", full_snapshot, on_date=PRE_SUNSET)
+    assert gemini_result.state is RuntimeAvailabilityState.AVAILABLE
+    assert gemini_result.effective_dispatchable is True
 
 
 def test_runtime_credential_names_are_real_settings_fields() -> None:

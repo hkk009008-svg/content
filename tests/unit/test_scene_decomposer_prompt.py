@@ -264,7 +264,10 @@ def test_injected_runtime_drives_one_identical_schema_validator_and_write_set():
     ("target_api", "reason"),
     [
         ("SORA_2", "retired"),
-        ("GEMINI_OMNI", "unsupported"),
+        # Slice 3 re-admitted GEMINI_OMNI: under _fal_snapshot() (no google
+        # credential/module) the truthful denial is runtime availability,
+        # not product support (invariant 4).
+        ("GEMINI_OMNI", "runtime_unavailable"),
         ("RUNWAY_ACT_ONE", "non_video"),
         ("VEO_NATIVE", "runtime_unavailable"),
         ("DOES_NOT_EXIST", "unknown"),

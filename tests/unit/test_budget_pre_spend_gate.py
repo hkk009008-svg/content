@@ -224,9 +224,12 @@ class TestPreSpendBudgetGate:
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
         assert result.get("success") is False
-        # The template is a historical order seed; its known-broken Gemini
-        # head is filtered, leaving the injected ready Veo engine.
-        resolved = "VEO_NATIVE"
+        # Slice 3 re-admitted GEMINI_OMNI: it is the template's own
+        # Google-first primary target_api for "medium" shots
+        # (workflow_selector.WORKFLOW_TEMPLATES["medium"]["target_api"]), and
+        # with google credentials/module present in this patched snapshot it
+        # is dispatchable, so it resolves ahead of the VEO_NATIVE fallback.
+        resolved = "GEMINI_OMNI"
         assert resolved != "AUTO"
         cost_tracker.would_exceed.assert_called_once_with(resolved)
         cost_tracker.would_exceed_cost.assert_not_called()
@@ -680,10 +683,14 @@ class TestPreSpendBudgetGate:
         assert result["error_kind"] == "target_api_policy"
         assert result["target_api"] == "AUTO"
         assert result["retryable"] is False
-        assert result["reason"] == "unsupported"
+        # Slice 3 re-admitted GEMINI_OMNI (LIMITED, product-supported); with
+        # no google credential/module in this empty snapshot the truthful
+        # rejection is runtime availability, not product support
+        # (invariant 4).
+        assert result["reason"] == "runtime_unavailable"
         assert result["rejections"][0] == {
             "key": "GEMINI_OMNI",
-            "reason": "unsupported",
+            "reason": "runtime_unavailable",
         }
         assert not any(
             rejection["key"] == "SORA_2"
@@ -747,9 +754,13 @@ class TestPreSpendBudgetGate:
         assert "_policy_snapshot" not in kwargs
         assert "_policy_allow_primary_fallback" not in kwargs
         assert cost_tracker.would_exceed.call_args.args == ("LTX",)
+        # Slice 3 re-admitted GEMINI_OMNI (LIMITED, product-supported); with
+        # no google credential/module in this fal-only snapshot the truthful
+        # rejection is runtime availability, not product support
+        # (invariant 4).
         assert captured_take["cascade_metadata"]["policy_rejections"][0] == {
             "key": "GEMINI_OMNI",
-            "reason": "unsupported",
+            "reason": "runtime_unavailable",
         }
 
 

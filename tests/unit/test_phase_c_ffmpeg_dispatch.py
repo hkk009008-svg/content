@@ -108,7 +108,10 @@ def test_public_signature_exposes_no_policy_bypass_arguments() -> None:
             SUNSET,
             "retired",
         ),
-        ("GEMINI_OMNI", _fal_snapshot(), PRE_SUNSET, "unsupported"),
+        # Re-admitted in Slice 3: with no google credential/module in the fal
+        # snapshot the truthful denial is runtime availability, not product
+        # support (invariant 4).
+        ("GEMINI_OMNI", _fal_snapshot(), PRE_SUNSET, "runtime_unavailable"),
         ("DOES_NOT_EXIST", RuntimeSnapshot(), PRE_SUNSET, "unknown"),
         ("RUNWAY_ACT_ONE", RuntimeSnapshot(), PRE_SUNSET, "non_video"),
         ("KLING_3_0", RuntimeSnapshot(), PRE_SUNSET, "runtime_unavailable"),
@@ -324,15 +327,20 @@ def test_cooldown_retry_reuses_filtered_chain_without_raw_revive(
     assert veo_module.VeoNativeAPI.call_count == 2
     assert ltx_module.LTXVideoAPI.call_count == 2
     policy_filter.assert_called_once()
+    # Slice 3 re-admitted GEMINI_OMNI; under this google-credentialed snapshot
+    # it is dispatchable, so it joins the filtered chain (its real adapter
+    # no-ops pre-billing on the missing start frame) instead of being
+    # policy-rejected as unsupported.
     assert cascade["policy_rejections"] == [
         {"key": "SORA_2", "reason": "retired"},
-        {"key": "GEMINI_OMNI", "reason": "unsupported"},
     ]
     assert cascade["attempt_history"] == [
         "VEO_NATIVE",
         "LTX",
+        "GEMINI_OMNI",
         "VEO_NATIVE",
         "LTX",
+        "GEMINI_OMNI",
     ]
 
 

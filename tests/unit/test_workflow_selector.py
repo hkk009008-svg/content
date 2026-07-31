@@ -146,7 +146,10 @@ class TestResolvedWorkflowRouting:
         assert routing.primary == "KLING_3_0"
         assert routing.fallbacks == ("SEEDANCE",)
         assert [(item.key, item.reason) for item in routing.rejections] == [
-            ("GEMINI_OMNI", VideoPolicyReason.UNSUPPORTED),
+            # Slice 3 re-admitted GEMINI_OMNI; under _fal_snapshot() (no
+            # google credential/module) the truthful rejection is runtime
+            # availability, not product support (invariant 4).
+            ("GEMINI_OMNI", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("VEO_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("KLING_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("RUNWAY_GEN4", VideoPolicyReason.RUNTIME_UNAVAILABLE),

@@ -126,6 +126,9 @@ PORTRAIT_CAPABLE_VIDEO_ENGINES = frozenset(
         "RUNWAY_GEN4",
         "RUNWAY",
         "SEEDANCE",
+        # Slice 3: repaired adapter declares the documented 9:16 support
+        # (catalog ParameterConstraint aspect_ratio 16:9|9:16).
+        "GEMINI_OMNI",
     }
 )
 

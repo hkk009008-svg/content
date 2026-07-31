@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import os
+import secrets
 import time
 from typing import Callable
 
@@ -83,12 +84,17 @@ class GeminiOmniAPI:
             output_path on success, None on failure (graceful — lets the
             cascade fall through to the next engine) — either pre-billing
             (non-completed terminal status) or post-billing (the interaction
-            completed but video retrieval/write failed).
+            completed but video content was empty/missing or retrieval/write
+            failed). Publication is atomic: the video is written to a sibling
+            temp file first and moved into place with os.replace, so a
+            mid-write failure never leaves a partial/corrupt file at
+            output_path (mirrors sora_native.py's download pattern).
         """
         if not os.path.exists(image_path):
             print(f"[GEMINI-OMNI] Start frame not found: {image_path}")
             return None
 
+        temp_output_path: str | None = None
         try:
             refs = reference_images or []
             print(f"[GEMINI-OMNI] Generating video — aspect_ratio={aspect_ratio}, "
@@ -150,15 +156,36 @@ class GeminiOmniAPI:
                         f"[GEMINI-OMNI] Warning: on_billed callback raised: {callback_exc}"
                     )
 
+            # A "completed" interaction can still carry no video content step
+            # at all (empty output) — classify this explicitly rather than
+            # crashing through an unhandled AttributeError on video.data.
             video = interaction.output_video
+            if video is None:
+                print(
+                    "[GEMINI-OMNI] Completed interaction has no video content "
+                    "(empty output)"
+                )
+                return None
+
             # `is not None` (not truthiness) — mirrors veo_native._extract_video_bytes:
             # an empty-but-present inline payload (b"") must still count as inline.
             if video.data is not None:
-                video_data = video.data
+                # Inline delivery: per the google.genai VideoContent contract,
+                # `data` is base64 TEXT (Optional[str]), never raw bytes —
+                # decode before writing to a binary file handle.
+                video_data = base64.b64decode(video.data)
             elif getattr(video, "uri", None):
                 file_obj = self.client.files.get(name=video.uri)
                 file_poll_count = 0
-                while getattr(file_obj, "state", None) != "ACTIVE":
+                while True:
+                    state = getattr(file_obj, "state", None)
+                    if state == "ACTIVE":
+                        break
+                    if state == "FAILED":
+                        print(
+                            f"[GEMINI-OMNI] File processing failed for uri={video.uri!r}"
+                        )
+                        return None
                     if file_poll_count >= max_polls:
                         raise TimeoutError(
                             f"GEMINI-OMNI file activation timed out after {file_poll_count * 10}s"
@@ -166,13 +193,36 @@ class GeminiOmniAPI:
                     time.sleep(10)
                     file_poll_count += 1
                     file_obj = self.client.files.get(name=video.uri)
-                video_data = self.client.files.download(file=file_obj)
+
+                # Download the RETURNED output URI from the polled file
+                # resource (not the original video.uri) — mirrors the SDK's
+                # own documented client.files.download(file=file.download_uri)
+                # usage and lets an ACTIVE-but-not-downloadable file be
+                # classified explicitly instead of raising from inside
+                # files.download().
+                download_uri = getattr(file_obj, "download_uri", None)
+                if not download_uri:
+                    print(
+                        f"[GEMINI-OMNI] Active file has no download_uri: {video.uri!r}"
+                    )
+                    return None
+                video_data = self.client.files.download(file=download_uri)
             else:
                 print("[GEMINI-OMNI] No video data or uri on completed interaction")
                 return None
 
-            with open(output_path, "wb") as f:
+            # Publish atomically — write to a sibling temp file and move it
+            # into place, so a mid-write failure cannot leave a partial or
+            # corrupt file at output_path.
+            out_dir = os.path.dirname(output_path) or "."
+            os.makedirs(out_dir, exist_ok=True)
+            temp_output_path = os.path.join(
+                out_dir, f".gemini-omni-download-{secrets.token_hex(8)}.tmp"
+            )
+            with open(temp_output_path, "wb") as f:
                 f.write(video_data)
+            os.replace(temp_output_path, output_path)
+            temp_output_path = None
 
             file_size = os.path.getsize(output_path) / (1024 * 1024)
             print(f"[GEMINI-OMNI] Video saved: {output_path} ({file_size:.1f} MB)")
@@ -181,3 +231,9 @@ class GeminiOmniAPI:
         except Exception as e:
             print(f"[GEMINI-OMNI] Generation failed: {e}")
             return None
+        finally:
+            if temp_output_path is not None:
+                try:
+                    os.remove(temp_output_path)
+                except OSError:
+                    pass

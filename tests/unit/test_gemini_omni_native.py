@@ -8,6 +8,7 @@ All tests are offline — no real API calls, no network, no spend (COST CONTROL)
 from __future__ import annotations
 
 import base64
+import os
 import sys
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -95,7 +96,11 @@ def _completed_interaction(with_inline_data: bool = True):
     interaction.status = "completed"
     interaction.id = "interaction-123"
     if with_inline_data:
-        interaction.output_video.data = b"VIDEO_BYTES"
+        # Real google.genai VideoContent.data is Optional[str] — base64 TEXT,
+        # never raw bytes (confirmed against the installed SDK: `from
+        # google.genai._interactions.types import VideoContent;
+        # VideoContent.model_fields["data"].annotation` == `Optional[str]`).
+        interaction.output_video.data = base64.b64encode(b"VIDEO_BYTES").decode("ascii")
         interaction.output_video.uri = None
     else:
         interaction.output_video.data = None
@@ -205,6 +210,9 @@ def test_generate_video_downloads_via_files_api_when_uri_delivered(tmp_path):
 
     active_file = MagicMock()
     active_file.state = "ACTIVE"
+    active_file.download_uri = (
+        "https://generativelanguage.googleapis.com/v1beta/files/abc123:download?alt=media"
+    )
     api.client.files.get.return_value = active_file
     api.client.files.download.return_value = b"DOWNLOADED_BYTES"
 
@@ -220,7 +228,10 @@ def test_generate_video_downloads_via_files_api_when_uri_delivered(tmp_path):
     with open(output_path, "rb") as f:
         assert f.read() == b"DOWNLOADED_BYTES"
     api.client.files.get.assert_called_with(name="files/abc123")
-    api.client.files.download.assert_called_once_with(file=active_file)
+    # Downloads the RETURNED output URI from the polled file resource (the
+    # SDK's own documented usage: client.files.download(file=file.download_uri)),
+    # not the file object or the original video.uri.
+    api.client.files.download.assert_called_once_with(file=active_file.download_uri)
 
 
 def test_generate_video_polls_files_api_until_active(tmp_path):
@@ -233,6 +244,7 @@ def test_generate_video_polls_files_api_until_active(tmp_path):
     processing_file.state = "PROCESSING"
     active_file = MagicMock()
     active_file.state = "ACTIVE"
+    active_file.download_uri = "https://.../files/abc123:download?alt=media"
     api.client.files.get.side_effect = [processing_file, active_file]
     api.client.files.download.return_value = b"DOWNLOADED_BYTES"
 
@@ -247,6 +259,74 @@ def test_generate_video_polls_files_api_until_active(tmp_path):
 
     assert result == output_path
     assert api.client.files.get.call_count == 2
+
+
+def test_generate_video_returns_none_on_file_processing_failed(tmp_path):
+    """URI failed terminal: the Files API resource itself can reach FAILED
+    state (distinct from the interaction's own status). Pre-fix, the poll
+    loop only checked `!= "ACTIVE"`, so a FAILED file spun until the 20-minute
+    poll budget exhausted instead of being classified immediately."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=False)
+
+    failed_file = MagicMock()
+    failed_file.state = "FAILED"
+    api.client.files.get.return_value = failed_file
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    # Pre-fix, a FAILED file state was indistinguishable from "still
+    # processing" and the loop would poll real time.sleep(10) up to the
+    # 20-minute budget — patch it out so this test stays fast regardless of
+    # which side of the fix is under test.
+    with patch("gemini_omni_native.time.sleep", return_value=None):
+        result = api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=output_path,
+        )
+
+    assert result is None
+    api.client.files.download.assert_not_called()
+    assert not os.path.exists(output_path)
+    # The discriminating assertion: pre-fix, FAILED was indistinguishable from
+    # "still processing" so the loop kept polling files.get() up to
+    # max_polls+1 times before giving up via TimeoutError. Fixed code
+    # recognizes FAILED on the very first poll and returns immediately.
+    assert api.client.files.get.call_count == 1, (
+        f"Expected exactly one files.get() poll before classifying FAILED as "
+        f"terminal; got {api.client.files.get.call_count} (a pre-fix "
+        f"regression would poll up to 121 times waiting for ACTIVE)"
+    )
+
+
+def test_generate_video_returns_none_when_active_file_has_no_download_uri(tmp_path):
+    """An ACTIVE file with no download_uri (e.g. an uploaded, non-generated
+    file) must be classified explicitly rather than raising out of
+    files.download() into the generic blanket-exception path."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=False)
+
+    active_file = MagicMock()
+    active_file.state = "ACTIVE"
+    active_file.download_uri = None
+    api.client.files.get.return_value = active_file
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=output_path,
+    )
+
+    assert result is None
+    api.client.files.download.assert_not_called()
+    assert not os.path.exists(output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +390,87 @@ def test_terminal_statuses_include_budget_exceeded():
     # string-match adds "budget_exceeded" alongside Veo's 429/quota/exhausted).
     assert "budget_exceeded" in _TERMINAL_INTERACTION_STATUSES
     assert "completed" in _TERMINAL_INTERACTION_STATUSES
+
+
+# ---------------------------------------------------------------------------
+# generate_video — completed interaction with empty video content
+# ---------------------------------------------------------------------------
+
+
+def test_generate_video_returns_none_on_empty_output_video(tmp_path, capsys):
+    """A completed interaction whose output_video is None (no video content
+    step at all — the empty-output terminal case) must be classified
+    explicitly. Pre-fix, `video.data` on a None `video` raised an unhandled
+    AttributeError caught only by the outer blanket except, indistinguishable
+    from any other crash. on_billed must still fire — the interaction
+    reached "completed", so it is billed regardless of empty content."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    on_billed = MagicMock()
+
+    interaction = MagicMock()
+    interaction.status = "completed"
+    interaction.id = "interaction-123"
+    interaction.output_video = None
+    api.client.interactions.create.return_value = interaction
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    result = api.generate_video(
+        image_path=str(image_path), prompt="hello", output_path=output_path,
+        on_billed=on_billed,
+    )
+
+    assert result is None
+    assert not os.path.exists(output_path)
+    on_billed.assert_called_once()
+    # The discriminating assertion: both the pre-fix crash (an unhandled
+    # AttributeError caught by the blanket except) and the fixed explicit
+    # check return None here, so the return value alone doesn't separate
+    # them. The explicit, intentional classification message does.
+    out = capsys.readouterr().out
+    assert "empty output" in out, (
+        f"Expected an explicit empty-output classification message; got: {out!r}"
+    )
+    assert "AttributeError" not in out and "NoneType" not in out, (
+        f"Must not fall through to the generic blanket-exception path; got: {out!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# generate_video — atomic publication (partial downloads must not leave a
+# consumable output file)
+# ---------------------------------------------------------------------------
+
+
+def test_atomic_publication_leaves_no_file_on_replace_failure(tmp_path):
+    """A mid-publish failure (simulated via os.replace raising after the temp
+    file is fully written) must not leave output_path OR a leftover temp
+    file. Pre-fix, the write went straight to `open(output_path, "wb")` with
+    no temp/rename step at all, so this scenario couldn't even be expressed —
+    a partial write from any mid-stream failure landed directly at
+    output_path."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(with_inline_data=True)
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = str(tmp_path / "out.mp4")
+
+    with patch("gemini_omni_native.os.replace", side_effect=OSError("simulated rename failure")):
+        result = api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=output_path,
+        )
+
+    assert result is None
+    assert not os.path.exists(output_path)
+    leftover = [p.name for p in tmp_path.iterdir() if p.name != "frame.jpg"]
+    assert leftover == [], f"partial/temp files leaked: {leftover}"
 
 
 # ---------------------------------------------------------------------------

@@ -945,16 +945,17 @@ class TestGenerateMotionTakeOverlayWiring:
             and API_REGISTRY[key].get("modality") == "video"
             and API_REGISTRY[key].get("status") == "live"
         )
-        # Typed compatibility truth disables GEMINI_OMNI, so the legacy
-        # dialogue walk skips it and selects the next live native-audio video
-        # entry, VEO_NATIVE. The budget gate prices that resolved route plus
-        # mandatory sync-3 overlay before either paid call.
-        assert API_REGISTRY["GEMINI_OMNI"]["status"] == "disabled"
-        assert dialogue_winner == "VEO_NATIVE"
+        # Slice 3 re-admitted GEMINI_OMNI: the catalog projection is "live"
+        # again, so the legacy dialogue walk now surfaces it first (restored
+        # Google-first intent) ahead of VEO_NATIVE.
+        assert API_REGISTRY["GEMINI_OMNI"]["status"] == "live"
+        assert dialogue_winner == "GEMINI_OMNI"
         expected_envelope = (
             API_COST_USD[dialogue_winner] + API_COST_USD["LIPSYNC_DEFAULT"]
         )
-        assert expected_envelope == pytest.approx(0.97)
+        # GEMINI_OMNI (0.56) + LIPSYNC_DEFAULT (0.67), was VEO_NATIVE (0.30) +
+        # LIPSYNC_DEFAULT (0.67) = 0.97 pre-Slice-3.
+        assert expected_envelope == pytest.approx(1.23)
         assert tracker.spent_usd + expected_envelope > tracker.budget_usd
         tracker.would_exceed.return_value = False
         tracker.would_exceed_cost.side_effect = (

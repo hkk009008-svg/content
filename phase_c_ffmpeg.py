@@ -65,9 +65,14 @@ _FAL_MISSING_WARNED = False
 # Default engine cascade for generate_ai_video when the caller passes no
 # video_fallbacks — quality order. Module-level so tests pin the REAL list
 # (the old test kept a local copy that silently drifted for two migrations).
-# Known-broken GEMINI_OMNI and retired SORA_2 are intentionally absent.  This
-# remains an order seed only: the typed entry guard below is the executable
-# authority for lifecycle, runtime, project, and aspect eligibility.
+# Retired SORA_2 is absent (endpoint deprecated). GEMINI_OMNI was repaired
+# and re-admitted in the catalog (Slice 3, 2026-07-30) but is deliberately
+# left out of this DEFAULT blind order: duration/resolution/audio are
+# prompt-inferred with no structured kwargs, a worse blind-default than the
+# explicit-parameter engines above — opt in via an explicit target_api or
+# fallbacks list instead. This remains an order seed only: the typed entry
+# guard below is the executable authority for lifecycle, runtime, project,
+# and aspect eligibility.
 DEFAULT_VIDEO_CASCADE = [
     "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
     "RUNWAY_GEN4", "LTX", "KLING_NATIVE", "VEO", "RUNWAY",
@@ -1334,8 +1339,11 @@ def _execute_admitted_video_chain(
             return try_next_api()
 
     elif target_api.upper() == "GEMINI_OMNI":
-        # Legacy Gemini Omni Flash payload. The typed catalog marks the product
-        # known-broken, so executable dispatch cannot reach this branch.
+        # Gemini Omni Flash (Preview) dispatch. Repaired + re-admitted in the
+        # typed catalog (Slice 3, 2026-07-30) — reachable for any project
+        # whose aspect ratio the admission fence accepts for this key (see
+        # domain/video_engine_policy.PORTRAIT_CAPABLE_VIDEO_ENGINES for the
+        # current portrait allowlist).
         #
         # _gemini_omni_billed_noted makes _note_billed_attempt idempotent for
         # this attempt: generate_video's on_billed hook fires the moment the

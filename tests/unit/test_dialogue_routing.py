@@ -259,7 +259,11 @@ class TestAutoRoutingDecisions:
         ):
             kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
         assert kwargs.get("target_api") == "AUTO"
-        assert kwargs.get("video_fallbacks") == ["VEO_NATIVE"]
+        # Slice 3 re-admitted GEMINI_OMNI; with google credentials/module
+        # present in this snapshot it is dispatchable and ranks first for
+        # dialogue purposes (restored Google-first intent), ahead of the
+        # VEO_NATIVE fallback.
+        assert kwargs.get("video_fallbacks") == ["GEMINI_OMNI", "VEO_NATIVE"]
 
 
 # ---------------------------------------------------------------------------

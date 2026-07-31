@@ -503,6 +503,21 @@ _SEEDANCE_PARAMETERS = (
     ),
 )
 
+_GEMINI_OMNI_PARAMETERS = (
+    # https://ai.google.dev/gemini-api/docs/omni — response_format.aspect_ratio
+    # accepts "16:9"/"9:16" directly; the adapter threads
+    # cinema.aspect.fal_aspect_ratio() into it (gemini_omni_native.py).
+    ParameterConstraint("aspect_ratio", allowed_values=("16:9", "9:16")),
+    ParameterConstraint(
+        "duration",
+        note="Prompt-inferred — this API has no structured duration kwarg.",
+    ),
+    ParameterConstraint(
+        "resolution",
+        note="Prompt-inferred — this API has no structured resolution kwarg.",
+    ),
+)
+
 _FAL_SVD_PARAMETERS = (
     ParameterConstraint("motion_bucket_id", allowed_values=(127,)),
     ParameterConstraint("cond_aug", allowed_values=(0.02,)),
@@ -634,10 +649,21 @@ _CATALOG_ROWS = (
         Modality.VIDEO,
         Maturity.PREVIEW,
         Lifecycle.ACTIVE,
-        ProductSupport.KNOWN_BROKEN,
+        # Repaired 2026-07-30 (Slice 3): the adapter's inline-base64,
+        # URI/Files-API polling+download, and failed/empty-terminal handling
+        # were fixed in gemini_omni_native.py, and this entry re-admitted
+        # from KNOWN_BROKEN to its truthful current state. LIMITED (not
+        # SUPPORTED) because duration/resolution/audio are prompt-inferred —
+        # no structured kwargs, unlike the sibling native video engines.
+        ProductSupport.LIMITED,
         Provider.GOOGLE_GEMINI_API,
-        (False, False, False),
+        (True, True, True),
         native_audio=True,
+        parameters=_GEMINI_OMNI_PARAMETERS,
+        runtime_options=(
+            (_credential("google_api_key"), _module("google.genai")),
+            (_credential("gemini_api_key"), _module("google.genai")),
+        ),
         source=_source(
             "https://ai.google.dev/gemini-api/docs/omni",
             SourceKind.PRIMARY_CONTRACT,

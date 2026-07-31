@@ -80,14 +80,16 @@ def test_target_apis_does_not_claim_live_truth_when_runtime_changes_after_import
 # API_REGISTRY — GEMINI_OMNI entry shape
 # ---------------------------------------------------------------------------
 
-def test_gemini_omni_registry_row_preserves_history_but_projects_disabled_truth():
+def test_gemini_omni_registry_row_projects_readmitted_live_truth():
+    # Slice 3 repaired the adapter (inline decode, files/<id> polling,
+    # terminal classification, atomic publication) and re-admitted the entry.
     assert "GEMINI_OMNI" in sd.API_REGISTRY
     entry = sd.API_REGISTRY["GEMINI_OMNI"]
     assert entry["category"] == "native"
     assert entry["modality"] == "video"
-    assert entry["status"] == "disabled"
-    assert entry["dispatchable"] is False
-    assert entry["selectable"] is False
+    assert entry["status"] == "live"
+    assert entry["dispatchable"] is True
+    assert entry["selectable"] is True
     assert entry["native_audio"] is True
     assert entry["per_shot_cost"] == 0.56
 
@@ -95,7 +97,10 @@ def test_gemini_omni_registry_row_preserves_history_but_projects_disabled_truth(
 def test_registry_projection_statuses_and_raw_history_are_separate():
     assert sd.API_REGISTRY["AUTO"]["status"] == "live"
     assert sd.API_REGISTRY["SORA_2"]["status"] == "retired"
-    assert sd.API_REGISTRY["GEMINI_OMNI"]["status"] == "disabled"
+    # Projection/history separation is demonstrated by SORA_2 (projected
+    # retired vs seed live); GEMINI_OMNI's projection re-agrees with the seed
+    # since its Slice 3 re-admission.
+    assert sd.API_REGISTRY["GEMINI_OMNI"]["status"] == "live"
 
     assert sd._LEGACY_API_REGISTRY_SEED["SORA_2"]["status"] == "live"
     assert sd._LEGACY_API_REGISTRY_SEED["GEMINI_OMNI"]["status"] == "live"
@@ -240,19 +245,22 @@ def test_rank_apis_for_purpose_dialogue_excludes_nonvideo_and_broken_entries():
             on_date=PRE_SUNSET,
         )
     )
-    assert list(ranked) == ["VEO_NATIVE"]
-    assert ranked["VEO_NATIVE"]["modality"] == "video"
+    # Slice 3 re-admission restores GEMINI_OMNI as the dialogue primary
+    # (Google-first routing intent), with VEO_NATIVE as the ranked fallback.
+    assert list(ranked) == ["GEMINI_OMNI", "VEO_NATIVE"]
+    assert ranked["GEMINI_OMNI"]["modality"] == "video"
+    assert ranked["GEMINI_OMNI"]["native_audio"] is True
     assert ranked["VEO_NATIVE"]["native_audio"] is True
 
 
-def test_legacy_dialogue_walk_no_longer_surfaces_broken_gemini():
+def test_legacy_dialogue_walk_surfaces_readmitted_gemini_first():
     winner = None
     for key in sd.PURPOSE_API_RANKING["dialogue_close_up"]:
         info = sd.API_REGISTRY.get(key, {})
         if info.get("native_audio") and info.get("modality") == "video" and info.get("status") == "live":
             winner = key
             break
-    assert winner == "VEO_NATIVE"
+    assert winner == "GEMINI_OMNI"
 
 
 def test_nonvideo_purpose_rows_preserve_legacy_membership_order_and_status():

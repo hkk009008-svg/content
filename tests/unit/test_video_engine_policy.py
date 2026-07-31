@@ -73,7 +73,10 @@ def test_auto_is_valid_for_storage_but_never_a_dispatch_candidate() -> None:
         ("DOES_NOT_EXIST", VideoPolicyReason.UNKNOWN),
         ("RUNWAY_ACT_ONE", VideoPolicyReason.NON_VIDEO),
         ("KLING_LIPSYNC_2", VideoPolicyReason.NON_VIDEO),
-        ("GEMINI_OMNI", VideoPolicyReason.UNSUPPORTED),
+        # Slice 3 re-admitted GEMINI_OMNI (LIMITED, product-supported); with no
+        # google credential/module in this snapshot the truthful rejection is
+        # runtime availability, not static product support (invariant 4).
+        ("GEMINI_OMNI", VideoPolicyReason.RUNTIME_UNAVAILABLE),
         ("SORA_2", VideoPolicyReason.RETIRED),
         ("LTX", VideoPolicyReason.NOT_SELECTABLE),
     ],
@@ -314,7 +317,7 @@ def test_empty_or_all_rejected_candidate_result_has_auto_primary() -> None:
     assert rejected.candidates == ()
     assert rejected.primary == "AUTO"
     assert {item.reason for item in rejected.rejections} == {
-        VideoPolicyReason.UNSUPPORTED,
+        VideoPolicyReason.RUNTIME_UNAVAILABLE,
         VideoPolicyReason.RETIRED,
         VideoPolicyReason.NON_VIDEO,
     }
@@ -335,7 +338,7 @@ def test_resolved_authoring_ranking_excludes_fallback_only_and_unsafe_keys() -> 
     )
     assert result.candidates == ("SEEDANCE",)
     assert [(item.key, item.reason) for item in result.rejections] == [
-        ("GEMINI_OMNI", VideoPolicyReason.UNSUPPORTED),
+        ("GEMINI_OMNI", VideoPolicyReason.RUNTIME_UNAVAILABLE),
         ("SORA_NATIVE", VideoPolicyReason.NOT_SELECTABLE),
         ("SORA_2", VideoPolicyReason.RETIRED),
         ("RUNWAY_ACT_ONE", VideoPolicyReason.NON_VIDEO),

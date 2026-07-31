@@ -106,6 +106,69 @@ class TestVeoNativeAspect:
 
 
 # ---------------------------------------------------------------------------
+# GEMINI_OMNI — repaired + re-admitted (Slice 3, 2026-07-30). Mirrors
+# TestVeoNativeAspect: generate_ai_video threads aspect_ratio into
+# omni.generate_video() for a landscape 16:9 project (the one aspect the
+# public admission fence currently accepts for this key — see
+# test_gemini_omni_portrait_dispatch_declaration below for the documented
+# gap on 9:16).
+# ---------------------------------------------------------------------------
+class TestGeminiOmniAspect:
+    def _run_gemini_omni(self, aspect: str, shot_type: str = "medium"):
+        mock_inst = MagicMock()
+        mock_inst.generate_video.return_value = "/tmp/out.mp4"
+        mock_omni_mod = MagicMock()
+        mock_omni_mod.GeminiOmniAPI.return_value = mock_inst
+
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["gemini_omni_native"] = mock_omni_mod
+
+        try:
+            with patch("os.path.exists", return_value=True):
+                import phase_c_ffmpeg
+                _observe_video_policy(
+                    phase_c_ffmpeg,
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                )
+                phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="GEMINI_OMNI",
+                    output_mp4="/tmp/o.mp4",
+                    shot_type=shot_type,
+                    ctx=_ctx(aspect),
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            sys.modules.pop("gemini_omni_native", None)
+
+        return mock_inst
+
+    def test_gemini_omni_threads_landscape_aspect(self):
+        mock_inst = self._run_gemini_omni("16:9")
+
+        assert mock_inst.generate_video.called, "generate_video was never called"
+        call_kwargs = mock_inst.generate_video.call_args.kwargs
+        assert call_kwargs.get("aspect_ratio") == "16:9", (
+            f"Expected aspect_ratio='16:9' in generate_video kwargs; got: {call_kwargs}"
+        )
+
+    def test_gemini_omni_portrait_dispatch_declaration(self):
+        """Portrait dispatch declaration acceptance fixture: once admitted,
+        the branch must thread aspect_ratio='9:16' into generate_video, the
+        same way VEO_NATIVE does for a portrait shot (test_veo_native_
+        threads_portrait_aspect above)."""
+        mock_inst = self._run_gemini_omni("9:16", shot_type="portrait")
+
+        assert mock_inst.generate_video.called, "generate_video was never called"
+        call_kwargs = mock_inst.generate_video.call_args.kwargs
+        assert call_kwargs.get("aspect_ratio") == "9:16", (
+            f"Expected aspect_ratio='9:16' in generate_video kwargs; got: {call_kwargs}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # TC-5 — VEO fal: generate_ai_video puts fal_aspect_ratio(_aspect) into arguments
 # ---------------------------------------------------------------------------
 class TestVeoFalAspect:
