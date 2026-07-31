@@ -82,7 +82,7 @@ API_COST_USD: dict[str, float] = {
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
     "HIDREAM_I1":    0.06,
-    "GEMINI_IMAGE":  0.03,   # gemini-2.5-flash-image (Nano Banana); Google model-card math ($30/1M output tok x ~1290 tok/img) computes ~$0.039/img — using 0.03 per brief, recalibrate against invoice
+    "GEMINI_IMAGE":  0.077,  # gemini-3.1-flash-image (Nano Banana 2) — migrated off gemini-2.5-flash-image (shutdown deadline 2026-10-02, Slice 6b). Provider-claimed pricing page (ai.google.dev/gemini-api/docs/pricing, 2026-07-31 WebFetch) lists standard-tier image OUTPUT at $60/1M tok; carrying forward the same ~1290 tok/img estimate the 2.5 entry used ($60/1M x ~1290 tok/img ~= $0.077/img) — PROVIDER-CLAIMED, recalibrate against invoice per R-MEASURE.
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
     "CARTESIA_SONIC_2":  0.008,   # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
@@ -151,8 +151,17 @@ PRICING = {
     "gpt-4o": {"input": 2.50, "output": 10.00},
     "o4-mini": {"input": 1.10, "output": 4.40},
     # Google
+    # gemini-2.5-flash / gemini-2.5-pro rows KEPT (not deleted) for historical
+    # cost-log math on old records even though both shut down 2026-10-16
+    # (Slice 6b migrated the live call sites to their successors below).
     "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
+    # Successor rows (Slice 6b, 2026-07-31). PROVIDER-CLAIMED rates from
+    # ai.google.dev/gemini-api/docs/pricing (WebFetch 2026-07-31), standard
+    # (non-batch) tier, short-context (<=200k tok) band where the provider
+    # tiers by prompt length — recalibrate against invoice per R-MEASURE.
+    "gemini-3.6-flash": {"input": 1.50, "output": 7.50},
+    "gemini-3.1-pro-preview": {"input": 2.00, "output": 12.00},
 }
 
 
@@ -499,7 +508,7 @@ class CostTracker:
             "SORA_2": "fal",        # fal-ai/sora-2 — before "SORA"→openai
             "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
             "GEMINI_OMNI": "google",  # Gemini Developer API only (not on Vertex yet) — shares the "google" cost-log bucket with VEO_NATIVE
-            "GEMINI_IMAGE": "google",  # gemini-2.5-flash-image (Nano Banana) — Gemini Developer API only, same "google" bucket
+            "GEMINI_IMAGE": "google",  # gemini-3.1-flash-image (Nano Banana 2, migrated Slice 6b) — Gemini Developer API only, same "google" bucket
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",

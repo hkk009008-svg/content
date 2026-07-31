@@ -145,7 +145,14 @@ class LLMEnsemble:
                     # judge dispatch).
                     "claude-opus": "claude-opus-4-8",
                     "gpt-4o": "gpt-4o",
-                    "gemini-pro": "gemini-2.5-pro",
+                    # gemini-2.5-pro shuts down 2026-10-16 (Slice 6b); migrated
+                    # to its documented successor gemini-3.1-pro-preview —
+                    # itself preview-tier (confirmed via 2026-07-31 WebFetch of
+                    # the model page), which is why the web_server.py option
+                    # label says "(Preview)". Structured outputs are supported
+                    # there too, so the existing response_mime_type-based
+                    # json_mode path in _generate_gemini carries over unchanged.
+                    "gemini-pro": "gemini-3.1-pro-preview",
                 }
                 self.judge_model_override = judge_map.get(judge_pref)
 

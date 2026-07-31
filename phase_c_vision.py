@@ -451,9 +451,20 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
             print("[VISION-COHERENCE] WARNING: Fewer than 2 images encoded successfully")
             return default_pass
 
+        # Migrated off gemini-2.5-flash (shutdown deadline 2026-10-16; Slice
+        # 6b) to gemini-3.6-flash, its documented successor — vision input +
+        # structured outputs both confirmed on the model page (2026-07-31
+        # WebFetch). response_mime_type mirrors llm/ensemble.py:_generate_gemini's
+        # existing json_mode idiom; the prompt's own "Respond ONLY with valid
+        # JSON" instruction plus the code-fence-stripping parse below are KEPT
+        # as a tolerant fallback in case the model still fences its output —
+        # belt and braces, no behavior regression either way.
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=[*image_parts, contents[0]],
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
         )
 
         raw = response.text.strip()

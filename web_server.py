@@ -614,7 +614,7 @@ def get_config():
             {"value": "auto", "label": "Auto (Best available)"},
             {"value": "claude-opus", "label": "Claude Opus 4.8"},
             {"value": "gpt-4o", "label": "GPT-4o"},
-            {"value": "gemini-pro", "label": "Gemini 2.5 Pro"},
+            {"value": "gemini-pro", "label": "Gemini 3.1 Pro (Preview)"},
         ],
         "workflow_templates": WORKFLOW_TEMPLATES,
         # Purpose-based API routing surface (consumed by SettingsPanel)

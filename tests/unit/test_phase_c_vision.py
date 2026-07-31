@@ -690,6 +690,51 @@ class TestValidateSceneCoherenceVision:
         assert result["source"] == "default"
         assert result["coherent"] is True
 
+    def test_model_migrated_to_gemini_3_6_flash_reaching_sdk_call(self):
+        """Slice 6b: gemini-2.5-flash (shutdown deadline 2026-10-16) migrated
+        to gemini-3.6-flash. Spy on the actual generate_content call — not
+        a doc comment — to prove the NEW id is what reaches the SDK."""
+        mock_google, mock_genai = _make_genai_mock({"coherent": True, "issues": []})
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
+             patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
+
+        gen = mock_genai.Client.return_value.models.generate_content
+        call_kwargs = gen.call_args.kwargs
+        assert call_kwargs["model"] == "gemini-3.6-flash"
+        assert call_kwargs["model"] != "gemini-2.5-flash"
+
+    def test_response_mime_type_json_set_and_fenced_json_still_parses(self):
+        """response_mime_type="application/json" is now set on the request
+        config (mirrors llm/ensemble.py:_generate_gemini's json_mode idiom,
+        since gemini-3.6-flash supports structured outputs on this SDK
+        surface) AND the tolerant code-fence-stripping parse still handles a
+        fenced response — belt and braces, no regression if the model fences
+        its output anyway despite the structured-output config."""
+        fenced_text = "```json\n" + json.dumps({"coherent": True, "issues": []}) + "\n```"
+        mock_genai = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = fenced_text
+        mock_genai.Client.return_value.models.generate_content.return_value = mock_resp
+        mock_genai.types.Part.from_bytes.return_value = MagicMock()
+        mock_google = MagicMock()
+        mock_google.genai = mock_genai
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
+             patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            result = pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
+
+        # The tolerant fenced-JSON parse still recovers the payload.
+        assert result["coherent"] is True
+        assert result["source"] == "gemini-flash"
+
+        # And the belt: response_mime_type was requested on the config.
+        config_call = mock_genai.types.GenerateContentConfig.call_args
+        assert config_call.kwargs.get("response_mime_type") == "application/json"
+
 
 # ---------------------------------------------------------------------------
 # encode_image_for_llm failure-contract tests (ticket #3 — oversize+MIME fix)

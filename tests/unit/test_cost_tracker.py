@@ -165,6 +165,58 @@ class TestLogLLM:
         )
         assert entry.cost_usd == pytest.approx(expected_cost)
 
+    # --- Slice 6b: Gemini 2.5 shutdown-successor PRICING rows -------------
+    # gemini-2.5-flash / gemini-2.5-pro shut down 2026-10-16; their live
+    # call sites (phase_c_vision.py, llm/ensemble.py) migrated to the rows
+    # below. The old rows are KEPT (not deleted) for historical cost-log
+    # math — assert both generations resolve correctly, not just the new one.
+
+    def test_cost_calculation_gemini_3_6_flash_successor(self, cost_tracker):
+        """gemini-3.6-flash (successor to gemini-2.5-flash) must be priced,
+        not silently fall back to the $0.00 unknown-model path."""
+        model = "gemini-3.6-flash"
+        assert model in PRICING
+        entry = cost_tracker.log_llm(
+            model=model,
+            operation="scene_coherence",
+            input_tokens=2_000_000,
+            output_tokens=500_000,
+        )
+        expected_cost = (
+            (2_000_000 / 1_000_000) * PRICING[model]["input"]
+            + (500_000 / 1_000_000) * PRICING[model]["output"]
+        )
+        assert entry.cost_usd == pytest.approx(expected_cost)
+        assert entry.cost_usd > 0.0
+        assert entry.provider == "google"
+
+    def test_cost_calculation_gemini_3_1_pro_preview_successor(self, cost_tracker):
+        """gemini-3.1-pro-preview (successor to gemini-2.5-pro, the
+        "gemini-pro" judge alias target) must be priced, not silently fall
+        back to the $0.00 unknown-model path."""
+        model = "gemini-3.1-pro-preview"
+        assert model in PRICING
+        entry = cost_tracker.log_llm(
+            model=model,
+            operation="llm_ensemble_judge",
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+        )
+        expected_cost = (
+            (1_000_000 / 1_000_000) * PRICING[model]["input"]
+            + (1_000_000 / 1_000_000) * PRICING[model]["output"]
+        )
+        assert entry.cost_usd == pytest.approx(expected_cost)
+        assert entry.cost_usd > 0.0
+        assert entry.provider == "google"
+
+    def test_gemini_2_5_rows_kept_for_historical_cost_math(self):
+        """The pre-migration rows must NOT be deleted — old cost-log records
+        still reference gemini-2.5-flash / gemini-2.5-pro and need PRICING
+        to resolve them, even though the live call sites moved on."""
+        assert "gemini-2.5-flash" in PRICING
+        assert "gemini-2.5-pro" in PRICING
+
 
 # ===================================================================
 # 4. log_llm() with unknown model — falls back to $0.00
@@ -611,6 +663,15 @@ class TestRecordAPICall:
         assert row["provider"] != "unknown"
         assert row["cost_usd"] == pytest.approx(API_COST_USD["GEMINI_IMAGE"])
         assert row["cost_usd"] != 0.0
+
+    def test_gemini_image_price_recalibrated_for_nano_banana_2(self):
+        """Slice 6b (2026-07-31): GEMINI_IMAGE migrated off gemini-2.5-flash-image
+        to gemini-3.1-flash-image (Nano Banana 2). Provider-claimed pricing
+        (ai.google.dev/gemini-api/docs/pricing) raised the image-output rate
+        to $60/1M tok (from $30/1M tok) — carrying forward the existing
+        ~1290 tok/img estimate gives ~$0.077/img, not the old $0.03 figure."""
+        assert API_COST_USD["GEMINI_IMAGE"] == pytest.approx(0.077)
+        assert API_COST_USD["GEMINI_IMAGE"] != pytest.approx(0.03)
 
     # --- Duration-aware LTX cost (money-gate finding 2026-07-30) ----------
     # The flat API_COST_USD["LTX"] entry assumes the 6s duration-enum floor

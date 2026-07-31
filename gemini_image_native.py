@@ -1,5 +1,10 @@
-"""Nano Banana (Gemini 2.5 Flash Image) Native API Client — Direct Gemini
+"""Nano Banana 2 (Gemini 3.1 Flash Image) Native API Client — Direct Gemini
 Developer API integration via google-genai SDK.
+
+Migrated off gemini-2.5-flash-image (shutdown deadline 2026-10-02; Slice 6b) —
+successor confirmed at https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-image
+(2026-07-31 WebFetch): image output supported, no documented reference-image-
+count cap (GEMINI_MULTIREF_MAX_REFS=8 below is unaffected).
 
 Generates an identity-conditioned still image from a text prompt plus up to
 GEMINI_MULTIREF_MAX_REFS reference images (primary character + multi-angle
@@ -32,7 +37,7 @@ def _load_image_bytes(image_path: str) -> bytes:
 
 
 class GeminiImageAPI:
-    """Native Gemini 2.5 Flash Image (Nano Banana) client using the
+    """Native Gemini 3.1 Flash Image (Nano Banana 2) client using the
     google-genai SDK.
 
     Gemini Developer API only — Nano Banana has no Vertex AI surface today
@@ -48,7 +53,7 @@ class GeminiImageAPI:
                 "[GEMINI-IMAGE] Neither GOOGLE_API_KEY nor GEMINI_API_KEY available."
             )
         self.client = genai.Client(api_key=api_key)
-        self._model = "gemini-2.5-flash-image"
+        self._model = "gemini-3.1-flash-image"
 
     def generate_image(
         self,

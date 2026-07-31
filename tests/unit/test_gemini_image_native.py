@@ -43,7 +43,7 @@ def test_init_prefers_google_api_key():
          patch("gemini_image_native.genai.Client") as mock_client_cls:
         api = GeminiImageAPI()
         mock_client_cls.assert_called_once_with(api_key="goog-key")
-        assert api._model == "gemini-2.5-flash-image"
+        assert api._model == "gemini-3.1-flash-image"
 
 
 def test_init_falls_back_to_gemini_api_key():
@@ -89,7 +89,7 @@ def _mock_response_with_image(data: bytes = b"IMAGE_BYTES"):
 
 def test_generate_image_truncates_refs_at_budget_with_warning(tmp_path, capsys):
     api = GeminiImageAPI.__new__(GeminiImageAPI)  # bypass __init__ (no real client)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -117,7 +117,7 @@ def test_generate_image_truncates_refs_at_budget_with_warning(tmp_path, capsys):
 
 def test_generate_image_no_truncation_under_budget(tmp_path, capsys):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -143,7 +143,7 @@ def test_generate_image_drops_missing_ref_paths(tmp_path):
     """A stale/missing ref path must not raise mid-encode — it's silently
     dropped before the GEMINI_MULTIREF_MAX_REFS budget check."""
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -170,7 +170,7 @@ def test_generate_image_drops_missing_ref_paths(tmp_path):
 
 def test_generate_image_maps_aspect_ratio_via_fal_aspect_ratio(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -183,7 +183,7 @@ def test_generate_image_maps_aspect_ratio_via_fal_aspect_ratio(tmp_path):
 
 def test_generate_image_defaults_aspect_ratio_to_16_9(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -199,7 +199,7 @@ def test_generate_image_unknown_aspect_ratio_defaults_to_landscape(tmp_path):
     # which never raises and defaults UNKNOWN strings to the 16:9 landscape
     # dims (cinema/aspect.py) — reuse, not a bespoke ternary.
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -215,9 +215,31 @@ def test_generate_image_unknown_aspect_ratio_defaults_to_landscape(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def test_init_sets_migrated_model_id_reaching_the_sdk_call(tmp_path):
+    """Slice 6b: gemini-2.5-flash-image (shutdown 2026-10-02) migrated to
+    gemini-3.1-flash-image (Nano Banana 2). Spy on the actual
+    generate_content call — not just the api._model attribute — to prove
+    the NEW id is what reaches the SDK, not just what __init__ sets."""
+    fake_settings = MagicMock(google_api_key="goog-key", gemini_api_key="")
+    with patch("gemini_image_native.settings", fake_settings), \
+         patch("gemini_image_native.genai.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.models.generate_content.return_value = _mock_response_with_image()
+
+        api = GeminiImageAPI()
+        output_path = str(tmp_path / "out.jpg")
+        result = api.generate_image(prompt="p", output_path=output_path)
+
+    assert result == output_path
+    kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert kwargs["model"] == "gemini-3.1-flash-image"
+    assert kwargs["model"] != "gemini-2.5-flash-image"
+
+
 def test_generate_image_writes_bytes_and_returns_output_path(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image(b"REAL_IMAGE_DATA")
 
@@ -231,7 +253,7 @@ def test_generate_image_writes_bytes_and_returns_output_path(tmp_path):
 
 def test_generate_image_negative_prompt_appended_to_contents(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
@@ -253,7 +275,7 @@ def test_generate_image_negative_prompt_appended_to_contents(tmp_path):
 
 def test_generate_image_returns_none_when_no_image_in_response(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
 
     empty_response = MagicMock()
@@ -275,7 +297,7 @@ def test_generate_image_returns_none_when_no_image_in_response(tmp_path):
 
 def test_generate_image_returns_none_on_exception(tmp_path, capsys):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.side_effect = RuntimeError("429 quota exceeded")
 
@@ -291,7 +313,7 @@ def test_generate_image_returns_none_on_exception(tmp_path, capsys):
 def test_generate_image_missing_character_image_does_not_raise(tmp_path):
     """No character_image and no refs at all — still a valid (text-only) call."""
     api = GeminiImageAPI.__new__(GeminiImageAPI)
-    api._model = "gemini-2.5-flash-image"
+    api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
     api.client.models.generate_content.return_value = _mock_response_with_image()
 

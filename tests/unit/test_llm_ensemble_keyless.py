@@ -106,7 +106,7 @@ assert blocker.attempted == ["anthropic"]
     [
         ("claude-opus", "claude-opus-4-8"),
         ("gpt-4o", "gpt-4o"),
-        ("gemini-pro", "gemini-2.5-pro"),
+        ("gemini-pro", "gemini-3.1-pro-preview"),
     ],
 )
 def test_settings_and_judge_aliases_apply_keyless(
@@ -159,7 +159,7 @@ def test_competitive_disabled_dispatches_only_first_model(monkeypatch):
     [
         ("claude-opus", "claude-opus-4-8"),
         ("gpt-4o", "gpt-4o"),
-        ("gemini-pro", "gemini-2.5-pro"),
+        ("gemini-pro", "gemini-3.1-pro-preview"),
     ],
 )
 def test_configured_judge_override_is_dispatched(
@@ -238,12 +238,12 @@ def test_direct_gemini_call_names_missing_credentials(keyless_ensemble):
         RuntimeError,
         match=r"Gemini.*GEMINI_API_KEY / GOOGLE_API_KEY",
     ):
-        keyless_ensemble._generate_gemini("gemini-2.5-pro", "system", "user")
+        keyless_ensemble._generate_gemini("gemini-3.1-pro-preview", "system", "user")
 
 
 @pytest.mark.parametrize(
     "model",
-    ["claude-sonnet-4-6", "gpt-4o", "gemini-2.5-pro"],
+    ["claude-sonnet-4-6", "gpt-4o", "gemini-3.1-pro-preview"],
 )
 def test_generate_single_degrades_missing_client_to_none(
     keyless_ensemble, model
@@ -305,3 +305,32 @@ def test_configured_clients_keep_explicit_timeouts(monkeypatch):
     assert ensemble.anthropic_client is anthropic_client
     assert ensemble.openai_client is openai_client
     assert ensemble.gemini_client is gemini_client
+
+
+def test_gemini_judge_alias_dispatches_migrated_model_id_to_sdk(monkeypatch):
+    """Slice 6b: the "gemini-pro" judge alias now maps to gemini-3.1-pro-preview
+    (documented successor to gemini-2.5-pro, which shuts down 2026-10-16).
+    Spy on the actual google-genai client call inside _judge — not just the
+    judge_map value — to prove the NEW id is what reaches the SDK."""
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble(settings={"quality_judge_llm": "gemini-pro"})
+    assert ensemble.judge_model_override == "gemini-3.1-pro-preview"
+
+    mock_gemini_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = '{"scores": [8, 5], "winner": 0, "reasoning": "ok"}'
+    mock_resp.usage_metadata = None
+    mock_gemini_client.models.generate_content.return_value = mock_resp
+    ensemble.gemini_client = mock_gemini_client
+
+    winner_idx, scores, reasoning = ensemble._judge(
+        candidates=["candidate a", "candidate b"],
+        models=["gpt-4o", "gpt-4o-mini"],
+        system_prompt="sys",
+        judge_model=ensemble.judge_model_override,
+    )
+
+    assert winner_idx == 0
+    kwargs = mock_gemini_client.models.generate_content.call_args.kwargs
+    assert kwargs["model"] == "gemini-3.1-pro-preview"
+    assert kwargs["model"] != "gemini-2.5-pro"

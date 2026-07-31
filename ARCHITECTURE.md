@@ -869,7 +869,7 @@ heuristic. §8.3 (below) covers what the max tier did, for archaeology.
 
 Four-priority cascade inside `generate_ai_broll` (PRIORITY 0 added WS3,
 Google-first overhaul):
-0. **Gemini 2.5 Flash Image** (Nano Banana, `gemini_image_native.GeminiImageAPI`) —
+0. **Gemini 3.1 Flash Image** (Nano Banana 2, `gemini_image_native.GeminiImageAPI`) —
    is the default when a character reference is present
    (`identity_backend='gemini_multiref'`); a project explicitly sets
    `identity_backend='pod'` to opt out. On success the image must
@@ -1688,9 +1688,9 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 
 `_generate_gemini` ([llm/ensemble.py:423-457](llm/ensemble.py:423)) is fully
 implemented. Gemini client constructed lazily when `GEMINI_API_KEY` OR
-`GOOGLE_API_KEY` is set. Judge override map exposes `gemini-pro → gemini-2.5-pro`.
+`GOOGLE_API_KEY` is set. Judge override map exposes `gemini-pro → gemini-3.1-pro-preview` (6b migration; preview-tier).
 
-To dispatch Gemini, pass `models=["gemini-2.5-pro", ...]` explicitly OR set
+To dispatch Gemini, pass `models=["gemini-3.1-pro-preview", ...]` explicitly OR set
 `quality_judge_llm="gemini-pro"` in project settings.
 
 ### 13.3 Anthropic prompt caching
