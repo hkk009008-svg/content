@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { Project } from './types/project'
@@ -23,7 +24,9 @@ vi.mock('./components/AppShell', () => ({
       <div data-testid="project-id">{props.project.id}</div>
       <div data-testid="generating">{String(props.generating)}</div>
       <div data-testid="budget-halt">{props.budgetHalt ? props.budgetHalt.stage : 'none'}</div>
+      <div data-testid="config-marker">{props.config?.test_marker ?? 'none'}</div>
       <button onClick={props.onGenerate}>do-generate</button>
+      <button onClick={() => props.onGenerateMotion('shot-1')}>do-generate-motion</button>
       <button onClick={props.onResumeFromCheckpoint}>do-resume-checkpoint</button>
       <button onClick={props.onCancel}>do-cancel</button>
       <button onClick={props.onBackToProjects}>back-to-projects</button>
@@ -33,12 +36,21 @@ vi.mock('./components/AppShell', () => ({
 }))
 
 vi.mock('./components/ProjectSelector', () => ({
-  default: ({ onSelect }: { onSelect: (id: string) => void }) => (
-    <div data-testid="mock-project-selector">
-      <button onClick={() => onSelect('proj-A')}>select-A</button>
-      <button onClick={() => onSelect('proj-B')}>select-B</button>
-    </div>
-  ),
+  default: ({ onSelect }: { onSelect: (id: string) => Promise<void> }) => {
+    const [error, setError] = useState('')
+    const select = (id: string) => {
+      void onSelect(id).catch((err) => {
+        setError(err instanceof Error ? err.message : 'Project could not be opened')
+      })
+    }
+    return (
+      <div data-testid="mock-project-selector">
+        <button onClick={() => select('proj-A')}>select-A</button>
+        <button onClick={() => select('proj-B')}>select-B</button>
+        {error && <div role="alert">{error}</div>}
+      </div>
+    )
+  },
 }))
 
 class MockEventSource {
@@ -69,6 +81,13 @@ function makeProject(id: string): Project {
     }],
     global_settings: { aspect_ratio: '16:9', music_mood: '', color_palette: '', style_rules: {} },
   }
+}
+
+function projectWithConfigState(id: string, revision: number, targetApi: string): Project {
+  const project = makeProject(id)
+  project.global_settings.revision = revision
+  project.scenes[0].shots = [{ id: 'shot-1', target_api: targetApi } as any]
+  return project
 }
 
 function response(payload: unknown, ok = true, status = ok ? 200 : 500): Response {
@@ -103,6 +122,7 @@ function idlePipelineState(overrides: { running?: boolean; allowed_actions?: str
 interface RouteOverrides {
   generate?: { ok: boolean; status?: number; body?: unknown }
   cancel?: { ok: boolean; status?: number; body?: unknown }
+  motion?: { ok: boolean; status?: number; body?: unknown }
 }
 
 function stubFetch(overrides: RouteOverrides = {}) {
@@ -121,7 +141,7 @@ function stubFetch(overrides: RouteOverrides = {}) {
         : idlePipelineState())
     }
     if (url.includes('/api/config')) return response({ camera_motions: [], visual_effects: [], video_engines: [], api_registry: {} })
-    if (method === 'POST' && url.endsWith('/generate')) {
+    if (method === 'POST' && /\/api\/projects\/[^/]+\/generate$/.test(url)) {
       const o = overrides.generate ?? { ok: true }
       if (o.ok) hasStarted = true
       return response(o.body ?? (o.ok ? {} : { error: 'Generation already in progress' }), o.ok, o.status)
@@ -130,6 +150,10 @@ function stubFetch(overrides: RouteOverrides = {}) {
       const o = overrides.cancel ?? { ok: true }
       if (o.ok) hasStarted = false
       return response(o.body ?? (o.ok ? {} : { error: 'Nothing to cancel' }), o.ok, o.status)
+    }
+    if (method === 'POST' && url.endsWith('/shots/shot-1/motion/generate')) {
+      const o = overrides.motion ?? { ok: true }
+      return response(o.body ?? (o.ok ? { success: true } : { error: 'Motion failed' }), o.ok, o.status)
     }
     if (method === 'GET' && /\/api\/projects\/[^/]+$/.test(url)) {
       const id = url.split('/').pop()!
@@ -143,6 +167,7 @@ function stubFetch(overrides: RouteOverrides = {}) {
 
 afterEach(() => {
   cleanup()
+  sessionStorage.clear()
   vi.unstubAllGlobals()
   MockEventSource.instances = []
 })
@@ -254,6 +279,131 @@ describe('App -- root project-identity race (CRITICAL: epoch/generation guard)',
   })
 })
 
+describe('App -- project selection failure contract', () => {
+  it('rejects a failed project GET so the selector can surface it and remain usable', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/projects/proj-A')) {
+        return response({ error: 'Project details unavailable' }, false, 503)
+      }
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Project details unavailable')
+    expect(screen.getByTestId('mock-project-selector')).toBeInTheDocument()
+    expect(screen.queryByTestId('mock-appshell')).toBeNull()
+  })
+})
+
+describe('App -- same-project config refresh', () => {
+  it('refetches after a settings revision and drops an older config response that resolves last', async () => {
+    const staleConfig = deferred<Response>()
+    let projectReads = 0
+    let configReads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) {
+        projectReads += 1
+        return response(projectWithConfigState('proj-A', projectReads - 1, 'AUTO'))
+      }
+      if (url.includes('/api/config')) {
+        configReads += 1
+        if (configReads === 1) return staleConfig.promise
+        return response({
+          test_marker: 'revision-1', camera_motions: [], visual_effects: [], video_engines: [], api_registry: {},
+        })
+      }
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(configReads).toBe(1))
+
+    fireEvent.click(screen.getByText('do-refresh'))
+    await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('revision-1'))
+    expect(configReads).toBe(2)
+
+    await act(async () => {
+      staleConfig.resolve(response({
+        test_marker: 'stale-revision-0', camera_motions: [], visual_effects: [], video_engines: [], api_registry: {},
+      }))
+    })
+    expect(screen.getByTestId('config-marker')).toHaveTextContent('revision-1')
+  })
+
+  it('refetches when a shot target changes even if the settings revision does not', async () => {
+    let projectReads = 0
+    let configReads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) {
+        projectReads += 1
+        const target = projectReads === 1 ? 'AUTO' : 'VEO_NATIVE'
+        return response(projectWithConfigState('proj-A', 4, target))
+      }
+      if (url.includes('/api/config')) {
+        configReads += 1
+        return response({
+          test_marker: `target-${configReads}`, camera_motions: [], visual_effects: [], video_engines: [], api_registry: {},
+        })
+      }
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('target-1'))
+
+    fireEvent.click(screen.getByText('do-refresh'))
+    await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('target-2'))
+    expect(configReads).toBe(2)
+  })
+
+  it('clears stale config authority and surfaces an error when refresh fails', async () => {
+    let projectReads = 0
+    let configReads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) {
+        projectReads += 1
+        return response(projectWithConfigState('proj-A', projectReads - 1, 'AUTO'))
+      }
+      if (url.includes('/api/config')) {
+        configReads += 1
+        if (configReads === 1) {
+          return response({
+            test_marker: 'authoritative-v0', camera_motions: [], visual_effects: [], video_engines: [], api_registry: {},
+          })
+        }
+        return response({ error: 'config probe unavailable' }, false, 503)
+      }
+      return response({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('authoritative-v0'))
+
+    fireEvent.click(screen.getByText('do-refresh'))
+
+    await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('none'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Configuration refresh failed: config probe unavailable',
+    )
+  })
+})
+
 describe('App -- truthful generate/cancel (never paint optimistic success)', () => {
   it('a rejected /generate does not switch the shell into a generating state', async () => {
     stubFetch({ generate: { ok: false, status: 409, body: { error: 'Generation already in progress' } } })
@@ -281,6 +431,101 @@ describe('App -- truthful generate/cancel (never paint optimistic success)', () 
     fireEvent.click(screen.getByText('do-cancel'))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Nothing to cancel')
+  })
+
+  it('surfaces a deferred provider job from motion generation as an accessible alert', async () => {
+    stubFetch({
+      motion: {
+        ok: false,
+        status: 409,
+        body: {
+          success: false,
+          code: 'provider_job_deferred',
+          error: 'LTX accepted the generation (job job-safe-123) and it is still pending. No fallback was started; Generate Motion will resume it.',
+          deferred_job: { engine: 'LTX', status: 'pending', job_id: 'job-safe-123' },
+        },
+      },
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    fireEvent.click(screen.getByText('do-generate-motion'))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('LTX accepted the generation')
+    expect(alert).toHaveTextContent('No fallback was started')
+    expect(alert).toHaveTextContent('Generate Motion will resume it')
+
+    const pending = screen.getByRole('status')
+    expect(pending).toHaveTextContent('Provider job pending')
+    expect(pending).toHaveTextContent('LTX · pending · job-safe-123')
+    expect(screen.getByRole('button', { name: 'Check / Resume LTX Job' })).toBeInTheDocument()
+
+    // The transient mutation alert may be dismissed, but the recovery handle
+    // remains and is restored after leaving/re-opening this project.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent('job-safe-123')
+
+    fireEvent.click(screen.getByText('back-to-projects'))
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    expect(screen.getByRole('status')).toHaveTextContent('job-safe-123')
+  })
+
+  it('clears the persisted deferred-job notice after a confirmed successful resume', async () => {
+    stubFetch({
+      motion: {
+        ok: false,
+        status: 409,
+        body: {
+          code: 'provider_job_deferred',
+          error: 'Provider job is still pending.',
+          deferred_job: { engine: 'LTX', status: 'pending', job_id: 'job-safe-456' },
+        },
+      },
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    fireEvent.click(screen.getByText('do-generate-motion'))
+    expect(await screen.findByRole('status')).toHaveTextContent('job-safe-456')
+
+    stubFetch({ motion: { ok: true, body: { success: true } } })
+    fireEvent.click(screen.getByRole('button', { name: 'Check / Resume LTX Job' }))
+
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull())
+    expect(sessionStorage.getItem('cinema.deferred-provider-job.proj-A')).toBeNull()
+  })
+
+  it('presents a non-LTX ambiguous job as recovery, not an automatic resume', async () => {
+    stubFetch({
+      motion: {
+        ok: false,
+        status: 409,
+        body: {
+          code: 'provider_job_deferred',
+          error: 'VEO_NATIVE submission requires recovery. No new provider was started.',
+          deferred_job: {
+            engine: 'VEO_NATIVE',
+            status: 'recovery_required',
+            job_id: 'operations/veo-safe-1',
+          },
+        },
+      },
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    fireEvent.click(screen.getByText('do-generate-motion'))
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('Provider recovery required')
+    expect(notice).toHaveTextContent('Manual recovery required in the provider console')
+    expect(screen.queryByRole('button', { name: 'Check / Resume LTX Job' })).toBeNull()
   })
 
   it('a successful generate clears a prior error and switches the shell into a generating state', async () => {

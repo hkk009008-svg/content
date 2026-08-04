@@ -1,8 +1,11 @@
 """Comprehensive tests for cost_tracker.py."""
 
 import os
+import sqlite3
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -284,6 +287,159 @@ class TestLogAPI:
             "SELECT cost_usd FROM cost_log WHERE provider = 'runway'"
         ).fetchone()
         assert row["cost_usd"] == pytest.approx(0.25)
+
+
+class TestProviderJobIdempotency:
+    def test_recovery_records_one_durable_charge_per_provider_job(
+        self,
+        cost_tracker,
+    ):
+        expected = API_COST_PER_SECOND_USD["LTX"] * 8
+
+        first = cost_tracker.record_api_call(
+            "LTX",
+            duration_seconds=8,
+            provider_job_id="job-recovered-123",
+        )
+        second = cost_tracker.record_api_call(
+            "LTX",
+            duration_seconds=8,
+            provider_job_id="job-recovered-123",
+        )
+
+        assert first == pytest.approx(expected)
+        assert second == pytest.approx(expected)  # public return contract retained
+        row = cost_tracker.conn.execute(
+            "SELECT COUNT(*) AS count, SUM(cost_usd) AS total "
+            "FROM cost_log WHERE provider_job_id = ?",
+            ("job-recovered-123",),
+        ).fetchone()
+        assert row["count"] == 1
+        assert row["total"] == pytest.approx(expected)
+        assert cost_tracker.spent_usd == pytest.approx(expected)
+
+    def test_same_provider_job_token_is_scoped_by_provider(self, cost_tracker):
+        cost_tracker.log_api(
+            provider="ltx",
+            model="LTX",
+            operation="video_generation",
+            cost_usd=0.48,
+            provider_job_id="shared-token",
+        )
+        cost_tracker.log_api(
+            provider="google",
+            model="VEO_NATIVE",
+            operation="video_generation",
+            cost_usd=0.30,
+            provider_job_id="shared-token",
+        )
+
+        row = cost_tracker.conn.execute(
+            "SELECT COUNT(*) AS count, SUM(cost_usd) AS total "
+            "FROM cost_log WHERE provider_job_id = ?",
+            ("shared-token",),
+        ).fetchone()
+        assert row["count"] == 2
+        assert row["total"] == pytest.approx(0.78)
+
+    def test_concurrent_trackers_cannot_charge_same_job_twice(self, tmp_path):
+        db_path = str(tmp_path / "shared-costs.db")
+        first = CostTracker(db_path=db_path)
+        second = CostTracker(db_path=db_path)
+        barrier = threading.Barrier(2)
+
+        def record(tracker):
+            barrier.wait(timeout=5)
+            return tracker.record_api_call(
+                "LTX",
+                duration_seconds=10,
+                provider_job_id="job-concurrent-1",
+            )
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(record, (first, second)))
+            assert results == pytest.approx(
+                [API_COST_PER_SECOND_USD["LTX"] * 10] * 2
+            )
+            row = first.conn.execute(
+                "SELECT COUNT(*) AS count, SUM(cost_usd) AS total "
+                "FROM cost_log WHERE provider_job_id = ?",
+                ("job-concurrent-1",),
+            ).fetchone()
+            assert row["count"] == 1
+            assert row["total"] == pytest.approx(
+                API_COST_PER_SECOND_USD["LTX"] * 10
+            )
+            assert first.spent_usd + second.spent_usd == pytest.approx(
+                API_COST_PER_SECOND_USD["LTX"] * 10
+            )
+        finally:
+            first.close()
+            second.close()
+
+    def test_existing_cost_database_is_migrated_additively(self, tmp_path):
+        db_path = str(tmp_path / "legacy-costs.db")
+        legacy = sqlite3.connect(db_path)
+        legacy.execute("""
+            CREATE TABLE cost_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                provider TEXT,
+                model TEXT,
+                operation TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0.0,
+                shot_id TEXT,
+                video_id TEXT
+            )
+        """)
+        legacy.execute(
+            "INSERT INTO cost_log (provider, model, operation, cost_usd) "
+            "VALUES ('legacy', 'old', 'old_op', 0.1)"
+        )
+        legacy.commit()
+        legacy.close()
+
+        tracker = CostTracker(db_path=db_path)
+        try:
+            columns = {
+                row["name"]
+                for row in tracker.conn.execute("PRAGMA table_info(cost_log)")
+            }
+            indexes = {
+                row["name"]
+                for row in tracker.conn.execute("PRAGMA index_list(cost_log)")
+            }
+            assert "provider_job_id" in columns
+            assert "idx_cost_log_provider_job_unique" in indexes
+            assert tracker.conn.execute(
+                "SELECT provider_job_id FROM cost_log WHERE provider = 'legacy'"
+            ).fetchone()["provider_job_id"] == ""
+        finally:
+            tracker.close()
+
+    @pytest.mark.parametrize(
+        "bad_job_id",
+        [" padded", "padded ", "contains\nnewline", object()],
+    )
+    def test_invalid_provider_job_id_fails_before_insert(
+        self,
+        cost_tracker,
+        bad_job_id,
+    ):
+        with pytest.raises(ValueError):
+            cost_tracker.log_api(
+                provider="ltx",
+                model="LTX",
+                operation="video_generation",
+                cost_usd=0.48,
+                provider_job_id=bad_job_id,
+            )
+        assert cost_tracker.conn.execute(
+            "SELECT COUNT(*) AS count FROM cost_log"
+        ).fetchone()["count"] == 0
 
 
 # ===================================================================

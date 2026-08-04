@@ -7,11 +7,35 @@ from __future__ import annotations
 
 import os
 import time
+from functools import lru_cache
 from typing import Callable
 
 from google import genai
 from google.genai import types
 from config.settings import settings
+from performance._net import atomic_publish_bytes, validate_video_artifact
+
+
+@lru_cache(maxsize=1)
+def google_adc_available() -> bool:
+    """Resolve ADC once, only at the provider-construction boundary.
+
+    Catalog and routing reads stay non-dispatching and never probe metadata.
+    """
+
+    try:
+        import google.auth
+
+        credentials, _ = google.auth.default()
+    except Exception:
+        return False
+    return credentials is not None
+
+
+def veo_native_audio_available() -> bool:
+    """Return whether the configured Veo path is ADC-backed Vertex AI."""
+
+    return bool(settings.google_cloud_project and google_adc_available())
 
 VEO_RESOLUTIONS = {
     "720p": "720p",
@@ -25,6 +49,68 @@ VEO_RESOLUTIONS = {
 # image_to_video"). text_to_video may differ, but this client only ever does
 # image_to_video — it always supplies a start `image`.
 VEO_IMAGE_TO_VIDEO_DURATIONS = (4, 6, 8)
+
+
+def _safe_operation_name(value: object) -> str | None:
+    """Return a bounded, log/persistence-safe Google operation name."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if (
+        not value
+        or len(value) > 1024
+        or any(ord(char) < 32 for char in value)
+        or "://" in value
+        or any(char in value for char in "?#&")
+    ):
+        return None
+    return value
+
+
+def _safe_provider_status(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    if not value or len(value) > 64:
+        return "unknown"
+    if not all(char.isalnum() or char in "_-" for char in value):
+        return "unknown"
+    return value
+
+
+class VeoNativeJobDeferred(RuntimeError):
+    """Submission-ambiguous or accepted Veo work must not cascade.
+
+    Only the server operation name and coarse state cross this boundary.  The
+    exception never carries prompts, image content, output handles, or raw
+    transport errors, making it suitable for a bounded durable recovery record.
+    """
+
+    engine = "VEO_NATIVE"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        status: str,
+        job_id: str | None = None,
+        provider_status: str | None = None,
+        billed: bool = False,
+        duration_s: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.status = status
+        self.job_id = _safe_operation_name(job_id)
+        self.provider_status = _safe_provider_status(provider_status)
+        self.billed = bool(billed)
+        self.duration_s = (
+            duration_s
+            if isinstance(duration_s, int) and not isinstance(duration_s, bool)
+            and 0 < duration_s <= 60
+            else None
+        )
 
 
 def _parse_duration_seconds(duration, default: int = 8) -> int:
@@ -106,35 +192,45 @@ def _extract_video_bytes(client, generated_video):
 class VeoNativeAPI:
     """Native Google Veo 3.1 client using the google-genai SDK.
 
-    Prefers Vertex AI (supports generate_audio for native speech).
-    Falls back to Gemini API (no audio generation) if Vertex AI unavailable.
+    Uses Vertex AI only when an explicit project is configured; otherwise uses
+    the Gemini Developer API when an API key is configured.
     """
 
     def __init__(self):
-        # Prefer Vertex AI for native audio generation support
-        gcp_project = settings.google_cloud_project or "project-ffb1f53f-bb4c-4add-8e7"
-        gcp_location = settings.google_cloud_location
-        try:
+        gcp_project = settings.google_cloud_project
+        adc_ready = bool(gcp_project) and google_adc_available()
+        if gcp_project and adc_ready:
+            gcp_location = settings.google_cloud_location
             self.client = genai.Client(
                 vertexai=True,
                 project=gcp_project,
                 location=gcp_location,
             )
             self._backend = "vertex"
+            self.supports_native_audio = True
             print(f"[VEO-NATIVE] Vertex AI client initialized (project={gcp_project}, location={gcp_location})")
-        except Exception as e:
-            print(f"[VEO-NATIVE] Vertex AI unavailable ({e}), falling back to Gemini API")
+        elif settings.google_api_key:
             api_key = settings.google_api_key
-            if not api_key:
-                raise EnvironmentError(
-                    "[VEO-NATIVE] Neither Vertex AI nor GOOGLE_API_KEY available."
-                )
             self.client = genai.Client(api_key=api_key)
             self._backend = "gemini"
+            self.supports_native_audio = False
             print("[VEO-NATIVE] Gemini API client initialized (no audio generation)")
+        elif gcp_project:
+            raise EnvironmentError(
+                "[VEO-NATIVE] GOOGLE_CLOUD_PROJECT requires resolvable "
+                "Application Default Credentials, or configure GOOGLE_API_KEY "
+                "for the Gemini Developer API."
+            )
+        else:
+            raise EnvironmentError(
+                "[VEO-NATIVE] Configure GOOGLE_CLOUD_PROJECT for Vertex AI "
+                "or GOOGLE_API_KEY for the Gemini Developer API."
+            )
 
         # Vertex AI uses stable model names; Gemini API uses -preview suffix
         self._model = "veo-3.1-generate-001" if self._backend == "vertex" else "veo-3.1-generate-preview"
+        self.last_job_id: str | None = None
+        self.last_duration_s: int | None = None
 
     def generate_video(
         self,
@@ -183,21 +279,32 @@ class VeoNativeAPI:
                 billed regardless of what happens next; see
                 phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the bytes
                 are retrieved/written so a caller can record the spend even
-                when the retrieval/write that follows fails and this method
-                still returns None (money-gate 2026-07-11 class, extended to
-                the native adapters in slice M2). Exceptions raised by the
-                callback are logged and swallowed — a broken accounting hook
-                must never abort a generation that would otherwise succeed.
+                when retrieval/write later raises VeoNativeJobDeferred
+                (money-gate 2026-07-11 class, extended to the native adapters
+                in slice M2). Exceptions raised by the callback are logged and
+                swallowed — a broken accounting hook must never abort a
+                generation that would otherwise succeed.
 
         Returns:
-            output_path on success, None on failure — either pre-billing
-            (operation error, RAI filter, empty response) or post-billing
-            (the provider returned a video but bytes retrieval/write failed).
+            output_path on success, or None when failure is known to be
+            terminal/pre-submission and a provider cascade is safe.
+
+        Raises:
+            VeoNativeJobDeferred: Submission acknowledgement was lost, an
+                accepted operation is still pending, or completed output could
+                not be recovered/published.  Callers must not cascade.
         """
         if not os.path.exists(image_path):
             print(f"[VEO-NATIVE] Start frame not found: {image_path}")
             return None
 
+        self.last_job_id = None
+        submission_started = False
+        operation_accepted = False
+        operation_name: str | None = None
+        provider_status: str | None = None
+        billed = False
+        dispatched_duration_s: int | None = None
         try:
             print(f"[VEO-NATIVE] Generating video — {duration}, {resolution}, audio={generate_audio}")
             print(f"[VEO-NATIVE] Prompt: {prompt[:120]}...")
@@ -228,6 +335,8 @@ class VeoNativeAPI:
                 reference_images=None,
                 aspect_ratio=aspect_ratio,
             )
+            dispatched_duration_s = config.duration_seconds
+            self.last_duration_s = dispatched_duration_s
 
             generate_kwargs = {
                 "model": self._model,
@@ -250,19 +359,40 @@ class VeoNativeAPI:
                       f"image-to-video path (SDK image/video are mutually exclusive); "
                       f"proceeding image-only: {os.path.basename(driving_video_path)}")
 
-            # Submit generation
+            # Once this call starts, a raised transport/protocol error cannot
+            # prove that the service did not accept a paid operation.  The
+            # caller must stop the provider cascade on that ambiguity.
+            submission_started = True
             operation = self.client.models.generate_videos(**generate_kwargs)
+            operation_accepted = True
+            operation_name = _safe_operation_name(getattr(operation, "name", None))
+            self.last_job_id = operation_name
             print(f"[VEO-NATIVE] Operation submitted, polling for completion...")
 
             # Poll until done (max 20 minutes to avoid indefinite hangs)
             poll_count = 0
             max_polls = 120  # 120 * 10s = 1200s = 20 minutes
-            while not operation.done:
+            provider_status = "completed" if getattr(operation, "done", False) else "pending"
+            while not getattr(operation, "done", False):
                 if poll_count >= max_polls:
-                    raise TimeoutError(f"VEO operation timed out after {poll_count * 10}s")
+                    raise VeoNativeJobDeferred(
+                        "Veo operation is still non-terminal; recovery is required",
+                        reason="accepted_job_poll_timeout",
+                        status="pending",
+                        job_id=operation_name,
+                        provider_status=provider_status,
+                        duration_s=dispatched_duration_s,
+                    )
                 time.sleep(10)
                 poll_count += 1
                 operation = self.client.operations.get(operation)
+                refreshed_name = _safe_operation_name(getattr(operation, "name", None))
+                if refreshed_name is not None:
+                    operation_name = refreshed_name
+                    self.last_job_id = refreshed_name
+                provider_status = (
+                    "completed" if getattr(operation, "done", False) else "pending"
+                )
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still generating... ({poll_count * 10}s elapsed)")
 
@@ -271,12 +401,14 @@ class VeoNativeAPI:
             # generic "empty response" branch — the error carries the real reason.
             op_error = getattr(operation, "error", None)
             if op_error:
+                provider_status = "failed"
                 print(f"[VEO-NATIVE] Generation error: {op_error}")
                 return None
 
             # Check for RAI content filter rejection / empty response.
             resp = operation.response
             if not resp or not resp.generated_videos:
+                provider_status = "failed"
                 rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
                 rai_count = getattr(resp, "rai_media_filtered_count", 0) if resp else 0
                 if rai_reasons:
@@ -288,7 +420,7 @@ class VeoNativeAPI:
             # Provider returned a generated video — billed regardless of what
             # happens next. Notify the caller BEFORE bytes retrieval/write so
             # a subsequent failure below still reaches the caller's spend
-            # accounting, even though this call goes on to return None.
+            # accounting before this call raises its deferred-job signal.
             generated_video = resp.generated_videos[0]
             if on_billed is not None:
                 try:
@@ -297,17 +429,59 @@ class VeoNativeAPI:
                     print(
                         f"[VEO-NATIVE] Warning: on_billed callback raised: {callback_exc}"
                     )
+            billed = True
 
             # Retrieve bytes — Vertex returns them inline; only the Gemini
             # backend needs a Files API download (which raises on Vertex).
             video_data = _extract_video_bytes(self.client, generated_video)
-            with open(output_path, "wb") as f:
-                f.write(video_data)
+            if atomic_publish_bytes(
+                video_data,
+                output_path,
+                max_bytes=1024 * 1024 * 1024,
+                content_validator=validate_video_artifact,
+            ) is None:
+                raise VeoNativeJobDeferred(
+                    "Veo completed output failed publication or validation",
+                    reason="completed_output_invalid",
+                    status="recovery_required",
+                    job_id=operation_name,
+                    provider_status="completed",
+                    billed=True,
+                    duration_s=dispatched_duration_s,
+                )
 
             file_size = os.path.getsize(output_path) / (1024 * 1024)
             print(f"[VEO-NATIVE] Video saved: {output_path} ({file_size:.1f} MB)")
             return output_path
 
+        except VeoNativeJobDeferred:
+            raise
         except Exception as e:
+            if submission_started:
+                if billed:
+                    reason = "completed_output_unavailable"
+                    status = "recovery_required"
+                elif operation_accepted:
+                    reason = "accepted_job_poll_error"
+                    status = "pending" if operation_name else "recovery_required"
+                else:
+                    reason = "submit_outcome_unknown"
+                    status = "recovery_required"
+                print(
+                    "[VEO-NATIVE] Remote work may have been accepted; "
+                    "caller must defer instead of cascading"
+                )
+                raise VeoNativeJobDeferred(
+                    "Veo work may have been accepted; recovery is required",
+                    reason=reason,
+                    status=status,
+                    job_id=operation_name,
+                    provider_status=(
+                        provider_status
+                        or ("submitted" if operation_accepted else "submission_unknown")
+                    ),
+                    billed=billed,
+                    duration_s=dispatched_duration_s,
+                ) from e
             print(f"[VEO-NATIVE] Generation failed: {e}")
             return None

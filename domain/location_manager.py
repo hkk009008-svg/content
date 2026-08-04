@@ -6,9 +6,8 @@ for consistent environments across scenes.
 
 import os
 import shutil
-import urllib.request
-import urllib.error
 from typing import Optional, List
+from performance._net import safe_download, validate_image_artifact
 from domain.project_manager import (
     MutationResult, make_location, add_location, get_project_dir, get_location,
     mutate_project,
@@ -20,16 +19,19 @@ def _download_url_to_file(url: str, dst_path: str) -> bool:
     Download *url* to *dst_path*.  Returns True on success, False on any error.
     Never raises — callers must treat False as "skip this URL".
     """
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = resp.read()
-        with open(dst_path, "wb") as f:
-            f.write(data)
-        return True
-    except Exception as exc:
-        print(f"   [RESEARCH] Download failed for {url}: {exc}")
-        return False
+    return safe_download(
+        url,
+        dst_path,
+        max_bytes=64 * 1024 * 1024,
+        connect_timeout=10,
+        read_timeout=60,
+        request_headers={"User-Agent": "Mozilla/5.0"},
+        allowed_content_types=("image/jpeg",),
+        content_validator=lambda path: validate_image_artifact(
+            path,
+            expected_formats=("JPEG",),
+        ),
+    ) is not None
 
 
 def _loc_dir(project_id: str, loc_id: str) -> str:

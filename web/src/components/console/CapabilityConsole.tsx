@@ -61,13 +61,23 @@ function fmt(v: number | null): string {
 // ── Section: one dimension card (Task 5, restyled Task 11) ──────────────────
 
 function DimensionCard({ d }: { d: CapabilityDimension }) {
-  const tone: MeterTone = d.value === null ? 'acc' : d.pass === false ? 'fail' : 'ok'
+  const tone: MeterTone = d.pass === false ? 'fail' : d.value === null ? 'acc' : 'ok'
   const isLipsync = d.key === 'lipsync'
+  const unknown = d.n_unknown ?? 0
+  const failed = d.n_failed ?? 0
+  const applicable = d.n_applicable ?? d.n_measured
+  const emptyLabel = isLipsync
+    ? unknown > 0
+      ? 'UNKNOWN'
+      : applicable === 0
+        ? 'N/A'
+        : '—'
+    : '—'
   return (
     <div className="rounded border border-line bg-panel p-2">
       <div className={MICRO_LABEL}>{d.label}</div>
       <div className={`mt-1 text-lg font-semibold tabular-nums ${scoreClass(d.value, d.bar)}`}>
-        {d.value !== null ? d.value.toFixed(2) : '—'}
+        {d.value !== null ? d.value.toFixed(2) : emptyLabel}
         {d.value !== null && d.bar !== null && (
           <span className="ml-1 text-xs font-normal text-dim">/ {d.bar.toFixed(2)}</span>
         )}
@@ -76,12 +86,18 @@ function DimensionCard({ d }: { d: CapabilityDimension }) {
         <Meter value={d.value ?? 0} max={1} tone={tone} />
       </div>
       <div className="mt-1 text-[10px] text-dim">
-        {d.n_measured} shot{d.n_measured !== 1 ? 's' : ''} measured
+        {d.n_measured}/{applicable} applicable shot{applicable !== 1 ? 's' : ''} measured
       </div>
-      {isLipsync && (
+      {isLipsync && unknown > 0 && (
         <div className="mt-1.5 flex items-center gap-1 text-[10px] text-warn">
           <StatusDot status="warn" />
-          gate needs recal
+          {unknown} unknown · manual review required
+        </div>
+      )}
+      {isLipsync && failed > 0 && (
+        <div className="mt-1 flex items-center gap-1 text-[10px] text-fail">
+          <StatusDot status="fail" />
+          {failed} measured failure{failed === 1 ? '' : 's'}
         </div>
       )}
     </div>
@@ -212,7 +228,19 @@ function PerShotTable({ sc }: { sc: CapabilityScorecard }) {
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.identity, identityBar)}`}>{fmt(row.identity)}</td>
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.coherence, coherenceBar)}`}>{fmt(row.coherence)}</td>
               <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.motion, motionBar)}`}>{fmt(row.motion)}</td>
-              <td className={`py-1 px-2 text-right tabular-nums ${scoreClass(row.lipsync, lipsyncBar)}`}>{fmt(row.lipsync)}</td>
+              <td className={`py-1 px-2 text-right tabular-nums ${
+                row.lipsync_state === 'UNKNOWN'
+                  ? 'text-warn'
+                  : row.lipsync_state === 'FAIL'
+                    ? 'text-fail'
+                    : scoreClass(row.lipsync, lipsyncBar)
+              }`}>
+                {row.lipsync_state === 'NOT_APPLICABLE'
+                  ? 'N/A'
+                  : row.lipsync_state === 'UNKNOWN'
+                    ? 'UNKNOWN'
+                    : fmt(row.lipsync)}
+              </td>
               <td className="py-1 pl-3 text-dim">{humanizeEngineId(row.engine)}</td>
             </tr>
           ))}
@@ -259,7 +287,8 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
     <div className="space-y-1 text-[11px]">
       {gates.map((g) => {
         const entry = sc.gates[g]
-        const total = entry.approved + entry.vetoed
+        const deferred = entry.deferred ?? 0
+        const total = entry.approved + entry.vetoed + deferred
         const topVeto = entry.top_vetoes[0]
         return (
           <div key={g} className="flex items-baseline gap-2">
@@ -267,6 +296,9 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
             <span className={entry.vetoed > 0 ? 'text-warn' : 'text-ok'}>
               {entry.approved}/{total}
             </span>
+            {deferred > 0 && (
+              <span className="text-warn">· {deferred} review required</span>
+            )}
             {topVeto && (
               <span className="text-dim">
                 · {topVeto[0]} <span className="text-fail">×{topVeto[1]}</span>

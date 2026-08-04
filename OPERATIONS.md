@@ -98,16 +98,16 @@ Authoritative list (every variable consumed by the pipeline):
 | `ANTHROPIC_API_KEY` | Yes (primary creative LLM) | LLMEnsemble, ChiefDirector, scene decomposition |
 | `OPENAI_API_KEY` | Yes (primary judge / GPT-4o-only paths) | LLMEnsemble, style director, dialogue writer, scene decomposer fallback |
 | `GEMINI_API_KEY` | Optional | Opt-in Gemini dispatch via `models=["gemini-3.1-pro-preview", ...]`; also `gemini_omni_native.GeminiOmniAPI` (video, WS2 `GEMINI_OMNI` — the `target_api` PRIMARY for all shot types) and `gemini_image_native.GeminiImageAPI` (image, WS3 Nano Banana 2 — the image PRIMARY by default policy, gated per-shot on a character reference being present; a project sets `identity_backend="pod"` to opt out). Both accept either this or `GOOGLE_API_KEY` (`settings.google_api_key or settings.gemini_api_key`). |
-| `GOOGLE_API_KEY` | Optional | Veo direct API path (falls back to Vertex AI if absent); also `gemini_omni_native.GeminiOmniAPI` (video) and `gemini_image_native.GeminiImageAPI` (image) — same either-key contract as `GEMINI_API_KEY` above. |
+| `GOOGLE_API_KEY` | Optional | Veo Gemini Developer API path when no ADC-ready explicit Vertex project is available. An explicit `GOOGLE_CLOUD_PROJECT` selects Vertex only when Application Default Credentials resolve; otherwise this key is the safe fallback. Also used by `gemini_omni_native.GeminiOmniAPI` (video) and `gemini_image_native.GeminiImageAPI` (image). |
 
 ### Video generation
 
 | Var | Required? | Used by |
 |---|---|---|
-| `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional (legacy fallback) | KLING_NATIVE — legacy kling-v1-6 JWT route (fallback + storyboard mode; primary Kling is fal KLING_3_0 via FAL_KEY since 2026-07-11) |
-| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback. (The FAL-hosted `SORA_2` route is catalogued RETIRED/unreachable — see §10; `SORA_NATIVE`, the surviving pre-sunset Sora fallback, is billed through `OPENAI_API_KEY` instead.) |
-| `LTX_API_KEY` | Optional | LTX_NATIVE direct (preferred over FAL proxy) |
-| `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-Two performance |
+| `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Optional (legacy compatibility) | KLING_NATIVE — deprecated kling-v1-6 JWT route, explicit-only for base video generation (storyboard compatibility remains separate); automatic Kling is fal KLING_3_0 via FAL_KEY |
+| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Veo (fal proxy), Kling 3.0, LTX (proxy), all lipsync engines, music, FLUX image fallback. The FAL-hosted `SORA_2` route is RETIRED/unreachable; native Sora is explicit-only pre-sunset compatibility billed through `OPENAI_API_KEY`. |
+| `LTX_API_KEY` | Optional | LTX native direct (signed input upload + persisted async-v2 job polling; preferred over FAL proxy) |
+| `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4 automatic fallback and Act-Two performance; the Gen-3 dispatch branch is retired |
 
 ### Audio + performance capture
 
@@ -137,15 +137,16 @@ Authoritative list (every variable consumed by the pipeline):
 
 | Var | Default | Purpose |
 |---|---|---|
-| `COMFYUI_SERVER_URL` | `http://127.0.0.1:8188` | Pod address. Set to your RunPod/Railway URL. |
+| `COMFYUI_SERVER_URL` | unset | Pod address. Set explicitly to your RunPod/Railway URL; unset is distinct from an unavailable configured pod. |
+| `COMFYUI_API_KEY` | unset | Optional bearer token for a ComfyUI reverse proxy; leave empty for an unauthenticated local/pod endpoint. |
 | `EXPERIMENTS_DB_PATH` | `data/experiments.db` | SQLite cost tracker DB |
 | `PERFORMANCE_CACHE_DIR` | `data/cache/driving` | Content-hash cache for Mode-B driving videos |
 | `MOTION_GATE_SAMPLES` | `8` | Number of frame pairs sampled by `motion_gate.score_motion_fidelity` |
 | `IDENTITY_EMBED_MODEL` | `GhostFaceNet` | DeepFace embedding backbone for identity QC (single chokepoint: `identity.validator.EMBED_MODEL`). ⚠️ All calibrated identity thresholds assume GhostFaceNet scores — non-default values (e.g. `Buffalo_L`, non-commercial license) fire a structural warning and need a pod re-calibration pass before the gates are meaningful. `AdaFace` selects the vendored adapter (`identity/adaface.py`, ADR-078) — UNCALIBRATED until P5 item 2. |
 | `IDENTITY_ADAFACE_CKPT` | `models/adaface/adaface_ir101_ms1mv2.ckpt` | AdaFace checkpoint path (only consulted when `IDENTITY_EMBED_MODEL=AdaFace`). Download via `scripts/download_adaface_ckpt.py`; a missing file fails LOUD at startup by design. |
 | `IDENTITY_ADAFACE_ARCH` | `ir_101` | Vendored AdaFace net arch (`identity/adaface_net.py` `build_model`); must match the checkpoint. |
-| `WEB_BIND_HOST` | `127.0.0.1` | Flask bind. Set to `0.0.0.0` for LAN access (then tighten `WEB_CORS_ORIGINS`). |
-| `WEB_CORS_ORIGINS` | `localhost-only dev origins` | Comma-separated origin allowlist. `*` opts back into the pre-hardening wide-open behavior. |
+| `WEB_BIND_HOST` | `127.0.0.1` | Loopback-only Flask bind. Non-loopback values are rejected until authenticated remote serving exists. |
+| `WEB_CORS_ORIGINS` | `localhost-only dev origins` | Comma-separated explicit origin allowlist; `*` is rejected. |
 
 ### Minimal viable config
 
@@ -271,8 +272,8 @@ torch 2.11.0 is cu130-only).
 `quality_max.py` (the node-pruning driver referenced by older docs/handoffs)
 was **deleted** in WS1 Task 4 along with `pulid_max.json` — there is no
 max-tier node-availability probe anymore. `scripts/setup_runpod.sh` installs
-what the single production tier (`pulid.json` + the dynamic ControlNet/
-IP-Adapter injection in `phase_c_assembly.py`) actually consumes:
+what the single production tier (`pulid.json` plus its contained FLUX-compatible
+img2img injection in `phase_c_assembly.py`) actually consumes:
 
 - **ComfyUI-PuLID-Flux** (balazik) — `ApplyPulidFlux`, `PulidFluxModelLoader`,
   `PulidFluxEvaClipLoader` (the production identity nodes `pulid.json` uses).
@@ -280,16 +281,16 @@ IP-Adapter injection in `phase_c_assembly.py`) actually consumes:
   class, which `pulid.json`'s face loader node names (balazik's own loader is
   the differently-named `PulidFluxInsightFaceLoader`, which `pulid.json` does
   NOT use); dropping this pack breaks the face-loader node.
-- **ComfyUI_IPAdapter_plus** (cubiq) — `IPAdapterUnifiedLoader` /
-  `IPAdapterAdvanced`, injected by `phase_c_assembly.py`'s IP-Adapter mode.
+- **ComfyUI_IPAdapter_plus** (cubiq) — installed for compatibility with older
+  persistent workflows, but no node from this pack is injected by the current
+  production `pulid.json` path.
 - **InsightFace runtime** (`insightface`, `onnxruntime-gpu`, `facexlib` — pip,
   not a ComfyUI node pack) — required for either PuLID pack's nodes to
   register at all; ComfyUI silently drops every node in a pack that fails to
   import.
-- `DepthAnythingV2Preprocessor` (a `comfyui_controlnet_aux`-family pack, not
-  installed by `setup_runpod.sh`) — used by `phase_c_assembly.py`'s optional
-  ControlNet-depth spatial-lock mode (img2img only); best-effort, catches its
-  own exception and skips the depth pass if the node isn't registered.
+- `DepthAnythingV2Preprocessor` / the old SD1.5 depth ControlNet are **not a
+  production requirement**. The incompatible dynamic depth branch was removed;
+  do not add these to a fresh pod contract for `pulid.json`.
 - `LivePortraitProcess` (Kijai's port, for LivePortrait performance capture)
 - `SadTalker` (for Mode-B driving-video synthesis)
 
@@ -298,9 +299,9 @@ The former max-tier-only nodes (FLUX Union ControlNet Pro, FLUX Redux/
 `DifferentialDiffusion`, `AlignYourStepsScheduler`, `DetailDaemonSamplerNode`,
 `LatentBlend`/`LatentUpscaleBy`, `DWPreprocessor`/`CannyEdgePreprocessor`,
 `FaceDetailer` (Impact Pack), and the three `SUPIR_*` nodes) have no
-production consumer anymore — `pulid_max.json` was deleted with them. Missing
-optional nodes degrade gracefully (production tier just runs without the
-ControlNet-depth pass).
+production consumer anymore — `pulid_max.json` was deleted with them. The
+production init-image path now uses only `LoadImage → VAEEncode` plus the
+provisioned FLUX/PuLID graph.
 
 ### Cost control
 
@@ -523,7 +524,50 @@ the FAL-side flag). Process restart also clears the cooldown.
 ### `ComfyUI pod not responding` / workflows fail
 
 Check `COMFYUI_SERVER_URL` — `curl $COMFYUI_SERVER_URL/object_info` should
-return JSON. If it doesn't, the pod is down, throttled, or the URL is wrong.
+return JSON. If the proxy is authenticated, include
+`-H "Authorization: Bearer $COMFYUI_API_KEY"`. Generation preflight also
+requires `/models` and `/queue`; its error names missing node classes, inputs,
+or configured model choices. During execution, `/ws` terminal errors are
+reported immediately and history polling is used if WebSocket attachment is
+unavailable. If these probes fail, the pod is down, throttled, unauthorized, or
+its installed graph contract does not match `pulid.json`.
+
+### A native provider reports a deferred or recovery-required job
+
+The dispatcher deliberately stops before the next provider whenever LTX,
+Gemini Omni, or native Veo may already have accepted billable work. The Review
+UI shows the durable recovery record instead of presenting a failed take.
+
+For LTX, do not delete the `.ltx-image-to-video-*.job.json` sidecar or manually
+reroute the shot while its state is `submitted`, `pending`, `processing`,
+`completed`, or `submission_unknown`. Use **Check / Resume LTX Job** to resume an
+exact known job. For `submission_unknown`, reconcile the request with
+LTX/provider billing first.
+
+Gemini/Veo records are labelled **Manual Recovery Required**. Copy the displayed
+exact job ID and reconcile it in the corresponding provider console; automatic
+Google-job resume is not implemented. Do not clear the marker or start a
+fallback until you have confirmed that no job was accepted, recovered and
+accounted for the accepted result, or explicitly authorized a new paid
+generation.
+
+Keyframe generation uses the same fail-closed rule. If Review shows **Keyframe
+Job Recovery Required**, inspect the ComfyUI queue/history using the displayed
+prompt ID when one is available. Recover and register any valid output, or
+confirm that no live/recoverable job remains and account for any billable work.
+Only then use **Confirm Manual Reconciliation**. That button clears the durable
+shot marker through `POST .../keyframes/recovery/resolve`; it does not cancel,
+retry, or create a take. All keyframe-generation and iteration controls remain
+disabled until the refreshed project confirms the marker is gone. A fresh
+`submission_claimed` record cannot be cleared during its displayed active
+window (600-second provider deadline plus a 60-second safety margin); the API
+returns 409 and leaves the marker untouched. Late responses are attempt-bound
+and cannot clear or publish over a newer claim.
+
+An LTX sidecar in explicit terminal `failed` or `expired` state does not need
+manual deletion: an identical retry supersedes it under a per-request file
+lock. Never delete or override pending, processing, submission-claimed, or
+unknown sidecars.
 
 ### SSE connection drops repeatedly
 
@@ -531,9 +575,8 @@ Bundle-C 3.1 added exponential-backoff reconnect (1s/2s/4s/.../30s, 10
 attempts). If you're seeing repeated drops in the browser console, check:
 - Network stability between client and `web_server.py`
 - Whether `web_server.py` daemon thread crashed (SSE generator emits END)
-- Whether a corporate proxy is closing long-lived connections (set
-  `WEB_BIND_HOST=0.0.0.0` and access via LAN IP to bypass localhost
-  proxying quirks)
+- Whether a corporate proxy is closing long-lived connections; keep the
+  application loopback-only and configure the proxy to bypass localhost.
 
 ### Cost tracking shows $0 despite real API calls
 
@@ -573,7 +616,7 @@ calibrate against your own invoices — will drift):
 | Kling v3 Pro (FAL) | ~$0.56 | Portrait/medium primary FALLBACK since 2026-07-11 (`KLING_3_0`) |
 | Kling Native | ~$0.50 | Legacy kling-v1-6 fallback (pre-v3 estimate) |
 | Seedance (FAL) | ~$1.51 | Action-shot primary fallback — notably the priciest engine; action-heavy projects should budget for this, not the older Sora figure below |
-| Sora (native, via OpenAI) | ~$0.80 | `SORA_NATIVE` — action-cascade fallback only, and only until its 2026-09-24 sunset. The FAL-hosted `SORA_2` route is retired/unreachable; do not budget for it. |
+| Sora (native, via OpenAI) | ~$0.80 | `SORA_NATIVE` — explicit-only compatibility until its 2026-09-24 sunset; absent from automatic/template cascades. The FAL-hosted `SORA_2` route is retired/unreachable. |
 | Runway Gen4 | ~$0.50 | Premium fallback |
 | LTX | $0.36 floor (6s) – ~$0.48 (8s, the dispatcher's shared default) | Cheapest native video provider; billed duration-true off the actual dispatched length (6/8/10s only), not a flat per-clip guess |
 | SadTalker | ~$0.045/5s shot (GPU-time estimate) | Mode-B driving-video synthesis (cached) |

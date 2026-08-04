@@ -249,6 +249,13 @@ class CinemaPipeline:
         self._runstate.current_shot_id = value
 
     @property
+    def headless(self) -> bool:
+        return self._runstate.headless
+    @headless.setter
+    def headless(self, value: bool) -> None:
+        self._runstate.headless = value
+
+    @property
     def _completed_scene_indices(self) -> set:
         return self._runstate.completed_scene_indices
     @_completed_scene_indices.setter
@@ -276,6 +283,9 @@ class CinemaPipeline:
 
     def regenerate_with_intent(self, *args, **kwargs):
         return self._shot_ctrl.regenerate_with_intent(*args, **kwargs)
+
+    def resolve_deferred_keyframe_job(self, *args, **kwargs):
+        return self._shot_ctrl.resolve_deferred_keyframe_job(*args, **kwargs)
 
     def diagnose_clip(self, *args, **kwargs):
         return self._shot_ctrl.diagnose_clip(*args, **kwargs)
@@ -1144,9 +1154,19 @@ class CinemaPipeline:
             project=project,
             on_failure=_on_keyframe_fail,
         ).run(ctx)
-        self.progress("KEYFRAME_DONE", keyframe_result.message, 50)
         if self.lifecycle.is_cancelled():
             self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+            return None
+        if keyframe_result.ok:
+            self.progress("KEYFRAME_DONE", keyframe_result.message, 50)
+        else:
+            # Budget refusal and provider ambiguity are deliberate phase
+            # stops, not successful completion. Preserve the durable project
+            # marker and do not enter KEYFRAME_REVIEW under a misleading DONE
+            # event (or continue toward downstream paid work).
+            self._runstate.update_progress_pointer("KEYFRAME_REVIEW", "", "")
+            self.progress("KEYFRAME_HALTED", keyframe_result.message, 40)
+            self._save_checkpoint()
             return None
 
         if not self._wait_for_gate("KEYFRAME_REVIEW", "Approve all keyframes to continue", 55):
@@ -1219,11 +1239,12 @@ class CinemaPipeline:
                 shot_id=shot_id,
             )
 
-        motion_result = MotionRenderPhase(
+        motion_phase = MotionRenderPhase(
             shot_generator=self,
             project=project,
             on_failure=_on_motion_fail,
-        ).run(ctx)
+        )
+        motion_result = motion_phase.run(ctx)
         # An aborted phase (budget halt, cancel) must NOT announce
         # MOTION_DONE at 80% — that event replaces `latest` in the UI and
         # masks the halt the operator needs to see (operator Lane V K2
@@ -1232,7 +1253,32 @@ class CinemaPipeline:
         if motion_result.ok:
             self.progress("MOTION_DONE", motion_result.message, 80)
         else:
-            self.progress("MOTION_HALTED", motion_result.message, 72)
+            halt_context = dict(motion_phase.deferred_job)
+            self.progress(
+                "MOTION_HALTED",
+                motion_result.message,
+                72,
+                **halt_context,
+            )
+            if self.lifecycle.is_cancelled():
+                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+                return None
+            if halt_context.get("code") == "provider_job_deferred":
+                # Keep the public recovery descriptor in normal checkpointed
+                # run-state without replacing keyframe data already recorded
+                # for this shot. Provider-local paths and request fingerprints
+                # were stripped at the phase boundary.
+                shot_id = halt_context.get("shot_id")
+                if isinstance(shot_id, str) and shot_id:
+                    existing = self.shot_results.get(shot_id)
+                    existing = dict(existing) if isinstance(existing, dict) else {}
+                    existing.update({
+                        "motion_status": "provider_job_deferred",
+                        "deferred_job": halt_context.get("deferred_job", {}),
+                    })
+                    self.shot_results[shot_id] = existing
+            self._save_checkpoint()
+            return None
         if self.lifecycle.is_cancelled():
             self.progress("CANCELLED", "Pipeline cancelled by user", 0)
             return None

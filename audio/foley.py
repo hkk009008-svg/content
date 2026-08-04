@@ -21,6 +21,7 @@ from typing import Optional
 
 import requests
 from config.settings import settings
+from performance._net import atomic_publish_bytes, validate_audio_artifact
 
 
 # ---------------------------------------------------------------------------
@@ -171,8 +172,24 @@ def generate_stability_foley(
         )
         r.raise_for_status()
 
-        with open(output_path, "wb") as f:
-            f.write(r.content)
+        response_content_type = r.headers.get("content-type", "")
+        if not isinstance(response_content_type, str):
+            response_content_type = ""
+        if atomic_publish_bytes(
+            r.content,
+            output_path,
+            max_bytes=256 * 1024 * 1024,
+            content_type=response_content_type,
+            allowed_content_types=(
+                "audio/mpeg",
+                "audio/mp3",
+                "audio/wav",
+                "audio/x-wav",
+                "application/octet-stream",
+            ),
+            content_validator=validate_audio_artifact,
+        ) is None:
+            raise RuntimeError("Stable Audio response failed audio validation")
         print(f"   ✅ Stable Audio Foley saved as: {output_path}")
         # Best-effort cost tracking — M-B2 closure (cycle-16). STABILITY_FOLEY
         # was in API_COST_USD ($0.03) since cycle-15 v0.9.6 but had no

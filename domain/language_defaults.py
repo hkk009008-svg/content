@@ -7,12 +7,8 @@ from English defaults:
     Cartesia Sonic 3.5 Korean, etc.) — pick those over multilingual fallbacks.
   - Voice pool filter — surface only voices that sound native in the target
     language.
-  - Lipsync engine priority — most are language-agnostic (audio-driven), but
-    a few (MuseTalk) were trained primarily on English/Chinese and produce
-    weaker results on Korean phonemes. Reorder to lead with multi-language
-    engines (sync.so v3, OmniHuman v1.5).
-  - Per-purpose API ranking — for dialogue purposes, prefer engines with
-    proven non-English performance.
+  - Lip-sync validation thresholds — tune how strictly generated dialogue is
+    checked without pretending the fixed runtime cascades are user-reorderable.
 
 PHILOSOPHY
 ----------
@@ -51,11 +47,8 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK", "LATENTSYNC", "OMNIHUMAN_V1_5", "SYNC_V2"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
-        # Per-purpose video API picks for dialogue
-        "dialogue_video_api": "KLING_NATIVE",
         # Voice pool filter — voice categories to surface in pickers
         "voice_pool_filter": None,  # None = no filter, all voices
         # Recommended character voices (auto-assigned for new characters)
@@ -68,15 +61,10 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",          # Korean voices have native prosody
         "dialogue_mode_enabled": True,            # multi-speaker Korean works well
         "forced_alignment_enabled": True,         # WhisperX has Korean wav2vec2
-        # sync-3 leads (multi-language native). MuseTalk demoted (English/Chinese-trained).
-        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK", "SYNC_V2"],
         "lipsync_quality_validation": True,
         # Slightly stricter gate for Korean — phoneme set is narrower so misses
         # are more obvious to native speakers
         "lipsync_validation_threshold": 0.70,
-        # For Korean dialogue close-ups, Kling 3.0 + sync-3 is the gold path.
-        # Veo 3.1 native-audio is a strong second when you need built-in sync.
-        "dialogue_video_api": "KLING_NATIVE",
         "voice_pool_filter": ["korean_woman", "korean_man"],
         "default_male_voice": "1W00IGEmNmwmsDeYy7ag",    # 준호 (Junho) — deep narrator
         "default_female_voice": "uyVNoMrnUku1dZyVEXwD", # 안나 (Anna) — warm conversational
@@ -92,10 +80,8 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.70,
-        "dialogue_video_api": "KLING_NATIVE",
         "voice_pool_filter": None,  # no JP-tagged voices in pool yet
         "default_male_voice": "pNInz6obpgDQGcFmaJgB",
         "default_female_voice": "21m00Tcm4TlvDq8ikWAM",
@@ -105,11 +91,8 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        # MuseTalk back to higher priority — its training set included Chinese
-        "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK", "LATENTSYNC", "OMNIHUMAN_V1_5"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
-        "dialogue_video_api": "KLING_NATIVE",
         "voice_pool_filter": None,
         "default_male_voice": "pNInz6obpgDQGcFmaJgB",
         "default_female_voice": "21m00Tcm4TlvDq8ikWAM",
@@ -122,10 +105,8 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "tts_provider": "ELEVENLABS_V3",
         "dialogue_mode_enabled": True,
         "forced_alignment_enabled": True,
-        "lipsync_engine_priority": ["SYNC_SO_V3", "LATENTSYNC", "OMNIHUMAN_V1_5", "MUSETALK"],
         "lipsync_quality_validation": True,
         "lipsync_validation_threshold": 0.65,
-        "dialogue_video_api": "KLING_NATIVE",
         "voice_pool_filter": None,
         "default_male_voice": "pNInz6obpgDQGcFmaJgB",
         "default_female_voice": "21m00Tcm4TlvDq8ikWAM",
@@ -148,7 +129,6 @@ APPLIED_SETTINGS_FIELDS = (
     "tts_provider",
     "dialogue_mode_enabled",
     "forced_alignment_enabled",
-    "lipsync_engine_priority",
     "lipsync_quality_validation",
     "lipsync_validation_threshold",
 )

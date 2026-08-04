@@ -98,4 +98,94 @@ describe('TakeStrip', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/already/resolved/kf.jpg'))
   })
+
+  it.each(['PASS', 'FAIL', 'UNKNOWN'] as const)(
+    'renders the persisted lip-sync validation state %s explicitly',
+    async (state) => {
+      vi.stubGlobal('fetch', vi.fn(async () => okResponse()))
+
+      render(
+        <TakeStrip
+          projectId="p1"
+          motionUrl="motion.mp4"
+          lipsyncValidationState={state}
+          lipsyncCascadeMetadata={{
+            engine: 'SYNC_SO_V3',
+            score: state === 'UNKNOWN' ? null : state === 'PASS' ? 0.8 : 0.4,
+            threshold: 0.65,
+            validation_state: state,
+          }}
+        />,
+      )
+
+      expect(
+        screen.getByRole('status', { name: `Lip-sync validation: ${state}` }),
+      ).toBeInTheDocument()
+      await waitFor(() =>
+        expect(document.querySelectorAll('[data-media-state="ready"]')).toHaveLength(1),
+      )
+    },
+  )
+
+  it('treats provider-native dialogue audio without measured sync evidence as UNKNOWN, never PASS', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse()))
+
+    render(
+      <TakeStrip
+        projectId="p1"
+        motionUrl="native-dialogue.mp4"
+        hasDialogue={true}
+        cascadeMetadata={{ engine: 'VEO_NATIVE', native_audio_generated: true }}
+      />,
+    )
+
+    expect(screen.getByText('Native audio')).toBeInTheDocument()
+    expect(
+      screen.getByRole('status', { name: 'Lip-sync validation: UNKNOWN' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Manual review required')).toBeInTheDocument()
+    expect(screen.queryByText('Lip-sync PASS')).toBeNull()
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-media-state="ready"]')).toHaveLength(1),
+    )
+  })
+
+  it('treats dialogue with no lip-sync metadata at all as UNKNOWN', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse()))
+
+    render(
+      <TakeStrip
+        projectId="p1"
+        motionUrl="dialogue-without-evidence.mp4"
+        hasDialogue={true}
+      />,
+    )
+
+    expect(
+      screen.getByRole('status', { name: 'Lip-sync validation: UNKNOWN' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Manual review required')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-media-state="ready"]')).toHaveLength(1),
+    )
+  })
+
+  it('normalizes an unrecognized future validation value to fail-closed UNKNOWN', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse()))
+
+    render(
+      <TakeStrip
+        projectId="p1"
+        motionUrl="motion.mp4"
+        lipsyncValidationState="UNAVAILABLE"
+      />,
+    )
+
+    expect(
+      screen.getByRole('status', { name: 'Lip-sync validation: UNKNOWN' }),
+    ).toBeInTheDocument()
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-media-state="ready"]')).toHaveLength(1),
+    )
+  })
 })

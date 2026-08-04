@@ -57,7 +57,7 @@ API_COST_USD: dict[str, float] = {
     "VEO_NATIVE":    0.30,
     "GEMINI_OMNI":   0.56,   # $0.112/s x ~5s estimate (Gemini Developer API preview pricing — WEB-VERIFIED NOT REPO-MEASURED, confirm against a live billed call per R-MEASURE). Duration is prompt-inferred/variable on this API (no structured duration kwarg), so this flat per-clip estimate risks the exact under-billing pattern SEEDANCE needed fixing for on 2026-07-11 (see SEEDANCE_DURATIONS, phase_c_ffmpeg.py:38) — a duration-probe (ffprobe on the downloaded mp4) fix is recommended before this is load-bearing at scale, not shipped in this first pass.
     "VEO":           0.25,
-    "LTX":           0.36,   # FLOOR ESTIMATE (pre-spend gate / no-duration callers only): fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.video pricing unverified. The dispatcher's shared default duration is 8s (phase_c_ffmpeg.generate_ai_video(duration="8s")), so this 6s-assuming flat figure under-records ~33% on default shots — record_api_call(duration_seconds=...) computes the TRUE per-second cost from API_COST_PER_SECOND_USD below whenever the caller supplies the actual dispatched duration (money-gate finding 2026-07-30).
+    "LTX":           0.36,   # FLOOR ESTIMATE (pre-spend gate / no-duration callers only): fal ltx-2.3 $0.06/s audio-off @1080p x 6s MINIMUM duration (fal OpenAPI + model page 2026-07-11); native api.ltx.io pricing unverified. The dispatcher's shared default duration is 8s (phase_c_ffmpeg.generate_ai_video(duration="8s")), so this 6s-assuming flat figure under-records ~33% on default shots — record_api_call(duration_seconds=...) computes the TRUE per-second cost from API_COST_PER_SECOND_USD below whenever the caller supplies the actual dispatched duration (money-gate finding 2026-07-30).
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
     "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
@@ -317,25 +317,66 @@ class CostTracker:
 
     def _create_table(self):
         with self._conn_lock:
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS cost_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT DEFAULT (datetime('now')),
-                    provider TEXT,
-                    model TEXT,
-                    operation TEXT,
-                    input_tokens INTEGER DEFAULT 0,
-                    output_tokens INTEGER DEFAULT 0,
-                    cost_usd REAL DEFAULT 0.0,
-                    shot_id TEXT,
-                    video_id TEXT
-                );
-            """)
-            self.conn.commit()
+            try:
+                # Serialize the additive migration across processes opening the
+                # same project database for the first time after upgrade.
+                self.conn.execute("BEGIN IMMEDIATE")
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS cost_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT DEFAULT (datetime('now')),
+                        provider TEXT,
+                        model TEXT,
+                        operation TEXT,
+                        input_tokens INTEGER DEFAULT 0,
+                        output_tokens INTEGER DEFAULT 0,
+                        cost_usd REAL DEFAULT 0.0,
+                        shot_id TEXT,
+                        video_id TEXT,
+                        provider_job_id TEXT NOT NULL DEFAULT ''
+                    );
+                """)
+                columns = {
+                    row["name"]
+                    for row in self.conn.execute("PRAGMA table_info(cost_log)")
+                }
+                if "provider_job_id" not in columns:
+                    self.conn.execute(
+                        "ALTER TABLE cost_log ADD COLUMN "
+                        "provider_job_id TEXT NOT NULL DEFAULT ''"
+                    )
+                # A provider job represents one invoice even if recovery sees
+                # the completed result more than once.  Empty IDs retain the
+                # historical append-every-call behavior.
+                self.conn.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        idx_cost_log_provider_job_unique
+                    ON cost_log(provider, provider_job_id)
+                    WHERE provider_job_id <> ''
+                """)
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Logging helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalized_provider_job_id(provider_job_id: Optional[str]) -> str:
+        """Return a safe exact idempotency key, or ``""`` when not supplied."""
+        if provider_job_id is None or provider_job_id == "":
+            return ""
+        if not isinstance(provider_job_id, str):
+            raise ValueError("provider_job_id must be a string when supplied")
+        if provider_job_id != provider_job_id.strip():
+            raise ValueError("provider_job_id must not contain surrounding whitespace")
+        if len(provider_job_id) > 512:
+            raise ValueError("provider_job_id must be at most 512 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in provider_job_id):
+            raise ValueError("provider_job_id must not contain control characters")
+        return provider_job_id
 
     def log(
         self,
@@ -347,8 +388,9 @@ class CostTracker:
         output_tokens: int = 0,
         shot_id: str = "",
         video_id: str = "",
+        provider_job_id: Optional[str] = None,
     ) -> CostEntry:
-        """Insert a cost record into the database."""
+        """Insert a cost record, idempotently when a provider job ID is known."""
         # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
         ts = datetime.now(timezone.utc).isoformat()
         # Guard against NaN/inf cost_usd: a non-finite value poisons the
@@ -369,14 +411,21 @@ class CostTracker:
                 stacklevel=3,
             )
             cost_usd = 0.0
+        normalized_job_id = self._normalized_provider_job_id(provider_job_id)
         with self._conn_lock:
-            self.conn.execute(
+            cursor = self.conn.execute(
                 """
-                INSERT INTO cost_log
-                    (timestamp, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO cost_log
+                    (timestamp, provider, model, operation, input_tokens,
+                     output_tokens, cost_usd, shot_id, video_id,
+                     provider_job_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ts, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id),
+                (
+                    ts, provider, model, operation, input_tokens,
+                    output_tokens, cost_usd, shot_id, video_id,
+                    normalized_job_id,
+                ),
             )
             self.conn.commit()
             # spent_usd mirrors the persisted spend. Increment at this sole write
@@ -384,7 +433,8 @@ class CostTracker:
             # reaches the in-process accumulator the budget gate reads
             # (would_exceed/is_over_budget). Placed AFTER commit so a failed INSERT
             # never inflates the accumulator.
-            self.spent_usd += cost_usd
+            if cursor.rowcount == 1:
+                self.spent_usd += cost_usd
         return CostEntry(
             timestamp=ts,
             provider=provider,
@@ -445,6 +495,7 @@ class CostTracker:
         cost_usd: float,
         shot_id: str = "",
         video_id: str = "",
+        provider_job_id: Optional[str] = None,
     ) -> CostEntry:
         """Direct cost logging for video/image API calls (non-token-based)."""
         return self.log(
@@ -456,6 +507,7 @@ class CostTracker:
             output_tokens=0,
             shot_id=shot_id,
             video_id=video_id,
+            provider_job_id=provider_job_id,
         )
 
     @staticmethod
@@ -535,6 +587,7 @@ class CostTracker:
         shot_id: str = "",
         video_id: str = "",
         duration_seconds: Optional[float] = None,
+        provider_job_id: Optional[str] = None,
     ) -> float:
         """Record a generation API call against the budget.
 
@@ -563,6 +616,9 @@ class CostTracker:
                 (explicit cost always wins), the api has no per-second rate,
                 or the duration is non-finite/non-positive/non-numeric/bool —
                 falls back to the flat table exactly as before.
+            provider_job_id: Opaque provider-issued job identifier. Repeated
+                records for the same provider and non-empty job ID are ignored
+                durably, so recovery cannot charge one invoice twice.
         """
         api_upper = api_name.upper()
         if cost_usd is None:
@@ -612,6 +668,7 @@ class CostTracker:
             cost_usd=cost_usd,
             shot_id=shot_id,
             video_id=video_id,
+            provider_job_id=provider_job_id,
         )
         # spent_usd is incremented inside log() (the sole write chokepoint that
         # log_api delegates to), so accumulating it again here would double-count.

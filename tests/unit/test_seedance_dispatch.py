@@ -65,7 +65,9 @@ def _run_seedance(
             # download_ok=False simulates a BILLED generation whose download
             # fails (safe_download contract: None on failure).
             phase_c_ffmpeg.safe_download = (
-                (lambda url, out: out) if download_ok else (lambda url, out: None)
+                (lambda url, out, **_kwargs: out)
+                if download_ok
+                else (lambda url, out, **_kwargs: None)
             )
             result = phase_c_ffmpeg.generate_ai_video(
                 image_path="/tmp/keyframe.png",

@@ -39,6 +39,7 @@ class VideoPolicyReason(StrEnum):
     NON_VIDEO = "non_video"
     NOT_SELECTABLE = "not_selectable"
     NOT_DISPATCHABLE = "not_dispatchable"
+    NOT_AUTOMATIC = "not_automatic"
     RETIRED = "retired"
     UNSUPPORTED = "unsupported"
     RUNTIME_UNAVAILABLE = "runtime_unavailable"
@@ -124,7 +125,6 @@ PORTRAIT_CAPABLE_VIDEO_ENGINES = frozenset(
         "KLING_NATIVE",
         "KLING_3_0",
         "RUNWAY_GEN4",
-        "RUNWAY",
         "SEEDANCE",
         # Slice 3: repaired adapter declares the documented 9:16 support
         # (catalog ParameterConstraint aspect_ratio 16:9|9:16).
@@ -289,20 +289,16 @@ def _iter_unique_engine_keys(
         yield key
 
 
-def filter_dispatch_candidates(
+def _filter_dispatch_candidates(
     candidates: Iterable[object],
     *,
     snapshot: RuntimeSnapshot | None = None,
     on_date: date | None = None,
     api_engines: Mapping[str, object] | None = None,
     aspect_ratio: object = None,
+    automatic: bool,
 ) -> VideoCandidateResult:
-    """Filter a future ordered dispatch chain without performing dispatch.
-
-    Non-selectable fallbacks such as ``KLING_NATIVE`` and pre-sunset
-    ``SORA_NATIVE`` may survive here.  ``AUTO`` never does: it is a storage and
-    router sentinel, not an executable engine.
-    """
+    """Shared ordered-candidate filter; ``automatic`` adds a lifecycle fence."""
 
     current = _snapshot_or_default(snapshot)
     accepted: list[str] = []
@@ -318,7 +314,9 @@ def filter_dispatch_candidates(
         reason = _catalog_reason(key, on_date=on_date)
         if reason is None:
             policy = effective_policy(key, on_date=on_date)
-            if not policy.dispatchable or not policy.spendable:
+            if automatic and policy.lifecycle is not Lifecycle.ACTIVE:
+                reason = VideoPolicyReason.NOT_AUTOMATIC
+            elif not policy.dispatchable or not policy.spendable:
                 reason = VideoPolicyReason.NOT_DISPATCHABLE
             elif _is_project_disabled(key, api_engines):
                 reason = VideoPolicyReason.PROJECT_DISABLED
@@ -339,6 +337,55 @@ def filter_dispatch_candidates(
     return VideoCandidateResult(
         candidates=tuple(accepted),
         rejections=tuple(rejected),
+    )
+
+
+def filter_dispatch_candidates(
+    candidates: Iterable[object],
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
+) -> VideoCandidateResult:
+    """Filter an explicitly requested dispatch chain without dispatching.
+
+    Deprecated compatibility engines may survive here when a caller names
+    them explicitly. ``AUTO`` never survives: it is a storage/router sentinel.
+    """
+
+    return _filter_dispatch_candidates(
+        candidates,
+        snapshot=snapshot,
+        on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
+        automatic=False,
+    )
+
+
+def filter_automatic_dispatch_candidates(
+    candidates: Iterable[object],
+    *,
+    snapshot: RuntimeSnapshot | None = None,
+    on_date: date | None = None,
+    api_engines: Mapping[str, object] | None = None,
+    aspect_ratio: object = None,
+) -> VideoCandidateResult:
+    """Filter an automatic seed, excluding every non-active lifecycle.
+
+    This is the boundary for templates, optimizer suggestions, and ``AUTO``
+    fallback lists. Deprecated engines remain available only through an
+    explicit concrete target handled by :func:`filter_dispatch_candidates`.
+    """
+
+    return _filter_dispatch_candidates(
+        candidates,
+        snapshot=snapshot,
+        on_date=on_date,
+        api_engines=api_engines,
+        aspect_ratio=aspect_ratio,
+        automatic=True,
     )
 
 
@@ -392,7 +439,7 @@ def resolve_workflow_candidates(
 ) -> VideoCandidateResult:
     """Resolve historical workflow order into a safe future routing view."""
 
-    return filter_dispatch_candidates(
+    return filter_automatic_dispatch_candidates(
         (primary, *fallbacks),
         snapshot=snapshot,
         on_date=on_date,
@@ -409,6 +456,7 @@ __all__ = [
     "build_runtime_snapshot",
     "eligible_shot_targets",
     "evaluate_shot_target",
+    "filter_automatic_dispatch_candidates",
     "filter_dispatch_candidates",
     "is_video_aspect_compatible",
     "PORTRAIT_CAPABLE_VIDEO_ENGINES",

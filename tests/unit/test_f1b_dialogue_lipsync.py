@@ -116,7 +116,7 @@ def _write_owned_video_candidate(*args, **kwargs):
 class TestAutoApproveGateFix:
     """
     Test that _best_take_lipsync correctly fails unverified dialogue takes
-    and passes audio_embedded / non-dialogue takes.
+    and preserves only non-dialogue as the N/A case.
     """
 
     def test_gate_fails_dialogue_take_with_no_lipsync_and_not_embedded(self):
@@ -133,17 +133,17 @@ class TestAutoApproveGateFix:
             f"Unverified dialogue take should score 0.0, got {score}"
         )
 
-    def test_gate_passes_audio_embedded_dialogue_take(self):
+    def test_gate_fails_unmeasured_audio_embedded_dialogue_take(self):
         """
-        (c) A take with audio_embedded=True is a native-audio take — gate passes.
+        (c) audio_embedded proves audio presence, not synchronization quality.
         """
         from cinema.auto_approve import _best_take_lipsync
         takes = [
             _make_take("t1", has_dialogue=True, audio_embedded=True),
         ]
         score = _best_take_lipsync(takes)
-        assert score == pytest.approx(1.0), (
-            f"audio_embedded take should score 1.0, got {score}"
+        assert score == pytest.approx(0.0), (
+            f"unmeasured audio_embedded take should score 0.0, got {score}"
         )
 
     def test_gate_passes_non_dialogue_take(self):
@@ -238,9 +238,9 @@ class TestAutoApproveGateFix:
             f"Expected lipsync veto reason in {decision.vetoes}"
         )
 
-    def test_gate_with_check_gate_passes_embedded_dialogue(self):
+    def test_gate_with_check_gate_vetoes_unmeasured_embedded_dialogue(self):
         """
-        Integration: check_gate("final") should NOT veto an audio_embedded take.
+        Integration: audio_embedded without measured sync must be vetoed.
         """
         from cinema.auto_approve import (
             AutoApproveConfig, check_gate,
@@ -271,10 +271,11 @@ class TestAutoApproveGateFix:
             takes=[embedded_take],
             config=config,
         )
-        assert decision.auto_approved is True, (
-            f"audio_embedded dialogue take should pass the final gate; "
+        assert decision.auto_approved is False, (
+            f"unmeasured audio_embedded dialogue take should be vetoed; "
             f"vetoes={decision.vetoes}"
         )
+        assert "final_lipsync_unverified" in decision.rule_names
 
 
 # ---------------------------------------------------------------------------
@@ -741,7 +742,7 @@ class TestGenerateMotionTakeOverlayWiring:
             shot["optimizer_cache"]["spec"]["purpose"] = "establishing"
         return project
 
-    def _run_motion_take_minimal(self, project, tmp_path):
+    def _run_motion_take_minimal(self, project, tmp_path, *, lipsync_score=0.91):
         ctrl, host = self._build_controller(project, tmp_path)
         audio_file = str(tmp_path / "shot_tts.mp3")
         open(audio_file, "wb").write(b"a")
@@ -764,7 +765,7 @@ class TestGenerateMotionTakeOverlayWiring:
             ),
             patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
             patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
-            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("lip_sync.validate_lipsync_quality", return_value=lipsync_score),
             patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
             patch("cinema.shots.controller._probe_duration", return_value=3.5),
             patch("workflow_selector.classify_shot_type", return_value="medium"),
@@ -786,6 +787,37 @@ class TestGenerateMotionTakeOverlayWiring:
         project = self._make_pinned_non_auto_project(tmp_path, dialogue=False)
         result = self._run_motion_take_minimal(project, tmp_path)
         assert result.get("success") is True
+
+    def test_unknown_lipsync_score_serializes_state_without_format_error(self, tmp_path):
+        """The controller persists UNKNOWN/null and never formats None as %.3f."""
+        project = self._make_pinned_non_auto_project(tmp_path, dialogue=True)
+
+        result = self._run_motion_take_minimal(
+            project,
+            tmp_path,
+            lipsync_score=None,
+        )
+
+        assert result.get("success") is True
+        metadata = result["take"]["metadata"]
+        assert metadata["lipsync_score"] is None
+        assert metadata["lipsync_validation_state"] == "UNKNOWN"
+        assert metadata["dialogue_audio_in_clip"] is True
+
+    def test_native_audio_records_unknown_not_perfect_lipsync(self, tmp_path):
+        """Embedded native audio is structural presence, not measured sync quality."""
+        project = self._make_overlay_dialogue_project(
+            tmp_path,
+            voice_mode="native",
+        )
+
+        result = self._run_motion_take_minimal(project, tmp_path)
+
+        assert result.get("success") is True
+        metadata = result["take"]["metadata"]
+        assert metadata["audio_embedded"] is True
+        assert metadata["lipsync_score"] is None
+        assert metadata["lipsync_validation_state"] == "UNKNOWN"
 
     def test_overlay_wiring_calls_real_generate_motion_take(self, tmp_path):
         """
@@ -889,10 +921,10 @@ class TestGenerateMotionTakeOverlayWiring:
             f"take metadata must carry a positive lipsync_score; got {lipsync_score!r}"
         )
 
-    def test_lipsync_fail_writes_zero_score(self, tmp_path):
+    def test_lipsync_no_output_writes_unknown_evidence(self, tmp_path):
         """
         When generate_lip_sync_video returns None (lipsync failure), the take
-        metadata must carry lipsync_score=0.0 — not absent, not 1.0.
+        metadata must carry None/UNKNOWN — not a fabricated numeric score.
 
         Calls the REAL generate_motion_take; generate_lip_sync_video mocked to
         return None to simulate the failure branch.
@@ -933,9 +965,24 @@ class TestGenerateMotionTakeOverlayWiring:
 
         assert result.get("success") is True, f"generate_motion_take returned failure: {result}"
         lipsync_score = _captured_take.get("metadata", {}).get("lipsync_score")
-        assert lipsync_score == pytest.approx(0.0), (
-            f"Failed lipsync must write lipsync_score=0.0 to take metadata; got {lipsync_score!r}"
+        metadata = _captured_take.get("metadata", {})
+        assert lipsync_score is None
+        assert metadata.get("lipsync_validation_state") == "UNKNOWN"
+
+        from cinema.auto_approve import AutoApproveConfig, check_gate
+
+        gate = check_gate(
+            "final",
+            shot_state=project["scenes"][0]["shots"][0],
+            project=project,
+            takes=[_captured_take],
+            config=AutoApproveConfig(
+                final_min_lipsync=0.0,
+                final_require_human_if_upstream_auto=False,
+            ),
         )
+        assert gate.auto_approved is False
+        assert "final_lipsync_unverified" in gate.rule_names
 
     def test_overlay_dialogue_budget_gate_counts_mandatory_lipsync_before_video(self, tmp_path):
         """Near-budget overlay dialogue refuses before video when video+lipsync exceeds cap."""

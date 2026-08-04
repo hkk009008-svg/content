@@ -1,5 +1,4 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VoiceSection } from './VoiceSection'
 import type { AppConfig } from '../../../types/project'
@@ -9,8 +8,8 @@ import type { AppConfig } from '../../../types/project'
  *  - the WPM hint no longer claiming the pacing control is unwired (it is —
  *    audio/dialogue.py's generate_dialogue_voiceover calls _apply_target_pace
  *    on both the dialogue-mode and per-line paths)
- *  - the lipsync-priority caption honestly disclosing it isn't read by the
- *    overlay/generation cascades yet (lip_sync.py hardcodes its own order)
+ *  - the inert lipsync-priority editor is absent (lip_sync.py owns fixed
+ *    overlay/generation cascades)
  *  - language selection invoking the apply-language-defaults contract and
  *    surfacing which fields changed, exactly once per real change (never on
  *    mount)
@@ -57,10 +56,11 @@ describe('VoiceSection', () => {
     expect(screen.getByText(/applied via an atempo post-process/i)).toBeInTheDocument()
   })
 
-  it('discloses that lipsync engine priority is not yet read by the cascades', () => {
+  it('does not render the inert lipsync engine-priority editor', () => {
     render(<VoiceSection s={{}} config={mockConfig()} update={vi.fn()} />)
 
-    expect(screen.getByText(/not yet read by the overlay\/generation cascades/i)).toBeInTheDocument()
+    expect(screen.queryByText(/lipsync engine priority/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /move .* (up|down)/i })).toBeNull()
   })
 
   it('does not call apply-language-defaults on initial mount', () => {
@@ -69,7 +69,7 @@ describe('VoiceSection', () => {
 
     render(
       <VoiceSection
-        s={{ language: 'English' }}
+        s={{ language: 'English', revision: 7 }}
         config={mockConfig()}
         update={vi.fn()}
         projectId="proj-1"
@@ -105,7 +105,7 @@ describe('VoiceSection', () => {
     await act(async () => {
       rerender(
         <VoiceSection
-          s={{ language: 'Korean' }}
+          s={{ language: 'Korean', revision: 8 }}
           config={mockConfig()}
           update={vi.fn()}
           projectId="proj-1"
@@ -117,7 +117,10 @@ describe('VoiceSection', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/projects/proj-1/apply-language-defaults')
-    expect(JSON.parse(init!.body as string)).toEqual({ language: 'Korean' })
+    expect(JSON.parse(init!.body as string)).toEqual({
+      expected_revision: 8,
+      language: 'Korean',
+    })
 
     await waitFor(() =>
       expect(
@@ -125,6 +128,53 @@ describe('VoiceSection', () => {
       ).toBeInTheDocument(),
     )
     expect(onRefresh).toHaveBeenCalled()
+  })
+
+  it('rebases language defaults onto a matching authoritative language after a revision conflict', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response({
+        error: 'Project settings changed since last read',
+        code: 'settings_revision_conflict',
+        current_revision: 9,
+        global_settings: { revision: 9, language: 'Korean' },
+      }, false, 409))
+      .mockImplementationOnce(async () => response({
+        language: 'Korean',
+        changed_fields: ['tts_provider'],
+        applied_defaults: {},
+        recommended_voices: { available_count: 0 },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onRefresh = vi.fn()
+
+    const { rerender } = render(
+      <VoiceSection
+        s={{ language: 'English', revision: 7 }}
+        config={mockConfig()}
+        update={vi.fn()}
+        projectId="proj-1"
+        onRefresh={onRefresh}
+      />,
+    )
+    await act(async () => {
+      rerender(
+        <VoiceSection
+          s={{ language: 'Korean', revision: 8 }}
+          config={mockConfig()}
+          update={vi.fn()}
+          projectId="proj-1"
+          onRefresh={onRefresh}
+        />,
+      )
+    })
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+      expected_revision: 9,
+      language: 'Korean',
+    })
+    expect(await screen.findByText(/Applied Korean voice\/lipsync defaults/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows a "nothing to change" notice when changed_fields is empty and does not refresh', async () => {
@@ -177,61 +227,5 @@ describe('VoiceSection', () => {
     })
 
     expect(fetchMock).not.toHaveBeenCalled()
-  })
-})
-
-/**
- * The lipsync cascade is the one control here that survived a file deletion:
- * `LipsyncPriorityList` used to live in `settings/AudioSyncSection.tsx`, whose
- * section component was dead while this named export stayed mounted. These
- * assertions pin the wiring — that the list renders inside Voice, and that it
- * reads/writes the server-validated `lipsync_engine_priority` key.
- */
-describe('VoiceSection lipsync cascade', () => {
-  const DEFAULT_CASCADE = ['SYNC_SO_V3', 'MUSETALK', 'LATENTSYNC', 'OMNIHUMAN_V1_5', 'SYNC_V2']
-
-  it('renders the default cascade in order when the setting is unset', () => {
-    render(<VoiceSection s={{}} config={null} update={vi.fn()} />)
-
-    expect(screen.getByText('Lipsync engine priority')).toBeInTheDocument()
-    for (const key of DEFAULT_CASCADE) {
-      expect(screen.getByText(key)).toBeInTheDocument()
-    }
-  })
-
-  it('reads an explicit priority from settings rather than the default', () => {
-    render(
-      <VoiceSection
-        s={{ lipsync_engine_priority: ['MUSETALK', 'SYNC_V2'] }}
-        config={null}
-        update={vi.fn()}
-      />,
-    )
-
-    expect(screen.getByText('MUSETALK')).toBeInTheDocument()
-    expect(screen.getByText('SYNC_V2')).toBeInTheDocument()
-    expect(screen.queryByText('SYNC_SO_V3')).toBeNull()
-  })
-
-  it('writes the reordered list back to lipsync_engine_priority', async () => {
-    const update = vi.fn()
-    render(<VoiceSection s={{}} config={null} update={update} />)
-
-    await userEvent.click(screen.getByRole('button', { name: 'Move SYNC_SO_V3 down' }))
-
-    expect(update).toHaveBeenCalledWith('lipsync_engine_priority', [
-      'MUSETALK',
-      'SYNC_SO_V3',
-      'LATENTSYNC',
-      'OMNIHUMAN_V1_5',
-      'SYNC_V2',
-    ])
-  })
-
-  it('disables reordering past either end of the cascade', () => {
-    render(<VoiceSection s={{}} config={null} update={vi.fn()} />)
-
-    expect(screen.getByRole('button', { name: 'Move SYNC_SO_V3 up' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Move SYNC_V2 down' })).toBeDisabled()
   })
 })

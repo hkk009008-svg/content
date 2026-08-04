@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Section } from '../../ui'
 import type { AppConfig } from '../../../types/project'
-import { LipsyncPriorityList } from './LipsyncPriorityList'
 import { apiPost } from '../../../lib/api'
+import { settingsRevisionConflict } from '../../../lib/settingsRevision'
 import { RangeRow, SelectRow, ToggleRow, NumberRow } from './controls'
 
 interface Props {
@@ -13,7 +13,7 @@ interface Props {
    *  Optional so existing shape-based tests that don't exercise that path
    *  can keep rendering without it. */
   projectId?: string
-  onRefresh?: () => void
+  onRefresh?: () => void | Promise<void>
 }
 
 interface ApplyLanguageDefaultsResponse {
@@ -45,8 +45,7 @@ const MUSIC_MASTERING = [
 
 /**
  * Voice section — TTS provider + default male/female voices, dialogue-quality
- * enhancers, the reorderable lipsync cascade ([LipsyncPriorityList]), the
- * SyncNet validation gate, and dialogue pace.
+ * enhancers, the SyncNet validation gate, and dialogue pace.
  *
  * Pace is a target-WPM number (`dialogue_target_wpm`), applied via atempo
  * post-process — NOT a `speed` field, because eleven_v3 ignores speed.
@@ -54,9 +53,9 @@ const MUSIC_MASTERING = [
  * Language change also invokes the language-defaults contract
  * (`POST /api/projects/<id>/apply-language-defaults`, backed by
  * domain/language_defaults.py) — every field it can seed (tts_provider,
- * dialogue_mode_enabled, forced_alignment_enabled, lipsync_engine_priority,
- * lipsync_quality_validation, lipsync_validation_threshold) lives in this
- * section, so this is where the applied/changed-fields result surfaces.
+ * dialogue_mode_enabled, forced_alignment_enabled, lipsync_quality_validation,
+ * lipsync_validation_threshold) lives in this section, so this is where the
+ * applied/changed-fields result surfaces.
  */
 export function VoiceSection({ s, config, update, projectId, onRefresh }: Props) {
   const ttsOptions = config?.api_registry
@@ -96,17 +95,31 @@ export function VoiceSection({ s, config, update, projectId, onRefresh }: Props)
     if (!next || prev === next || !projectId) return
 
     let cancelled = false
-    apiPost<ApplyLanguageDefaultsResponse>(`/api/projects/${projectId}/apply-language-defaults`, {
-      language: next,
-    }).then((result) => {
+    const request = (expectedRevision: number) =>
+      apiPost<ApplyLanguageDefaultsResponse>(`/api/projects/${projectId}/apply-language-defaults`, {
+        expected_revision: expectedRevision,
+        language: next,
+      })
+
+    const applyDefaults = async () => {
+      let result = await request(Number.isInteger(s.revision) ? s.revision : 0)
+      const conflict = settingsRevisionConflict(result)
+      // Rebase only when the authoritative project still has the language
+      // this effect is configuring. If another writer changed the language,
+      // refreshing is safer than applying defaults for a stale selection.
+      if (conflict && conflict.globalSettings.language === next) {
+        result = await request(conflict.currentRevision)
+      }
       if (cancelled) return
       if (result.ok) {
         setLangNotice({ language: result.data.language, changed: result.data.changed_fields })
         if (result.data.changed_fields.length) onRefresh?.()
       } else {
         setLangNotice({ error: result.error })
+        if (settingsRevisionConflict(result)) await onRefresh?.()
       }
-    })
+    }
+    void applyDefaults()
     return () => {
       cancelled = true
     }
@@ -178,20 +191,6 @@ export function VoiceSection({ s, config, update, projectId, onRefresh }: Props)
             options={LIP_SYNC_MODES}
             onChange={(v) => update('lip_sync_mode', v)}
           />
-
-          <div>
-            <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.09em] text-mut">
-              Lipsync engine priority
-            </span>
-            <div className="space-y-1 rounded border border-line bg-panel p-1.5">
-              <LipsyncPriorityList s={s} config={config} update={update} />
-            </div>
-            <p className="mt-1 text-[10px] leading-tight text-mut">
-              Reordering is saved but not yet read by the overlay/generation
-              cascades — each still tries its own fixed engine order
-              (lip_sync.py). Kept here as a staged preference for that wiring.
-            </p>
-          </div>
 
           <ToggleRow
             label="Lipsync quality gate (SyncNet)"

@@ -107,6 +107,14 @@ class Shot(BaseModel):
     approved_keyframe_take_id: str = ""
     motion_takes: List[TakeRecord] = Field(default_factory=list)
     approved_motion_take_id: str = ""
+    # Public-safe recovery descriptor for accepted motion-provider work that
+    # has not produced a publishable take yet. The server may retain an opaque
+    # request fingerprint inside this object to prevent changed-input
+    # resubmission; UI consumers render only the documented safe fields.
+    deferred_motion_job: Optional[dict] = None
+    # Durable cross-request interlock for keyframe submissions whose provider
+    # outcome must be reconciled before another paid render can start.
+    deferred_keyframe_job: Optional[dict] = None
     postprocess_variants: List[TakeRecord] = Field(default_factory=list)
     approved_final_take_id: str = ""
     performance_takes: List[TakeRecord] = Field(default_factory=list)

@@ -12,7 +12,10 @@ All tests are offline — no Vertex, no network, no spend.
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, mock_open
+
+import pytest
 
 from google.genai import types
 
@@ -23,11 +26,122 @@ from google.genai import types
 # (google-genai is installed).
 sys.modules.pop("veo_native", None)
 
+import veo_native  # noqa: E402
 from veo_native import (  # noqa: E402
     _parse_duration_seconds,
     _build_generate_videos_config,
     VeoNativeAPI,
+    VeoNativeJobDeferred,
+    veo_native_audio_available,
 )
+
+
+@pytest.fixture(autouse=True)
+def _accept_mock_video_payloads(monkeypatch):
+    """These SDK contract tests use sentinel bytes; ffprobe validation has a
+    dedicated artifact-validation suite."""
+    monkeypatch.setattr(veo_native, "validate_video_artifact", lambda _path: None)
+
+
+def _veo_settings(*, project="", location="us-central1", api_key=""):
+    return SimpleNamespace(
+        google_cloud_project=project,
+        google_cloud_location=location,
+        google_api_key=api_key,
+    )
+
+
+def test_init_uses_vertex_only_with_explicit_project():
+    client = MagicMock()
+    with (
+        patch(
+            "veo_native.settings",
+            _veo_settings(project="explicit-project", api_key="developer-key"),
+        ),
+        patch("veo_native.google_adc_available", return_value=True),
+        patch("veo_native.genai.Client", return_value=client) as client_factory,
+    ):
+        api = VeoNativeAPI()
+
+    client_factory.assert_called_once_with(
+        vertexai=True,
+        project="explicit-project",
+        location="us-central1",
+    )
+    assert api.client is client
+    assert api._backend == "vertex"
+    assert api._model == "veo-3.1-generate-001"
+    assert api.supports_native_audio is True
+
+
+def test_init_uses_developer_api_when_only_api_key_is_configured():
+    client = MagicMock()
+    with (
+        patch("veo_native.settings", _veo_settings(api_key="developer-key")),
+        patch("veo_native.genai.Client", return_value=client) as client_factory,
+    ):
+        api = VeoNativeAPI()
+
+    client_factory.assert_called_once_with(api_key="developer-key")
+    assert api.client is client
+    assert api._backend == "gemini"
+    assert api._model == "veo-3.1-generate-preview"
+    assert api.supports_native_audio is False
+
+
+def test_init_falls_back_to_developer_api_when_project_has_no_adc():
+    client = MagicMock()
+    with (
+        patch(
+            "veo_native.settings",
+            _veo_settings(project="explicit-project", api_key="developer-key"),
+        ),
+        patch("veo_native.google_adc_available", return_value=False),
+        patch("veo_native.genai.Client", return_value=client) as client_factory,
+    ):
+        api = VeoNativeAPI()
+
+    client_factory.assert_called_once_with(api_key="developer-key")
+    assert api.client is client
+    assert api._backend == "gemini"
+    assert api.supports_native_audio is False
+
+
+def test_init_project_without_adc_or_api_key_fails_before_client():
+    with (
+        patch("veo_native.settings", _veo_settings(project="explicit-project")),
+        patch("veo_native.google_adc_available", return_value=False),
+        patch("veo_native.genai.Client") as client_factory,
+        pytest.raises(EnvironmentError, match="Application Default Credentials"),
+    ):
+        VeoNativeAPI()
+
+    client_factory.assert_not_called()
+
+
+def test_native_audio_capability_requires_project_and_adc():
+    with (
+        patch("veo_native.settings", _veo_settings(project="project")),
+        patch("veo_native.google_adc_available", return_value=True),
+    ):
+        assert veo_native_audio_available() is True
+
+    with (
+        patch("veo_native.settings", _veo_settings(api_key="key")),
+        patch("veo_native.google_adc_available", return_value=False),
+    ):
+        assert veo_native_audio_available() is False
+
+
+def test_init_without_credentials_fails_before_client_construction():
+    with (
+        patch("veo_native.settings", _veo_settings()),
+        patch("veo_native.genai.Client") as client_factory,
+        pytest.raises(EnvironmentError, match="GOOGLE_CLOUD_PROJECT"),
+    ):
+        VeoNativeAPI()
+
+    client_factory.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +204,7 @@ def test_wraps_reference_images_into_config():
 # ---------------------------------------------------------------------------
 def _completed_operation():
     op = MagicMock()
+    op.name = "operations/veo-123"
     op.done = True
     op.error = None  # a successful operation has no error (Bug 3 reads operation.error)
     gen_vid = MagicMock()
@@ -141,6 +256,41 @@ def test_generate_video_passes_config_not_toplevel_kwargs():
     cfg = captured["config"]
     assert cfg.generate_audio is True
     assert not cfg.reference_images
+
+
+def test_invalid_video_bytes_do_not_replace_existing_output(tmp_path, monkeypatch):
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = _completed_operation()
+    api.client.operations.get.side_effect = lambda operation: operation
+    image_path = tmp_path / "frame.png"
+    image_path.write_bytes(b"input")
+    output_path = tmp_path / "out.mp4"
+    output_path.write_bytes(b"known-good")
+    monkeypatch.setattr(
+        veo_native,
+        "validate_video_artifact",
+        lambda _path: "invalid test container",
+    )
+
+    with patch(
+        "google.genai.types.Image.from_file",
+        return_value=types.Image(gcs_uri="gs://x/y.png"),
+    ):
+        with pytest.raises(VeoNativeJobDeferred) as deferred:
+            api.generate_video(
+                image_path=str(image_path),
+                prompt="hello",
+                output_path=str(output_path),
+            )
+
+    assert deferred.value.reason == "completed_output_invalid"
+    assert deferred.value.job_id == "operations/veo-123"
+    assert deferred.value.provider_status == "completed"
+    assert deferred.value.billed is True
+    assert deferred.value.duration_s == 8
+    assert output_path.read_bytes() == b"known-good"
 
 
 def test_reference_images_not_threaded_when_start_image_present():
@@ -301,6 +451,68 @@ def test_generate_video_surfaces_operation_error(capsys):
     assert "Unsupported output video duration" in out
 
 
+def test_submit_acknowledgement_ambiguity_requires_recovery():
+    """A raised submit call cannot prove that the service rejected the job."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    api.client = MagicMock()
+    api.client.models.generate_videos.side_effect = RuntimeError("response lost")
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with (
+        patch("veo_native.os.path.exists", return_value=True),
+        patch("google.genai.types.Image.from_file", return_value=fake_img),
+        pytest.raises(VeoNativeJobDeferred) as deferred,
+    ):
+        api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="x",
+            output_path="/tmp/out.mp4",
+        )
+
+    assert deferred.value.reason == "submit_outcome_unknown"
+    assert deferred.value.status == "recovery_required"
+    assert deferred.value.job_id is None
+    assert deferred.value.provider_status == "submission_unknown"
+    assert deferred.value.billed is False
+    assert deferred.value.duration_s == 8
+
+
+def test_poll_transport_ambiguity_defers_bound_operation():
+    """A returned operation name owns the request after a poll response is lost."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+
+    pending = MagicMock()
+    pending.name = "projects/p/locations/l/operations/veo-bound-456"
+    pending.done = False
+    pending.error = None
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = pending
+    api.client.operations.get.side_effect = RuntimeError("connection reset")
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with (
+        patch("veo_native.os.path.exists", return_value=True),
+        patch("veo_native.time.sleep", return_value=None),
+        patch("google.genai.types.Image.from_file", return_value=fake_img),
+        pytest.raises(VeoNativeJobDeferred) as deferred,
+    ):
+        api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="x",
+            output_path="/tmp/out.mp4",
+        )
+
+    assert deferred.value.reason == "accepted_job_poll_error"
+    assert deferred.value.status == "pending"
+    assert deferred.value.job_id == pending.name
+    assert deferred.value.provider_status == "pending"
+    assert deferred.value.billed is False
+    assert deferred.value.duration_s == 8
+
+
 # ---------------------------------------------------------------------------
 # Task 3 — generate_video() must accept and thread aspect_ratio into the config
 # RED: today generate_video has no aspect_ratio param → TypeError or it's dropped
@@ -426,6 +638,7 @@ def test_post_billing_bytes_retrieval_failure_still_notes_billed():
     gen_vid.video.video_bytes = None  # Gemini backend: falls through to files.download
 
     op = MagicMock()
+    op.name = "operations/veo-download-456"
     op.done = True
     op.error = None
     op.response.generated_videos = [gen_vid]
@@ -443,12 +656,17 @@ def test_post_billing_bytes_retrieval_failure_still_notes_billed():
     fake_img = types.Image(gcs_uri="gs://x/y.png")
     with patch("veo_native.os.path.exists", return_value=True), \
          patch("google.genai.types.Image.from_file", return_value=fake_img):
-        result = api.generate_video(
-            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
-            on_billed=on_billed,
-        )
+        with pytest.raises(VeoNativeJobDeferred) as deferred:
+            api.generate_video(
+                image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+                on_billed=on_billed,
+            )
 
-    assert result is None
+    assert deferred.value.reason == "completed_output_unavailable"
+    assert deferred.value.job_id == "operations/veo-download-456"
+    assert deferred.value.provider_status == "completed"
+    assert deferred.value.billed is True
+    assert deferred.value.duration_s == 8
     on_billed.assert_called_once()
     assert call_order == ["billed", "download"], (
         "on_billed must fire BEFORE the bytes-retrieval attempt so a caller's "

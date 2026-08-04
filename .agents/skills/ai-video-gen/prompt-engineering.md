@@ -135,18 +135,11 @@ Mood-aware transition prompt patterns between shots:
 - **2.5**: Wide shots (avoid over-sharpening distance)
 - **2.0**: Action/motion (allow dynamic softness)
 
-### ControlNet Depth Strength
-- **0.55**: Landscape — strongest architectural preservation
-- **0.50**: Wide — prevent environment drift
-- **0.40**: Medium — balanced spatial and face
-- **0.35**: Portrait — face is priority over background
-- **0.30**: Action — allow motion freedom
+### Removed structural controls
 
-### IP-Adapter Weight
-- **0.40**: Landscape — lock atmosphere and color
-- **0.35**: Wide — environment consistency
-- **0.30**: Medium — balanced style transfer
-- **0.25**: Portrait/action — face is priority
+The production FLUX graph has no dynamic ControlNet or IP-Adapter branch.
+Do not prescribe `controlnet_depth_strength` or `ip_adapter_weight`; those
+template fields were reader-less after the invalid nodes were removed.
 
 ---
 

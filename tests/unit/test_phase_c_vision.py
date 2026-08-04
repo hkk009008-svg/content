@@ -184,20 +184,20 @@ class TestExtractFrameAt:
 
 class TestFaceSwapVideoFrames:
 
-    def test_fal_success_uploads_and_retrieves(self):
-        """fal_key set, subscribe returns url → urlretrieve called, path returned."""
+    def test_fal_success_uploads_and_downloads_safely(self):
+        """fal_key set, subscribe returns URL → validated download, path returned."""
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
         mock_fal.subscribe.return_value = {"video": {"url": "http://fal/video.mp4"}}
 
-        import urllib.request as _urllib_req
         with patch.object(pcv, "settings", _fal_settings()), \
              patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(_urllib_req, "urlretrieve") as mock_retr:
+             patch.object(pcv, "safe_download", return_value="/out.mp4") as download:
             result = pcv.face_swap_video_frames("/vid.mp4", "/ref.jpg", "/out.mp4")
 
         assert result == "/out.mp4"
-        mock_retr.assert_called_once_with("http://fal/video.mp4", "/out.mp4")
+        assert download.call_args.args == ("http://fal/video.mp4", "/out.mp4")
+        assert download.call_args.kwargs["allowed_content_types"] == ("video/mp4",)
 
     def test_fal_no_key_skips_to_facefusion(self):
         """fal_key absent → fal path skipped, falls through to FaceFusion."""
@@ -212,7 +212,7 @@ class TestFaceSwapVideoFrames:
         mock_fal.subscribe.assert_not_called()
 
     def test_fal_no_url_in_result_falls_through(self):
-        """subscribe returns dict without 'url' → no urlretrieve, falls to FaceFusion."""
+        """subscribe returns dict without 'url' → no download, falls to FaceFusion."""
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
         mock_fal.subscribe.return_value = {"video": {}}  # no 'url' key

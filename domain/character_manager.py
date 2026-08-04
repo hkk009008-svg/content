@@ -14,7 +14,6 @@ from typing import Optional, List
 import os
 import json
 import shutil
-import urllib.request
 import numpy as np
 try:
     from deepface import DeepFace
@@ -35,6 +34,7 @@ IDENTITY_THRESHOLD_LENIENT = 0.55
 
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
+from performance._net import safe_download, validate_image_artifact
 from domain.project_manager import (
     make_character, add_character, save_project, get_project_dir, get_character
 )
@@ -468,7 +468,17 @@ def _generate_multi_angle_refs(
             )
             img_url = result["images"][0]["url"]
             out_path = os.path.join(char_path, f"{cfg['name']}.jpg")
-            urllib.request.urlretrieve(img_url, out_path)
+            downloaded = safe_download(
+                img_url,
+                out_path,
+                max_bytes=64 * 1024 * 1024,
+                allowed_content_types=("image/jpeg",),
+                content_validator=lambda path: validate_image_artifact(
+                    path, expected_formats=("JPEG",)
+                ),
+            )
+            if downloaded is None:
+                raise RuntimeError("generated reference image failed download validation")
             angle_refs.append(out_path)
             print(f"   [ANGLE] Generated {cfg['name']} (Max Multi): {out_path}")
             # F-D.1 / MR-C0 closure (cycle-16 max-quality audit a79c59):

@@ -822,6 +822,10 @@ def optimize_shot_prompt(
             user_prompt=user_prompt,
             json_mode=True,
         )
+        if result.winner_index is None or result.winner_content is None:
+            raise ValueError(
+                f"optimizer ensemble produced no defensible winner ({result.judgment_status})"
+            )
         raw = result.winner_content
         if isinstance(raw, dict):
             spec = raw

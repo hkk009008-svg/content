@@ -21,10 +21,9 @@ generate_ai_broll() in phase_c_assembly.py
 2. FAL.ai FLUX Kontext Max Multi (fallback — identity-preserving)
 3. FAL.ai FLUX-Pro (last resort — no face-lock)
 
-There is also a **max tier**: `pulid_max.json` (60 nodes — N=8 adaptive
-best-of + SUPIR + 4K downsample), driven by `quality_max.generate_ai_broll_max`
-with per-class params from `MAX_QUALITY_TEMPLATES`. Everything below describes
-the production workflow.
+The former max tier (`pulid_max.json`, `quality_max.py`, and
+`MAX_QUALITY_TEMPLATES`) was retired in WS1. The 22-node `pulid.json` graph is
+the sole production image tier.
 
 ## Annotated pulid.json Node Map
 
@@ -76,25 +75,40 @@ the core graph; PAG and the hires-upscale chain are in the table below):
 | 301 | PerturbedAttentionGuidance | PAG model patch — detail sharpening | `scale` (per shot class, 2.0–3.5) |
 | 501 | UpscaleModelLoader | Load hires upscale model | `RealESRGAN_x4plus.pth` |
 | 500 | ImageUpscaleWithModel | Apply 4× upscale | upscale_model, image |
-| 502 | ImageScale | Downsample to delivery res | lanczos, 2688×1536 |
+| 502 | ImageScale | Downsample to delivery res | lanczos, 2688×1536 landscape / 1536×2688 portrait |
 
 ## ComfyUI API Class
 
-`RunPodComfyUI` in `phase_c_assembly.py` communicates with the ComfyUI server:
+`RunPodComfyUI` in `comfyui_client.py` communicates with the ComfyUI server and
+is imported by `phase_c_assembly.py`:
 
 ```python
 class RunPodComfyUI:
-    def upload_image(image_path) -> str       # POST /upload/image → returns remote filename
-    def queue_prompt(workflow) -> str          # POST /prompt → returns prompt_id
-    def get_history(prompt_id) -> dict         # GET /history/{prompt_id} → poll for completion
-    def get_image(filename, subfolder, type)   # GET /view?filename=...&subfolder=...&type=...
+    def preflight(workflow) -> dict             # /object_info + /models + /queue
+    def upload_image(image_path) -> str         # bounded POST /upload/image
+    def queue_prompt(workflow) -> str           # one-shot POST /prompt; parse node_errors
+    def wait_for_completion(prompt_id) -> dict  # /ws events + bounded /history fallback
+    def cancel_prompt(prompt_id) -> bool        # atomic scoped cancel; legacy request is UNKNOWN
+    def interrupt() -> None                     # explicit global /interrupt control
+    def download_image(..., destination) -> str # validate + atomic /view publication
 ```
 
 **Environment**: `COMFYUI_SERVER_URL` (pod gateway URL, port 8188 — currently
 a Novita RTX 6000 Ada pod; the class name `RunPodComfyUI` is historical, the
-integration is host-agnostic)
+integration is host-agnostic). `COMFYUI_API_KEY` optionally supplies a bearer
+token for an authenticated reverse proxy.
 
-**Polling**: 300 retries × 2s = 600s max timeout. Check `outputs` dict for `images` key.
+**Job control**: connect/read timeouts bound every request. Idempotent reads use
+pooled retries for transport failures, 429, and selected 5xx responses;
+`POST /prompt` is never blindly retried. WebSocket terminal errors fail
+immediately, and the 600-second job deadline requests ID-scoped cancellation
+before falling through. Older pods can receive a pending `/queue` deletion
+request, but its race with job start remains `UNKNOWN` and blocks fallback. An
+unknown submission acknowledgement or any unconfirmed cancellation fails closed
+instead of starting a duplicate FAL render. Global `/interrupt` remains
+available as an explicit control but is never used automatically because it can
+race into the next job. Output images are MIME/magic/dimension validated and
+atomically published.
 
 ## Workflow Selector
 
@@ -102,17 +116,17 @@ integration is host-agnostic)
 
 | Shot Type | PuLID Weight | Start At | Guidance | Steps | PAG | Use Case |
 |---|---|---|---|---|---|---|
-| portrait | 1.0 | 0.2 | 3.5 | 25 | 3.0 | Close-ups, max face fidelity |
-| medium | 0.9 | 0.25 | 3.5 | 20 | 3.0 | Balanced face + scene |
-| wide | 0.65 | 0.35 | 3.0 | 20 | 2.5 | Establishing shots |
-| action | 0.8 | 0.3 | 3.5 | 20 | 2.0 | Movement, tracking |
+| portrait | 1.0 | 0.0 | 3.5 | 25 | 3.0 | Close-ups, max face fidelity |
+| medium | 0.9 | 0.0 | 3.5 | 20 | 3.0 | Balanced face + scene |
+| wide | 0.65 | 0.0 | 3.0 | 20 | 2.5 | Establishing shots |
+| action | 0.8 | 0.0 | 3.5 | 20 | 2.0 | Movement, tracking |
 | landscape | 0.0 | 0.0 | 4.0 | 25 | 3.5 | No characters, pure environment |
 
-All classes run `dpmpp_2m` + `sgm_uniform`. Templates also carry
-`controlnet_depth_strength`, `ip_adapter_weight`, `denoise_default`, and the
-per-class video `target_api`/`video_fallbacks` cascade — read
-`WORKFLOW_TEMPLATES` in `workflow_selector.py` for live values (this table is
-a snapshot, verified 2026-06-12).
+All classes run `dpmpp_2m` + `sgm_uniform`. Templates still carry historical
+`controlnet_depth_strength` and `ip_adapter_weight` fields, but the production
+graph has no ControlNet/IP-Adapter consumer. `denoise_default` drives the
+supported nodes 200-201 img2img path; provider routing comes from the per-class
+`target_api`/`video_fallbacks` cascade in `WORKFLOW_TEMPLATES`.
 
 **Classification**: Keyword matching on prompt + camera fields (85+ keywords).
 **Landscape bypass**: If no characters → skip ComfyUI entirely, use Kontext.

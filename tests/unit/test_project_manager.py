@@ -49,6 +49,7 @@ class TestMakeProject:
         assert gs["aspect_ratio"] == "16:9"
         assert gs["competitive_generation"] is True
         assert isinstance(gs["master_seed"], int)
+        assert gs["auto_approve"]["image_min_composite"] == pytest.approx(0.60)
 
     def test_unique_ids(self):
         ids = {project_manager.make_project("p")["id"] for _ in range(50)}

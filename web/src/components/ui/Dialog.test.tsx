@@ -17,7 +17,7 @@ describe('Dialog', () => {
   })
 
   it('is a modal dialog named by its title', () => {
-    render(
+    const { container } = render(
       <Dialog isOpen onClose={vi.fn()} title="Confirm action">
         <p>Are you sure?</p>
       </Dialog>,
@@ -26,6 +26,9 @@ describe('Dialog', () => {
       'aria-modal',
       'true',
     )
+    expect(container).toHaveAttribute('aria-hidden', 'true')
+    expect(container).toHaveAttribute('inert')
+    expect(screen.getByRole('dialog').parentElement).not.toHaveAttribute('aria-hidden')
   })
 
   it('falls back to aria-label when no title is given', () => {
@@ -181,9 +184,8 @@ describe('Dialog', () => {
       const [open, setOpen] = useState(true)
       return (
         <div>
-          <button onClick={() => setOpen(false)}>Close</button>
           <Dialog isOpen={open} onClose={() => setOpen(false)} title="T">
-            <p>body</p>
+            <button onClick={() => setOpen(false)}>Close</button>
           </Dialog>
         </div>
       )
@@ -192,5 +194,28 @@ describe('Dialog', () => {
     expect(document.body.style.overflow).toBe('hidden')
     await userEvent.click(screen.getByText('Close'))
     expect(document.body.style.overflow).toBe('')
+  })
+
+  it('restores pre-existing background accessibility state on close', async () => {
+    const sibling = document.createElement('section')
+    sibling.setAttribute('aria-hidden', 'false')
+    sibling.setAttribute('inert', '')
+    document.body.appendChild(sibling)
+
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return (
+        <Dialog isOpen={open} onClose={() => setOpen(false)} title="T">
+          <button onClick={() => setOpen(false)}>Close safely</button>
+        </Dialog>
+      )
+    }
+
+    render(<Harness />)
+    expect(sibling).toHaveAttribute('aria-hidden', 'true')
+    await userEvent.click(screen.getByText('Close safely'))
+    expect(sibling).toHaveAttribute('aria-hidden', 'false')
+    expect(sibling).toHaveAttribute('inert')
+    sibling.remove()
   })
 })

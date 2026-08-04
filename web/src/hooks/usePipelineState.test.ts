@@ -419,6 +419,24 @@ describe('usePipelineState -- reconnect replay lands on the same state as an unb
     expect(result.current.activeStage).toBe('KEYFRAME_REVIEW')
   })
 
+  it('routes a durable keyframe halt to Review so recovery controls stay visible', async () => {
+    const fetchMock = vi.fn(async () => response(pipelineStateBody()))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => usePipelineState('proj-keyframe-halt'))
+    await waitFor(() => expect(result.current.allowedActions).toEqual(['start']))
+
+    act(() => {
+      result.current.processEvent({ stage: 'KEYFRAME', detail: '', percent: 40 })
+      result.current.processEvent({
+        stage: 'KEYFRAME_HALTED',
+        detail: 'keyframe recovery required',
+        percent: 40,
+      })
+    })
+
+    expect(result.current.activeStage).toBe('KEYFRAME_REVIEW')
+  })
+
   it('a GAP event triggers a fresh pipeline-state reconcile instead of guessing at the missed range', async () => {
     const fetchMock = vi.fn(async () => response(pipelineStateBody({ running: true, allowed_actions: ['cancel', 'pause'] })))
     vi.stubGlobal('fetch', fetchMock)

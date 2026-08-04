@@ -24,19 +24,16 @@ import { createPortal } from 'react-dom'
  * - Rendered through a portal to `document.body` so a fixed-position
  *   overlay is never clipped or mispositioned by an ancestor's `transform`/
  *   `overflow` (a real risk for a shared primitive mounted from anywhere).
+ * - Every other direct body child is temporarily `inert` and
+ *   `aria-hidden`, with reference-counted restoration for nested dialogs, so
+ *   pointer, keyboard, and screen-reader browse navigation stay inside the
+ *   active modal.
  *
  * `children` is the full panel body -- this primitive owns only the
  * overlay/panel chrome and the a11y mechanics, not any particular form or
  * button layout, so existing bespoke modals can adopt it without losing
  * their own content shape.
  *
- * Known scope cut: background content is NOT marked `aria-hidden`/`inert`
- * while open (the fuller WAI-ARIA APG pattern hides the rest of the page
- * from assistive tech during a modal). The visible overlay plus the Tab
- * trap already prevent sighted and keyboard-only interaction with it; a
- * screen-reader user in browse mode could still read past the overlay.
- * Deferred rather than reaching for a hardcoded app-root id from a shared
- * primitive -- revisit if a real screen-reader walkthrough flags it.
  */
 
 const FOCUSABLE_SELECTOR = [
@@ -47,6 +44,40 @@ const FOCUSABLE_SELECTOR = [
   'select:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
+
+type BackgroundLockState = {
+  count: number
+  ariaHidden: string | null
+  hadInert: boolean
+}
+
+const backgroundLocks = new WeakMap<HTMLElement, BackgroundLockState>()
+
+function acquireBackgroundLock(element: HTMLElement) {
+  const existing = backgroundLocks.get(element)
+  if (existing) {
+    existing.count += 1
+    return
+  }
+  backgroundLocks.set(element, {
+    count: 1,
+    ariaHidden: element.getAttribute('aria-hidden'),
+    hadInert: element.hasAttribute('inert'),
+  })
+  element.setAttribute('aria-hidden', 'true')
+  element.setAttribute('inert', '')
+}
+
+function releaseBackgroundLock(element: HTMLElement) {
+  const state = backgroundLocks.get(element)
+  if (!state) return
+  state.count -= 1
+  if (state.count > 0) return
+  backgroundLocks.delete(element)
+  if (state.ariaHidden === null) element.removeAttribute('aria-hidden')
+  else element.setAttribute('aria-hidden', state.ariaHidden)
+  if (!state.hadInert) element.removeAttribute('inert')
+}
 
 interface DialogProps {
   isOpen: boolean
@@ -153,6 +184,22 @@ export function Dialog({
     return () => {
       document.body.style.overflow = prevOverflow
     }
+  }, [isOpen])
+
+  // Hide and disable every body-level background surface. Deriving the
+  // targets from the portal overlay avoids coupling this shared primitive to
+  // a hardcoded app-root id and also handles test/embedded roots. The shared
+  // per-element counter preserves correct state when one modal opens over
+  // another.
+  useEffect(() => {
+    if (!isOpen) return
+    const overlay = panelRef.current?.parentElement
+    if (!overlay) return
+    const locked = Array.from(document.body.children).filter(
+      (element): element is HTMLElement => element instanceof HTMLElement && element !== overlay,
+    )
+    locked.forEach(acquireBackgroundLock)
+    return () => locked.forEach(releaseBackgroundLock)
   }, [isOpen])
 
   if (!isOpen) return null

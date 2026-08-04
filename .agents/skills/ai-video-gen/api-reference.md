@@ -94,9 +94,8 @@ duration-probe is recommended before it is load-bearing at scale.
 
 ## Kling Native — LEGACY kling-v1-6 (`kling_native.py`)
 
-**⚠️ Fallback-only since 2026-07-11**, and since WS2 no longer even the first
-fallback — the portrait/medium chain is now `GEMINI_OMNI → VEO_NATIVE → KLING_3_0
-→ KLING_NATIVE`. KLING_3_0 is the fal Kling v3 Pro route
+**⚠️ Deprecated explicit-only compatibility.** Automatic templates and AUTO
+fallbacks quarantine this v1.6 adapter. KLING_3_0 is the fal Kling v3 Pro route
 (`fal-ai/kling-video/v3/pro/image-to-video`) — best-ranked Kling (#11 AA i2v
 arena), identity via `elements` (frontal + ≤3 reference images, addressed as
 `@Element1`). This native client still sends v1.6-era params (`face_consistency`,
@@ -140,12 +139,12 @@ pending a live-key param check (native docs geo-blocked HTTP 446).
 
 | Key | What it is | State |
 |-----|-----------|-------|
-| `SORA_NATIVE` | OpenAI Videos API direct (`sora_native.py`) | **Deprecated but live** — date-gated fallback through the 2026-09-24 sunset, then non-dispatchable automatically. Still the 3rd fallback in the action cascade |
+| `SORA_NATIVE` | OpenAI Videos API direct (`sora_native.py`) | **Deprecated explicit-only compatibility** — a direct pre-sunset pin may dispatch, but automatic templates, optimizer suggestions, and fallback cascades exclude it |
 | `SORA_2` | The FAL-proxied route | **Fully RETIRED** — `Lifecycle.RETIRED` + `ProductSupport.UNSUPPORTED`, flags `(False, False, False)`: not selectable, not dispatchable, not spendable. **Do not route new work to it, in code or in prompts** |
 
 OpenAI retires Sora 2 and the Videos API on **2026-09-24**. The action primary
 moved to Seedance 2.0 (fal) on 2026-07-11 and then to `GEMINI_OMNI` in WS2;
-`SORA_NATIVE` now sits third in the action fallback chain.
+`SORA_NATIVE` is retained only for an explicit compatibility pin.
 
 **Auth**: OpenAI API key via `OPENAI_API_KEY`
 
@@ -153,9 +152,10 @@ moved to Seedance 2.0 (fal) on 2026-07-11 and then to `GEMINI_OMNI` in WS2;
 
 **Image-to-Video**:
 - Model: `"sora-2"`
-- Duration: **must be exactly** `4`, `8`, `12`, `16`, or `20` (integer seconds) — invalid values default to 4
+- Duration: **must be exactly** `4`, `8`, or `12` seconds; invalid values fail before client construction or a provider call
 - Resolution: `"480p"`, `"720p"`, or `"1080p"`
 - Input images auto-resized to the resolved resolution (1280x720 landscape OR 720x1280 portrait, after sora-2 clamps to 720p) (LANCZOS, JPEG quality 90)
+- Only a still-image input reference is supported; any nonempty driving-video argument fails before image processing, temp-file work, or a provider call
 - Uses `client.videos.create_and_poll()` — SDK handles polling automatically
 - Download: `client.videos.download_content(video.id)` with streaming iter_bytes
 
@@ -170,9 +170,14 @@ moved to Seedance 2.0 (fal) on 2026-07-11 and then to `GEMINI_OMNI` in WS2;
 ## Veo 3.1 Native (`veo_native.py`)
 
 **Shared first fallback for every shot type** since WS2 — when `GEMINI_OMNI` is
-unavailable or fails, this is what actually runs. Also native-audio.
+unavailable or fails, this is what actually runs. Its Vertex/ADC backend can
+generate native audio; its Developer-API backend cannot.
 
-**Auth**: Google Generative AI SDK via `GOOGLE_API_KEY`
+**Auth**: Google Gen AI SDK. An explicit `GOOGLE_CLOUD_PROJECT` selects Vertex
+AI only when ADC resolves at provider construction. If ADC is absent and
+`GOOGLE_API_KEY` exists, the adapter uses the Developer API; with neither
+usable path, construction fails. Policy reads do not probe ADC, and the adapter
+never invents a public project.
 
 **SDK**: `google.genai` with `types.Image.from_file(location=path)`
 
@@ -183,7 +188,8 @@ unavailable or fails, this is what actually runs. Also native-audio.
 - Aspect ratio: `"16:9"` (hardcoded)
 - `person_generation`: `"allow_adult"`
 - `reference_images`: Parameter accepted for interface compatibility, but NOT applied on the image-to-video path — server rejects them when a start image is provided ("Image and reference images cannot be both set.")
-- `generate_audio`: Boolean — native synced audio generation
+- `generate_audio`: Boolean — native synced audio generation on the
+  Vertex/ADC backend only; the Developer-API backend forces it off
 
 **First + Last Frame Control** (unique to Veo):
 - Veo smoothly interpolates between start and end compositions via keyframe-controlled generation
@@ -197,7 +203,8 @@ unavailable or fails, this is what actually runs. Also native-audio.
 - First+last frame control is unmatched by other APIs — use for transitions
 - Reference images (up to 3) lock character appearance without explicit face flag
 - `"6s"` is the sweet spot for cinematic pacing
-- Native audio is useful for dialogue/narration scenes
+- Vertex-backed native audio is useful for dialogue/narration scenes; a
+  Developer-API take must traverse the normal F1b lip-sync path
 - Quota issues occur — pipeline tracks via TTL timestamp `_VEO_QUOTA_EXHAUSTED_UNTIL` (float, 0 = no cooldown), checked via `_veo_quota_blocked()`, auto-expires after `_VEO_QUOTA_TTL_S = 1800s` (30 min). **Distinct from Gemini Omni's cooldown** — never reuse one for the other
 
 ---
@@ -205,20 +212,20 @@ unavailable or fails, this is what actually runs. Also native-audio.
 ## LTX Video 2.3 (`ltx_native.py`)
 
 **Auth**: Hybrid mode
-- Primary: `LTX_API_KEY` → native API at `https://api.ltx.video/v1`
+- Primary: `LTX_API_KEY` → native API at `https://api.ltx.io`
 - Fallback: `FAL_KEY` → FAL proxy at `fal-ai/ltx-2.3/image-to-video` (`FAL_MODEL_ID`; bumped 2026-07-11 from `fal-ai/ltx-2`; fast tier `.../fast` unlocks 12-20s at 25fps/1080p; NO camera_motion param on fal — prompt-folded; generate_audio=False, audio carries ~$0.02/s surcharge)
 - Auto-detects at init; tries native first
 
 **Image-to-Video (native)**:
 - Model: `"ltx-2-3-pro"`
-- **Duration: exactly 6, 8, or 10 seconds** (`DURATION_SECONDS`; default 6). Anything else **raises before any network call** — both the native endpoint and the FAL proxy share this enum. Snap first with `LTXVideoAPI.nearest_supported_duration()` (snap-up bias). `phase_c_ffmpeg._LTX_DURATION_ENUM_S` mirrors it as a literal, drift-pinned by `tests/unit/test_ltx_native.py::test_phase_c_ffmpeg_duration_enum_matches_ltx_native`
+- **Duration: exactly 6, 8, or 10 seconds** (`DURATION_SECONDS`; default 6). Anything else **raises before any network call** — both the native endpoint and the FAL proxy share this enum. Snap first with `LTXVideoAPI.nearest_supported_duration()` (snap-up bias). `phase_c_ffmpeg._LTX_DURATION_ENUM_S` mirrors it as a literal, drift-pinned by `tests/unit/test_ltx_native.py::test_phase_c_duration_enum_matches_adapter`
 - Resolution: `"480p"` (854x480), `"720p"`/`"1080p"` (1920x1080), `"4k"` (3840x2160). The fal resolution enum is `1080p`/`1440p`/`2160p`
-- **Camera motion** parameter (native only): `dolly_in`, `dolly_out`, `jib_up`, `jib_down`, `pan_left`, `pan_right`, `tilt_up`, `tilt_down`, `zoom_in`, `zoom_out`, `crane_up`, `crane_down`, `truck_left`, `truck_right`, `static`
-- **No polling** — returns MP4 bytes directly (fastest response of all APIs)
-
-**Keyframe Transition** (like Veo):
-- `generate_transition(start_frame, end_frame, prompt, duration)`
-- Smooth interpolation between two compositions
+- Input upload: `POST /v1/upload` → signed HTTPS PUT with MIME detected from PNG/JPEG/WebP bytes → `ltx://` storage URI. Native mode never uploads through FAL.
+- Generation: `POST /v2/image-to-video` → atomically persist the returned job ID before polling `GET /v2/image-to-video/{id}` every 5 seconds within the shared 600-second video-job bound.
+- Recovery: a deterministic `.ltx-image-to-video-<request-fingerprint>.job.json` sidecar in the output directory resumes an accepted identical job instead of submitting duplicate paid work. An unreadable sidecar fails closed; a lost submit response persists `submission_unknown` and blocks automatic resubmission.
+- Camera motion: the adapter prompt-folds its broader existing motion vocabulary on both native and FAL routes instead of sending an unsupported direct enum value.
+- Publication: require response MIME `video/mp4`, then ffprobe-validate MP4-family magic, a nonempty video stream, codec, dimensions, and positive duration before sibling-temp `os.replace`.
+- Safety: once native async submission starts, `LTXJobPending` propagates for pending/ambiguous/post-ack recovery cases. The dispatcher records `deferred_job` metadata and returns without FAL, another provider, or a cooldown retry. Only an explicit terminal provider `failed` result may cascade.
 
 **4K Support**:
 - Pass `resolution="4k"` to `generate_video()` — no separate `generate_4k()` convenience wrapper exists
@@ -226,11 +233,11 @@ unavailable or fails, this is what actually runs. Also native-audio.
 **Wisdom**:
 - **4K support** is unique — no other API generates at 3840x2160
 - Second-cheapest at $0.36 per clip, but that is a **6s floor estimate** while the dispatcher's default is 8s — it under-records ~33% on default shots unless the caller passes `record_api_call(duration_seconds=...)`
-- Camera motion parameters add cinematic movement without prompt engineering — but only on the native route; on fal they must be folded into the prompt
-- Direct byte stream = no polling overhead = fastest turnaround
+- Accepted async jobs survive worker restarts through their request-bound job sidecar; preserve that file until the job/output lifecycle is settled
+- MIME truth and ffprobe validation happen before publication, so an HTML error page or corrupt container cannot replace an existing good clip
 - True 720p not natively supported — mapped to 1080p internally
 - Best for: wide/landscape/environment shots (no face distortion at distance), where it remains the 2nd fallback behind Veo
-- Keyframe transition shared with Veo — use for cut-to-cut scenes
+- LTX transition helpers do not exist; scene transitions use the pipeline's ffmpeg xfade assembly path
 
 ---
 
@@ -239,10 +246,10 @@ unavailable or fails, this is what actually runs. Also native-audio.
 **Auth**: RunwayML SDK via `RUNWAYML_API_SECRET`
 
 **Image-to-Video**:
-- Model: `"gen4_turbo"` (primary); a secondary path uses `"gen3a_turbo"`
+- Model: `"gen4_turbo"` on the active route. The legacy `RUNWAY`/Gen-3 dispatch branch is retired and removed
 - Duration: 10 seconds
 - Ratio: `"16:9"`
-- Image input: base64 data URI (`data:image/jpeg;base64,...`)
+- Image input: a content-validated JPEG, PNG, or WebP base64 data URI. The detected signature must match the path suffix; mismatches and unsupported bytes fail before client construction
 - Style lock: up to **3 reference images** for style consistency
 - Poll: `client.tasks.retrieve(id=task.id)` (keyword arg); gen4_turbo block polls at 10s intervals
 
@@ -338,17 +345,17 @@ slice, not yet landed**. The routing branch returns `ENGINE_VIGGLE` again when i
 
 | Feature | **Gemini Omni** | Kling 3.0 | Sora 2 | Veo 3.1 | LTX 2.3 | Runway Gen-4 Turbo |
 |---------|-----------------|-----------|--------|---------|---------|-------------|
-| Role (post-WS2) | **PRIMARY (all types)** | Fallback | Fallback (action, pre-sunset) | **1st fallback (all types)** | Fallback | Fallback |
+| Role (post-WS2) | **PRIMARY (all types)** | Fallback | Explicit-only compatibility | **1st fallback (all types)** | Fallback | Fallback |
 | Character Binding | Reference images (`reference_to_video`) | `elements` (≤3 refs) | Prompt only | References (3, t2v path only) | Prompt only | Style lock (3) |
 | Face Consistency Flag | No | No (v1.6 only) | No | No | No | No |
-| Duration | **Prompt-inferred (no kwarg)** | 5s optimal | 4,8,12,16,20 | 4s,6s,8s | 6/8/10 (enforced) | 10s fixed |
+| Duration | **Prompt-inferred (no kwarg)** | 5s optimal | 4,8,12 | 4s,6s,8s | 6/8/10 (enforced) | 10s fixed |
 | Max Resolution | Prompt-inferred | 1080p | 1080p | 1080p | **4K** | 1080p |
 | Aspect Ratio | 16:9 / 9:16 | 16:9 / 9:16 | 16:9 / 9:16 | 16:9 (hardcoded) | 16:9 | 16:9 |
 | Storyboard | No | 6 shots/15s | No | No | No | No |
-| First+Last Frame | No | No | No | Yes | Yes | No |
-| Native Audio | **Yes** | No | No | **Yes** | No (fal: off by contract) | No |
-| Camera Motion Params | No | No | No | No | **15 types** (native only) | No |
-| Polling Required | Yes (10s, 20min cap) | Yes (backoff) | Yes (SDK auto) | Yes (10s manual) | **No (direct)** | Yes (10s) |
+| First+Last Frame | No | No | No | Yes | No | No |
+| Native Audio | **Yes** | No | No | **Vertex/ADC only** | No (fal: off by contract) | No |
+| Camera Motion Params | No | No | No | No | No direct param (prompt-folded) | No |
+| Polling Required | Yes (10s, 20min cap) | Yes (backoff) | Yes (SDK auto) | Yes (10s manual) | Yes (5s, 600s bound) | Yes (10s) |
 | Est. USD / ~5s | 0.56 | 0.56 | 0.80 (`SORA_NATIVE`) | **0.30** | 0.36 (6s floor) | 0.50 |
 | Best For | **Everything — arena #1** | Portraits/face | Action/motion | **Cheap + transitions** | Landscape/4K | Style lock |
 
@@ -361,7 +368,7 @@ When native APIs fail, these FAL endpoints provide redundancy:
 | API | FAL Model ID | Notes |
 |-----|-------------|-------|
 | Kling | `fal-ai/kling-video/v3/pro/image-to-video` | KLING_3_0 engine; `elements` identity, $0.112/s audio-off (parity with native pricing) |
-| ~~Sora~~ | ~~`fal-ai/sora-2/image-to-video`~~ | **RETIRED — `SORA_2` is UNSUPPORTED, not dispatchable. Do not route here.** Use `SORA_NATIVE` until the 2026-09-24 sunset |
+| ~~Sora~~ | ~~`fal-ai/sora-2/image-to-video`~~ | **RETIRED — `SORA_2` is UNSUPPORTED, not dispatchable. Do not route here.** `SORA_NATIVE` remains explicit-only compatibility until its sunset |
 | Veo | `fal-ai/veo3.1/reference-to-video` | Reference images supported |
 | LTX | `fal-ai/ltx-2.3/image-to-video` | `FAL_MODEL_ID`; duration enum {6,8,10}s; no camera_motion param (prompt-folded); audio off by contract |
 | Seedance | `bytedance/seedance-2.0/image-to-video` | 4-15s, 480p-4k, 9:16 OK; `.../reference-to-video` takes ≤9 ref images ($0.3024/s @720p standard). Per-shot-type durations in `SEEDANCE_DURATIONS` |
@@ -375,6 +382,7 @@ All FAL proxies use `FAL_KEY` and `fal_client.subscribe()` with polling.
 ```bash
 GOOGLE_API_KEY         # Gemini Omni (PRIMARY) + Veo 3.1
 GEMINI_API_KEY         # Gemini Omni alternative — either this or GOOGLE_API_KEY
+GOOGLE_CLOUD_PROJECT   # Veo Vertex backend when ADC resolves (native audio)
 KLING_ACCESS_KEY       # Kling native JWT
 KLING_SECRET_KEY       # Kling native JWT
 OPENAI_API_KEY         # Sora 2 native (also used for scene decomposition)
@@ -386,8 +394,11 @@ ANTHROPIC_API_KEY      # Chief Director QA (Claude)
 ```
 
 Without `GOOGLE_API_KEY` **or** `GEMINI_API_KEY` the primary engine for every shot
-type is unavailable and the pipeline silently runs on `VEO_NATIVE` — which needs
-`GOOGLE_API_KEY` too. Verify key presence before blaming routing.
+type is unavailable and the pipeline starts with `VEO_NATIVE`. That fallback
+needs either `GOOGLE_API_KEY` for the Developer API, or an explicit
+`GOOGLE_CLOUD_PROJECT` with resolvable Application Default Credentials for
+Vertex AI. Only the Vertex path supports native audio. Verify the selected auth
+path before blaming routing.
 
 ---
 

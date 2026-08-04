@@ -22,6 +22,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm.chief_director import ChiefDirector
+from cinema.auto_approve import (
+    AutoApproveConfig,
+    check_gate,
+    record_director_review_on_shots,
+)
 from identity.types import IdentityValidationResult
 
 
@@ -76,6 +81,94 @@ def _blocked_json() -> str:
         "quality_score": 0.2,
         "reasoning": "identity firewall triggered",
     })
+
+
+class TestUnavailableValidationRequiresReview:
+    def test_validate_shot_prompts_without_client_requires_review(self, capsys):
+        cd = _make_chief_director()
+        cd.client = None
+
+        result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        assert result["decision"] == "REVIEW_REQUIRED"
+        assert result["violations"]
+        assert "no LLM available" in capsys.readouterr().out
+
+    def test_valid_object_missing_decision_requires_review(self):
+        cd = _make_chief_director()
+        response = json.dumps({"violations": [], "modifications": []})
+
+        with patch.object(cd, "_call_llm", return_value=response):
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        assert result["decision"] == "REVIEW_REQUIRED"
+        assert result["violations"]
+
+    @pytest.mark.parametrize("raw", [None, 123, b'{}'])
+    def test_non_string_validation_response_requires_review(self, raw):
+        cd = _make_chief_director()
+
+        with patch.object(cd, "_call_llm", return_value=raw) as call:
+            result = cd.validate_shot_prompts(
+                _minimal_shots(),
+                _minimal_scene(),
+            )
+
+        assert result["decision"] == "REVIEW_REQUIRED"
+        assert result["violations"]
+        assert call.call_count == 2
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"decision": "APPROVED"},
+            {"decision": "APPROVED", "violations": {}},
+            {"decision": "APPROVED", "violations": ""},
+            {"decision": "APPROVED", "violations": [1]},
+        ],
+    )
+    def test_partial_approved_payload_cannot_clear_plan_gate(self, payload):
+        cd = _make_chief_director()
+        shots = _minimal_shots()
+
+        with patch.object(cd, "_call_llm", return_value=json.dumps(payload)):
+            result = cd.validate_shot_prompts(shots, _minimal_scene())
+
+        assert result["decision"] == "REVIEW_REQUIRED"
+        record_director_review_on_shots(shots, result)
+        gate = check_gate(
+            "plan",
+            shot_state=shots[0],
+            project={},
+            takes=[],
+            config=AutoApproveConfig(enabled=True),
+        )
+        assert gate.auto_approved is False
+
+    def test_generation_quality_without_client_requires_review_even_for_good_score(self):
+        cd = _make_chief_director()
+        cd.client = None
+
+        result = cd.evaluate_generation_quality(
+            image_path="/fake/img.jpg",
+            reference_path="/fake/ref.jpg",
+            identity_score=0.95,
+        )
+
+        assert result["decision"] == "REVIEW_REQUIRED"
+
+    @pytest.mark.parametrize("raw", ["", "}{ not json {", '{"decision":"APPROVED"}'])
+    def test_generation_quality_unavailable_or_unsupported_response_requires_review(self, raw):
+        cd = _make_chief_director()
+
+        with patch.object(cd, "_call_llm", return_value=raw):
+            result = cd.evaluate_generation_quality(
+                image_path="/fake/img.jpg",
+                reference_path="/fake/ref.jpg",
+                identity_score=0.40,
+            )
+
+        assert result["decision"] == "REVIEW_REQUIRED"
 
 
 # ─── (a) fenced JSON → real decision, no parse-error log ────────────────────
@@ -181,22 +274,23 @@ class TestFallbackAfterBothAttemptsFail:
         assert "violations" in result
         assert "shots" in result
 
-        # Fallback decision is deterministic (APPROVED for throughput fail-safe)
-        assert result["decision"] == "APPROVED"
+        # Unavailable validation is deterministic and cannot clear the plan gate.
+        assert result["decision"] == "REVIEW_REQUIRED"
+        assert result["violations"]
 
         # Observable flagged log line — NOT the old silent "Evaluation parse error"
         out = capsys.readouterr().out
         assert "parse-fallback after retry" in out
         assert "Evaluation parse error" not in out
 
-    def test_fallback_decision_is_approved_not_silent(self, capsys):
-        """Confirm the fallback is APPROVED-but-flagged (throughput fail-safe)."""
+    def test_fallback_decision_requires_review_and_is_not_silent(self, capsys):
+        """Confirm the flagged fallback cannot masquerade as genuine approval."""
         cd = _make_chief_director()
 
         with patch.object(cd, "_call_llm", return_value="}{bad json}{"):
             result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
 
-        assert result["decision"] == "APPROVED"
+        assert result["decision"] == "REVIEW_REQUIRED"
         # The fallback marker must be visible in output — distinguishable from
         # a genuine LLM APPROVED decision
         out = capsys.readouterr().out
@@ -226,7 +320,7 @@ class TestNonDictParseDoesNotCrash:
             result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
 
         # No exception raised; contract keys intact.
-        assert result["decision"] == "APPROVED"
+        assert result["decision"] == "REVIEW_REQUIRED"
         assert "violations" in result
         assert "shots" in result
         # Parse succeeded on attempt 0 → no retry triggered.
@@ -240,7 +334,7 @@ class TestNonDictParseDoesNotCrash:
         with patch.object(cd, "_call_llm", return_value='"just a quoted string"'):
             result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
 
-        assert result["decision"] == "APPROVED"
+        assert result["decision"] == "REVIEW_REQUIRED"
         assert "shots" in result
         out = capsys.readouterr().out
         assert "parse-fallback" in out
@@ -288,6 +382,46 @@ class TestModifiedWithoutModificationsDowngrades:
         out = capsys.readouterr().out
         assert "downgrading to REJECTED" in out
 
+    def test_modified_with_malformed_nonempty_modification_downgrades(self, capsys):
+        """A truthy ``[{}]`` payload applies nothing and cannot be auto-cleared."""
+        cd = _make_chief_director()
+        shots = _minimal_shots()
+        original_prompt = shots[0]["prompt"]
+        malformed = json.dumps({
+            "decision": "MODIFIED",
+            "violations": ["HC2: shot 0 describes blue eyes"],
+            "modifications": [{}],
+            "quality_score": 0.4,
+            "reasoning": "claimed correction without an applicable patch",
+        })
+
+        with patch.object(cd, "_call_llm", return_value=malformed):
+            result = cd.validate_shot_prompts(shots, _minimal_scene())
+
+        assert result["decision"] == "REJECTED"
+        assert shots[0]["prompt"] == original_prompt
+        assert "complete applicable modification set" in capsys.readouterr().out
+
+    def test_modified_with_mixed_valid_and_malformed_modifications_downgrades(self):
+        """One valid patch cannot launder a malformed sibling correction."""
+        cd = _make_chief_director()
+        shots = _minimal_shots()
+        original_prompt = shots[0]["prompt"]
+        mixed = json.dumps({
+            "decision": "MODIFIED",
+            "violations": ["HC2", "HC3"],
+            "modifications": [
+                {"shot_index": 0, "field": "prompt", "corrected": "valid correction"},
+                {},
+            ],
+        })
+
+        with patch.object(cd, "_call_llm", return_value=mixed):
+            result = cd.validate_shot_prompts(shots, _minimal_scene())
+
+        assert result["decision"] == "REJECTED"
+        assert shots[0]["prompt"] == original_prompt
+
     def test_modified_with_modifications_is_not_downgraded(self, capsys):
         """The normal MODIFIED path (corrections supplied) must be untouched:
         decision stays MODIFIED and the correction is applied in-place."""
@@ -311,10 +445,9 @@ class TestModifiedWithoutModificationsDowngrades:
         out = capsys.readouterr().out
         assert "downgrading to REJECTED" not in out
 
-    def test_modified_empty_violations_and_mods_is_not_downgraded(self):
-        """Boundary: MODIFIED with neither violations nor modifications is NOT the
-        degenerate case the guard targets — there are no open violations to ship
-        uncorrected, so auto-clearing to APPROVED is harmless. Leave it unchanged."""
+    def test_modified_empty_violations_and_mods_is_downgraded(self):
+        """MODIFIED without a concrete mutation cannot be normalized to approval,
+        even when a partial payload omits all violations."""
         cd = _make_chief_director()
         modified_empty = json.dumps({
             "decision": "MODIFIED",
@@ -326,8 +459,16 @@ class TestModifiedWithoutModificationsDowngrades:
         with patch.object(cd, "_call_llm", return_value=modified_empty):
             result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
 
-        # No violations → not the uncorrected-plan risk → not downgraded.
-        assert result["decision"] == "MODIFIED"
+        assert result["decision"] == "REJECTED"
+
+    def test_partial_modified_payload_without_lists_requires_review(self):
+        """A MODIFIED payload missing its required lists is unavailable evidence."""
+        cd = _make_chief_director()
+
+        with patch.object(cd, "_call_llm", return_value='{"decision":"MODIFIED"}'):
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        assert result["decision"] == "REVIEW_REQUIRED"
 
 
 # ─── (f) evaluate_generation_quality with skipped identity result ────────────
@@ -340,8 +481,8 @@ class TestEvaluateGenerationQualitySkipGuard:
     Before the guard (chief_director.py line ~365):
         identity_score = None  →  None >= threshold  →  TypeError crash.
 
-    After the guard:
-        identity_passed = True  (skip = non-blocking, treat as pass).
+    After the guard, the unmeasurable identity state requires review instead
+    of being converted to ACCEPT.
     """
 
     def test_skip_identity_result_does_not_raise(self):
@@ -355,14 +496,12 @@ class TestEvaluateGenerationQualitySkipGuard:
             identity_result=_skip_result(),
         )
 
-        # Skip result is non-blocking: identity_passed should be True so the method
-        # does not drive an identity mutation decision off a non-score.
+        # Skip result remains a valid non-crashing response.
         assert isinstance(result, dict), "result must be a dict"
         assert "decision" in result, f"result keys: {list(result.keys())}"
 
-    def test_skip_identity_result_treated_as_non_blocking(self):
-        """A skipped identity (overall_score=None) must be treated as passing:
-        if coherence is also nominal the decision should be ACCEPT (not a mutation path)."""
+    def test_skip_identity_result_requires_review(self):
+        """A skipped identity (overall_score=None) must never become ACCEPT."""
         cd = _make_chief_director()
 
         result = cd.evaluate_generation_quality(
@@ -371,17 +510,12 @@ class TestEvaluateGenerationQualitySkipGuard:
             identity_result=_skip_result(),
         )
 
-        # With skip + no coherence issue, identity is non-blocking → ACCEPT.
-        assert result.get("decision") == "ACCEPT", (
-            f"Expected ACCEPT for skipped identity, got {result.get('decision')}"
+        assert result.get("decision") == "REVIEW_REQUIRED", (
+            f"Expected REVIEW_REQUIRED for skipped identity, got {result.get('decision')}"
         )
 
-    def test_skip_identity_does_not_crash_in_llm_except_fallback(self):
-        """Skip identity (overall_score=None) + incoherence + an LLM parse failure
-        must not crash at the except-fallback (chief_director.py ~:510, which does
-        `identity_score > 0.55`). identity_passed=True (skip) but coherent=False
-        bypasses the ACCEPT short-circuit and reaches the LLM path; a garbage
-        response makes parsing raise → the except fallback runs with score=None."""
+    def test_skip_identity_short_circuits_before_llm(self):
+        """Skip identity + incoherence remains review-required without LLM use."""
         cd = _make_chief_director()
 
         class _FakeCoherence:
@@ -390,7 +524,7 @@ class TestEvaluateGenerationQualitySkipGuard:
             lighting_consistency = 0.9
             recommendations = []
 
-        with patch.object(cd, "_call_llm", return_value="}{ not json {"):
+        with patch.object(cd, "_call_llm", return_value="}{ not json {") as mock_llm:
             result = cd.evaluate_generation_quality(
                 image_path="/fake/img.jpg",
                 reference_path="/fake/ref.jpg",
@@ -398,6 +532,5 @@ class TestEvaluateGenerationQualitySkipGuard:
                 coherence_result=_FakeCoherence(),
             )
 
-        # Before the guard: TypeError (None > 0.55). After: a valid RETRY fallback.
-        assert result.get("decision") == "RETRY"
-        assert result.get("mutation_level") in (1, 2, 3)
+        assert result.get("decision") == "REVIEW_REQUIRED"
+        mock_llm.assert_not_called()

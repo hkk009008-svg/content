@@ -39,6 +39,11 @@ from audio._client import client
 from audio.voiceover import get_voice_direction
 from cinema.context import get_project_setting
 from config.settings import settings
+from performance._net import (
+    atomic_publish_bytes,
+    publish_validated_file,
+    validate_audio_artifact,
+)
 
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
@@ -227,13 +232,18 @@ def generate_cartesia(
         r = requests.post(url, headers=headers, json=payload, timeout=60)
         r.raise_for_status()
 
-        # Cartesia bytes endpoint streams audio bytes in the response body.
-        # Atomic publish (T-B quality fold): a kill mid-write must not leave
-        # a partial mp3 — the exists-guard above would cache-hit it forever.
-        _part = output_path + ".part"
-        with open(_part, "wb") as f:
-            f.write(r.content)
-        os.replace(_part, output_path)
+        response_content_type = r.headers.get("content-type", "")
+        if not isinstance(response_content_type, str):
+            response_content_type = ""
+        if atomic_publish_bytes(
+            r.content,
+            output_path,
+            max_bytes=64 * 1024 * 1024,
+            content_type=response_content_type,
+            allowed_content_types=("audio/mpeg", "audio/mp3"),
+            content_validator=validate_audio_artifact,
+        ) is None:
+            raise RuntimeError("Cartesia response failed audio validation")
         print(f"   ✅ Cartesia output: {output_path}")
         return True
 
@@ -440,9 +450,22 @@ def _try_dialogue_mode(
         print(f"   [DIALOGUE-MODE] dialogue endpoint failed ({e}); using per-line path.")
         return None
 
+    staged = output_filename + ".part"
     try:
-        save(audio, output_filename)
+        save(audio, staged)
+        if publish_validated_file(
+            staged,
+            output_filename,
+            content_validator=validate_audio_artifact,
+        ) is None:
+            raise RuntimeError("dialogue-mode response failed audio validation")
     except Exception as e:
+        try:
+            os.remove(staged)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
         print(f"   [DIALOGUE-MODE] save failed: {e}")
         return None
 
@@ -802,6 +825,7 @@ def generate_dialogue_voiceover(
             print(f"   [ELEVENLABS] Cache hit: {temp_path}")
             temp_files.append(temp_path)
             continue
+        _part = temp_path + ".part"
         try:
             audio = client.text_to_speech.convert(
                 voice_id=voice_id,
@@ -815,9 +839,13 @@ def generate_dialogue_voiceover(
                     use_speaker_boost=voice_profile.get("speaker_boost", True),
                 ),
             )
-            _part = temp_path + ".part"
             save(audio, _part)
-            os.replace(_part, temp_path)
+            if publish_validated_file(
+                _part,
+                temp_path,
+                content_validator=validate_audio_artifact,
+            ) is None:
+                raise RuntimeError("ElevenLabs response failed audio validation")
             temp_files.append(temp_path)
             # Best-effort cost tracking — M-B2 closure (cycle-16). Symmetric
             # to Cartesia tracking above; closes the asymmetry noted at
@@ -835,6 +863,12 @@ def generate_dialogue_voiceover(
                 print(f"   [ELEVENLABS] cost record skipped for line {i+1} (non-critical)")
             print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path}")
         except Exception as e:
+            try:
+                os.remove(_part)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
             print(f"   ⚠️ Failed to generate line {i+1} for {char_name}: {e}")
 
     if not temp_files:

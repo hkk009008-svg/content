@@ -17,7 +17,7 @@ import os
 from typing import Optional, Tuple
 
 from config.settings import settings
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 from performance._poll import poll_task
 
 
@@ -150,7 +150,13 @@ def _synth_via_sadtalker(
                 )
                 # ComfyUI pod is internal-trusted; allow http (RunPod often
                 # exposes the proxy URL without TLS).
-                if not safe_download(view, output_mp4, allow_http=True):
+                if not safe_download(
+                    view,
+                    output_mp4,
+                    allow_http=True,
+                    allowed_content_types=("video/mp4",),
+                    content_validator=validate_video_artifact,
+                ):
                     return None
                 _cost_log("sadtalker", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                 print(f"   ✅ SadTalker driving face: {output_mp4}")

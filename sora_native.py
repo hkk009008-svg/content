@@ -1,14 +1,13 @@
 """
 Sora Native API Client — Direct OpenAI Sora 2 integration via openai SDK.
 Uses the /v1/videos endpoint for image-to-video generation with
-up to 20s duration at 1080p.
+4, 8, or 12 second duration requests.
 
 Note: OpenAI has announced Sora will shut down September 2026.
 """
 from __future__ import annotations
 
 import os
-import secrets
 import tempfile
 from pathlib import Path
 from typing import Callable
@@ -16,6 +15,11 @@ from typing import Callable
 import openai
 from config.settings import settings
 from cinema.aspect import portrait_swap
+from performance._net import (
+    DEFAULT_MAX_BYTES,
+    atomic_publish_stream,
+    validate_video_artifact,
+)
 
 # Maps the public resolution string to the Sora API `size` parameter value.
 # Mirrors the naming convention of ltx_native.RESOLUTION_MAP (sora uses flat
@@ -25,6 +29,9 @@ RESOLUTION_MAP: dict[str, str] = {
     "720p": "1280x720",
     "1080p": "1920x1080",
 }
+
+SORA_DURATION_SECONDS = (4, 8, 12)
+SORA_MAX_VIDEO_BYTES = DEFAULT_MAX_BYTES
 
 
 class SoraNativeAPI:
@@ -61,22 +68,15 @@ class SoraNativeAPI:
         Generate video from a start frame image + text prompt using Sora 2.
 
         Args:
-            image_path: Path to the start frame image. Required when no valid
-                driving video is supplied; unused (and may be absent) when
-                ``driving_video_path`` names an existing file that becomes the
-                complete ``input_reference``.
+            image_path: Path to the required start frame image.
             prompt: Text prompt describing the desired motion/scene.
             output_path: Where to save the generated video.
-            duration: Video duration in seconds — 4, 8, 12, 16, or 20 (integer).
+            duration: Video duration in seconds — 4, 8, or 12 (integer).
             model: Model name — "sora-2" (default).
             resolution: Output resolution — "480p", "720p", or "1080p".
-            driving_video_path: Optional path to a performance-capture clip.
-                When provided AND the file exists, Sora submits it as the
-                ``input_reference`` (video) without opening or resizing the still.
-                When the driving path is missing, the resized still is used.
-                Any later SDK or file-access failure follows the normal failure
-                path and returns None; it does not retry with the still after
-                selecting an existing driving file.
+            driving_video_path: Interface-compatible performance-capture path.
+                Sora's ``input_reference`` accepts images, not video. Any
+                non-empty value is rejected before preprocessing or submission.
             aspect_ratio: Project aspect ratio string — "16:9" (default, landscape)
                 or "9:16" (portrait). When portrait, both the PIL resize target
                 and the API ``size=`` parameter are transposed via portrait_swap
@@ -101,22 +101,23 @@ class SoraNativeAPI:
             post-billing (the provider completed the video but the download
             that followed failed).
         """
-        # Driving video is a complete input reference — check it before requiring
-        # an otherwise unused still.
-        use_driving = bool(driving_video_path) and os.path.exists(driving_video_path)
-        if use_driving:
+        if driving_video_path:
             print(
-                f"[SORA-NATIVE] Using performance driving video as input_reference: "
-                f"{os.path.basename(driving_video_path)}"
+                "[SORA-NATIVE] Driving-video input is unsupported; "
+                "input_reference must be a still image."
             )
-        elif not os.path.exists(image_path):
-            print(f"[SORA-NATIVE] Start frame not found: {image_path}")
             return None
 
-        valid_durations = [4, 8, 12, 16, 20]
-        if duration not in valid_durations:
-            print(f"[SORA-NATIVE] Invalid duration {duration}s, must be one of {valid_durations}. Defaulting to 4s.")
-            duration = 4
+        if duration not in SORA_DURATION_SECONDS:
+            print(
+                f"[SORA-NATIVE] Invalid duration {duration}s; "
+                f"must be one of {list(SORA_DURATION_SECONDS)}."
+            )
+            return None
+
+        if not os.path.exists(image_path):
+            print(f"[SORA-NATIVE] Start frame not found: {image_path}")
+            return None
 
         # sora-2 supports ONLY the 720p tier (1280x720 / 720x1280 per the API); 1080p and
         # 480p requests 400 ("Invalid size for sora-2 model"). Clamp to 720p so the call can't
@@ -139,37 +140,32 @@ class SoraNativeAPI:
             size = f"{target_w}x{target_h}"
 
             temp_still_path: Path | None = None
-            temp_output_path: str | None = None
             try:
                 # Pass as PathLike — the SDK expects a file path, bytes, or IO
-                # object. A valid driving video is the complete reference, so
-                # avoid creating a still that cannot be submitted alongside it.
-                if use_driving:
-                    reference_for_sora = Path(driving_video_path)
-                else:
-                    from PIL import Image as PILImage
+                # object. The Videos API input-reference contract is image-only.
+                from PIL import Image as PILImage
 
-                    with tempfile.NamedTemporaryFile(
-                        suffix=".jpg", delete=False
-                    ) as temp_still:
-                        temp_still_path = Path(temp_still.name)
+                with tempfile.NamedTemporaryFile(
+                    suffix=".jpg", delete=False
+                ) as temp_still:
+                    temp_still_path = Path(temp_still.name)
 
-                    with PILImage.open(image_path) as source_image:
-                        resized_image = source_image.resize(
-                            (target_w, target_h), PILImage.LANCZOS
-                        )
-                        try:
-                            resized_image.save(
-                                temp_still_path, format="JPEG", quality=90
-                            )
-                        finally:
-                            resized_image.close()
-
-                    reference_for_sora = temp_still_path
-                    print(
-                        f"[SORA-NATIVE] Image resized to {size}: "
-                        f"{temp_still_path}"
+                with PILImage.open(image_path) as source_image:
+                    resized_image = source_image.resize(
+                        (target_w, target_h), PILImage.LANCZOS
                     )
+                    try:
+                        resized_image.save(
+                            temp_still_path, format="JPEG", quality=90
+                        )
+                    finally:
+                        resized_image.close()
+
+                reference_for_sora = temp_still_path
+                print(
+                    f"[SORA-NATIVE] Image resized to {size}: "
+                    f"{temp_still_path}"
+                )
 
                 video = self.client.videos.create_and_poll(
                     model=model,
@@ -199,46 +195,28 @@ class SoraNativeAPI:
                             f"[SORA-NATIVE] Warning: on_billed callback raised: {callback_exc}"
                         )
 
-                # Download via download_content — publish atomically so a
-                # mid-stream failure cannot leave a partial new file or destroy
-                # a previously valid output_path.
+                # Download via download_content through the shared bounded,
+                # validated atomic publisher. A mid-stream failure or response
+                # over the hard cap preserves any prior output_path.
                 print(f"[SORA-NATIVE] Downloading video {video.id}...")
                 content = self.client.videos.download_content(video.id)
-                out_dir = os.path.dirname(output_path) or "."
-                os.makedirs(out_dir, exist_ok=True)
-                temp_output_path = os.path.join(
-                    out_dir,
-                    f".sora-download-{secrets.token_hex(8)}.tmp",
-                )
-                with open(temp_output_path, "wb") as f:
-                    for chunk in content.response.iter_bytes():
-                        f.write(chunk)
-                try:
-                    destination_mode = os.stat(output_path).st_mode & 0o777
-                except FileNotFoundError:
-                    pass
-                else:
-                    os.chmod(temp_output_path, destination_mode)
-                os.replace(temp_output_path, output_path)
-                temp_output_path = None
+                if atomic_publish_stream(
+                    content.response.iter_bytes(),
+                    output_path,
+                    max_bytes=SORA_MAX_VIDEO_BYTES,
+                    content_validator=validate_video_artifact,
+                ) is None:
+                    raise RuntimeError("Sora response failed MP4 validation")
                 file_size = os.path.getsize(output_path) / (1024 * 1024)
                 print(f"[SORA-NATIVE] Video saved: {output_path} ({file_size:.1f} MB)")
                 return output_path
             finally:
-                # Only this method's generated still is owned here. The driving
-                # video remains operator-owned and is never assigned to this slot.
+                # Only this method's generated still is owned here.
                 if temp_still_path is not None:
                     try:
                         temp_still_path.unlink()
                     except OSError:
                         pass  # Cleanup is non-fatal if the OS refuses deletion.
-                if temp_output_path is not None:
-                    try:
-                        os.remove(temp_output_path)
-                    except FileNotFoundError:
-                        pass
-                    except OSError:
-                        pass
 
         except Exception as e:
             print(f"[SORA-NATIVE] Generation failed: {e}")

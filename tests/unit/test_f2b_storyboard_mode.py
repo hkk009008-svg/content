@@ -568,6 +568,29 @@ class TestIneligibleScenes:
         assert gen.generate_motion_take.call_count == 7
         gen._shot_ctrl._finalize_motion_take.assert_not_called()
 
+    @pytest.mark.parametrize("purpose", ["dialogue_close_up", "talking_head_full"])
+    def test_dialogue_shot_forces_per_shot_f1b_path(self, purpose):
+        """Storyboard finalization cannot bypass dialogue lip-sync evidence."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        shots[0]["optimizer_cache"] = {"spec": {"purpose": purpose}}
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+        gen = _make_gen_mock()
+        phase = MotionRenderPhase(shot_generator=gen, project=project)
+
+        with patch.object(
+            phase,
+            "_run_storyboard_scene",
+            side_effect=AssertionError("dialogue escaped into storyboard batch"),
+        ):
+            result = phase.run(_make_lifecycle())
+
+        assert result.ok is True
+        assert gen.generate_motion_take.call_count == 2
+        gen._shot_ctrl._finalize_motion_take.assert_not_called()
+
     def test_two_shots_triggers_storyboard_path(self, tmp_path):
         """2 shots is inside the 2–6 range — storyboard path should be attempted."""
         from cinema.phases.motion_render import MotionRenderPhase

@@ -1,5 +1,6 @@
 /**
- * PostRunSummary — modal aggregating auto-approve audit decisions across all shots.
+ * PostRunSummary — modal aggregating retained auto-approve audit history across
+ * all shots in the current project.
  *
  * Triggered by the pipeline-completion SSE event (stage: "DONE") from the parent
  * component (`AppShell`, formerly `EditorialShell` — deleted in Task 13). Auto-opens
@@ -7,18 +8,21 @@
  * user can revisit after closing.
  *
  * Displays:
- *   - Per-gate counts (plan / image / motion / final): N approved / M vetoed
+ *   - Latest per-shot/per-gate counts (plan / image / motion / final): approved / vetoed /
+ *     deferred. Deferred means evaluation failed and manual review remains;
+ *     it is not a substantive rule veto.
  *     Motion gate only appears when at least one motion audit entry exists
  *     (opt-in per S12 / ADR-014).
- *   - Top-5 firing rules across all shots (by frequency)
- *   - List of all auto-approved takes with shot ID + gate + rules + reject affordance
+ *   - Top-5 firing rules across retained history (by frequency)
+ *   - Latest auto-approved decisions with shot ID + gate + rules + reject affordance
  *
  * Each approved take row has a "Reject" button → opens RejectAutoApproveModal.
  */
 
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import type { Project, AutoApproveAuditEntry } from '../../types/project'
 import RejectAutoApproveModal from './RejectAutoApproveModal'
+import { Dialog } from '../ui'
 
 interface Props {
   project: Project
@@ -48,6 +52,7 @@ interface GateStat {
   gate: Gate
   approved: number
   vetoed: number
+  deferred: number
 }
 
 export function PostRunSummary({
@@ -59,8 +64,19 @@ export function PostRunSummary({
 }: Props) {
   const [rejectTarget, setRejectTarget] = useState<{ shotId: string; gate: Gate } | null>(null)
 
+  // This component remains mounted in AppShell while closed. Do not let a
+  // previously-open nested destructive dialog reappear on a later reopen or
+  // after switching to a different project.
+  useEffect(() => {
+    if (!isOpen) setRejectTarget(null)
+  }, [isOpen])
+
+  useEffect(() => {
+    setRejectTarget(null)
+  }, [project.id])
+
   // Aggregate audit entries across all shots in all scenes.
-  const { gateStats, topRules, approvedRows, hasMotionEntries } = useMemo(() => {
+  const { gateStats, topRules, approvedRows } = useMemo(() => {
     const allEntries: Array<{ shotId: string; entry: AutoApproveAuditEntry }> = []
 
     for (const scene of project.scenes) {
@@ -71,7 +87,8 @@ export function PostRunSummary({
       }
     }
 
-    // Gate stats — count approved/vetoed per gate (most recent entry per gate per shot)
+    // Gate stats — count each authoritative outcome separately. A deferred
+    // eval-error still routes to a human but is not a substantive rule veto.
     const latestByGateAndShot = new Map<string, AutoApproveAuditEntry>()
     for (const { shotId, entry } of allEntries) {
       const key = `${shotId}::${entry.gate}`
@@ -81,11 +98,11 @@ export function PostRunSummary({
       }
     }
 
-    const gateCounts: Record<Gate, { approved: number; vetoed: number }> = {
-      plan: { approved: 0, vetoed: 0 },
-      image: { approved: 0, vetoed: 0 },
-      motion: { approved: 0, vetoed: 0 },
-      final: { approved: 0, vetoed: 0 },
+    const gateCounts: Record<Gate, { approved: number; vetoed: number; deferred: number }> = {
+      plan: { approved: 0, vetoed: 0, deferred: 0 },
+      image: { approved: 0, vetoed: 0, deferred: 0 },
+      motion: { approved: 0, vetoed: 0, deferred: 0 },
+      final: { approved: 0, vetoed: 0, deferred: 0 },
     }
     let hasMotionEntries = false
     for (const [key, entry] of latestByGateAndShot) {
@@ -93,6 +110,8 @@ export function PostRunSummary({
       if (gate === 'motion') hasMotionEntries = true
       if (entry.auto_approved) {
         gateCounts[gate].approved++
+      } else if (entry.deferred) {
+        gateCounts[gate].deferred++
       } else {
         gateCounts[gate].vetoed++
       }
@@ -100,7 +119,12 @@ export function PostRunSummary({
 
     const gateStats: GateStat[] = GATE_ORDER
       .filter(g => g !== 'motion' || hasMotionEntries)
-      .map(g => ({ gate: g, approved: gateCounts[g].approved, vetoed: gateCounts[g].vetoed }))
+      .map(g => ({
+        gate: g,
+        approved: gateCounts[g].approved,
+        vetoed: gateCounts[g].vetoed,
+        deferred: gateCounts[g].deferred,
+      }))
 
     // Top-5 firing rules across all entries (frequency count)
     const ruleCounts = new Map<string, number>()
@@ -124,7 +148,7 @@ export function PostRunSummary({
     // Sort chronologically (oldest first) for a readable audit trail
     approvedRows.sort((a, b) => (a.entry.timestamp < b.entry.timestamp ? -1 : 1))
 
-    return { gateStats, topRules, approvedRows, hasMotionEntries }
+    return { gateStats, topRules, approvedRows }
   }, [project])
 
   if (!isOpen) return null
@@ -140,34 +164,30 @@ export function PostRunSummary({
 
   const totalApproved = gateStats.reduce((s, g) => s + g.approved, 0)
   const totalVetoed = gateStats.reduce((s, g) => s + g.vetoed, 0)
+  const totalDeferred = gateStats.reduce((s, g) => s + g.deferred, 0)
 
   return (
     <>
-      {/* Overlay */}
-      <div
-        className="fixed inset-0 z-40 flex items-center justify-center bg-black/70"
-        onClick={onClose}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Run auto-approve summary"
+      <Dialog
+        isOpen={isOpen && !rejectTarget}
+        onClose={onClose}
+        aria-label="Project auto-approve history"
+        className="max-h-[85vh] max-w-2xl overflow-y-auto"
       >
-        {/* Dialog panel */}
-        <div
-          className="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-lg border border-line bg-app p-6 shadow-xl"
-          onClick={(e) => e.stopPropagation()}
-        >
           {/* Header */}
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-1">
-                Run Complete
+                Project History
               </div>
               <h2 className="text-xl font-semibold text-tx">
-                Auto-Approve Summary
+                Auto-Approve Decision History
               </h2>
               <p className="mt-1.5 text-sm text-mut">
                 {totalApproved} decision{totalApproved === 1 ? '' : 's'} auto-approved
-                {totalVetoed > 0 && `, ${totalVetoed} vetoed`} across this run.
+                {totalVetoed > 0 && `, ${totalVetoed} vetoed`}
+                {totalDeferred > 0 && `, ${totalDeferred} deferred for manual review`} in the latest
+                {' '}recorded state for each shot and gate.
               </p>
             </div>
             <button
@@ -183,10 +203,10 @@ export function PostRunSummary({
           {gateStats.length > 0 ? (
             <section className="mb-6">
               <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
-                Per-Gate Results
+                Latest Per-Gate State
               </div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {gateStats.map(({ gate, approved, vetoed }) => (
+                {gateStats.map(({ gate, approved, vetoed, deferred }) => (
                   <div
                     key={gate}
                     className="rounded border border-line bg-panel px-3 py-3"
@@ -200,8 +220,14 @@ export function PostRunSummary({
                     </div>
                     {vetoed > 0 && (
                       <div className="flex items-baseline gap-1.5 mt-1">
-                        <span className="text-sm font-mono text-warn">{vetoed}</span>
+                        <span className="text-sm font-mono text-fail">{vetoed}</span>
                         <span className="text-eyebrow text-mut">vetoed</span>
+                      </div>
+                    )}
+                    {deferred > 0 && (
+                      <div className="flex items-baseline gap-1.5 mt-1">
+                        <span className="text-sm font-mono text-warn">{deferred}</span>
+                        <span className="text-eyebrow text-mut">deferred</span>
                       </div>
                     )}
                   </div>
@@ -210,7 +236,7 @@ export function PostRunSummary({
             </section>
           ) : (
             <div className="mb-6 rounded border border-line bg-panel px-4 py-6 text-center text-sm text-mut">
-              No auto-approve entries found. Auto-approve may not be configured for this project.
+              No auto-approve history found. Auto-approve may not be configured for this project.
             </div>
           )}
 
@@ -218,8 +244,11 @@ export function PostRunSummary({
           {topRules.length > 0 && (
             <section className="mb-6">
               <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
-                Top Firing Rules
+                Historical Rule Frequency
               </div>
+              <p className="mb-2 text-xs text-mut">
+                Counts include every retained audit entry for this project, not only the latest state above.
+              </p>
               <ul className="space-y-1.5">
                 {topRules.map(({ rule, count }) => (
                   <li
@@ -240,7 +269,7 @@ export function PostRunSummary({
           {approvedRows.length > 0 && (
             <section>
               <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-3">
-                Auto-Approved Decisions — Override
+                Latest Auto-Approved Decisions — Override
               </div>
               <div className="space-y-2">
                 {approvedRows.map(({ shotId, gate, entry }) => (
@@ -284,8 +313,7 @@ export function PostRunSummary({
               Close
             </button>
           </div>
-        </div>
-      </div>
+      </Dialog>
 
       {/* Nested reject modal */}
       {rejectTarget && (

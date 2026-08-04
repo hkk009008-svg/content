@@ -281,15 +281,16 @@ class TestRemediationAdvisoryOnFailedKeyframe:
 
         # Intercept _mutate_shot to extract the 'take' dict the mutator closes over.
         captured_take = {}
+        mutation_shot = {}
 
         def _capture_mutator(shot_id_arg, mutator_fn):
-            # Call the mutator on a stub; the mutator appends the local `take` dict
-            # to fake_shot["keyframe_takes"] — capture it from there.
-            fake_shot = {}
-            mutator_fn({}, fake_shot)
-            # take was appended to fake_shot["keyframe_takes"][0]
-            captured_take.update(fake_shot["keyframe_takes"][0])
-            return MagicMock()
+            # Generation now performs a durable reservation mutation before
+            # the final take append. Preserve one stub across both mutations
+            # and capture only when the take-registration mutation runs.
+            result = mutator_fn({}, mutation_shot)
+            if mutation_shot.get("keyframe_takes"):
+                captured_take.update(mutation_shot["keyframe_takes"][0])
+            return result.value
 
         ctrl._mutate_shot = _capture_mutator
 
@@ -361,12 +362,13 @@ class TestRemediationAdvisoryOnFailedKeyframe:
         mock_validator.validate_image.return_value = passed_id_result
 
         captured_take = {}
+        mutation_shot = {}
 
         def _capture_mutator(shot_id_arg, mutator_fn):
-            fake_shot = {}
-            mutator_fn({}, fake_shot)
-            captured_take.update(fake_shot["keyframe_takes"][0])
-            return MagicMock()
+            result = mutator_fn({}, mutation_shot)
+            if mutation_shot.get("keyframe_takes"):
+                captured_take.update(mutation_shot["keyframe_takes"][0])
+            return result.value
 
         ctrl._mutate_shot = _capture_mutator
 

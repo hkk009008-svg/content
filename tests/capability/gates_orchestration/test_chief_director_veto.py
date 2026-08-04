@@ -3,7 +3,7 @@
 These exercise the ChiefDirector's OWN decision logic (the spec §7 blind spot) —
 NOT the parse paths (test_chief_director_parse.py) or the gate's consumption
 (test_auto_approve.py). No real LLM call: the no-client branches need zero mocking;
-the except-fallback tiering monkeypatches _call_llm to raise.
+the except-fallback tiering monkeypatches _call_llm to return invalid JSON.
 
 evaluate_generation_quality(self, image_path, reference_path, identity_result=None,
 identity_score=0.0, ...) — image_path AND reference_path are both required
@@ -27,29 +27,28 @@ def _cd():
 
 
 @pytest.mark.offline
-def test_no_client_identity_fail_retries_level_one(capability_record):
+def test_no_client_identity_fail_requires_review(capability_record):
     cd = _cd()
-    # identity below the 0.70 default threshold, coherence passing -> not the ACCEPT
-    # short-circuit; no client -> RETRY mutation_level=1.
+    # Missing ChiefDirector evidence is an infrastructure state, not a quality
+    # verdict, even when deterministic identity scoring failed.
     out = cd.evaluate_generation_quality(
         image_path=None, reference_path=None, identity_result=None,
         coherence_result=_coherence(0.9), identity_score=0.50,
     )
-    assert out["decision"] == "RETRY"
-    assert out["mutation_level"] == 1
+    assert out["decision"] == "REVIEW_REQUIRED"
+    assert "mutation_level" not in out
     capability_record(claim_id="CD-01", passed=True)
 
 
 @pytest.mark.offline
-def test_no_client_coherence_only_fail_accepts(capability_record):
+def test_no_client_coherence_only_fail_requires_review(capability_record):
     cd = _cd()
-    # identity passes (0.90 >= 0.70), coherence fails (0.30 < 0.6); no client -> ACCEPT
-    # (the coherence-only failure is not actioned without an LLM).
+    # No client may not turn a coherence-only failure into ACCEPT.
     out = cd.evaluate_generation_quality(
         image_path=None, reference_path=None, identity_result=None,
         coherence_result=_coherence(0.30), identity_score=0.90,
     )
-    assert out["decision"] == "ACCEPT"
+    assert out["decision"] == "REVIEW_REQUIRED"
     capability_record(claim_id="CD-02", passed=True)
 
 
@@ -70,7 +69,7 @@ def test_except_fallback_mutation_level_tiering(capability_record):
             image_path=None, reference_path=None, identity_result=None,
             coherence_result=coherence_result, identity_score=identity_score,
         )
-        assert out["decision"] == "RETRY", out
+        assert out["decision"] == "REVIEW_REQUIRED", out
         return out["mutation_level"]
 
     # numeric tiering: identity < 0.70 fails -> identity_passed=False -> no ACCEPT
@@ -79,22 +78,30 @@ def test_except_fallback_mutation_level_tiering(capability_record):
     assert _level(0.60, None) == 1
     assert _level(0.45, None) == 2
     assert _level(0.30, None) == 3
-    # None identity (skipped): identity_passed=True, so coherent must be False to avoid
-    # the ACCEPT short-circuit — hence a FULL coherence mock the prompt-builder can read.
-    full_coherence = types.SimpleNamespace(
-        overall_coherence_score=0.30, color_drift=0.10,
-        lighting_consistency=0.90, recommendations=[])
-    assert _level(None, full_coherence) == 1
+    # None identity (skipped) short-circuits to manual review before an LLM call;
+    # it has no mutation-level inference because there was no measurable score.
+    cd = ChiefDirector(project={})
+    cd.client = object()
+    cd._call_llm = _bad_json
+    skipped = cd.evaluate_generation_quality(
+        image_path=None,
+        reference_path=None,
+        identity_result=None,
+        coherence_result=_coherence(0.30),
+        identity_score=None,
+    )
+    assert skipped["decision"] == "REVIEW_REQUIRED"
+    assert "mutation_level" not in skipped
     capability_record(claim_id="CD-03", passed=True)
 
 
 @pytest.mark.offline
-def test_validate_shot_prompts_no_client_passthrough(capability_record):
+def test_validate_shot_prompts_no_client_requires_review(capability_record):
     cd = _cd()
     shots = [{"prompt": "a wide shot"}]
     out = cd.validate_shot_prompts(shots, {"id": "scene_1"})
-    assert out["decision"] == "APPROVED"
-    assert out["violations"] == []
+    assert out["decision"] == "REVIEW_REQUIRED"
+    assert out["violations"]
     assert out["shots"] is shots
     capability_record(claim_id="CD-04", passed=True)
 

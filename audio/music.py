@@ -25,6 +25,7 @@ from audio.effects import (
 from typing import Optional
 
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+from performance._net import safe_download, validate_audio_artifact
 
 
 # ---------------------------------------------------------------------------
@@ -233,10 +234,24 @@ def generate_suno_v5(
             print(f"   [SUNO V5] timed out after {poll_timeout_s}s (no audioUrl)")
             return False
 
-        dl = requests.get(audio_url, headers={"User-Agent": _SUNO_DOWNLOAD_UA}, timeout=60)
-        dl.raise_for_status()
-        with open(output_filename, "wb") as f:
-            f.write(dl.content)
+        downloaded = safe_download(
+            audio_url,
+            output_filename,
+            max_bytes=256 * 1024 * 1024,
+            read_timeout=60,
+            request_headers={"User-Agent": _SUNO_DOWNLOAD_UA},
+            allowed_content_types=(
+                "audio/mpeg",
+                "audio/mp3",
+                "audio/wav",
+                "audio/x-wav",
+                "application/octet-stream",
+            ),
+            content_validator=validate_audio_artifact,
+        )
+        if downloaded is None:
+            print("   [SUNO V5] downloaded asset failed audio validation")
+            return False
         print(f"   ✅ Suno V5 song saved: {output_filename}")
         # Best-effort cost tracking — closes part of M-B2 (cycle-16 Tier B
         # surfaced BGM/foley/TTS sites lacked record_api_call invocations).
@@ -287,7 +302,6 @@ import time  # used by Suno polling — placed here to keep the import surface s
 
 def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, cost_tracker: Optional = None):
     """Uses Fal.ai's text-to-audio engine to generate custom background music."""
-    import urllib.request
 
     print(f"   [BGM] Generating [{music_vibe.upper()}] via Fal.ai Stable Audio...")
     try:
@@ -364,7 +378,22 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, 
             audio_url = o['url'] if isinstance(o, dict) else o
 
         if audio_url:
-            urllib.request.urlretrieve(audio_url, output_filename)
+            downloaded = safe_download(
+                audio_url,
+                output_filename,
+                max_bytes=256 * 1024 * 1024,
+                allowed_content_types=(
+                    "audio/mpeg",
+                    "audio/mp3",
+                    "audio/wav",
+                    "audio/x-wav",
+                    "application/octet-stream",
+                ),
+                content_validator=validate_audio_artifact,
+            )
+            if downloaded is None:
+                print("⚠️ Fal.ai BGM output failed audio validation")
+                return False
             print(f"✅ Fal.ai Generated BGM saved as: {output_filename}")
             # Best-effort cost tracking — M-B2 closure (cycle-16). Mirrors
             # Cartesia pattern at audio/dialogue.py:419-427.

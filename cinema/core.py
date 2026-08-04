@@ -103,6 +103,12 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         except (TypeError, ValueError):
             budget_usd = None
 
+    cost_tracker = CostTracker(budget_usd=budget_usd)
+    # A core can be rebuilt after restart or after a settings mutation without
+    # passing through checkpoint restore. Durable project spend must therefore
+    # seed the budget gate at construction, before any new paid call is admitted.
+    cost_tracker.rehydrate_spent_usd_from_video(project_id)
+
     return PipelineCore(
         project=project,
         project_dir=project_dir,
@@ -110,6 +116,6 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         export_dir=export_dir,
         continuity=ContinuityEngine(project),
         director=ChiefDirector(project),
-        cost_tracker=CostTracker(budget_usd=budget_usd),
+        cost_tracker=cost_tracker,
         ensemble=LLMEnsemble(settings=settings),
     )

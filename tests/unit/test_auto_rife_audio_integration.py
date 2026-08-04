@@ -93,7 +93,7 @@ def _mock_fal_cloud(monkeypatch, cloud_returns_path):
     fake_fal.subscribe.return_value = {"video": {"url": "https://fake/rife.mp4"}}
     monkeypatch.setattr(lip_sync, "fal_client", fake_fal, raising=False)
 
-    def _fake_download(url, dest):
+    def _fake_download(url, dest, **_kwargs):
         shutil.copyfile(cloud_returns_path, dest)
         return dest
 

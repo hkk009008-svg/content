@@ -1,10 +1,7 @@
 import os
 import json
 import math
-import uuid
 import time
-
-import requests
 
 from typing import NamedTuple
 
@@ -12,6 +9,14 @@ from config.settings import settings
 from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from cinema.context import get_project_setting
+from comfyui_client import (
+    ComfyUIJobError,
+    ComfyUIJobStateUnknown,
+    ComfyUISubmitUnknown,
+    ComfyUITimeout,
+    RunPodComfyUI,
+)
+from performance._net import safe_download, validate_image_artifact
 
 
 class ImageGenResult(NamedTuple):
@@ -43,45 +48,18 @@ class ImageGenResult(NamedTuple):
     billed_rejects: tuple = ()
 
 
-class RunPodComfyUI:
-    def __init__(self, server_url):
-        self.server_url = server_url.rstrip('/')
-        self.client_id = str(uuid.uuid4())
-
-    def upload_image(self, image_path):
-        print(f"      ↳ Uploading {os.path.basename(image_path)} to RunPod ephemeral disk...")
-        url = f"{self.server_url}/upload/image"
-        with open(image_path, 'rb') as f:
-            files = {'image': f}
-            response = requests.post(url, files=files)
-            if response.status_code == 200:
-                return response.json()['name']
-            else:
-                raise Exception(f"Failed to upload image: {response.text}")
-
-    def queue_prompt(self, prompt_workflow):
-        p = {"prompt": prompt_workflow, "client_id": self.client_id}
-        url = f"{self.server_url}/prompt"
-        response = requests.post(url, json=p)
-        if response.status_code == 200:
-            return response.json()['prompt_id']
-        else:
-            raise Exception(f"Failed to queue prompt: {response.text}")
-
-    def get_image(self, filename, subfolder, folder_type):
-        url = f"{self.server_url}/view"
-        params = {"filename": filename, "subfolder": subfolder, "type": folder_type}
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            return response.content
-        return None
-
-    def get_history(self, prompt_id):
-        url = f"{self.server_url}/history/{prompt_id}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json()
-        return {}
+def _download_generated_jpeg(url: str, output_filename: str):
+    """Publish only a bounded, MIME-true, decodable JPEG provider output."""
+    return safe_download(
+        url,
+        output_filename,
+        max_bytes=64 * 1024 * 1024,
+        allowed_content_types=("image/jpeg",),
+        content_validator=lambda path: validate_image_artifact(
+            path,
+            expected_formats=("JPEG",),
+        ),
+    )
 
 
 def _resolve_ui_denoise(ctx):
@@ -127,7 +105,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        char_lora_strength=None,
                        char_lora_trigger=None,
                        secondary_char_refs=None,
-                       style_reference=None, shot_hint=None, ctx=None):
+                       style_reference=None, shot_hint=None, ctx=None,
+                       _recovery_out=None):
     """
     Generates a cinematic image with face-identity preservation.
 
@@ -196,11 +175,16 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     billed_rejects = []
 
     def _with_rejects(result):
-        """Attach any accumulated billed_rejects to a winning ImageGenResult.
-        Passes None through unchanged so the caller's `if not result`
-        failure guard is preserved."""
+        """Hand accumulated billed rejects to the caller on every outcome.
+
+        A winner carries them on ``ImageGenResult``.  If every fallback
+        fails, use the private recovery handoff so the controller can still
+        record already-incurred spend before returning the ordinary failure.
+        """
         if result is not None and billed_rejects:
             return result._replace(billed_rejects=tuple(billed_rejects))
+        if result is None and billed_rejects and isinstance(_recovery_out, dict):
+            _recovery_out["_billed_rejects"] = tuple(billed_rejects)
         return result
 
     # ----- PRIORITY 0: Gemini 3.1 Flash Image (Nano Banana 2, WS3) -----
@@ -235,6 +219,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 negative_prompt=negative_prompt,
             )
             if gemini_path:
+                # A successful generation crosses Google's billing boundary.
+                # Record that spend before any local validation work because
+                # the validator can reject *or raise* after the provider has
+                # already charged for the frame.  A passing Gemini result
+                # returns directly below, so this local reject ledger is only
+                # threaded onto a later fallback winner.
+                billed_rejects.append("GEMINI_IMAGE")
                 from phase_c_vision import _get_shared_validator
                 _chars_in_frame = (shot_hint or {}).get("characters_in_frame") or []
                 id_result = _get_shared_validator().validate_image(
@@ -248,11 +239,6 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                     return ImageGenResult(output_filename, "GEMINI_IMAGE")
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
                       f"falling back to the pod/FAL cascade")
-                # Google already billed this frame ($0.067, the authoritative
-                # figure in cost_tracker.API_COST_USD["GEMINI_IMAGE"]) even
-                # though it lost the identity check — record it so the eventual
-                # winner's cost record doesn't make it invisible spend.
-                billed_rejects.append("GEMINI_IMAGE")
                 try:
                     os.makedirs("logs", exist_ok=True)
                     with open("logs/gemini_image_arc_comparison.jsonl", "a", encoding="utf-8") as f:
@@ -302,6 +288,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
     print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
 
+    prompt_id = None
     try:
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
@@ -335,7 +322,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         except ImportError:
             pass  # workflow_selector not available — use defaults
 
-        comfy = RunPodComfyUI(server_url)
+        comfy = RunPodComfyUI(
+            server_url,
+            auth_token=settings.comfyui_api_key,
+        )
 
         # 1. Inject LLM Text prompt to CLIP node "122"
         workflow["122"]["inputs"]["text"] = prompt
@@ -347,6 +337,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         workflow["102"]["inputs"]["width"] = _w
         workflow["102"]["inputs"]["height"] = _h
         workflow["102"]["inputs"]["batch_size"] = 1
+
+        # Keep the final ImageScale orientation aligned with the latent canvas.
+        # pulid.json stores the landscape default; portrait projects transpose it
+        # with the same single-source helper used for node 102 above.
+        _delivery_w, _delivery_h = portrait_swap(2688, 1536, aspect_ratio)
+        workflow["502"]["inputs"]["width"] = _delivery_w
+        workflow["502"]["inputs"]["height"] = _delivery_h
 
         # 3. Seed control via RandomNoise node "25"
         if seed is not None:
@@ -367,50 +364,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             if "301" in workflow:
                 workflow["301"]["inputs"]["model"] = ["112", 0]
 
-        # 5a. CONTROLNET DEPTH MODE: Spatial consistency via depth map from init image
-        # When we have an init_image, extract depth and use ControlNet to guide spatial layout
-        # This prevents character "floating" and ensures consistent spatial positioning
-        if init_image and os.path.exists(init_image):
-            try:
-                # Inject DepthAnything V2 preprocessor (node 400)
-                remote_depth_src = comfy.upload_image(init_image)
-                workflow["400"] = {
-                    # resolution = DepthAnythingV2 preprocessor working size (longest
-                    # side), aspect-independent — NOT a latent pixel budget, so it is
-                    # intentionally not routed through portrait_swap (node 102 carries dims).
-                    "inputs": {"image": remote_depth_src, "resolution": 1344},
-                    "class_type": "DepthAnythingV2Preprocessor",
-                    "_meta": {"title": "Depth Map (DepthAnything V2)"}
-                }
-                # Inject ControlNet loader (node 401)
-                workflow["401"] = {
-                    "inputs": {"control_net_name": "control_v11f1p_sd15_depth.safetensors"},
-                    "class_type": "ControlNetLoader",
-                    "_meta": {"title": "Load ControlNet Depth"}
-                }
-                # Inject ControlNet apply — modifies conditioning (node 402)
-                # Strength from workflow_selector per shot type (portrait=0.35, wide=0.50, etc.)
-                cn_strength = wf_params.get("controlnet_depth_strength", 0.35) if 'wf_params' in dir() else 0.35
-                workflow["402"] = {
-                    "inputs": {
-                        "positive": ["60", 0],
-                        "negative": ["60", 0],
-                        "control_net": ["401", 0],
-                        "image": ["400", 0],
-                        "strength": cn_strength,
-                        "start_percent": 0.0,
-                        "end_percent": 0.5,
-                    },
-                    "class_type": "ControlNetApplyAdvanced",
-                    "_meta": {"title": "Apply ControlNet Depth (spatial lock)"}
-                }
-                # Rewire: BasicGuider now uses ControlNet-enhanced conditioning
-                workflow["22"]["inputs"]["conditioning"] = ["402", 0]
-                print(f"      ↳ ControlNet Depth injected (strength=0.35, end=50%) from {os.path.basename(init_image)}")
-            except Exception as e_cn:
-                print(f"      ↳ ControlNet Depth skipped (node not available): {e_cn}")
-
-        # 5b. IMG2IMG MODE: Temporal consistency via init image
+        # 5. IMG2IMG MODE: Temporal consistency via init image.
+        # Keep this path limited to the provisioned, FLUX-compatible
+        # LoadImage -> VAEEncode graph. The former dynamic SD1.5 ControlNet and
+        # IP-Adapter nodes were not valid members of this production workflow.
         # Injects a VAEEncode node to convert init image → latent, replacing EmptyLatentImage
         if init_image and os.path.exists(init_image):
             remote_init = comfy.upload_image(init_image)
@@ -449,46 +406,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             if "17" in workflow:
                 workflow["17"]["inputs"]["denoise"] = 1.0
 
-        # 5c. IP-ADAPTER STYLE TRANSFER: Lock visual style from init image
-        # When img2img is active, use the init image as a style reference via IP-Adapter
-        # This ensures color grading, lighting tone, and atmosphere carry between shots
-        if init_image and os.path.exists(init_image):
-            try:
-                # IP-Adapter needs the init image uploaded (reuse remote_init if available)
-                style_ref = remote_init if 'remote_init' in dir() else comfy.upload_image(init_image)
-                # Inject IP-Adapter unified loader (node 410)
-                workflow["410"] = {
-                    "inputs": {
-                        "preset": "PLUS (high strength)",
-                        "model": ["301", 0],
-                    },
-                    "class_type": "IPAdapterUnifiedLoader",
-                    "_meta": {"title": "Load IP-Adapter (Style Transfer)"}
-                }
-                # Inject IP-Adapter apply (node 411)
-                # Weight from workflow_selector per shot type (portrait=0.25, wide=0.35, etc.)
-                # weight_type "style transfer" isolates style from content
-                ipa_weight = wf_params.get("ip_adapter_weight", 0.30) if 'wf_params' in dir() else 0.30
-                workflow["411"] = {
-                    "inputs": {
-                        "weight": ipa_weight,
-                        "weight_type": "style transfer",
-                        "start_at": 0.0,
-                        "end_at": 0.4,
-                        "image": ["200", 0],
-                        "model": ["410", 0],
-                    },
-                    "class_type": "IPAdapterAdvanced",
-                    "_meta": {"title": "Apply IP-Adapter Style (shot consistency)"}
-                }
-                # Rewire: BasicScheduler and BasicGuider reference IP-Adapter output
-                workflow["17"]["inputs"]["model"] = ["411", 0]
-                workflow["22"]["inputs"]["model"] = ["411", 0]
-                print(f"      ↳ IP-Adapter style transfer injected (weight=0.3, style-only, end=40%)")
-            except Exception as e_ipa:
-                print(f"      ↳ IP-Adapter skipped (node not available): {e_ipa}")
-
-        # 5d. FACE REFINEMENT removed. PuLID face-locking provides sufficient identity
+        # FACE REFINEMENT removed. PuLID face-locking provides sufficient identity
         # for the current pipeline; FAL PixVerse swap handles any post-video refinement
         # (see phase_c_vision.face_swap_video_frames).
 
@@ -496,35 +414,94 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         prompt_id = comfy.queue_prompt(workflow)
         print(f"      ↳ ComfyUI Task {prompt_id} queued. Awaiting GPU computation...")
 
-        # 7. Polling loop with Timeout
-        max_retries = 300  # 300 * 2 = 600 seconds (10 min) — RTX 3090 needs more time for FLUX+PuLID
-        for attempt in range(max_retries):
-            history = comfy.get_history(prompt_id)
-            if prompt_id in history:
-                outputs = history[prompt_id].get('outputs', {})
-                if outputs:
-                    # Task finished — check for images
-                    for node_id, node_output in outputs.items():
-                        if 'images' in node_output:
-                            img_info = node_output['images'][0]
-                            img_data = comfy.get_image(img_info['filename'], img_info['subfolder'], img_info['type'])
-                            if img_data:
-                                with open(output_filename, 'wb') as f:
-                                    f.write(img_data)
-                                print(f"      ✅ Downloaded {mode} render: {output_filename}")
-                                return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
-                    # Outputs exist but no images — task failed
-                    print(f"      ⚠️ ComfyUI task completed but no images in output")
-                    break
-                # else: outputs empty = task still running, keep polling
-            if attempt % 15 == 0 and attempt > 0:
-                print(f"      ↳ ComfyUI polling... ({attempt * 2}s elapsed)")
-            time.sleep(2)
+        # 7. WebSocket job events with bounded /history fallback.  Terminal
+        # execution_error/interrupted events fail immediately; a timeout enters
+        # fallback only after ID-scoped cancellation is positively confirmed.
+        try:
+            history = comfy.wait_for_completion(prompt_id)
+        except KeyboardInterrupt:
+            try:
+                comfy.cancel_prompt(prompt_id)
+            except Exception as cancel_error:
+                print(f"      ↳ ComfyUI cancellation failed: {cancel_error}")
+            raise
+        except ComfyUIJobError:
+            # Explicit terminal execution failure: no live job remains, so the
+            # normal image cascade may safely continue.
+            raise
+        except ComfyUITimeout:
+            # wait_for_completion raises this type only after ID-scoped
+            # cancellation was positively confirmed. Do not cancel twice.
+            raise
+        except Exception as monitor_error:
+            # A known prompt must not be abandoned while the cascade starts a
+            # replacement render. Continue only after cancellation is confirmed.
+            try:
+                cancelled = comfy.cancel_prompt(prompt_id)
+            except Exception as cancel_error:
+                raise ComfyUIJobStateUnknown(
+                    f"ComfyUI monitoring failed ({monitor_error}); cancellation "
+                    f"could not be confirmed ({cancel_error})"
+                ) from monitor_error
+            if not cancelled:
+                raise ComfyUIJobStateUnknown(
+                    f"ComfyUI monitoring failed ({monitor_error}); prompt/output "
+                    "state remains UNKNOWN"
+                ) from monitor_error
+            raise
+        record = history.get(prompt_id, {})
+        outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
+        if isinstance(outputs, dict):
+            for node_output in outputs.values():
+                images = node_output.get("images") if isinstance(node_output, dict) else None
+                if not isinstance(images, list) or not images:
+                    continue
+                img_info = images[0]
+                if not isinstance(img_info, dict):
+                    continue
+                comfy.download_image(
+                    img_info.get("filename"),
+                    img_info.get("subfolder", ""),
+                    img_info.get("type", "output"),
+                    output_filename,
+                    expected_dimensions=(_delivery_w, _delivery_h),
+                )
+                print(f"      ✅ Downloaded {mode} render: {output_filename}")
+                return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
+
+        print("      ⚠️ ComfyUI task completed but produced no valid image output")
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
         return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
                                   aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
+    except (ComfyUISubmitUnknown, ComfyUIJobStateUnknown) as e:
+        # A lost acknowledgement or unconfirmed cancellation may leave a valid
+        # ComfyUI render in flight or recoverable. Starting FAL here would
+        # duplicate work/spend, so fail closed for operator recovery.
+        if isinstance(_recovery_out, dict):
+            _recovery_out.clear()
+            _recovery_out.update({
+                "engine": "COMFYUI_PULID",
+                "status": "recovery_required",
+                "provider_status": (
+                    "submission_unknown"
+                    if isinstance(e, ComfyUISubmitUnknown)
+                    else "job_state_unknown"
+                ),
+                "reason": (
+                    "ComfyUI may still have accepted or completed this keyframe. "
+                    "Reconcile its queue and history before allowing another render."
+                ),
+            })
+            if isinstance(prompt_id, str) and prompt_id:
+                _recovery_out["job_id"] = prompt_id
+            if billed_rejects:
+                # Internal-only accounting handoff. The controller removes
+                # this before persisting the public recovery descriptor.
+                _recovery_out["_billed_rejects"] = tuple(billed_rejects)
+        print(f"   [UNKNOWN] ComfyUI job state: {e}. Refusing duplicate fallback.")
+        return None
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
         return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
@@ -632,7 +609,6 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         return None
 
     try:
-        import urllib.request
         import fal_client
 
         # PRIORITY 1: FLUX Kontext Max Multi (strongest identity — up to 9 refs)
@@ -776,7 +752,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     },
                 )
                 img_url = result["images"][0]["url"]
-                urllib.request.urlretrieve(img_url, output_filename)
+                if _download_generated_jpeg(img_url, output_filename) is None:
+                    raise RuntimeError("FLUX Kontext output failed JPEG validation")
                 print(f"      [OK] FLUX Kontext image: {output_filename}")
                 return ImageGenResult(output_filename, "FLUX_KONTEXT")
             except Exception as e_kontext:
@@ -798,7 +775,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 },
             )
             img_url = result["images"][0]["url"]
-            urllib.request.urlretrieve(img_url, output_filename)
+            if _download_generated_jpeg(img_url, output_filename) is None:
+                raise RuntimeError("FLUX-Pro output failed JPEG validation")
             print(f"      [OK] FLUX-Pro image: {output_filename}")
             return ImageGenResult(output_filename, "FLUX_PRO")
         except Exception as e1:
@@ -818,7 +796,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 },
             )
             img_url = result["images"][0]["url"]
-            urllib.request.urlretrieve(img_url, output_filename)
+            if _download_generated_jpeg(img_url, output_filename) is None:
+                raise RuntimeError("FLUX-schnell output failed JPEG validation")
             print(f"      ✅ FAL FLUX-schnell image: {output_filename}")
             return ImageGenResult(output_filename, "FLUX_SCHNELL")
         except Exception as e2:
@@ -830,10 +809,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         _pw, _ph = portrait_swap(1344, 768, aspect_ratio)
         poll_seed = 42 if seed is None else seed
         poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width={_pw}&height={_ph}&nologo=True&model=flux&seed={poll_seed}"
-        img_data = urllib.request.urlopen(poll_url).read()
-        if len(img_data) > 5000:
-            with open(output_filename, "wb") as f:
-                f.write(img_data)
+        if _download_generated_jpeg(poll_url, output_filename) is not None:
             print(f"      ✅ Pollinations fallback image: {output_filename}")
             return ImageGenResult(output_filename, "POLLINATIONS")
 

@@ -26,6 +26,13 @@ import sora_native
 from sora_native import SoraNativeAPI
 
 
+@pytest.fixture(autouse=True)
+def _accept_mock_video_payloads(monkeypatch):
+    """These SDK contract tests use sentinel bytes; container validation is
+    covered independently in test_media_artifact_validation.py."""
+    monkeypatch.setattr(sora_native, "validate_video_artifact", lambda _path: None)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -131,28 +138,27 @@ def test_missing_image_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# generate_video — invalid duration → clamped to 4
+# generate_video — invalid duration rejected before submission
 # ---------------------------------------------------------------------------
 
-def test_invalid_duration_clamped_to_4(monkeypatch, tmp_path):
-    """Invalid durations are silently clamped to 4; the clamped value is
-    forwarded to create_and_poll as `seconds=4`."""
+@pytest.mark.parametrize("duration", [0, 7, 16, 20])
+def test_invalid_duration_rejected_before_submission(duration, monkeypatch, tmp_path):
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
     out = str(tmp_path / "out.mp4")
 
-    video_mock = _make_video_mock(status="completed")
-    api.client.videos.create_and_poll.return_value = video_mock
-    api.client.videos.download_content.return_value = _make_download_content()
-
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
-    api.generate_video(image_path=img_path, prompt="test", output_path=out, duration=7)
-
-    call_kwargs = api.client.videos.create_and_poll.call_args
-    assert call_kwargs.kwargs.get("seconds") == 4, (
-        "Invalid duration should be clamped to 4"
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="test",
+        output_path=out,
+        duration=duration,
     )
+
+    assert result is None
+    api.client.videos.create_and_poll.assert_not_called()
+    api.client.videos.download_content.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +265,23 @@ def test_happy_path_writes_output(monkeypatch, tmp_path):
         assert f.read() == b"CHUNK1CHUNK2"
     api.client.videos.download_content.assert_called_once_with("vid-42")
     assert not submitted_reference.exists()
+
+
+def test_invalid_download_is_not_published(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = tmp_path / "out.mp4"
+    out.write_bytes(b"known-good")
+    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
+    api.client.videos.download_content.return_value = _make_download_content()
+    monkeypatch.setattr(
+        sora_native,
+        "validate_video_artifact",
+        lambda _path: "invalid test container",
+    )
+
+    assert api.generate_video(img_path, "cinematic", str(out)) is None
+    assert out.read_bytes() == b"known-good"
 
 
 # ---------------------------------------------------------------------------
@@ -437,82 +460,29 @@ def test_on_billed_exception_does_not_abort_download(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# generate_video — driving video: used when file exists
+# generate_video — driving video rejected before submission
 # ---------------------------------------------------------------------------
 
-def test_driving_video_used_when_exists(monkeypatch, tmp_path):
-    """When `driving_video_path` is set AND the file exists, it is passed as
-    `input_reference` to `create_and_poll` instead of the resized still."""
-    api = _make_api()
-    img_path = _real_jpeg(tmp_path)
-    driving = tmp_path / "driving.mp4"
-    driving.write_bytes(b"fakevideo")
-    out = str(tmp_path / "out.mp4")
-
-    video_mock = _make_video_mock(status="completed")
-    api.client.videos.create_and_poll.return_value = video_mock
-    api.client.videos.download_content.return_value = _make_download_content()
-
-    existing = {img_path, str(driving)}
-    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p in existing)
-
-    with (
-        patch(
-            "PIL.Image.open",
-            side_effect=AssertionError("driving reference must bypass PIL"),
-        ) as image_open,
-        patch(
-            "sora_native.tempfile.NamedTemporaryFile",
-            side_effect=AssertionError("driving reference must bypass temp files"),
-        ) as named_temp,
-    ):
-        result = api.generate_video(
-            image_path=img_path,
-            prompt="motion",
-            output_path=out,
-            driving_video_path=str(driving),
-        )
-
-    call_kwargs = api.client.videos.create_and_poll.call_args
-    assert result == out
-    assert call_kwargs.kwargs.get("input_reference") == Path(str(driving))
-    image_open.assert_not_called()
-    named_temp.assert_not_called()
-    assert driving.read_bytes() == b"fakevideo"
-
-
-@pytest.mark.parametrize("failure_stage", ["create", "download"])
-def test_driving_video_survives_sdk_exceptions_without_still_preprocessing(
-    failure_stage, monkeypatch, tmp_path
+@pytest.mark.parametrize("driving_exists", [False, True])
+def test_driving_video_rejected_before_preprocessing_or_submission(
+    driving_exists, tmp_path
 ):
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
     driving = tmp_path / "driving.mp4"
-    driving.write_bytes(b"operator-owned")
-
-    if failure_stage == "create":
-        api.client.videos.create_and_poll.side_effect = RuntimeError(
-            "create failed"
-        )
-    else:
-        api.client.videos.create_and_poll.return_value = _make_video_mock(
-            status="completed", video_id="vid-driving"
-        )
-        api.client.videos.download_content.side_effect = RuntimeError(
-            "download failed"
-        )
-
-    existing = {img_path, str(driving)}
-    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p in existing)
+    if driving_exists:
+        driving.write_bytes(b"operator-owned")
 
     with (
         patch(
             "PIL.Image.open",
-            side_effect=AssertionError("driving reference must bypass PIL"),
+            side_effect=AssertionError("rejected driving input must bypass PIL"),
         ) as image_open,
         patch(
             "sora_native.tempfile.NamedTemporaryFile",
-            side_effect=AssertionError("driving reference must bypass temp files"),
+            side_effect=AssertionError(
+                "rejected driving input must bypass temp files"
+            ),
         ) as named_temp,
     ):
         result = api.generate_video(
@@ -522,53 +492,13 @@ def test_driving_video_survives_sdk_exceptions_without_still_preprocessing(
             driving_video_path=str(driving),
         )
 
-    submitted_reference = (
-        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
-    )
     assert result is None
-    assert submitted_reference == driving
-    assert driving.read_bytes() == b"operator-owned"
     image_open.assert_not_called()
     named_temp.assert_not_called()
-    if failure_stage == "create":
-        api.client.videos.download_content.assert_not_called()
-    else:
-        api.client.videos.download_content.assert_called_once_with("vid-driving")
-
-
-# ---------------------------------------------------------------------------
-# generate_video — driving video: ignored when file missing
-# ---------------------------------------------------------------------------
-
-def test_driving_video_ignored_when_missing(monkeypatch, tmp_path):
-    """When `driving_video_path` is set but the file does NOT exist, the still
-    frame (temp resized JPEG) is used as `input_reference` instead."""
-    api = _make_api()
-    img_path = _real_jpeg(tmp_path)
-    out = str(tmp_path / "out.mp4")
-    missing_driving = str(tmp_path / "missing_driving.mp4")
-
-    video_mock = _make_video_mock(status="completed")
-    api.client.videos.create_and_poll.return_value = video_mock
-    api.client.videos.download_content.return_value = _make_download_content()
-
-    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
-
-    api.generate_video(
-        image_path=img_path,
-        prompt="motion",
-        output_path=out,
-        driving_video_path=missing_driving,
-    )
-
-    call_kwargs = api.client.videos.create_and_poll.call_args
-    actual_ref = call_kwargs.kwargs.get("input_reference")
-    # input_reference must NOT be the missing driving video path
-    assert actual_ref != Path(missing_driving)
-    # It should be a Path to a temp .jpg (the resized still frame)
-    assert isinstance(actual_ref, Path)
-    assert actual_ref.suffix == ".jpg"
-    assert not actual_ref.exists()
+    api.client.videos.create_and_poll.assert_not_called()
+    api.client.videos.download_content.assert_not_called()
+    if driving_exists:
+        assert driving.read_bytes() == b"operator-owned"
 
 
 def test_still_reference_preserves_lanczos_resize_and_jpeg_quality_90(tmp_path):
@@ -665,14 +595,14 @@ def test_partial_preprocessing_failure_cleans_created_temp(monkeypatch, tmp_path
 # ---------------------------------------------------------------------------
 
 def test_valid_duration_passes_through(monkeypatch, tmp_path):
-    """Each valid duration (4, 8, 12, 16, 20) is forwarded as `seconds=<dur>`."""
+    """Each current API duration is forwarded unchanged."""
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
     out = str(tmp_path / "out.mp4")
 
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
-    for dur in (4, 8, 12, 16, 20):
+    for dur in (4, 8, 12):
         api.client.videos.create_and_poll.reset_mock()
         video_mock = _make_video_mock(status="completed")
         api.client.videos.create_and_poll.return_value = video_mock
@@ -766,47 +696,6 @@ def test_landscape_size_unchanged(monkeypatch, tmp_path):
     )
 
 
-def test_driving_video_does_not_require_still_image(monkeypatch, tmp_path):
-    """A valid driving video is a complete input_reference — still may be absent."""
-    api = _make_api()
-    driving = tmp_path / "driving.mp4"
-    driving.write_bytes(b"fakevideo")
-    missing_still = str(tmp_path / "missing.jpg")
-    out = str(tmp_path / "out.mp4")
-
-    api.client.videos.create_and_poll.return_value = _make_video_mock(status="completed")
-    api.client.videos.download_content.return_value = _make_download_content(
-        (b"DRV",)
-    )
-    monkeypatch.setattr(
-        sora_native.os.path, "exists", lambda p: p == str(driving)
-    )
-
-    with (
-        patch(
-            "PIL.Image.open",
-            side_effect=AssertionError("driving path must not open still"),
-        ),
-        patch(
-            "sora_native.tempfile.NamedTemporaryFile",
-            side_effect=AssertionError("driving path must not create still temp"),
-        ),
-    ):
-        result = api.generate_video(
-            image_path=missing_still,
-            prompt="motion",
-            output_path=out,
-            driving_video_path=str(driving),
-        )
-
-    assert result == out
-    assert Path(out).read_bytes() == b"DRV"
-    assert (
-        api.client.videos.create_and_poll.call_args.kwargs["input_reference"]
-        == Path(str(driving))
-    )
-
-
 def test_midstream_download_preserves_existing_output(monkeypatch, tmp_path):
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
@@ -835,3 +724,29 @@ def test_midstream_download_preserves_existing_output(monkeypatch, tmp_path):
     assert result is None
     assert out.read_bytes() == b"known-good"
     assert list(tmp_path.glob(".sora-download-*.tmp")) == []
+
+
+def test_download_over_hard_cap_preserves_existing_output(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = tmp_path / "out.mp4"
+    out.write_bytes(b"known-good")
+
+    api.client.videos.create_and_poll.return_value = _make_video_mock(
+        status="completed"
+    )
+    api.client.videos.download_content.return_value = _make_download_content(
+        (b"12345", b"6789")
+    )
+    monkeypatch.setattr(sora_native, "SORA_MAX_VIDEO_BYTES", 8)
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="test",
+        output_path=str(out),
+    )
+
+    assert result is None
+    assert out.read_bytes() == b"known-good"
+    assert list(tmp_path.glob(".safe-download-*.tmp")) == []

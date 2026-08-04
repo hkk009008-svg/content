@@ -36,9 +36,9 @@ import pytest
 # self-describing so that if one ever DID escape to a real API the failure
 # reads as an obvious test placeholder rather than a mysterious auth error.
 #
-# ``setdefault`` (not assignment) so a real environment always wins, and
-# ``config/settings.py``'s ``load_dotenv(..., override=True)`` still overrides
-# these for a developer who has a real ``.env``.
+# ``setdefault`` (not assignment) so a real environment always wins. The
+# settings loader uses ``override=False``, so these hermetic test placeholders
+# also outrank any developer-local ``.env`` values during pytest.
 _PLACEHOLDER_CREDENTIAL_ENV = (
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { apiDelete, apiGet, apiPost } from '../lib/api'
 
 const API = '/api'
 
@@ -11,18 +12,40 @@ const API = '/api'
 const DEFAULT_SHOW_COUNT = 20
 
 interface Props {
-  onSelect: (id: string) => void
+  /** Resolves only once the full project has loaded. A rejection is rendered
+   *  here so selecting an existing project and the create-then-open path
+   *  share one accessible failure surface. */
+  onSelect: (id: string) => Promise<void>
+}
+
+interface ProjectListEntry {
+  id: string
+  name: string
 }
 
 export default function ProjectSelector({ onSelect }: Props) {
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
+  const [projects, setProjects] = useState<ProjectListEntry[]>([])
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [selectingId, setSelectingId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [showAll, setShowAll] = useState(false)
+  const newNameRef = useRef<HTMLInputElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    fetch(`${API}/projects`).then(r => r.json()).then(setProjects).catch(() => {})
+    let cancelled = false
+    apiGet<ProjectListEntry[]>(`${API}/projects`).then((result) => {
+      if (cancelled) return
+      if (result.ok) {
+        setProjects(result.data)
+      } else {
+        setError(result.error)
+      }
+    })
+    return () => { cancelled = true }
   }, [])
 
   const filtered = useMemo(() => {
@@ -46,19 +69,67 @@ export default function ProjectSelector({ onSelect }: Props) {
 
   const hiddenCount = filtered.length - visible.length
 
-  const handleCreate = async () => {
-    if (!newName.trim()) return
-    setCreating(true)
-    const res = await fetch(`${API}/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newName.trim() }),
-    })
-    if (res.ok) {
-      const project = await res.json()
-      onSelect(project.id)
+  const selectProject = async (id: string): Promise<boolean> => {
+    setSelectingId(id)
+    setError(null)
+    try {
+      await onSelect(id)
+      return true
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Project could not be opened')
+      return false
+    } finally {
+      setSelectingId(null)
     }
-    setCreating(false)
+  }
+
+  const handleCreate = async () => {
+    if (creating || deletingId !== null || selectingId !== null || !newName.trim()) return
+    setCreating(true)
+    setError(null)
+    try {
+      const result = await apiPost<ProjectListEntry>(`${API}/projects`, {
+        name: newName.trim(),
+      })
+      if (result.ok) {
+        // If opening fails after creation, keep the newly-created project in
+        // the list so the operator can retry instead of creating a duplicate.
+        setProjects((current) => current.some((item) => item.id === result.data.id)
+          ? current
+          : [result.data, ...current])
+        setNewName('')
+        await selectProject(result.data.id)
+      } else {
+        setError(result.error)
+      }
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDelete = async (project: ProjectListEntry) => {
+    if (deletingId !== null || creating || selectingId !== null) return
+    const confirmed = window.confirm(
+      `Delete “${project.name}”? This removes the project and all of its generated media.`,
+    )
+    if (!confirmed) return
+
+    setDeletingId(project.id)
+    setError(null)
+    const result = await apiDelete<{ deleted: boolean }>(
+      `${API}/projects/${encodeURIComponent(project.id)}`,
+    )
+    if (result.ok) {
+      const remainingCount = Math.max(projects.length - 1, 0)
+      setProjects((current) => current.filter((item) => item.id !== project.id))
+      setTimeout(() => {
+        if (remainingCount > 0) searchRef.current?.focus()
+        else newNameRef.current?.focus()
+      }, 0)
+    } else {
+      setError(result.error)
+    }
+    setDeletingId(null)
   }
 
   return (
@@ -84,22 +155,34 @@ export default function ProjectSelector({ onSelect }: Props) {
           <h2 className="text-eyebrow-lg font-semibold text-acc uppercase tracking-widest mb-4">New Production</h2>
           <div className="flex gap-3">
             <input
+              ref={newNameRef}
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleCreate()}
               placeholder="Enter film title..."
+              aria-label="Film title"
               className="flex-1 bg-app border border-line rounded-xl px-4 py-2.5 text-tx placeholder:text-mut/60"
             />
             <button
               onClick={handleCreate}
-              disabled={creating || !newName.trim()}
+              disabled={creating || deletingId !== null || selectingId !== null || !newName.trim()}
+              aria-busy={creating}
               className="bg-acc hover:shadow-glow-accent disabled:opacity-30 px-6 py-2.5 rounded-xl text-white font-semibold text-sm shadow-panel"
             >
               {creating ? 'Creating...' : 'Create'}
             </button>
           </div>
         </div>
+
+        {error && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-fail/50 bg-fail/10 px-4 py-3 text-sm text-tx"
+          >
+            <span className="font-semibold text-fail">Project action failed:</span> {error}
+          </div>
+        )}
 
         {/* Existing Projects */}
         {projects.length > 0 && (
@@ -117,6 +200,7 @@ export default function ProjectSelector({ onSelect }: Props) {
 
             {/* Search input */}
             <input
+              ref={searchRef}
               type="text"
               value={search}
               onChange={e => {
@@ -131,14 +215,30 @@ export default function ProjectSelector({ onSelect }: Props) {
             {/* Project list */}
             <div className="space-y-1.5 max-h-[40vh] overflow-y-auto">
               {visible.map(p => (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => onSelect(p.id)}
-                  className="w-full text-left px-4 py-3 rounded-xl hover:bg-head border border-transparent hover:border-line group"
+                  className="group flex items-center rounded-xl border border-transparent hover:border-line hover:bg-head"
                 >
-                  <span className="text-tx font-medium group-hover:text-acc transition-colors">{p.name}</span>
-                  <span className="text-mut text-xs ml-2 font-mono">{p.id.slice(0, 8)}</span>
-                </button>
+                  <button
+                    onClick={() => { void selectProject(p.id) }}
+                    disabled={deletingId !== null || creating || selectingId !== null}
+                    aria-busy={selectingId === p.id}
+                    className="min-w-0 flex-1 px-4 py-3 text-left"
+                  >
+                    <span className="text-tx font-medium group-hover:text-acc transition-colors">{p.name}</span>
+                    <span className="text-mut text-xs ml-2 font-mono">{p.id.slice(0, 8)}</span>
+                    {selectingId === p.id && <span className="ml-2 text-xs text-acc">Opening…</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(p)}
+                    disabled={deletingId !== null || creating || selectingId !== null}
+                    aria-label={`Delete ${p.name}`}
+                    className="mr-2 rounded border border-transparent px-2 py-1 text-xs text-mut hover:border-fail/50 hover:text-fail disabled:opacity-40"
+                  >
+                    {deletingId === p.id ? 'Deleting…' : 'Delete'}
+                  </button>
+                </div>
               ))}
             </div>
 

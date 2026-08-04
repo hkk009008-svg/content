@@ -45,11 +45,12 @@ def fal_capture(monkeypatch, tmp_path):
         dataclasses.replace(pca.settings, fal_key="test-key"),
     )
 
-    def _fake_retrieve(url, filename):
+    def _fake_download(url, filename):
         with open(filename, "wb") as fh:
             fh.write(b"jpeg-bytes")
+        return filename
 
-    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+    monkeypatch.setattr(pca, "_download_generated_jpeg", _fake_download)
     return captured
 
 

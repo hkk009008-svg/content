@@ -1,13 +1,15 @@
 """Live regression for discovery-wf_13f9d2f6-f93, confirmed[8].
 
 BUG: W2:MAJOR:download-urllib-notimeout
-  phase_c_ffmpeg.py had seven video-download sites calling
+  phase_c_ffmpeg.py had video-download sites calling
   urllib.request.urlretrieve(url, path) with no timeout. A stalled CDN transfer
-  could block the pipeline thread indefinitely. The fixed shape routes all seven
-  provider branches through a local helper that calls performance._net.safe_download.
+  could block the pipeline thread indefinitely. The fixed shape routes every
+  current provider branch through a local helper that calls
+  performance._net.safe_download.
 
 Source: logs/discovery-wf_13f9d2f6-f93.json confirmed[8]; refuters returned
-  refuted=False (all seven bare call sites confirmed).
+  refuted=False (all then-live bare call sites confirmed). Retired SORA_2 and
+  legacy RUNWAY branches have since been removed from executable dispatch.
 """
 
 import ast
@@ -16,11 +18,9 @@ import pathlib
 _MODULE_PATH = pathlib.Path(__file__).parent.parent.parent / "phase_c_ffmpeg.py"
 _EXPECTED_ENGINES = {
     "RUNWAY_GEN4",
-    "SORA_2",
     "VEO",
     "KLING_3_0",
     "FAL_SVD",
-    "RUNWAY",
     "SEEDANCE",
 }
 
@@ -130,7 +130,7 @@ def test_urlretrieve_download_sites_have_timeout_protection():
         for call in guarded_calls
         if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant)
     }
-    assert len(guarded_calls) == 7
+    assert len(guarded_calls) == len(_EXPECTED_ENGINES)
     assert engines == _EXPECTED_ENGINES
     assert {
         call.args[0].id

@@ -7,11 +7,10 @@ Covers four parse-path scenarios:
   (a) fenced valid JSON → real winner returned + [Ensemble] Judge: marker printed
   (b) garbage on attempt-1 + valid JSON on attempt-2 → retry fires (judge called
       twice) → real winner
-  (c) garbage on both attempts → first-valid fallback (no crash, [LLMEnsemble]
-      Judging failed path)
+  (c) garbage on both attempts → unable-to-judge (no crash, no fabricated winner)
   (d) THE DP-01 REGRESSION GUARD: judge returns valid JSON that is the WRONG
       SHAPE (top-level array OR dict missing "scores"/"winner") → must NOT crash;
-      must fall through to the first-valid fallback via the preserved broad except.
+      must become unable-to-judge via the preserved broad exception boundary.
 
 Mocking style mirrors tests/unit/test_chief_director_parse.py:
   - Instantiate LLMEnsemble, inject stub clients to bypass API key checks.
@@ -44,10 +43,11 @@ def _make_ensemble() -> LLMEnsemble:
 
 def _valid_judge_json(winner: int = 0) -> str:
     """Return a well-formed judge JSON response."""
+    scores = [8.5, 6.0] if winner == 0 else [6.0, 8.5]
     return json.dumps({
-        "scores": [8.5, 6.0],
+        "scores": scores,
         "winner": winner,
-        "reasoning": "candidate 0 is better",
+        "reasoning": f"candidate {winner} is better",
     })
 
 
@@ -106,7 +106,7 @@ class TestFencedJsonParsesToRealWinner:
 
         winner_idx, full_scores, _ = result
         assert winner_idx == 1
-        assert full_scores[1] == pytest.approx(6.0)
+        assert full_scores[1] == pytest.approx(8.5)
         assert mock_gen.call_count == 1
 
         out = capsys.readouterr().out
@@ -143,7 +143,7 @@ class TestRetryPathFiresOnFirstParseFailure:
 
         # The correction string must appear in the second call's user_prompt arg.
         _model, _system, retry_user_prompt = mock_gen.call_args_list[1].args
-        assert "not valid JSON" in retry_user_prompt
+        assert "violated the JSON contract" in retry_user_prompt
 
         winner_idx, full_scores, _ = result
         assert winner_idx == 0
@@ -170,12 +170,12 @@ class TestRetryPathFiresOnFirstParseFailure:
         assert "[LLMEnsemble] Judging failed" not in out
 
 
-# ─── (c) garbage on both attempts → first-valid fallback ─────────────────────
+# ─── (c) garbage on both attempts → unable to judge ──────────────────────────
 
-class TestFallbackAfterBothAttemptsFail:
-    """Both attempts return unparseable JSON → first-valid-candidate fallback."""
+class TestUnableToJudgeAfterBothAttemptsFail:
+    """Both attempts invalid → preserve an explicit unable-to-judge result."""
 
-    def test_fallback_fires_no_crash(self, capsys):
+    def test_unable_to_judge_fires_no_crash(self, capsys):
         ens = _make_ensemble()
         garbage = "nope, still not JSON {unterminated"
 
@@ -185,10 +185,9 @@ class TestFallbackAfterBothAttemptsFail:
         assert mock_gen.call_count == 2
 
         winner_idx, scores, reasoning = result
-        # Fallback: first valid candidate (index 0).
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
-        assert "Judging failed" in reasoning
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
+        assert "Unable to judge" in reasoning
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
@@ -196,15 +195,15 @@ class TestFallbackAfterBothAttemptsFail:
         assert "[Ensemble] Judge:" not in out
 
     def test_single_garbage_response_falls_back(self, capsys):
-        """Single garbage response: retry fires, second also garbage, fallback."""
+        """Single garbage response: retry fires, second also remains invalid."""
         ens = _make_ensemble()
 
         result, mock_gen = _call_judge(ens, ["}{bad json}{", "still bad}{"])
 
         assert mock_gen.call_count == 2
         winner_idx, scores, _ = result
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
@@ -214,7 +213,7 @@ class TestFallbackAfterBothAttemptsFail:
 
 class TestWrongShapeJsonDoesNotCrash:
     """Valid JSON that is NOT the expected shape must degrade to first-valid
-    fallback, NOT crash.
+    unable-to-judge state, NOT crash or promote roster position zero.
 
     This is the DP-01 fold-forward: chief_director.py's Lane V CRITICAL found
     that narrowing the outer broad-except to guard only json.loads lets a
@@ -223,47 +222,47 @@ class TestWrongShapeJsonDoesNotCrash:
     these cases.
     """
 
-    def test_json_array_does_not_crash_returns_fallback(self, capsys):
+    def test_json_array_does_not_crash_returns_unable(self, capsys):
         ens = _make_ensemble()
         # Valid JSON, but a top-level list (not a dict). Parse succeeds → no
         # retry. The outer broad except must catch the subsequent KeyError/TypeError.
         result, mock_gen = _call_judge(ens, ['[1, 2, 3]'])
 
-        assert mock_gen.call_count == 1  # no retry (parse succeeded)
+        assert mock_gen.call_count == 2  # schema failure is retried once
         winner_idx, scores, reasoning = result
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
-        assert "Judging failed" in reasoning
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
+        assert "Unable to judge" in reasoning
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
         assert "[Ensemble] Judge:" not in out
 
-    def test_dict_missing_scores_key_returns_fallback(self, capsys):
+    def test_dict_missing_scores_key_returns_unable(self, capsys):
         ens = _make_ensemble()
         # Valid dict, but missing "scores" key → KeyError.
         missing_scores = json.dumps({"winner": 0, "reasoning": "missing scores key"})
 
         result, mock_gen = _call_judge(ens, [missing_scores])
 
-        assert mock_gen.call_count == 1
+        assert mock_gen.call_count == 2
         winner_idx, scores, _ = result
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
 
-    def test_dict_missing_winner_key_returns_fallback(self, capsys):
+    def test_dict_missing_winner_key_returns_unable(self, capsys):
         ens = _make_ensemble()
         missing_winner = json.dumps({"scores": [8.0, 6.0], "reasoning": "no winner key"})
 
         result, mock_gen = _call_judge(ens, [missing_winner])
 
-        assert mock_gen.call_count == 1
+        assert mock_gen.call_count == 2
         winner_idx, scores, _ = result
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
@@ -272,13 +271,73 @@ class TestWrongShapeJsonDoesNotCrash:
         ens = _make_ensemble()
         result, mock_gen = _call_judge(ens, ['"just a quoted string"'])
 
-        assert mock_gen.call_count == 1
+        assert mock_gen.call_count == 2
         winner_idx, scores, _ = result
-        assert winner_idx == 0
-        assert scores[0] == pytest.approx(5.0)
+        assert winner_idx is None
+        assert scores == [0.0, 0.0]
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
+
+
+class TestJudgePacketContract:
+    """The judge receives the task and rubric, but not candidate identities."""
+
+    def test_packet_is_complete_anonymous_and_untruncated(self):
+        ens = _make_ensemble()
+        long_tail = "TAIL-MUST-REACH-JUDGE"
+        candidates = ["A" * 7000 + long_tail, {"answer": "second"}]
+        models = ["secret-provider-model-a", "secret-provider-model-b"]
+
+        with patch.object(
+            ens,
+            "_generate_anthropic",
+            return_value=(
+                _JUDGE_MODEL,
+                json.dumps(
+                    {
+                        "scores": [9.0, 7.0],
+                        "winner": 0,
+                        "reasoning": "A satisfies the task best.",
+                    }
+                ),
+            ),
+        ) as mock_gen:
+            winner, scores, _ = ens._judge(
+                candidates,
+                models,
+                "system contract",
+                user_prompt="the original user request",
+                task_type="decompose",
+                requirements=["return valid shots"],
+                rubric={"accuracy": "must be executable"},
+                judge_model=_JUDGE_MODEL,
+            )
+
+        assert winner == 0
+        assert scores == [9.0, 7.0]
+        judge_prompt = mock_gen.call_args.args[2]
+        assert "the original user request" in judge_prompt
+        assert "return valid shots" in judge_prompt
+        assert "must be executable" in judge_prompt
+        assert long_tail in judge_prompt
+        assert "secret-provider-model-a" not in judge_prompt
+        assert "secret-provider-model-b" not in judge_prompt
+        assert "Candidate A" in judge_prompt
+        assert "Candidate B" in judge_prompt
+
+    def test_winner_must_reference_a_highest_score(self):
+        ens = _make_ensemble()
+        invalid = json.dumps(
+            {"scores": [9.0, 4.0], "winner": 1, "reasoning": "contradiction"}
+        )
+
+        result, mock_gen = _call_judge(ens, [invalid, invalid])
+
+        assert mock_gen.call_count == 2
+        assert result[0] is None
+        assert result[1] == [0.0, 0.0]
+        assert "Unable to judge" in result[2]
 
 
 # ─── judge_map model-id validity (deferred-minors item G) ───────────────────

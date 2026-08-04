@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type { Project, ShotState, Scene, Shot, TakeRecord } from '../../types/project'
-import TakeStrip from '../console/TakeStrip'
+import TakeStrip, { LipsyncStatusBadge } from '../console/TakeStrip'
 import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 import IterationPanel from './IterationPanel'
+import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
 
 const API = '/api'
 
@@ -97,9 +98,15 @@ function CascadeBadge({
 }) {
   if (!meta) return null
   const scoreColor = meta.score != null && meta.threshold != null
-    ? meta.score >= meta.threshold
-      ? 'text-ok'
-      : 'text-warn'
+    ? label === 'lipsync'
+      ? meta.validation_state === 'PASS'
+        ? 'text-ok'
+        : meta.validation_state === 'FAIL'
+          ? 'text-fail'
+          : 'text-mut'
+      : meta.score >= meta.threshold
+        ? 'text-ok'
+        : 'text-warn'
     : null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -120,11 +127,41 @@ function CascadeBadge({
   )
 }
 
+/** Render only persisted synchronization evidence. Provider-native audio is
+ *  called out, but it becomes UNKNOWN when no measured validation state is
+ *  present — audio presence must never be promoted to a fabricated PASS. */
+function TakeLipsyncEvidence({
+  take,
+  shotRequiresEvidence = false,
+}: {
+  take: TakeRecord
+  shotRequiresEvidence?: boolean
+}) {
+  const state = take.metadata?.lipsync_validation_state
+    ?? take.metadata?.lipsync_cascade?.validation_state
+    ?? take.cascade_metadata?.validation_state
+  const nativeAudioGenerated = take.cascade_metadata?.native_audio_generated === true
+  const hasDialogue = take.metadata?.has_dialogue
+  const showWhenUnmeasured = shotRequiresEvidence
+    || hasDialogue === true
+    || Boolean(take.metadata?.lipsync_cascade)
+    || (nativeAudioGenerated && hasDialogue !== false)
+
+  return (
+    <LipsyncStatusBadge
+      state={state}
+      nativeAudioGenerated={nativeAudioGenerated}
+      showWhenUnmeasured={showWhenUnmeasured}
+    />
+  )
+}
+
 function TakeCard({
   take,
   active,
   approved,
   showIterateButton,
+  shotRequiresEvidence = false,
   onSelect,
   onApprove,
   onIterate,
@@ -136,6 +173,7 @@ function TakeCard({
    *  S18 extends usage to the REVIEW gate; PERFORMANCE_REVIEW uses an inline iterate
    *  button next to the Approve button (renders IterationPanel below) rather than per-card. */
   showIterateButton: boolean
+  shotRequiresEvidence?: boolean
   onSelect: () => void
   onApprove: () => void
   /** S18: onIterate signature carries the optional verb DSL params through. */
@@ -159,6 +197,7 @@ function TakeCard({
         <CascadeBadge meta={take.cascade_metadata} />
         <CascadeBadge meta={take.metadata?.lipsync_cascade} label="lipsync" />
       </button>
+      <TakeLipsyncEvidence take={take} shotRequiresEvidence={shotRequiresEvidence} />
       {!approved && (
         <div className="mt-2 flex gap-2">
           <button
@@ -240,11 +279,15 @@ function ClipCard({
   const [positivePrompt, setPositivePrompt] = useState(shot.prompt || '')
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_constraints || '')
   const [showRegenForm, setShowRegenForm] = useState(false)
+  const [keyframeRecoveryError, setKeyframeRecoveryError] = useState<string | null>(null)
+  const requiresLipsync = shotRequiresLipsync(shot)
   const [rejectReason, setRejectReason] = useState(shot.plan_rejection_reason || '')
   const [rejectAutoApproveGate, setRejectAutoApproveGate] = useState<'plan' | 'image' | 'motion' | 'final' | null>(null)
   /** S18: Performance-card iteration toggle. Inline drawer below the
    *  side-by-side preview, mirroring TakeCard's iteration UX shape. */
   const [iteratingPerformance, setIteratingPerformance] = useState(false)
+  const deferredKeyframeJobTitleId = useId()
+  const deferredJobTitleId = useId()
 
   const audit = shot.auto_approve_audit || []
   const [selectedKeyframeTakeId, setSelectedKeyframeTakeId] = useState(shot.approved_keyframe_take_id || lastTake(shot.keyframe_takes || [])?.id || '')
@@ -278,6 +321,12 @@ function ClipCard({
   const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
   const performanceIdentity: number | null | undefined = performanceMetadata.identity_score
   const resolvedShotType = shot.shot_type
+  const deferredKeyframeJob = shot.deferred_keyframe_job
+  const deferredMotionJob = shot.deferred_motion_job
+  const deferredJobIsRecovery = deferredMotionJob?.status === 'recovery_required'
+  const deferredJobStatusLabel = deferredJobIsRecovery ? 'Recovery Required' : 'Pending'
+  const deferredJobEngine = deferredMotionJob?.engine?.trim() || 'Provider'
+  const deferredJobCanResume = deferredJobEngine.toUpperCase() === 'LTX' && Boolean(deferredMotionJob?.job_id)
 
   useEffect(() => {
     if (shot.approved_keyframe_take_id) {
@@ -294,6 +343,10 @@ function ClipCard({
       setSelectedFinalTakeId(finalTakes[finalTakes.length - 1].id)
     }
   }, [finalTakes, selectedFinalTakeId, shot.approved_final_take_id])
+
+  useEffect(() => {
+    if (deferredKeyframeJob) setShowRegenForm(false)
+  }, [deferredKeyframeJob])
 
   const imageUrl = selectedKeyframe?.path || shotState?.generated_image || shot.generated_image
   const videoUrl = selectedFinal?.path || shotState?.generated_video || shot.generated_video
@@ -330,15 +383,68 @@ function ClipCard({
   }
 
   const handleGenerateKeyframeClick = async () => {
+    if (deferredKeyframeJob) return
     await runAction('keyframe', () => onGenerateKeyframe(shot.id, positivePrompt, negativePrompt))
     setShowRegenForm(false)
   }
 
   const handleRegenerate = async () => {
+    if (deferredKeyframeJob) return
     // Full restart: clear every downstream approval and regenerate the keyframe
     // with the (possibly edited) prompt. See ShotController.restart_shot.
     await runAction('regenerate', () => onRegenerate(shot.id, positivePrompt, negativePrompt))
     setShowRegenForm(false)
+  }
+
+  const handleResolveDeferredKeyframeJob = async () => {
+    if (!deferredKeyframeJob) return
+
+    const jobId = deferredKeyframeJob.job_id?.trim() || 'not reported'
+    const confirmed = window.confirm(
+      `Confirm that keyframe job ${jobId} was reconciled manually? This clears the recovery block and does not create a new keyframe.`,
+    )
+    if (!confirmed) return
+
+    setKeyframeRecoveryError(null)
+    await runAction('keyframe-recovery', async () => {
+      let response: Response
+      try {
+        response = await fetch(
+          `${API}/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shot.id)}/keyframes/recovery/resolve`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ confirmed: true }),
+          },
+        )
+      } catch {
+        setKeyframeRecoveryError('Could not reach the server. The keyframe recovery block remains in place.')
+        return
+      }
+
+      let payload: { error?: unknown; detail?: unknown } = {}
+      try {
+        payload = await response.json() as { error?: unknown; detail?: unknown }
+      } catch {
+        // An empty or non-JSON response is valid on success; HTTP status remains authoritative.
+      }
+
+      if (!response.ok) {
+        const detail = typeof payload.error === 'string'
+          ? payload.error
+          : typeof payload.detail === 'string'
+            ? payload.detail
+            : `Server error ${response.status}`
+        setKeyframeRecoveryError(`${detail} The keyframe recovery block remains in place.`)
+        return
+      }
+
+      try {
+        await onRefreshProject()
+      } catch {
+        setKeyframeRecoveryError('The recovery record was resolved, but the project could not be refreshed. Reload the project before continuing.')
+      }
+    })
   }
 
   return (
@@ -389,10 +495,20 @@ function ClipCard({
               <span className="text-mut">Motion</span>
               {formatScore(diagnosis?.scores?.motion ?? latestDiagnostic?.scores?.motion)}
             </div>
-            {(selectedFinal?.cascade_metadata || selectedFinal?.metadata?.lipsync_cascade) && (
+            {selectedFinal && (
+              selectedFinal.cascade_metadata
+              || selectedFinal.metadata?.lipsync_cascade
+              || selectedFinal.metadata?.lipsync_validation_state
+              || selectedFinal.metadata?.has_dialogue === true
+              || requiresLipsync
+            ) && (
               <div className="mt-2 border-t border-line pt-2">
                 <CascadeBadge meta={selectedFinal.cascade_metadata} />
                 <CascadeBadge meta={selectedFinal.metadata?.lipsync_cascade} label="lipsync" />
+                <TakeLipsyncEvidence
+                  take={selectedFinal}
+                  shotRequiresEvidence={requiresLipsync}
+                />
               </div>
             )}
           </div>
@@ -443,12 +559,69 @@ function ClipCard({
               <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Keyframes</h3>
               <button
                 onClick={handleGenerateKeyframeClick}
-                disabled={shot.plan_status !== 'approved'}
+                disabled={shot.plan_status !== 'approved' || Boolean(deferredKeyframeJob) || loadingAction === 'keyframe'}
+                aria-describedby={deferredKeyframeJob ? deferredKeyframeJobTitleId : undefined}
                 className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
               >
                 Generate Keyframe
               </button>
             </div>
+            {deferredKeyframeJob && (
+              <div
+                role="alert"
+                aria-labelledby={deferredKeyframeJobTitleId}
+                className="mt-3 rounded border border-fail/50 bg-fail/5 px-3 py-3 text-xs"
+              >
+                <h4 id={deferredKeyframeJobTitleId} className="font-semibold text-fail">
+                  Keyframe Job Recovery Required
+                </h4>
+                <p className="mt-2 leading-relaxed text-tx">
+                  A previous provider attempt is unresolved. New keyframe generation stays disabled until an operator reconciles this saved job.
+                </p>
+                <dl className="mt-2 grid gap-x-4 gap-y-1 text-mut sm:grid-cols-2">
+                  <div>
+                    <dt className="inline">Status: </dt>
+                    <dd className="inline font-mono text-tx">{deferredKeyframeJob.status}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="inline">Job ID: </dt>
+                    <dd className="inline break-all font-mono text-tx">
+                      {deferredKeyframeJob.job_id?.trim() || 'not reported'}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="inline">Reason: </dt>
+                    <dd className="inline text-tx">
+                      {deferredKeyframeJob.reason?.trim() || 'No reason was reported.'}
+                    </dd>
+                  </div>
+                  {deferredKeyframeJob.resolve_after && (
+                    <div className="sm:col-span-2">
+                      <dt className="inline">Manual reconciliation available after: </dt>
+                      <dd className="inline font-mono text-tx">
+                        {deferredKeyframeJob.resolve_after}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <p className="mt-2 leading-relaxed text-mut">
+                  Confirm only after checking the provider record. Reconciliation clears this block; it does not retry or create a take.
+                </p>
+                <button
+                  onClick={handleResolveDeferredKeyframeJob}
+                  disabled={loadingAction === 'keyframe-recovery'}
+                  aria-busy={loadingAction === 'keyframe-recovery'}
+                  className="mt-3 rounded border border-fail/50 px-2 py-1 text-eyebrow-lg text-fail hover:bg-fail/10 disabled:opacity-40"
+                >
+                  {loadingAction === 'keyframe-recovery' ? 'Reconciling…' : 'Confirm Manual Reconciliation'}
+                </button>
+                {keyframeRecoveryError && (
+                  <p role="status" className="mt-2 leading-relaxed text-fail">
+                    {keyframeRecoveryError}
+                  </p>
+                )}
+              </div>
+            )}
             {keyframeTakes.length > 0 ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {keyframeTakes.map((take) => (
@@ -457,7 +630,7 @@ function ClipCard({
                     take={take}
                     active={selectedKeyframe?.id === take.id}
                     approved={shot.approved_keyframe_take_id === take.id}
-                    showIterateButton={activeStage === 'KEYFRAME_REVIEW' && Boolean(onIterate)}
+                    showIterateButton={activeStage === 'KEYFRAME_REVIEW' && Boolean(onIterate) && !deferredKeyframeJob}
                     onSelect={() => setSelectedKeyframeTakeId(take.id)}
                     onApprove={() => runAction(`approve-${take.id}`, () => onApproveKeyframe(shot.id, take.id))}
                     onIterate={onIterate ? (takeId, prose, verb, params) =>
@@ -494,6 +667,7 @@ function ClipCard({
                 <div className="flex gap-2">
                   <button
                     onClick={handleRegenerate}
+                    disabled={Boolean(deferredKeyframeJob) || loadingAction === 'regenerate'}
                     className="rounded bg-acc px-3 py-1.5 text-xs text-white"
                   >
                     Create New Take
@@ -509,7 +683,9 @@ function ClipCard({
             ) : (
               <button
                 onClick={() => setShowRegenForm(true)}
-                className="mt-3 text-xs text-acc hover:text-acc"
+                disabled={Boolean(deferredKeyframeJob)}
+                aria-describedby={deferredKeyframeJob ? deferredKeyframeJobTitleId : undefined}
+                className="mt-3 text-xs text-acc hover:text-acc disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Adjust prompts and create another keyframe take
               </button>
@@ -663,14 +839,99 @@ function ClipCard({
           <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Motion and Final Takes</h3>
-              <button
-                onClick={() => runAction('motion', () => onGenerateMotion(shot.id))}
-                disabled={!shot.approved_keyframe_take_id}
-                className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
-              >
-                Generate Motion
-              </button>
+              {deferredMotionJob && !deferredJobCanResume ? (
+                <span className="rounded border border-fail/40 px-2 py-1 text-eyebrow-lg text-fail">
+                  Manual Recovery Required
+                </span>
+              ) : (
+                <button
+                  onClick={() => runAction('motion', () => onGenerateMotion(shot.id))}
+                  disabled={(!shot.approved_keyframe_take_id && !deferredMotionJob) || loadingAction === 'motion'}
+                  aria-busy={loadingAction === 'motion'}
+                  title={deferredMotionJob
+                    ? 'Checks or resumes the saved LTX provider job; no new fallback provider is started.'
+                    : undefined}
+                  className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
+                >
+                  {loadingAction === 'motion'
+                    ? deferredMotionJob ? 'Checking / resuming…' : 'Generating…'
+                    : deferredMotionJob ? 'Check / Resume LTX Job' : 'Generate Motion'}
+                </button>
+              )}
             </div>
+            {deferredMotionJob && (
+              <div
+                role={deferredJobIsRecovery ? 'alert' : 'status'}
+                aria-labelledby={deferredJobTitleId}
+                className={`mt-3 rounded border px-3 py-3 text-xs ${
+                  deferredJobIsRecovery
+                    ? 'border-fail/50 bg-fail/5'
+                    : 'border-warn/50 bg-warn/5'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4
+                    id={deferredJobTitleId}
+                    className={`font-semibold ${deferredJobIsRecovery ? 'text-fail' : 'text-warn'}`}
+                  >
+                    {deferredJobEngine} Job {deferredJobStatusLabel}
+                  </h4>
+                  <span className="rounded bg-app px-2 py-0.5 font-mono text-eyebrow-lg text-mut">
+                    {deferredMotionJob.engine}
+                  </span>
+                </div>
+                {deferredMotionJob.reason && (
+                  <p className="mt-2 leading-relaxed text-tx">{deferredMotionJob.reason}</p>
+                )}
+                <dl className="mt-2 grid gap-x-4 gap-y-1 text-mut sm:grid-cols-2">
+                  {deferredMotionJob.job_id && (
+                    <div className="min-w-0">
+                      <dt className="inline">Job ID: </dt>
+                      <dd className="inline break-all font-mono text-tx">{deferredMotionJob.job_id}</dd>
+                    </div>
+                  )}
+                  {deferredMotionJob.provider_status && (
+                    <div>
+                      <dt className="inline">Provider status: </dt>
+                      <dd className="inline font-mono text-tx">{deferredMotionJob.provider_status}</dd>
+                    </div>
+                  )}
+                  {Array.isArray(deferredMotionJob.attempts) && deferredMotionJob.attempts.length > 0 && (
+                    <div>
+                      <dt className="inline">Attempts: </dt>
+                      <dd className="inline font-mono text-tx">
+                        {deferredMotionJob.attempts.filter((attempt) => typeof attempt === 'string').join(' → ')}
+                      </dd>
+                    </div>
+                  )}
+                  {typeof deferredMotionJob.duration_s === 'number' && Number.isFinite(deferredMotionJob.duration_s) && (
+                    <div>
+                      <dt className="inline">Requested duration: </dt>
+                      <dd className="inline font-mono text-tx">{deferredMotionJob.duration_s}s</dd>
+                    </div>
+                  )}
+                  {typeof deferredMotionJob.billed === 'boolean' && (
+                    <div>
+                      <dt className="inline">Provider billing: </dt>
+                      <dd className="inline text-tx">{deferredMotionJob.billed ? 'reported' : 'not reported'}</dd>
+                    </div>
+                  )}
+                  {deferredMotionJob.updated_at && (
+                    <div>
+                      <dt className="inline">Updated: </dt>
+                      <dd className="inline font-mono text-tx">
+                        <time dateTime={deferredMotionJob.updated_at}>{deferredMotionJob.updated_at}</time>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <p className="mt-2 leading-relaxed text-mut">
+                  {deferredJobCanResume
+                    ? 'Check / Resume uses this saved LTX job. It does not start a fallback provider.'
+                    : 'Automatic recovery is unavailable. Use the saved job ID in the provider console; this record blocks fallback generation.'}
+                </p>
+              </div>
+            )}
             {finalTakes.length > 0 ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {finalTakes.map((take) => (
@@ -679,6 +940,7 @@ function ClipCard({
                     take={take}
                     active={selectedFinal?.id === take.id}
                     approved={shot.approved_final_take_id === take.id}
+                    shotRequiresEvidence={requiresLipsync}
                     /* S18: REVIEW gate now exposes Iterate for motion takes too.
                        Postprocess-variant takes (kind != 'motion') stay non-iterable
                        — they're derivative of an approved motion take, not a
@@ -731,6 +993,7 @@ function ClipCard({
                 </button>
               ))}
               <select
+                aria-label="Color grade preset"
                 onChange={(event) => {
                   if (event.target.value) handleCorrect('color_grade', { preset: event.target.value })
                   event.target.value = ''
@@ -744,6 +1007,7 @@ function ClipCard({
                 ))}
               </select>
               <select
+                aria-label="Playback speed correction"
                 onChange={(event) => {
                   if (event.target.value) handleCorrect('speed', { factor: parseFloat(event.target.value) })
                   event.target.value = ''

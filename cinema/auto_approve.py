@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
 
 from cinema.context import _finite_or
+from domain.optimizer_cache import sanitize_optimizer_cache
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class AutoApproveConfig:
     plan_reject_on_violations: bool = True   # veto if violations[] non-empty
 
     # --- Image (keyframe) gate ---
-    image_min_composite: float = 0.97         # conservative threshold (PuLID-calibrated)
+    image_min_composite: float = 0.60         # production identity-score floor
     image_min_composite_fallback: float = 0.78  # fair bar for non-PuLID fallback engines
     image_veto_on_fallback: bool = True       # veto if cascade fallback
     image_max_spent_multiplier: float = 1.5   # veto if spent > 1.5× budget
@@ -128,21 +129,13 @@ class AutoApproveConfig:
                 return _finite_or(v, default)
             return v
 
-        # Production is the only tier now (max tier retired, WS1 Task 2). Production
-        # never writes a real ``composite`` — the gate's _best_take_composite falls
-        # back to identity_score (~0.6-0.8) — so the class default (0.97, calibrated
-        # for the retired max-tier composite range) would veto every production
-        # keyframe; default to the keyframe identity threshold (0.60) instead.
-        # An explicit project ``auto_approve.image_min_composite`` still overrides this.
-        composite_default = 0.60
-
         return cls(
             enabled=_get("enabled", cls.enabled),
             plan_require_approved=_get("plan_require_approved", cls.plan_require_approved),
             plan_reject_on_violations=_get(
                 "plan_reject_on_violations", cls.plan_reject_on_violations
             ),
-            image_min_composite=_get("image_min_composite", composite_default),
+            image_min_composite=_get("image_min_composite", cls.image_min_composite),
             image_min_composite_fallback=_get(
                 "image_min_composite_fallback", cls.image_min_composite_fallback
             ),
@@ -262,10 +255,10 @@ def record_director_review_on_shots(shots: list[dict], review: dict) -> None:
     shot prompts by the caller before this runs. A MODIFIED verdict is
     normalized to gate-decision "APPROVED" with no violations (the applied
     corrections are the resolution); the raw verdict is kept in
-    ``chief_director_verdict``. A missing ``decision`` defaults to "APPROVED",
-    mirroring ``validate_shot_prompts``' own parse-fallback.
+    ``chief_director_verdict``. A missing ``decision`` defaults to
+    ``REVIEW_REQUIRED`` so a partial/unavailable review cannot clear the gate.
     """
-    decision = (review or {}).get("decision", "APPROVED")
+    decision = (review or {}).get("decision") or "REVIEW_REQUIRED"
     violations = list((review or {}).get("violations") or [])
     # A MODIFIED verdict means the ChiefDirector already rewrote the shot
     # prompts to resolve what it flagged (the ChiefDirector step applies the
@@ -394,7 +387,18 @@ def _rules_for_motion(config: AutoApproveConfig) -> list[VetoRule]:
 
 def _rules_for_final(config: AutoApproveConfig) -> list[VetoRule]:
     """Veto rules for the REVIEW (final) gate."""
-    rules: list[VetoRule] = []
+    rules: list[VetoRule] = [
+        VetoRule(
+            name="final_lipsync_unverified",
+            predicate=lambda ctx: _selected_final_lipsync_is_unverified(
+                ctx["takes"],
+                ctx["shot_state"],
+            ),
+            reason_template=(
+                "selected final take has UNKNOWN/UNAVAILABLE lip-sync evidence"
+            ),
+        )
+    ]
 
     min_lipsync = config.final_min_lipsync
 
@@ -402,11 +406,11 @@ def _rules_for_final(config: AutoApproveConfig) -> list[VetoRule]:
         rules.append(
             VetoRule(
                 name="final_lipsync_below_threshold",
-                predicate=lambda ctx, _thr=min_lipsync: _best_take_lipsync(
+                predicate=lambda ctx, _thr=min_lipsync: _selected_final_lipsync(
                     ctx["takes"]
                 )
                 < _thr,
-                reason_template=f"best final take lipsync_score below threshold (< {min_lipsync:.2f})",
+                reason_template=f"selected final take lipsync_score below threshold (< {min_lipsync:.2f})",
             )
         )
 
@@ -441,7 +445,7 @@ def _best_take_composite(takes: list[dict]) -> float:
     max-tier ``quality_max.py``, deleted WS1 Task 4 with no production
     replacement — so no live path writes ``composite`` today); without this
     fallback the function returned 0.0 for every production take, so any
-    ``image_min_composite > 0`` (default 0.97) vetoed EVERY keyframe → headless
+    ``image_min_composite > 0`` (formerly 0.97) vetoed EVERY keyframe → headless
     ``GateNotSatisfiedError`` regardless of actual quality.
     """
     best = 0.0
@@ -490,9 +494,13 @@ def _best_take_lipsync(takes: list[dict]) -> float:
     Default semantics (F1b fix):
     - Non-dialogue takes (no take has ``has_dialogue=True``): return 1.0 (N/A pass).
     - Audio-embedded dialogue takes (``audio_embedded=True`` or
-      ``dialogue_audio_in_clip=True``): return 1.0 (native/postprocess sync pass).
+      ``dialogue_audio_in_clip=True``) without a measured score: return 0.0.
+      Audio presence is not synchronization-quality evidence.
+    - Dialogue takes with explicit ``lipsync_validation_state=UNKNOWN`` (or
+      ``UNAVAILABLE``): treat as unverified even when audio is present in the
+      clip. Presence of an audio track is not quality evidence.
     - Dialogue takes with a real ``lipsync_score``: return the max score (existing behaviour).
-    - Dialogue takes with NO ``lipsync_score`` AND NOT embedded-dialogue proof:
+    - Dialogue takes with NO ``lipsync_score``:
       return 0.0 (fail — the lipsync pass was skipped or failed; do not silently approve).
 
     Fixed v1.1 (Session 11 review): was returning the FIRST take's score
@@ -502,9 +510,8 @@ def _best_take_lipsync(takes: list[dict]) -> float:
     acceptable take being present.
 
     F1b: The original 1.0 blind default masked dialogue shots that went through
-    generation with no lipsync pass.  The fix distinguishes: if any take is
-    dialogue AND it has neither a lipsync_score nor embedded-dialogue proof, that
-    take is syncing-unverified and should be caught by the gate.
+    generation with no lipsync pass. If any dialogue take has no measured score,
+    that take is syncing-unverified and should be caught by the gate.
     """
     best = 0.0
     any_score_present = False
@@ -513,6 +520,25 @@ def _best_take_lipsync(takes: list[dict]) -> float:
     for take in takes:
         metadata = take.get("metadata") or {}
         score = metadata.get("lipsync_score")
+        validation_state = str(
+            metadata.get("lipsync_validation_state") or ""
+        ).strip().upper()
+        if validation_state in {"UNKNOWN", "UNAVAILABLE"}:
+            any_dialogue_unverified = True
+            continue
+        if validation_state == "FAIL":
+            # Explicit measured failure is a real score-bearing outcome even
+            # when a malformed producer omitted its numeric score.
+            any_score_present = True
+            continue
+        if validation_state and validation_state != "PASS":
+            # Unknown future states must not silently become structural PASS.
+            any_dialogue_unverified = True
+            continue
+        if validation_state == "PASS" and score is None:
+            # A PASS label without its score is internally inconsistent.
+            any_dialogue_unverified = True
+            continue
         if score is not None:
             any_score_present = True
             try:
@@ -527,12 +553,12 @@ def _best_take_lipsync(takes: list[dict]) -> float:
             if math.isfinite(s):
                 best = max(best, s)
         elif metadata.get("audio_embedded") or metadata.get("dialogue_audio_in_clip"):
-            # Voice is baked into this clip, either natively or by postprocess lip_sync.
-            any_score_present = True
-            best = max(best, 1.0)
+            # Voice is baked into this clip, but audio presence does not prove
+            # that mouth motion is synchronized. Require measured evidence.
+            any_dialogue_unverified = True
         elif metadata.get("has_dialogue"):
-            # Dialogue take with no lipsync_score and no embedded-dialogue proof:
-            # lipsync either didn't run or failed — this is the blind gap.
+            # Dialogue take with no lipsync_score: validation either did not run
+            # or produced no evidence — this is the blind gap.
             any_dialogue_unverified = True
 
     if any_dialogue_unverified and not any_score_present:
@@ -575,27 +601,94 @@ def pick_best_take_by_composite(takes: list[dict]) -> Optional[dict]:
     return best_take if best_take is not None else takes[-1]
 
 
+def _shot_requires_lipsync_evidence(shot_state: object) -> bool:
+    if not isinstance(shot_state, dict):
+        return False
+    cache = sanitize_optimizer_cache(shot_state.get("optimizer_cache"))
+    spec = cache.get("spec")
+    purpose = spec.get("purpose") if isinstance(spec, dict) else ""
+    return purpose in {"dialogue_close_up", "talking_head_full"}
+
+
+def _take_lipsync_is_unverified(
+    take: dict,
+    *,
+    dialogue_required: bool = False,
+) -> bool:
+    """Return True when a take has explicit or inferable missing sync evidence."""
+    metadata = take.get("metadata") or {}
+    cascade = take.get("cascade_metadata") or {}
+    state = str(
+        metadata.get("lipsync_validation_state")
+        or (cascade.get("validation_state") if isinstance(cascade, dict) else "")
+        or ""
+    ).strip().upper()
+    if state and state not in {"PASS", "FAIL"}:
+        # Unknown future, misspelled, or corrupt states are not quality
+        # evidence.  Keep this aligned with _best_take_lipsync so disabling
+        # the numeric threshold cannot turn a malformed state into approval.
+        return True
+    score = metadata.get("lipsync_score")
+    if state == "PASS" and _finite_or(score, None) is None:
+        return True
+    if score is not None and _finite_or(score, None) is None:
+        return True
+    return score is None and bool(
+        dialogue_required
+        or metadata.get("has_dialogue")
+        or metadata.get("audio_embedded")
+        or metadata.get("dialogue_audio_in_clip")
+    )
+
+
+def _selected_final_lipsync_is_unverified(
+    candidates: list[dict],
+    shot_state: object = None,
+) -> bool:
+    selected = pick_best_take_for_final(candidates)
+    return bool(
+        selected
+        and _take_lipsync_is_unverified(
+            selected,
+            dialogue_required=_shot_requires_lipsync_evidence(shot_state),
+        )
+    )
+
+
+def _selected_final_lipsync(candidates: list[dict]) -> float:
+    selected = pick_best_take_for_final(candidates)
+    return _best_take_lipsync([selected] if selected else [])
+
+
 def pick_best_take_for_final(candidates: list[dict]) -> Optional[dict]:
     """Return the best take for the final gate from a candidate pool (typically
     postprocess_variants + motion_takes).
 
     Strategy:
-      1. Prefer non-fallback takes (`cascade_metadata.fallback != True`)
+      1. Prefer takes with measurable lip-sync evidence when any exist. An
+         UNKNOWN take may still be returned when every candidate is UNKNOWN,
+         but the final gate vetoes it.
+      2. Prefer non-fallback takes (`cascade_metadata.fallback != True`)
          when any exist — the audit log will say "approved without
          fallback" which is the stronger signal.
-      2. Within the chosen pool, pick by composite score (max), else by
+      3. Within the chosen pool, pick by composite score (max), else by
          recency (last in list).
 
     Returns None if candidates is empty.
     """
     if not candidates:
         return None
+    verified = [
+        take for take in candidates
+        if not _take_lipsync_is_unverified(take)
+    ]
+    evidence_pool = verified if verified else candidates
     non_fallback = []
-    for take in candidates:
+    for take in evidence_pool:
         cascade = take.get("cascade_metadata") or {}
         if not (isinstance(cascade, dict) and cascade.get("fallback") is True):
             non_fallback.append(take)
-    pool = non_fallback if non_fallback else candidates
+    pool = non_fallback if non_fallback else evidence_pool
     return pick_best_take_by_composite(pool)
 
 

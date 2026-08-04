@@ -55,8 +55,8 @@ def _controller_routing_snapshot(project: dict) -> RuntimeSnapshot:
     )
     if suggested == "SORA_NATIVE":
         return RuntimeSnapshot(
-            credentials={"openai_api_key"},
-            modules={"openai"},
+            credentials={"openai_api_key", "google_api_key"},
+            modules={"openai", "google.genai"},
         )
     return _ready_veo_snapshot()
 
@@ -159,7 +159,9 @@ class TestAutoRoutingDecisions:
         )
         return ctrl, host
 
-    def _run_and_capture_gen_vid_kwargs(self, project, tmp_path):
+    def _run_and_capture_gen_vid_kwargs(
+        self, project, tmp_path, *, routing_snapshot=None
+    ):
         """Run generate_motion_take and return the kwargs passed to generate_ai_video."""
         ctrl, host = self._build_controller(project, tmp_path)
         veo_clip = str(tmp_path / "veo_clip.mp4")
@@ -198,7 +200,9 @@ class TestAutoRoutingDecisions:
             patch("workflow_selector.classify_shot_type", return_value="medium"),
             patch(
                 "cinema.shots.controller._video_policy_runtime_snapshot",
-                return_value=_controller_routing_snapshot(project),
+                return_value=(
+                    routing_snapshot or _controller_routing_snapshot(project)
+                ),
             ),
             patch(
                 "cinema.shots.controller._video_policy_current_date",
@@ -232,11 +236,11 @@ class TestAutoRoutingDecisions:
             }],
         }
 
-    def test_non_dialogue_purpose_honors_cached_suggestion(self, tmp_path):
-        """A non-dialogue purpose with a valid cached suggestion is honored.
+    def test_deprecated_cached_suggestion_is_omitted_from_auto_seed(self, tmp_path):
+        """A deprecated, non-selectable cached suggestion cannot drive AUTO.
 
         Calls the REAL generate_motion_take; asserts generate_ai_video received
-        the cached suggestion (SORA_NATIVE), not a template API.
+        the ready template candidates rather than cached SORA_NATIVE.
         """
         project = self._make_project(
             tmp_path,
@@ -248,7 +252,58 @@ class TestAutoRoutingDecisions:
             "AUTO authoring must remain AUTO at the mandatory public fence; "
             f"got {kwargs.get('target_api')!r}"
         )
-        assert kwargs.get("video_fallbacks", [None])[0] == "SORA_NATIVE"
+        assert kwargs.get("video_fallbacks") == ["GEMINI_OMNI", "VEO_NATIVE"]
+        assert "SORA_NATIVE" not in kwargs.get("video_fallbacks", [])
+
+    def test_explicit_pre_sunset_sora_pin_remains_compatible(self, tmp_path):
+        project = self._make_project(tmp_path, target_api="SORA_NATIVE")
+        kwargs = self._run_and_capture_gen_vid_kwargs(
+            project,
+            tmp_path,
+            routing_snapshot=RuntimeSnapshot(
+                credentials={"openai_api_key"},
+                modules={"openai"},
+            ),
+        )
+
+        assert kwargs.get("target_api") == "SORA_NATIVE"
+        assert kwargs.get("video_fallbacks") is None
+
+    def test_dialogue_native_audio_seed_cannot_reintroduce_deprecated_engine(
+        self, tmp_path
+    ):
+        from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
+
+        project = self._make_project(
+            tmp_path,
+            target_api="AUTO",
+            optimizer_cache={
+                "spec": {
+                    "purpose": "dialogue_close_up",
+                    "suggested_video_api": "AUTO",
+                }
+            },
+        )
+        runtime = RuntimeSnapshot(
+            credentials={"openai_api_key", "google_api_key"},
+            modules={"openai", "google.genai"},
+        )
+
+        with (
+            patch.dict(
+                PURPOSE_API_RANKING,
+                {"dialogue_close_up": ["SORA_NATIVE", "VEO_NATIVE"]},
+            ),
+            patch.dict(API_REGISTRY["SORA_NATIVE"], {"native_audio": True}),
+        ):
+            kwargs = self._run_and_capture_gen_vid_kwargs(
+                project,
+                tmp_path,
+                routing_snapshot=runtime,
+            )
+
+        assert kwargs.get("video_fallbacks", [None])[0] == "VEO_NATIVE"
+        assert "SORA_NATIVE" not in kwargs.get("video_fallbacks", [])
 
     def test_no_optimizer_cache_uses_filtered_template_seed(self, tmp_path):
         """Without optimizer cache, typed policy filters the template seed.
@@ -345,6 +400,35 @@ class TestGenerateAudioForDialogue:
             "has_dialogue=False + non-landscape should keep generate_audio=False"
         )
 
+    def test_developer_backend_cannot_claim_native_audio(self):
+        """The key-only Veo backend stays video-capable but is audio-unverified."""
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.supports_native_audio = False
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        cascade = {}
+
+        with patch.dict(
+            "sys.modules",
+            {"veo_native": MagicMock(VeoNativeAPI=MagicMock(return_value=mock_veo_instance))},
+        ):
+            with patch("os.path.exists", return_value=True), _ready_veo_policy():
+                result = generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="portrait",
+                    has_dialogue=True,
+                    dialogue_native_audio=True,
+                    _cascade_out=cascade,
+                )
+
+        assert result == "/tmp/fake_output.mp4"
+        assert mock_veo_instance.generate_video.call_args.kwargs["generate_audio"] is False
+        assert cascade["cascade_metadata"]["native_audio_generated"] is False
+
     def test_landscape_still_gets_generate_audio_true(self):
         """Landscape shots still get generate_audio=True (existing behaviour preserved)."""
         from phase_c_ffmpeg import generate_ai_video
@@ -440,6 +524,19 @@ class TestAudioEmbeddedTakeTag:
         assert result is False, (
             "VEO_NATIVE without has_dialogue should not set audio_embedded"
         )
+
+    def test_audio_embedded_not_set_when_backend_reports_no_native_audio(self):
+        from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _should_tag_audio_embedded
+
+        result = _should_tag_audio_embedded(
+            API_REGISTRY["VEO_NATIVE"],
+            has_dialogue=True,
+            voice_mode="native",
+            native_audio_generated=False,
+        )
+
+        assert result is False
 
     def test_audio_embedded_not_set_when_veo_falls_back_to_kling(self):
         """If VEO_NATIVE fails and cascade picks KLING_NATIVE, no audio_embedded."""

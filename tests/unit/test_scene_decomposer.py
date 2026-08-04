@@ -94,15 +94,15 @@ def test_gemini_omni_registry_row_projects_readmitted_live_truth():
     assert entry["per_shot_cost"] == 0.56
 
 
-def test_registry_projection_statuses_and_raw_history_are_separate():
+def test_registry_projection_isolated_and_retired_seed_stays_truthful():
     assert sd.API_REGISTRY["AUTO"]["status"] == "live"
     assert sd.API_REGISTRY["SORA_2"]["status"] == "retired"
-    # Projection/history separation is demonstrated by SORA_2 (projected
-    # retired vs seed live); GEMINI_OMNI's projection re-agrees with the seed
-    # since its Slice 3 re-admission.
+    # The compatibility seed is externally visible to legacy project readers,
+    # so its tombstone must not re-advertise a removed provider as live. The
+    # projection still proves isolation through deep-copied mutable fields.
     assert sd.API_REGISTRY["GEMINI_OMNI"]["status"] == "live"
 
-    assert sd._LEGACY_API_REGISTRY_SEED["SORA_2"]["status"] == "live"
+    assert sd._LEGACY_API_REGISTRY_SEED["SORA_2"]["status"] == "retired"
     assert sd._LEGACY_API_REGISTRY_SEED["GEMINI_OMNI"]["status"] == "live"
     assert (
         sd._LEGACY_API_REGISTRY_SEED["AUTO"]["best_for"]

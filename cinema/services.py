@@ -62,8 +62,10 @@ def state_snapshot(project_id: str) -> dict:
     """Return a pipeline-state-shaped dict without instantiating CinemaPipeline.
 
     Used by /api/projects/<pid>/pipeline-state when no run is in flight.
-    In-memory fields (current_stage, shot_results, failed_shots) are
-    empty in this snapshot — they only exist on a live pipeline object.
+    In-memory fields (shot_results and failed_shots) are empty in this
+    snapshot — they only exist on a live pipeline object. ``current_stage``
+    is normally empty too, except that a persisted deferred keyframe marker
+    truthfully routes an idle/restarted client back to KEYFRAME_REVIEW.
     """
     project = load_project(project_id)
     if not project:
@@ -84,12 +86,25 @@ def state_snapshot(project_id: str) -> dict:
                 "finals_approved": 0,
             },
         }
+    deferred_keyframe_pointer = next(
+        (
+            (scene.get("id", ""), shot.get("id", ""))
+            for scene in project.get("scenes", [])
+            for shot in scene.get("shots", [])
+            if isinstance(shot.get("deferred_keyframe_job"), dict)
+        ),
+        None,
+    )
     return {
         "paused": False,
         "cancelled": False,
-        "current_stage": "",
-        "current_scene_id": "",
-        "current_shot_id": "",
+        # In-memory pointers are normally empty for an idle pipeline. A
+        # durable keyframe recovery fence is different: Review is the only
+        # truthful/operator-actionable surface, so derive that route directly
+        # from persisted project state across reloads and server restarts.
+        "current_stage": "KEYFRAME_REVIEW" if deferred_keyframe_pointer else "",
+        "current_scene_id": deferred_keyframe_pointer[0] if deferred_keyframe_pointer else "",
+        "current_shot_id": deferred_keyframe_pointer[1] if deferred_keyframe_pointer else "",
         "shot_results": {},
         "failed_shots": [],
         "scenes_completed": 0,

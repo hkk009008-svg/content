@@ -24,13 +24,15 @@ from llm.negative_prompts import get_negative_prompt_for_failure
 from llm.image_encoding import encode_image_for_llm
 
 
-def _strip_json_fences(raw: str) -> str:
+def _strip_json_fences(raw: object) -> str:
     """Strip ```json … ``` fences that LLMs emit despite instructions.
 
     Mirrors the shape of prompt_optimizer._strip_json_fences (canonical
     pattern: llm/prompt_optimizer.py:339). Local copy avoids importing a
     _-private cross-module symbol and keeps this a single-file change.
     """
+    if not isinstance(raw, str):
+        return ""
     raw = raw.strip()
     if raw.startswith("```"):
         lines = raw.split("\n")
@@ -302,9 +304,12 @@ When suggesting prompt_mutation for failures:
             Dict with decision, violations, and optionally corrected shots.
         """
         if not self.client:
-            # No LLM available — pass through with warning
-            print("   [DIRECTOR] No LLM available — passing shots through unvalidated")
-            return {"decision": "APPROVED", "violations": [], "shots": shots}
+            print("   [DIRECTOR] decision=REVIEW_REQUIRED (no LLM available)")
+            return {
+                "decision": "REVIEW_REQUIRED",
+                "violations": ["ChiefDirector validation unavailable: no LLM client"],
+                "shots": shots,
+            }
 
         # Build the evaluation request
         shot_data = []
@@ -350,31 +355,100 @@ When suggesting prompt_mutation for failures:
             # bare string — valid JSON but not a dict, possible on the Anthropic
             # path which has no response_format=json_object guard; .get() below
             # would otherwise raise AttributeError and crash the run at the
-            # cinema_pipeline.py caller). Flagged deterministic fallback, not
-            # silent. Fail-safe-for-throughput: APPROVED so the pipeline isn't
-            # blocked, but the log line is distinct so operators can detect it.
-            print("   [DIRECTOR] decision=APPROVED (parse-fallback after retry)")
-            return {"decision": "APPROVED", "violations": [], "shots": shots}
+            # cinema_pipeline.py caller). Keep the shots available for manual
+            # review, but never convert unavailable evidence into APPROVED.
+            print("   [DIRECTOR] decision=REVIEW_REQUIRED (parse-fallback after retry)")
+            return {
+                "decision": "REVIEW_REQUIRED",
+                "violations": [
+                    "ChiefDirector validation unavailable: response was not a JSON object"
+                ],
+                "shots": shots,
+            }
 
-        decision = result.get("decision", "APPROVED")
-        violations = result.get("violations", [])
-        modifications = result.get("modifications", [])
+        raw_violations = result.get("violations")
+        violations_schema_valid = (
+            isinstance(raw_violations, list)
+            and all(isinstance(item, str) for item in raw_violations)
+        )
+        violations = list(raw_violations) if violations_schema_valid else []
+        decision = result.get("decision")
+        if not violations_schema_valid:
+            decision = "REVIEW_REQUIRED"
+            violations = [
+                "ChiefDirector validation unavailable: violations must be a present list of strings"
+            ]
+        elif decision not in {
+            "APPROVED",
+            "REJECTED",
+            "MODIFIED",
+            "BLOCKED",
+            "REVIEW_REQUIRED",
+        }:
+            decision = "REVIEW_REQUIRED"
+            violations = list(violations or [])
+            violations.append(
+                "ChiefDirector validation unavailable: missing or unsupported decision"
+            )
+        raw_modifications = result.get("modifications", [])
+        modifications = (
+            raw_modifications if isinstance(raw_modifications, list) else []
+        )
+        if "modifications" in result and not isinstance(raw_modifications, list):
+            decision = "REVIEW_REQUIRED"
+            violations.append(
+                "ChiefDirector validation unavailable: modifications must be a list"
+            )
 
-        # M-A guard: a MODIFIED verdict that flags violations but supplies NO
-        # modifications is degenerate. The gate-side normalizer
+        def _is_applicable_modification(modification: object) -> bool:
+            if not isinstance(modification, dict):
+                return False
+            idx = modification.get("shot_index")
+            if (
+                not isinstance(idx, int)
+                or isinstance(idx, bool)
+                or not 0 <= idx < len(shots)
+                or not isinstance(shots[idx], dict)
+            ):
+                return False
+            field = modification.get("field", "prompt")
+            corrected = modification.get("corrected")
+            if (
+                not isinstance(field, str)
+                or field not in {"prompt", "camera", "target_api"}
+            ):
+                return False
+            if not isinstance(corrected, str) or not corrected.strip():
+                return False
+            current = shots[idx].get(field)
+            return not isinstance(current, str) or corrected.strip() != current.strip()
+
+        applicable_modifications = [
+            modification
+            for modification in modifications
+            if _is_applicable_modification(modification)
+        ]
+
+        # M-A guard: every MODIFIED verdict must supply at least one applicable
+        # change. The gate-side normalizer
         # (cinema/auto_approve.py:record_director_review_on_shots) auto-clears
         # MODIFIED → gate-APPROVED on the assumption the flagged corrections were
-        # applied in-place — but with empty `modifications` nothing was corrected,
+        # applied in-place — but with no applicable modification nothing was corrected,
         # so auto-clear would ship a plan with open violations straight through
         # the headless PLAN gate. The normalizer can't see `modifications` (the
         # return dict is only {decision, violations, shots}), so the guard lives
         # here: downgrade to REJECTED so the gate fails fast (GateNotSatisfiedError
         # headless; regenerate / operator-review interactive) instead of silently
-        # approving an uncorrected plan.
-        if decision == "MODIFIED" and violations and not modifications:
+        # approving an unchanged plan. This is independent of ``violations``:
+        # a partial payload may omit that field while still claiming MODIFIED.
+        modifications_are_complete = (
+            bool(modifications)
+            and len(applicable_modifications) == len(modifications)
+        )
+        if decision == "MODIFIED" and not modifications_are_complete:
             print(
-                "   [DIRECTOR] MODIFIED with open violations but no modifications "
-                "— downgrading to REJECTED (uncorrected plan)"
+                "   [DIRECTOR] MODIFIED without a complete applicable modification set "
+                "— downgrading to REJECTED (unchanged plan)"
             )
             decision = "REJECTED"
 
@@ -384,13 +458,12 @@ When suggesting prompt_mutation for failures:
                 print(f"      - {v}")
 
         # Apply modifications if any
-        if modifications and decision == "MODIFIED":
-            for mod in modifications:
-                idx = mod.get("shot_index", -1)
-                if 0 <= idx < len(shots) and "corrected" in mod:
-                    field = mod.get("field", "prompt")
-                    shots[idx][field] = mod["corrected"]
-                    print(f"   [DIRECTOR] Shot {idx} '{field}' corrected")
+        if applicable_modifications and decision == "MODIFIED":
+            for mod in applicable_modifications:
+                idx = mod["shot_index"]
+                field = mod.get("field", "prompt")
+                shots[idx][field] = mod["corrected"]
+                print(f"   [DIRECTOR] Shot {idx} '{field}' corrected")
 
         self.diagnostic_log.append({
             "stage": "shot_validation",
@@ -439,9 +512,11 @@ When suggesting prompt_mutation for failures:
         else:
             threshold = 0.70
 
-        # A skipped identity result has overall_score=None (couldn't be checked):
-        # treat as non-blocking — don't drive an identity mutation off a non-score.
-        if identity_score is None:
+        # A skipped identity result has overall_score=None (couldn't be checked).
+        # Keep it distinct from a measured pass so it cannot short-circuit to
+        # ACCEPT without evidence.
+        identity_measured = identity_score is not None
+        if not identity_measured:
             identity_passed = True
         else:
             identity_passed = identity_score >= threshold
@@ -451,13 +526,22 @@ When suggesting prompt_mutation for failures:
         if coherence_result is not None:
             coherent = coherence_result.overall_coherence_score >= 0.6
 
+        if not self.client:
+            return {
+                "decision": "REVIEW_REQUIRED",
+                "mutation": None,
+                "reason": "ChiefDirector validation unavailable: no LLM client",
+            }
+
+        if not identity_measured:
+            return {
+                "decision": "REVIEW_REQUIRED",
+                "mutation": None,
+                "reason": "Identity quality was not measurable",
+            }
+
         # 2x2 decision matrix
         if identity_passed and coherent:
-            return {"decision": "ACCEPT", "mutation": None}
-
-        if not self.client:
-            if not identity_passed:
-                return {"decision": "RETRY", "mutation": None, "mutation_level": 1}
             return {"decision": "ACCEPT", "mutation": None}
 
         # Encode images at the evaluate layer so labels match attachments by
@@ -602,6 +686,14 @@ When suggesting prompt_mutation for failures:
 
         try:
             result = json.loads(_strip_json_fences(raw))
+            if not isinstance(result, dict):
+                raise ValueError("ChiefDirector response was not a JSON object")
+            if result.get("decision") not in {"RETRY", "ACCEPT_LENIENT", "FAIL"}:
+                return {
+                    "decision": "REVIEW_REQUIRED",
+                    "mutation": None,
+                    "reason": "ChiefDirector response omitted a supported decision",
+                }
 
             # Append the negative-prompt hint to the LLM's mutation instructions.
             # Opt-in: unknown reasons and "passed" return "" and are silently skipped.
@@ -648,7 +740,12 @@ When suggesting prompt_mutation for failures:
                 level = 1
             else:
                 level = 1 if identity_score > 0.55 else (2 if identity_score > 0.40 else 3)
-            return {"decision": "RETRY", "mutation": None, "mutation_level": level}
+            return {
+                "decision": "REVIEW_REQUIRED",
+                "mutation": None,
+                "mutation_level": level,
+                "reason": "ChiefDirector response unavailable or unparsable",
+            }
 
     def get_diagnostic_summary(self) -> str:
         """Return a summary of all diagnostic decisions made during this generation."""

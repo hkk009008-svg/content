@@ -20,6 +20,12 @@ import pytest
 from cost_tracker import CostTracker
 
 
+@pytest.fixture(autouse=True)
+def _offline_audio_validators(monkeypatch):
+    monkeypatch.setattr("audio.foley.validate_audio_artifact", lambda _path: None)
+    monkeypatch.setattr("audio.dialogue.validate_audio_artifact", lambda _path: None)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -51,6 +57,7 @@ class TestFoleyCostTrackerThreading:
         r = MagicMock()
         r.raise_for_status.return_value = None
         r.content = b"ID3-FAKE-FOLEY"
+        r.headers = {"content-type": "audio/mpeg"}
         return r
 
     def _make_settings(self):
@@ -109,7 +116,7 @@ class TestFalBgmCostTrackerThreading:
     """generate_fal_bgm records spend on the caller-supplied tracker."""
 
     def _setup_fal(self, monkeypatch, tmp_path, url="https://cdn/bgm.mp3"):
-        """Stub fal_client.subscribe + urllib.request.urlretrieve."""
+        """Stub fal_client.subscribe + validated safe_download."""
         # fal_client may not be installed; stub it
         fal_mod = _stub("fal_client")
         monkeypatch.setitem(sys.modules, "fal_client", fal_mod)
@@ -122,12 +129,12 @@ class TestFalBgmCostTrackerThreading:
 
         fal_mod.subscribe = _fake_subscribe
 
-        # urlretrieve: write fake bytes to the output path
-        def _fake_urlretrieve(url, out):
+        def _fake_download(url, out, **_kwargs):
             with open(out, "wb") as f:
                 f.write(audio_content)
+            return out
 
-        monkeypatch.setattr("urllib.request.urlretrieve", _fake_urlretrieve)
+        monkeypatch.setattr("audio.music.safe_download", _fake_download)
 
         # Stub out the optional research_engine import to avoid network.
         # Must be restored: test_location_research.py and test_style_director.py

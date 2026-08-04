@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import TakeStrip from './TakeStrip'
+import DirectorReviewCard from '../pipeline/DirectorReviewCard'
 import type { Project, ShotState, DirectorReview } from '../../types/project'
+import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
 
 export interface MonitorProps {
   project: Project
@@ -29,8 +31,18 @@ export default function Monitor({
   // into ReviewStage; this closes the deferred Monitor-side gap). NF-4
   // (P1-3): dialogue takes carry a SECOND record at metadata.lipsync_cascade
   // — the overlay lip-sync pass; cascade_metadata holds the video cascade.
-  const { cascadeMetadata, lipsyncCascadeMetadata } = useMemo(() => {
-    const none = { cascadeMetadata: null, lipsyncCascadeMetadata: null }
+  const {
+    cascadeMetadata,
+    lipsyncCascadeMetadata,
+    lipsyncValidationState,
+    hasDialogue,
+  } = useMemo(() => {
+    const none = {
+      cascadeMetadata: null,
+      lipsyncCascadeMetadata: null,
+      lipsyncValidationState: null,
+      hasDialogue: undefined,
+    }
     const takeId = activeState?.take_id
     if (!activeShotId || !takeId) return none
     const shot = project.scenes
@@ -46,6 +58,12 @@ export default function Monitor({
     return {
       cascadeMetadata: take?.cascade_metadata ?? null,
       lipsyncCascadeMetadata: take?.metadata?.lipsync_cascade ?? null,
+      lipsyncValidationState: take?.metadata?.lipsync_validation_state ?? null,
+      hasDialogue: shotRequiresLipsync(shot)
+        ? true
+        : typeof take?.metadata?.has_dialogue === 'boolean'
+          ? take.metadata.has_dialogue
+          : undefined,
     }
   }, [activeShotId, activeState?.take_id, project.scenes])
 
@@ -73,6 +91,8 @@ export default function Monitor({
             projectId={projectId}
             cascadeMetadata={cascadeMetadata}
             lipsyncCascadeMetadata={lipsyncCascadeMetadata}
+            lipsyncValidationState={lipsyncValidationState}
+            hasDialogue={hasDialogue}
           />
         </div>
       ) : (
@@ -84,27 +104,8 @@ export default function Monitor({
       )}
 
       {directorReview && (
-        <div className="mt-4 rounded border border-acc/30 bg-head px-4 py-3">
-          <div className={`text-eyebrow-lg uppercase tracking-wider font-semibold font-mono ${
-            directorReview.decision === 'APPROVED'
-              ? 'text-acc'
-              : directorReview.decision === 'REJECTED'
-                ? 'text-acc'
-                : 'text-acc'
-          }`}>
-            Director Review · {directorReview.decision}
-            {directorReview.quality_score != null && (
-              <span className="ml-2 font-normal">
-                ({Math.round(directorReview.quality_score * 100)}%)
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-mut font-display italic">{directorReview.reasoning}</p>
-          {directorReview.violations.length > 0 && (
-            <ul className="mt-2 list-disc pl-5 text-xs text-acc font-mono">
-              {directorReview.violations.map((v, i) => <li key={i}>{v}</li>)}
-            </ul>
-          )}
+        <div className="mt-4">
+          <DirectorReviewCard review={directorReview} />
         </div>
       )}
     </main>

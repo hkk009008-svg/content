@@ -47,9 +47,32 @@ export interface ProductObject {
 export interface AutoApproveAuditEntry {
   gate: 'plan' | 'image' | 'motion' | 'final'
   auto_approved: boolean
+  /** Evaluation could not produce a substantive approval/veto decision.
+   *  Deferred entries still require manual review and must not be counted as
+   *  rule vetoes. Optional for projects written before the field existed. */
+  deferred?: boolean
   vetoes: string[]
   rule_names: string[]
   timestamp: string  // ISO 8601
+}
+
+/** Safe, operator-facing projection of a provider job that was accepted but
+ *  did not reach a terminal state during the request that started it. This
+ *  intentionally excludes provider credentials, raw payloads, and URLs.
+ *  Optional/nullable detail fields keep older and partially-populated project
+ *  JSON readable while the required engine/status pair identifies the job's
+ *  recovery state. */
+export interface DeferredMotionJob {
+  engine: string
+  status: 'pending' | 'recovery_required'
+  reason?: string | null
+  job_id?: string | null
+  provider_status?: string | null
+  attempts?: string[] | null
+  billed?: boolean | null
+  duration_s?: number | null
+  updated_at?: string | null
+  resolve_after?: string | null
 }
 
 export interface Shot {
@@ -69,6 +92,13 @@ export interface Shot {
   performance_engine?: 'ACT_ONE' | 'LIVE_PORTRAIT' | 'VIGGLE' | 'SKIP' | ''
   driving_video_path?: string
   shot_type?: string
+  /** Canonical shot-level dialogue survives in older projects even when a
+   *  take predates metadata.has_dialogue. */
+  dialogue?: string | Array<Record<string, unknown>> | null
+  optimizer_cache?: {
+    spec?: { purpose?: string | null } | null
+    [key: string]: unknown
+  } | null
   action_context: string
   generated_image: string
   generated_video: string
@@ -92,6 +122,14 @@ export interface Shot {
   motion_auto_approved?: boolean   // present only when CINEMA_AUTO_APPROVE_MOTION=1
   final_auto_approved?: boolean
   auto_approve_audit?: AutoApproveAuditEntry[]
+  /** Durable ambiguity fence for keyframe generation. While present, the UI
+   *  must not start or iterate a keyframe take; an operator must reconcile the
+   *  saved provider job explicitly before generation can continue. */
+  deferred_keyframe_job?: DeferredMotionJob | null
+  /** Durable provider-resume handle. Present only while motion generation
+   *  must check/resume an already-accepted provider job; cleared by the
+   *  backend when that job reaches a terminal result. */
+  deferred_motion_job?: DeferredMotionJob | null
 }
 
 export interface Scene {
@@ -221,8 +259,6 @@ export interface GlobalSettings {
   forced_alignment_enabled?: boolean        // WhisperX word-level alignment + DTW correction
   dialogue_target_wpm?: number               // target words/min, atempo post-process; 0 disables pacing
   dialogue_voice_mode?: 'overlay' | 'native' // 'overlay' = TTS lip-sync over silent video (default); 'native' = engine's own embedded voice
-  // Lipsync engine priority — drag-rank in UI; first available wins.
-  lipsync_engine_priority?: string[]        // e.g. ["HEDRA_C3", "SYNC_SO_V3", "MUSETALK", "OMNIHUMAN_V1_5"]
   lipsync_quality_validation?: boolean      // SyncNet score gate after each lipsync
   lipsync_validation_threshold?: number     // 0.0-1.0, default 0.65
 
@@ -300,8 +336,6 @@ export interface WorkflowTemplate {
   sampler: string
   scheduler: string
   pag_scale: number
-  controlnet_depth_strength: number
-  ip_adapter_weight: number
   denoise_default: number
   target_api: string
   video_fallbacks: string[]
@@ -366,6 +400,21 @@ export interface Project {
   global_settings: GlobalSettings
 }
 
+export type LipsyncValidationState = 'PASS' | 'FAIL' | 'UNKNOWN'
+
+/** Provider/cascade evidence persisted with a take. A native audio flag is
+ *  evidence that the provider emitted audio, never evidence that dialogue is
+ *  synchronized; only validation_state carries that quality decision. */
+export interface CascadeMetadata {
+  engine: string
+  score?: number | null
+  threshold?: number | null
+  validation_state?: LipsyncValidationState | null
+  native_audio_generated?: boolean | null
+  fallback?: boolean
+  attempts?: string[]
+}
+
 export interface TakeRecord {
   id: string
   kind: 'keyframe' | 'motion' | 'performance' | 'postprocess'
@@ -377,18 +426,15 @@ export interface TakeRecord {
    *  schema — dialogue takes persist their lip-sync cascade record here
    *  (NF-4, P1-3): read via take.metadata?.lipsync_cascade. */
   metadata?: Record<string, any> & {
-    lipsync_cascade?: TakeRecord['cascade_metadata']
+    has_dialogue?: boolean
+    lipsync_score?: number | null
+    lipsync_validation_state?: LipsyncValidationState | null
+    lipsync_cascade?: CascadeMetadata
   }
   /** Cascade decision metadata — added Session 6 (P2-3).
    *  Optional: absent on takes produced before this field existed.
    *  Consumers MUST use optional chaining: take.cascade_metadata?.engine */
-  cascade_metadata?: {
-    engine: string        // which engine actually produced this take
-    score?: number        // quality gate score (SyncNet for lipsync, not used for video)
-    threshold?: number    // the gate bar that was checked
-    fallback?: boolean    // true if restored from stash after no engine cleared threshold
-    attempts?: string[]   // engines tried in order, oldest first (includes the winning engine)
-  }
+  cascade_metadata?: CascadeMetadata
 }
 
 export interface ShotDiagnostic {
@@ -513,11 +559,20 @@ export interface StructuredPrompt {
   raw: string
 }
 
+export type DirectorReviewDecision =
+  | 'APPROVED'
+  | 'MODIFIED'
+  | 'REJECTED'
+  | 'REVIEW_REQUIRED'
+  // Preserve forward compatibility while every unknown value is rendered
+  // fail-closed as manual-review-required by the UI.
+  | (string & {})
+
 export interface DirectorReview {
-  decision: 'APPROVED' | 'MODIFIED' | 'REJECTED'
-  violations: string[]
-  quality_score: number
-  reasoning: string
+  decision: DirectorReviewDecision
+  violations?: string[]
+  quality_score?: number | null
+  reasoning?: string | null
 }
 
 export interface ShotState {
@@ -593,6 +648,9 @@ export interface AppConfig {
 export interface CapabilityDimension {
   key: string; label: string;
   value: number | null; bar: number | null; pass: boolean | null; n_measured: number;
+  n_applicable?: number;
+  n_unknown?: number;
+  n_failed?: number;
 }
 
 /** U3 — Final-media conformance blocks on the scorecard. Sub-blocks are null
@@ -674,11 +732,20 @@ export interface CapabilityScorecard {
   summary: { shots_total: number; shots_clearing_all_bars: number };
   dimensions: CapabilityDimension[];
   routing: { first_try: number; fallback: number; silent_fallback: number };
-  gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; top_vetoes: [string, number][] }>;
+  gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; deferred?: number; top_vetoes: [string, number][] }>;
   lora_availability: LoraAvailability;
   lora: { char_id: string; strength: number | null; score: number | null; verdict: 'ok'|'warning'|'rejected' }[];
   components: CapabilityComponent[];
-  per_shot: { shot_id: string; identity: number|null; coherence: number|null; motion: number|null; lipsync: number|null; engine: string }[];
+  per_shot: {
+    shot_id: string;
+    identity: number|null;
+    coherence: number|null;
+    motion: number|null;
+    lipsync: number|null;
+    lipsync_state?: LipsyncValidationState | 'NOT_APPLICABLE';
+    lipsync_applicable?: boolean;
+    engine: string;
+  }[];
   provenance: { shot_id: string; engine: string; attempts: string[]; fallback: boolean }[];
   media: ScorecardMedia | null;
   future_dimensions: string[];

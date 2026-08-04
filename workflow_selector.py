@@ -36,17 +36,14 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",     # DPM++ 2M: higher-order solver, sharper at same step count
         "scheduler": "sgm_uniform", # SGM Uniform: optimized sigma distribution for FLUX flow-matching
         "pag_scale": 3.0,          # PAG: sharpen fine face details without oversaturating
-        "controlnet_depth_strength": 0.35,  # Subtle spatial lock from previous shot
-        "ip_adapter_weight": 0.25, # Minimal style transfer — face is priority
         "denoise_default": 0.25,   # Lower denoise = tighter temporal consistency in img2img
         # GEMINI_OMNI = Gemini Omni Flash (Preview), Google-first primary since
         # WS2 (Gemini Omni Flash is arena #1). KLING_3_0 = fal Kling v3 Pro
         # (#11 AA i2v arena, 2026-07-11) with `elements` identity binding stays
-        # first fallback; KLING_NATIVE is the legacy kling-v1-6 route (proven
-        # identity path; native kling-v3 bump deferred — v3 param compat
-        # unverifiable offline).
+        # first non-Google fallback. The deprecated native kling-v1-6 adapter
+        # is quarantined from automatic routing and remains explicit-only.
         "target_api": "GEMINI_OMNI",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "SEEDANCE"],
         "description": "Close-up portrait — max face fidelity, 25 steps, DPM++ 2M + PAG",
     },
     "medium": {
@@ -58,14 +55,11 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 3.0,          # PAG: enhance mid-range detail (clothing, background texture)
-        "controlnet_depth_strength": 0.40,  # Moderate spatial lock
-        "ip_adapter_weight": 0.30, # Balanced style transfer
         "denoise_default": 0.35,
         # GEMINI_OMNI Google-first primary (WS2); fal Kling v3 Pro (elements
-        # identity) first fallback, native v1.6 second — see the portrait
-        # entry for the full rationale.
+        # identity) first non-Google fallback; native v1.6 is explicit-only.
         "target_api": "GEMINI_OMNI",
-        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
+        "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "Medium shot — balanced face + scene, 20 steps, DPM++ 2M + PAG",
     },
     "wide": {
@@ -77,8 +71,6 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 2.5,          # Lower PAG — avoid over-sharpening large environments
-        "controlnet_depth_strength": 0.50,  # Strongest spatial lock — wide shots drift most
-        "ip_adapter_weight": 0.35, # Higher style transfer — lock environment atmosphere
         "denoise_default": 0.45,
         # GEMINI_OMNI Google-first primary (WS2); old target_api LTX demoted
         # into 2nd fallback slot; old VEO_NATIVE fallback deduped (now the head).
@@ -95,16 +87,14 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 2.0,          # Lower PAG — motion shots need softness, not crispness
-        "controlnet_depth_strength": 0.30,  # Light spatial guidance — allow motion freedom
-        "ip_adapter_weight": 0.25, # Light style transfer — don't constrain action
         "denoise_default": 0.40,
         # GEMINI_OMNI Google-first primary (WS2). SEEDANCE (#1 AA i2v arena,
         # 2026-07; multi-reference up to 9 images binds multi-character action)
-        # demoted into 2nd fallback slot. SORA_NATIVE stays third fallback
-        # (best motion physics) until the shutdown date; after it, the call
-        # errors fast and cascades on.
+        # demoted into 2nd fallback slot. Deprecated SORA_NATIVE remains
+        # available only when an operator explicitly pins it before sunset;
+        # new automatic action routing must not introduce it.
         "target_api": "GEMINI_OMNI",
-        "video_fallbacks": ["VEO_NATIVE", "SEEDANCE", "SORA_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
+        "video_fallbacks": ["VEO_NATIVE", "SEEDANCE", "KLING_3_0", "RUNWAY_GEN4", "LTX"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
     },
     "landscape": {
@@ -116,8 +106,6 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 3.5,          # Max PAG — landscapes benefit most from detail sharpening
-        "controlnet_depth_strength": 0.55,  # Strong spatial lock for architecture/layout
-        "ip_adapter_weight": 0.40, # Max style transfer — lock atmosphere and color grade
         "denoise_default": 0.55,
         # GEMINI_OMNI Google-first primary (WS2); old target_api LTX demoted;
         # old VEO_NATIVE fallback deduped (now the head).
@@ -126,11 +114,9 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "description": "Pure landscape — no PuLID, 25 steps, max detail + PAG",
     },
     # NOTE: "dialogue" is not a ComfyUI image-gen template — dialogue shots use
-    # portrait/medium templates for image generation, then the pipeline routes
-    # to a video API with native lipsync.
-    # The video generation cascade for dialogue: GEMINI_OMNI → VEO_NATIVE →
-    # Kling Lip Sync → Omnihuman (data-driven via PURPOSE_API_RANKING /
-    # _resolve_dialogue_routing, domain/scene_decomposer.py).
+    # portrait/medium templates for image generation, then the controller picks
+    # the first policy-admitted native-audio video route. Any result without
+    # verified embedded dialogue traverses the separate F1b lip-sync cascade.
     # Assembly uses HARD CUTS only — no AI-generated transition clips.
 }
 

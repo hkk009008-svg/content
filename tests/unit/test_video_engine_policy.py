@@ -12,6 +12,7 @@ from domain.video_engine_policy import (
     build_runtime_snapshot,
     eligible_shot_targets,
     evaluate_shot_target,
+    filter_automatic_dispatch_candidates,
     filter_dispatch_candidates,
     resolve_video_ranking,
     resolve_workflow_candidates,
@@ -148,17 +149,17 @@ def test_authoring_target_applies_project_disable_and_aspect(
     assert incompatible.reason is VideoPolicyReason.ASPECT_INCOMPATIBLE
 
 
-def test_veo_runtime_alternatives_require_complete_api_key_or_adc_path() -> None:
-    missing_service = RuntimeSnapshot(
+def test_veo_runtime_alternatives_require_config_and_module() -> None:
+    project_path = RuntimeSnapshot(
         credentials={"google_cloud_project"},
         modules={"google.genai"},
     )
     missing_module = RuntimeSnapshot(credentials={"google_api_key"})
     assert evaluate_shot_target(
         "VEO_NATIVE",
-        snapshot=missing_service,
+        snapshot=project_path,
         on_date=PRE_SUNSET,
-    ).reason is VideoPolicyReason.RUNTIME_UNAVAILABLE
+    ).accepted is True
     assert evaluate_shot_target(
         "VEO_NATIVE",
         snapshot=missing_module,
@@ -177,11 +178,21 @@ def test_veo_runtime_alternatives_require_complete_api_key_or_adc_path() -> None
         snapshot=RuntimeSnapshot(
             credentials={"google_cloud_project"},
             modules={"google.genai"},
-            services={"google_adc"},
         ),
         on_date=PRE_SUNSET,
     )
     assert adc_path.accepted is True
+
+
+def test_runtime_snapshot_does_not_probe_or_claim_adc() -> None:
+    settings_obj = SimpleNamespace(google_cloud_project="project")
+    snapshot = build_runtime_snapshot(
+        settings_obj,
+        module_probe=lambda name: name == "google.genai",
+    )
+
+    assert snapshot.credentials == frozenset({"google_cloud_project"})
+    assert snapshot.services == frozenset()
 
 
 def test_sora_native_is_fallback_only_before_sunset_and_denied_on_sunset() -> None:
@@ -209,7 +220,7 @@ def test_sora_native_is_fallback_only_before_sunset_and_denied_on_sunset() -> No
     assert on_boundary.rejections[0].reason is VideoPolicyReason.RETIRED
 
 
-def test_nonselectable_kling_native_is_admitted_only_as_ready_fallback() -> None:
+def test_deprecated_kling_native_requires_an_explicit_dispatch_chain() -> None:
     snapshot = RuntimeSnapshot(
         credentials={"kling_access_key", "kling_secret_key"},
         modules={"jwt"},
@@ -227,6 +238,33 @@ def test_nonselectable_kling_native_is_admitted_only_as_ready_fallback() -> None
         on_date=PRE_SUNSET,
     )
     assert routing.candidates == ("KLING_NATIVE",)
+
+    automatic = filter_automatic_dispatch_candidates(
+        ["KLING_NATIVE"],
+        snapshot=snapshot,
+        on_date=PRE_SUNSET,
+    )
+    assert automatic.candidates == ()
+    assert automatic.rejections[0].reason is VideoPolicyReason.NOT_AUTOMATIC
+
+
+def test_automatic_filter_excludes_explicit_sora_and_retired_runway() -> None:
+    snapshot = RuntimeSnapshot(
+        credentials={"openai_api_key", "runwayml_api_secret"},
+        modules={"openai", "runwayml"},
+    )
+
+    result = filter_automatic_dispatch_candidates(
+        ["SORA_NATIVE", "RUNWAY"],
+        snapshot=snapshot,
+        on_date=PRE_SUNSET,
+    )
+
+    assert result.candidates == ()
+    assert [item.reason for item in result.rejections] == [
+        VideoPolicyReason.NOT_AUTOMATIC,
+        VideoPolicyReason.RETIRED,
+    ]
 
 
 def test_fal_sora_is_always_retired_even_with_fal_runtime() -> None:

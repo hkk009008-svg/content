@@ -97,6 +97,93 @@ class TestScorecardBuilder:
         assert sc["summary"]["shots_total"] == 1
         assert sc["summary"]["shots_clearing_all_bars"] == 0
 
+    def test_dialogue_unknown_is_visible_and_cannot_clear_all_bars(self):
+        proj = _make_project()
+        shot = proj["scenes"][0]["shots"][0]
+        shot["motion_takes"][0]["metadata"].update({
+            "has_dialogue": True,
+            "audio_embedded": True,
+            "lipsync_score": None,
+            "lipsync_validation_state": "UNKNOWN",
+        })
+
+        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
+        assert lipsync["value"] is None
+        assert lipsync["pass"] is False
+        assert lipsync["n_applicable"] == 1
+        assert lipsync["n_unknown"] == 1
+        assert sc["per_shot"][0]["lipsync_state"] == "UNKNOWN"
+        assert sc["summary"]["shots_clearing_all_bars"] == 0
+
+    def test_approved_postprocess_lipsync_is_final_authority(self):
+        proj = _make_project()
+        shot = proj["scenes"][0]["shots"][0]
+        shot["motion_takes"][0]["metadata"].update({
+            "has_dialogue": True,
+            "lipsync_score": None,
+            "lipsync_validation_state": "UNKNOWN",
+        })
+        shot["motion_takes"][0]["cascade_metadata"] = {
+            "engine": "KLING_NATIVE",
+            "fallback": False,
+            "attempts": ["KLING_NATIVE"],
+        }
+        shot["postprocess_variants"] = [{
+            "id": "pp_lipsync",
+            "kind": "postprocess",
+            "source_take_id": "m1",
+            "metadata": {
+                "dialogue_audio_in_clip": True,
+                "lipsync_score": 0.91,
+                "lipsync_validation_state": "PASS",
+            },
+            "cascade_metadata": {
+                "engine": "SYNC_SO_V3",
+                "fallback": False,
+                "attempts": ["SYNC_SO_V3"],
+            },
+        }]
+        shot["approved_final_take_id"] = "pp_lipsync"
+
+        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
+        motion = next(d for d in sc["dimensions"] if d["key"] == "motion")
+
+        assert lipsync["value"] == 0.91
+        assert lipsync["pass"] is True
+        assert lipsync["n_unknown"] == 0
+        assert sc["per_shot"][0]["lipsync_state"] == "PASS"
+        assert sc["per_shot"][0]["lipsync"] == 0.91
+        # Motion quality and routing provenance remain anchored to the base
+        # motion take, not the derivative post-process variant.
+        assert motion["value"] == 0.82
+        assert sc["per_shot"][0]["engine"] == "KLING_NATIVE"
+        assert sc["provenance"][0]["engine"] == "KLING_NATIVE"
+
+    def test_non_dialogue_missing_lipsync_is_not_applicable(self):
+        proj = _make_project()
+        shot = proj["scenes"][0]["shots"][0]
+        shot["motion_takes"][0]["metadata"].pop("lipsync_score")
+
+        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        assert sc["per_shot"][0]["lipsync_state"] == "NOT_APPLICABLE"
+        assert sc["per_shot"][0]["lipsync_applicable"] is False
+        lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
+        assert lipsync["n_applicable"] == 0
+        assert lipsync["n_unknown"] == 0
+
+    def test_shot_dialogue_without_measurement_is_unknown(self):
+        proj = _make_project()
+        shot = proj["scenes"][0]["shots"][0]
+        shot["dialogue"] = "We need to leave now."
+        shot["motion_takes"][0]["metadata"].pop("lipsync_score")
+
+        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        assert sc["per_shot"][0]["lipsync_state"] == "UNKNOWN"
+        assert sc["per_shot"][0]["lipsync_applicable"] is True
+        assert sc["summary"]["shots_clearing_all_bars"] == 0
+
 
 class TestGateRollup:
     """The gate rollup must reflect the CURRENT decision per (shot, gate) —
@@ -126,7 +213,8 @@ class TestGateRollup:
         # top_vetoes is Counter.most_common() → list of tuples at the Python
         # level (jsonify serializes them to JSON arrays over the wire).
         assert self._gates([shot])["image"] == {
-            "approved": 0, "vetoed": 1, "top_vetoes": [("too soft", 1)]}
+            "approved": 0, "vetoed": 1, "deferred": 0,
+            "top_vetoes": [("too soft", 1)]}
 
     def test_stale_veto_not_counted_when_later_approved(self):
         # final vetoed @ t0, then approved @ t1 → current state approved; the
@@ -138,7 +226,8 @@ class TestGateRollup:
              "rule_names": ["ok"], "timestamp": "2026-06-04T02:00:00Z"},
         ]}
         assert self._gates([shot])["final"] == {
-            "approved": 1, "vetoed": 0, "top_vetoes": []}
+            "approved": 1, "vetoed": 0, "deferred": 0,
+            "top_vetoes": []}
 
     def test_dedup_is_per_shot_not_global(self):
         # Two different shots both approved at the image gate → both count
@@ -148,6 +237,22 @@ class TestGateRollup:
         shots = [{"id": "s1_01", "auto_approve_audit": [dict(e)]},
                  {"id": "s1_02", "auto_approve_audit": [dict(e)]}]
         assert self._gates(shots)["image"]["approved"] == 2
+
+    def test_deferred_is_not_counted_as_vetoed(self):
+        shot = {"id": "s1_01", "auto_approve_audit": [{
+            "gate": "final",
+            "auto_approved": False,
+            "deferred": True,
+            "vetoes": ["evaluation error"],
+            "rule_names": ["evaluation_error"],
+            "timestamp": "2026-06-04T00:00:00Z",
+        }]}
+        assert self._gates([shot])["final"] == {
+            "approved": 0,
+            "vetoed": 0,
+            "deferred": 1,
+            "top_vetoes": [("evaluation error", 1)],
+        }
 
 
 class TestIdentityMulti:

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Project, AppConfig } from '../../types/project'
 import { Section, BusyState, ErrorState, LiveRegion } from '../ui'
 import { SelectRow, TextRow } from './inspector/controls'
@@ -6,15 +6,17 @@ import { VideoSection } from './inspector/VideoSection'
 import { ImageSection } from './inspector/ImageSection'
 import { IdentitySection } from './inspector/IdentitySection'
 import { VoiceSection } from './inspector/VoiceSection'
+import { AutoApproveSection } from './inspector/AutoApproveSection'
 import { BudgetSection } from './inspector/BudgetSection'
-import { apiPost, apiPut, type ApiResult } from '../../lib/api'
+import { apiPatch, apiPost, type ApiResult } from '../../lib/api'
+import { settingsRevisionConflict } from '../../lib/settingsRevision'
 
 const API = '/api'
 
 interface Props {
   project: Project
   config: AppConfig | null
-  onRefresh: () => void
+  onRefresh: () => void | Promise<void>
 }
 
 const FALLBACK_MOODS = [
@@ -25,11 +27,11 @@ const FALLBACK_MOODS = [
 /**
  * SettingsInspector — the reconciled Resolve-style right-column inspector for
  * SetupPage. Replaces the interim SettingsPanel mount. Composes:
- *   Project → Video → Image → Identity → Voice → Budget.
+ *   Project → Video → Image → Identity → Voice → Auto-Approve → Budget.
  *
  * Settings write contract (shared by every section): read `s =
- * project.global_settings`, write via `update(key, value)` which PUTs the
- * merged `global_settings` then refreshes.
+ * project.global_settings`, write via `update(key, value)` which PATCHes one
+ * revision-bound setting then refreshes authoritative project state.
  *
  * Every write goes through `runMutation` below, so a rejection surfaces the
  * banner instead of silently no-op'ing. That is a realistic outcome here,
@@ -53,30 +55,166 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [savedNotice, setSavedNotice] = useState('')
+  const currentProjectIdRef = useRef(project.id)
+  const revisionByProjectRef = useRef(new Map<string, number>())
+  // Last server-confirmed snapshot. Functional nested-setting updates are
+  // evaluated against this map when their queued request actually runs, so
+  // a conflict rebase cannot drop fields another writer added meanwhile.
+  const authoritativeSettingsByProjectRef = useRef(new Map<string, Record<string, any>>())
+  // Optimistic composition snapshot used only while enqueueing rapid local
+  // edits. It is reconciled back to the authoritative map when the queue
+  // drains.
+  const settingsByProjectRef = useRef(new Map<string, Record<string, any>>())
+  const settingsWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const pendingSettingsWritesRef = useRef(0)
 
-  /** Sibling of ShotInspector's `runMutation` — same contract: surface and
-   *  don't refresh on failure, clear and refresh on a confirmed success. */
+  // Keep the queue's authoritative revision/snapshot aligned with parent
+  // refreshes, but never roll it backward while a queued response is newer
+  // than the currently rendered project prop.
+  useEffect(() => {
+    currentProjectIdRef.current = project.id
+    const renderedRevision = Number.isInteger(s.revision) ? s.revision : 0
+    const knownRevision = revisionByProjectRef.current.get(project.id) ?? -1
+    if (renderedRevision >= knownRevision) {
+      revisionByProjectRef.current.set(project.id, renderedRevision)
+      authoritativeSettingsByProjectRef.current.set(project.id, { ...s })
+      if (pendingSettingsWritesRef.current === 0) {
+        settingsByProjectRef.current.set(project.id, { ...s })
+      }
+    }
+  }, [project.id, s])
+
+  /** Sibling of ShotInspector's `runMutation`: ordinary failures surface
+   *  without refresh; a revision conflict also adopts/refreshes the server
+   *  snapshot so an explicit retry cannot remain pinned to stale state. */
   const runMutation = async (request: Promise<ApiResult<unknown>>): Promise<boolean> => {
+    const pid = project.id
     const result = await request
     if (!result.ok) {
-      setSaveError(result.error)
+      const conflict = settingsRevisionConflict(result)
+      if (conflict) {
+        const adoptedSettings = {
+          ...conflict.globalSettings,
+          revision: conflict.currentRevision,
+        }
+        revisionByProjectRef.current.set(pid, conflict.currentRevision)
+        authoritativeSettingsByProjectRef.current.set(pid, adoptedSettings)
+        if (pendingSettingsWritesRef.current === 0) {
+          settingsByProjectRef.current.set(pid, { ...adoptedSettings })
+        }
+      }
+      if (currentProjectIdRef.current === pid) {
+        setSaveError(result.error)
+        // A second raced conflict is not retried forever. Refresh the rendered
+        // project once so the next explicit action starts from the adopted
+        // server revision instead of repeating the same stale request.
+        if (conflict) await onRefresh()
+      }
       return false
     }
-    setSaveError(null)
-    onRefresh()
+    if (currentProjectIdRef.current === pid) {
+      setSaveError(null)
+      await onRefresh()
+    }
     return true
   }
 
-  // Returns void rather than the boolean `runMutation` produces: the five
-  // child sections type `update` as `=> void | Promise<void>`, and their
-  // controls render straight from `project.global_settings` (server state),
-  // so there is no optimistic local value for them to revert -- the banner
-  // is the whole remedy.
-  const update = async (key: string, value: any): Promise<void> => {
+  // Serialize settings writes. Range/text controls emit on every input event;
+  // sending those concurrently with one rendered revision makes all but an
+  // arbitrary first request conflict. Each queued PATCH instead uses the
+  // revision returned by its predecessor. A functional value lets nested
+  // objects (api_engines/auto_approve) merge against the latest queued
+  // snapshot rather than a stale render.
+  const update = async (
+    key: string,
+    value: any | ((current: any) => any),
+  ): Promise<void> => {
+    const pid = project.id
+    const renderedRevision = Number.isInteger(s.revision) ? s.revision : 0
+    const shadow = settingsByProjectRef.current.get(pid) ?? { ...s }
+    const optimisticValue = typeof value === 'function' ? value(shadow[key]) : value
+    settingsByProjectRef.current.set(pid, { ...shadow, [key]: optimisticValue })
+
+    pendingSettingsWritesRef.current += 1
     setBusy(true)
-    const ok = await runMutation(apiPut(`${API}/projects/${project.id}`, { global_settings: { ...s, [key]: value } }))
-    setBusy(false)
-    if (ok) setSavedNotice(`Saved ${key.replace(/_/g, ' ')}`)
+
+    const execute = async () => {
+      let revision = revisionByProjectRef.current.get(pid) ?? renderedRevision
+      let baseSettings = authoritativeSettingsByProjectRef.current.get(pid) ?? { ...s }
+      let resolvedValue = typeof value === 'function' ? value(baseSettings[key]) : value
+      const sendPatch = (expectedRevision: number, nextValue: any) =>
+        apiPatch<Project>(`${API}/projects/${pid}`, {
+          global_settings: { revision: expectedRevision, [key]: nextValue },
+        })
+
+      let result = await sendPatch(revision, resolvedValue)
+      const firstConflict = settingsRevisionConflict(result)
+      if (firstConflict) {
+        // Adopt the server snapshot, rebase this one user intent, and retry
+        // exactly once. Even if that retry races and conflicts again, the
+        // second payload is adopted below so future edits do not remain
+        // wedged on the original stale revision.
+        revision = firstConflict.currentRevision
+        baseSettings = {
+          ...firstConflict.globalSettings,
+          revision,
+        }
+        revisionByProjectRef.current.set(pid, revision)
+        authoritativeSettingsByProjectRef.current.set(pid, baseSettings)
+        resolvedValue = typeof value === 'function' ? value(baseSettings[key]) : value
+        result = await sendPatch(revision, resolvedValue)
+      }
+
+      if (!result.ok) {
+        const finalConflict = settingsRevisionConflict(result)
+        if (finalConflict) {
+          const adoptedSettings = {
+            ...finalConflict.globalSettings,
+            revision: finalConflict.currentRevision,
+          }
+          revisionByProjectRef.current.set(pid, finalConflict.currentRevision)
+          authoritativeSettingsByProjectRef.current.set(pid, adoptedSettings)
+        }
+        if (currentProjectIdRef.current === pid) setSaveError(result.error)
+        return
+      }
+
+      const returnedSettings = result.data?.global_settings
+      const returnedRevision = Number.isInteger(returnedSettings?.revision)
+        ? returnedSettings.revision!
+        : revision + 1
+      revisionByProjectRef.current.set(pid, returnedRevision)
+      authoritativeSettingsByProjectRef.current.set(
+        pid,
+        returnedSettings
+          ? { ...returnedSettings, revision: returnedRevision }
+          : { ...baseSettings, [key]: resolvedValue, revision: returnedRevision },
+      )
+
+      if (currentProjectIdRef.current === pid) {
+        setSaveError(null)
+        setSavedNotice(`Saved ${key.replace(/_/g, ' ')}`)
+        await onRefresh()
+      }
+    }
+
+    const operation = settingsWriteQueueRef.current.then(execute, execute)
+    settingsWriteQueueRef.current = operation.then(() => undefined, () => undefined)
+    try {
+      await operation
+    } finally {
+      pendingSettingsWritesRef.current -= 1
+      if (pendingSettingsWritesRef.current === 0) {
+        const authoritative = authoritativeSettingsByProjectRef.current.get(pid)
+        if (authoritative) settingsByProjectRef.current.set(pid, { ...authoritative })
+      }
+      if (
+        currentProjectIdRef.current === pid
+        && pendingSettingsWritesRef.current === 0
+      ) {
+        setBusy(false)
+      }
+    }
   }
 
   return (
@@ -100,6 +238,7 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
       <ImageSection s={s} config={config} update={update} />
       <IdentitySection s={s} update={update} />
       <VoiceSection s={s} config={config} update={update} projectId={project.id} onRefresh={onRefresh} />
+      <AutoApproveSection s={s} update={update} />
       <BudgetSection s={s} update={update} />
     </div>
   )
@@ -128,11 +267,16 @@ function ProjectSection({ s, config, project, update, runMutation }: ProjectSect
 
   const generateStyleRules = async () => {
     setGenerating(true)
-    await runMutation(apiPost(`${API}/projects/${project.id}/style-rules`, {
+    const request = (expectedRevision: number) => apiPost(`${API}/projects/${project.id}/style-rules`, {
+      expected_revision: expectedRevision,
       mood: s.music_mood,
       color_palette: s.color_palette,
       music_mood: s.music_mood,
-    }))
+    })
+    let result = await request(Number.isInteger(s.revision) ? s.revision : 0)
+    const conflict = settingsRevisionConflict(result)
+    if (conflict) result = await request(conflict.currentRevision)
+    await runMutation(Promise.resolve(result))
     setGenerating(false)
   }
 

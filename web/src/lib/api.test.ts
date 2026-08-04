@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiRequest, apiGet, apiPost, apiPut, apiDelete } from './api'
+import { apiRequest, apiGet, apiPost, apiPut, apiPatch, apiDelete } from './api'
 
 /**
  * lib/api.ts is the single place that turns `fetch` into a typed, truthful
@@ -227,6 +227,23 @@ describe('verb helpers -- method + body wiring', () => {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ target_api: 'KLING' }),
+    })
+  })
+
+  it('apiPatch sends a JSON PATCH body for revision-bound partial settings writes', async () => {
+    const fetchMock = vi.fn(async () => mockResponse({}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await apiPatch('/api/projects/p1', {
+      global_settings: { revision: 4, aspect_ratio: '9:16' },
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/p1', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        global_settings: { revision: 4, aspect_ratio: '9:16' },
+      }),
     })
   })
 

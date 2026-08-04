@@ -150,6 +150,21 @@ def _run_native(target_api: str, module_name: str, class_attr: str, aspect: str 
 ])
 def test_native_branch_notes_billed_attempt_on_aspect_reject(target_api, module_name, class_attr):
     cascade = _run_native(target_api, module_name, class_attr)
+    if target_api == "LTX":
+        # LTX now owns a durable accepted-job recovery boundary: a billed
+        # output rejected by the local aspect backstop is deferred instead of
+        # launching a second paid generation on the cooldown cycle.
+        assert cascade.get("billed_attempts") == ["LTX"]
+        assert cascade["deferred_job"] == {
+            "engine": "LTX",
+            "status": "recovery_required",
+            "reason": "output_aspect_rejected",
+            "attempts": ["LTX"],
+            "billed": True,
+            "provider_status": "completed",
+            "duration_s": 8,
+        }
+        return
     # MAX_CASCADE_RETRIES=1 re-runs the single-fallback cycle, so the billed
     # generation fires twice — both are real invoices and both must be noted.
     assert cascade.get("billed_attempts") == [target_api, target_api], (

@@ -84,7 +84,7 @@ import os
 import stat
 import tempfile
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project, make_take
@@ -108,6 +108,7 @@ from domain.provider_catalog import RuntimeSnapshot
 from domain.video_engine_policy import (
     VideoCandidateResult,
     build_runtime_snapshot,
+    filter_automatic_dispatch_candidates,
     filter_dispatch_candidates,
 )
 
@@ -191,8 +192,8 @@ def _target_policy_failure(
 def _dialogue_voice_mode(settings: dict) -> str:
     """Resolve the dialogue voice mode from global_settings (default 'overlay').
 
-    'overlay' = Veo silent video + our TTS lip-sync overlay (consistent voice).
-    'native'  = Veo generates its own embedded voice (legacy).
+    'overlay' = silent provider video + our TTS lip-sync overlay.
+    'native'  = request provider-native voice; unsupported backends still use F1b.
 
     Mirror of settings.get("lip_sync_mode","auto") at controller.py:1256.
     Unknown values fall back to 'overlay' (typo guard).
@@ -214,7 +215,7 @@ def _resolve_dialogue_routing(
     For dialogue shots (has_dialogue=True callers), walks PURPOSE_API_RANKING for the
     given purpose to find the first live video engine with native_audio.  Then:
     - overlay mode: sets target_api to that engine; keeps resolved_fallbacks intact so
-      a Veo RAI-block can cascade to a silent engine (F1b overlay still fires).
+      a provider rejection can cascade to a silent engine (F1b overlay still fires).
     - native mode:  sets target_api to that engine AND nulls fallbacks so the
       native-audio engine's internal cascade never routes to a non-native-audio engine.
 
@@ -255,27 +256,34 @@ def _should_tag_audio_embedded(
     engine_info: dict,
     has_dialogue: bool,
     voice_mode: str,
+    native_audio_generated: Optional[bool] = None,
 ) -> bool:
     """Return True when the winning engine's take should be tagged audio_embedded.
 
     Pure helper — mirrors the inline if-expression at generate_motion_take:1251-1253.
 
-    audio_embedded is True only when ALL three conditions hold:
+    audio_embedded is True only when ALL four conditions hold:
     - The winning engine has native_audio=True in API_REGISTRY.
     - The shot has dialogue (has_dialogue=True).
     - The voice mode is 'native' (overlay mode intentionally skips the tag so
       the F1b TTS overlay pass runs).
+    - A backend-specific capability result did not explicitly report that
+      native audio was unavailable (Developer-API Veo reports False).
 
     Args:
         engine_info: API_REGISTRY entry for the winning engine (may be {}).
         has_dialogue: True when the shot purpose is a dialogue purpose.
         voice_mode: The resolved voice mode string ('overlay' or 'native').
+        native_audio_generated: Backend evidence when available. False blocks
+            the tag; None preserves capability-registry behavior for providers
+            whose audio contract is not surfaced as a structured result.
 
     Returns:
         bool
     """
     return bool(
-        engine_info.get("native_audio")
+        native_audio_generated is not False
+        and engine_info.get("native_audio")
         and has_dialogue
         and voice_mode == "native"
     )
@@ -793,6 +801,260 @@ class ShotController:
         self._host._refresh_project_snapshot()
         return result
 
+    @staticmethod
+    def _public_deferred_motion_job(job: object) -> dict:
+        """Return the bounded, UI-safe subset of a provider recovery record."""
+        if not isinstance(job, dict):
+            return {}
+        engine = str(job.get("engine") or "Provider")[:64]
+        raw_status = str(job.get("status") or "recovery_required")
+        status = (
+            raw_status
+            if raw_status in {"pending", "recovery_required"}
+            else "recovery_required"
+        )
+        result: dict = {"engine": engine, "status": status}
+        for key in ("reason", "provider_status"):
+            value = job.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value[:256]
+        job_id = job.get("job_id")
+        if (
+            isinstance(job_id, str)
+            and 0 < len(job_id) <= 512
+            and job_id == job_id.strip()
+            and not any(ord(char) < 32 or ord(char) == 127 for char in job_id)
+            and "://" not in job_id
+            and not any(char in job_id for char in "?#&")
+        ):
+            # Keep the exact bounded provider identity. Truncating it would
+            # break recovery and CostTracker idempotency for long Google
+            # operation names.
+            result["job_id"] = job_id
+        attempts = job.get("attempts")
+        if isinstance(attempts, (list, tuple)):
+            result["attempts"] = [
+                item[:64]
+                for item in attempts[:32]
+                if isinstance(item, str) and item
+            ]
+        if isinstance(job.get("billed"), bool):
+            result["billed"] = job["billed"]
+        duration_s = job.get("duration_s")
+        if (
+            isinstance(duration_s, (int, float))
+            and not isinstance(duration_s, bool)
+            and math.isfinite(float(duration_s))
+            and 0 < float(duration_s) <= 3600
+        ):
+            result["duration_s"] = float(duration_s)
+        for key in ("updated_at", "resolve_after"):
+            value = job.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value[:64]
+        return result
+
+    @classmethod
+    def _deferred_motion_response(cls, job: object, *, detail: str = "") -> dict:
+        public = cls._public_deferred_motion_job(job)
+        engine = str(public.get("engine") or "Provider")
+        status = str(public.get("status") or "recovery_required")
+        job_id = public.get("job_id")
+        job_suffix = f" (job {job_id})" if job_id else ""
+        if detail:
+            message = detail
+        elif status == "pending":
+            message = (
+                f"{engine} accepted the generation{job_suffix} and it is still "
+                "pending. No fallback was started; Generate Motion will resume it "
+                "through the Check / Resume action."
+            )
+        else:
+            message = (
+                f"{engine} generation{job_suffix} requires recovery before another "
+                "provider can run. No fallback was started."
+            )
+        return {
+            "success": False,
+            "code": "provider_job_deferred",
+            "error": message,
+            "deferred_job": public,
+        }
+
+    def _persist_deferred_motion_job(
+        self,
+        shot_id: str,
+        job: Optional[dict],
+    ) -> object:
+        """Persist or clear one shot's provider recovery descriptor atomically."""
+        def _mutator(_scene: dict, project_shot: dict):
+            if job is None:
+                if "deferred_motion_job" not in project_shot:
+                    return MutationResult(True, save=False)
+                project_shot.pop("deferred_motion_job", None)
+                return MutationResult(True, save=True)
+            if project_shot.get("deferred_motion_job") == job:
+                return MutationResult(job, save=False)
+            project_shot["deferred_motion_job"] = job
+            return MutationResult(job, save=True)
+
+        return self._mutate_shot(shot_id, _mutator)
+
+    @classmethod
+    def _deferred_keyframe_response(cls, job: object, *, detail: str = "") -> dict:
+        """Build the stable HTTP/phase response for a blocked keyframe retry."""
+        public = cls._public_deferred_motion_job(job)
+        engine = str(public.get("engine") or "Keyframe provider")
+        job_id = public.get("job_id")
+        job_suffix = f" (job {job_id})" if job_id else ""
+        message = detail or (
+            f"{engine} keyframe generation{job_suffix} has an unresolved provider "
+            "outcome. No replacement render was started. Reconcile the provider "
+            "queue and history in Review before allowing another keyframe."
+        )
+        return {
+            "success": False,
+            "error_kind": "deferred",
+            "code": "keyframe_job_deferred",
+            "error": message,
+            "deferred_job": public,
+        }
+
+    def _claim_deferred_keyframe_job(self, shot_id: str, marker: dict) -> object:
+        """Atomically reserve one keyframe submission slot for a shot.
+
+        The reservation is durable before provider dispatch. A second HTTP
+        request therefore observes the marker instead of opening another paid
+        job, even when the first request lost its response or worker process.
+        """
+        def _mutator(_scene: dict, project_shot: dict):
+            existing = project_shot.get("deferred_keyframe_job")
+            if isinstance(existing, dict):
+                return MutationResult(
+                    {"claimed": False, "job": self._public_deferred_motion_job(existing)},
+                    save=False,
+                )
+            project_shot["deferred_keyframe_job"] = marker
+            return MutationResult({"claimed": True, "job": marker}, save=True)
+
+        return self._mutate_shot(shot_id, _mutator)
+
+    def _persist_deferred_keyframe_job(
+        self,
+        shot_id: str,
+        job: Optional[dict],
+        *,
+        attempt_id: str,
+    ) -> object:
+        """Update only the marker owned by ``attempt_id``.
+
+        An expired request may finish after an operator reconciles it and a
+        newer attempt claims the shot. Conditional replacement/clear prevents
+        that older request from erasing the newer paid-work fence.
+        """
+        def _mutator(_scene: dict, project_shot: dict):
+            current = project_shot.get("deferred_keyframe_job")
+            if (
+                not isinstance(current, dict)
+                or current.get("attempt_id") != attempt_id
+            ):
+                return MutationResult({
+                    "updated": False,
+                    "job": self._public_deferred_motion_job(current),
+                }, save=False)
+            if job is None:
+                project_shot.pop("deferred_keyframe_job", None)
+                return MutationResult({"updated": True, "job": {}}, save=True)
+            public = self._public_deferred_motion_job(job)
+            persisted = {**public, "attempt_id": attempt_id}
+            if current == persisted:
+                return MutationResult({"updated": True, "job": public}, save=False)
+            project_shot["deferred_keyframe_job"] = persisted
+            return MutationResult({"updated": True, "job": public}, save=True)
+
+        return self._mutate_shot(shot_id, _mutator)
+
+    def resolve_deferred_keyframe_job(self, shot_id: str) -> dict:
+        """Clear a recovery block only after an operator explicitly reconciles it."""
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+
+        def _mutator(_scene: dict, project_shot: dict):
+            existing = project_shot.get("deferred_keyframe_job")
+            if not isinstance(existing, dict):
+                return MutationResult(
+                    {"success": False, "error": "No deferred keyframe job to resolve"},
+                    save=False,
+                )
+            public = self._public_deferred_motion_job(existing)
+            resolve_after = public.get("resolve_after")
+            if existing.get("provider_status") == "submission_claimed" and resolve_after:
+                try:
+                    safe_after = datetime.fromisoformat(
+                        str(resolve_after).replace("Z", "+00:00")
+                    )
+                    if safe_after.tzinfo is None:
+                        safe_after = safe_after.replace(tzinfo=timezone.utc)
+                except (TypeError, ValueError):
+                    safe_after = now_dt + timedelta(seconds=1)
+                if now_dt < safe_after:
+                    return MutationResult({
+                        "success": False,
+                        "code": "keyframe_attempt_active",
+                        "error": (
+                            "The original keyframe request is still within its "
+                            "active provider window and cannot be reconciled yet"
+                        ),
+                        "deferred_job": public,
+                    }, save=False)
+            project_shot.pop("deferred_keyframe_job", None)
+            project_shot.setdefault("diagnostics", []).append({
+                "kind": "keyframe_recovery_resolved",
+                "timestamp": now,
+                "engine": public.get("engine", "Keyframe provider"),
+                "provider_status": public.get("provider_status", ""),
+                "job_id": public.get("job_id", ""),
+                "attempt_id": str(existing.get("attempt_id") or "")[:128],
+                "message": (
+                    "Operator confirmed provider queue/history reconciliation "
+                    "before enabling a new keyframe submission."
+                ),
+            })
+            return MutationResult(
+                {"success": True, "resolved": True, "deferred_job": public},
+                save=True,
+            )
+
+        result = self._mutate_shot(shot_id, _mutator)
+        if isinstance(result, dict):
+            return result
+        return {"success": False, "error": "Shot not found"}
+
+    @staticmethod
+    def _pending_motion_reservation_usd(
+        project: dict,
+        *,
+        exclude_shot_id: str = "",
+    ) -> float:
+        """Sum unbilled deferred commitments visible in the durable project."""
+        total = 0.0
+        for scene in project.get("scenes", []):
+            for project_shot in scene.get("shots", []):
+                if project_shot.get("id") == exclude_shot_id:
+                    continue
+                job = project_shot.get("deferred_motion_job")
+                if not isinstance(job, dict) or job.get("billed") is True:
+                    continue
+                value = job.get("reserved_cost_usd")
+                if (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and math.isfinite(float(value))
+                    and float(value) > 0
+                ):
+                    total += float(value)
+        return round(total, 6)
+
     def _record_diagnostic(self, shot_id: str, diagnostic: dict) -> None:
         def _mutator(_scene: dict, shot: dict):
             shot.setdefault("diagnostics", []).append(diagnostic)
@@ -828,6 +1090,9 @@ class ShotController:
             return {"success": False, "error": "Shot not found"}
         if shot.get("plan_status") != "approved":
             return {"success": False, "error": "Shot plan must be approved before generating a keyframe"}
+        existing_keyframe_job = shot.get("deferred_keyframe_job")
+        if isinstance(existing_keyframe_job, dict):
+            return self._deferred_keyframe_response(existing_keyframe_job)
 
         settings = project.get("global_settings", {})
         style_suffix = style_rules_to_prompt_suffix(settings.get("style_rules", {}))
@@ -1023,6 +1288,30 @@ class ShotController:
         # get_project_setting() read it correctly if a consumer returns.
         ctx = PipelineContext(global_settings=settings)
 
+        attempt_id = take["id"]
+        claim_started = datetime.now(timezone.utc)
+        submission_marker = {
+            "engine": "KEYFRAME_PIPELINE",
+            "status": "recovery_required",
+            "provider_status": "submission_claimed",
+            "reason": (
+                "A keyframe submission slot was claimed, but its provider outcome "
+                "has not yet been reconciled."
+            ),
+            "updated_at": claim_started.isoformat(),
+            # ComfyUI has a bounded 600-second job deadline. The extra minute
+            # covers cancellation/history reconciliation before an operator
+            # may clear a marker that can still belong to a live request.
+            "resolve_after": (claim_started + timedelta(seconds=660)).isoformat(),
+            "attempt_id": attempt_id,
+        }
+        claim = self._claim_deferred_keyframe_job(shot_id, submission_marker)
+        if claim is None:
+            return {"success": False, "error": "Shot not found"}
+        if isinstance(claim, dict) and claim.get("claimed") is False:
+            return self._deferred_keyframe_response(claim.get("job"))
+
+        recovery: dict = {}
         result = generate_ai_broll(
             full_prompt,
             img_path,
@@ -1044,9 +1333,119 @@ class ShotController:
                        "camera": shot.get("camera", ""),
                        "image_api": _image_api_hint},
             ctx=ctx,
+            _recovery_out=recovery,
         )
-        if not result or not os.path.exists(img_path):
+        if not result:
+            # The provider cascade can fail after an earlier provider already
+            # billed (for example Gemini generated a frame, local validation
+            # raised, and every fallback then failed).  Consume the private
+            # accounting handoff even when there is no public recovery marker.
+            rejected_engines = recovery.pop("_billed_rejects", ())
+            for rejected_engine in rejected_engines:
+                try:
+                    self.cost_tracker.record_api_call(
+                        rejected_engine,
+                        operation="image_generation_rejected",
+                        shot_id=shot_id,
+                        video_id=self.project.get("id", ""),
+                    )
+                except Exception:
+                    logger.warning(
+                        "billed-but-rejected image recovery record skipped",
+                        exc_info=True,
+                        extra={"shot_id": shot_id},
+                    )
+            if recovery:
+                recovery["updated_at"] = datetime.now(timezone.utc).isoformat()
+                persisted = self._persist_deferred_keyframe_job(
+                    shot_id,
+                    recovery,
+                    attempt_id=attempt_id,
+                )
+                if isinstance(persisted, dict) and persisted.get("updated") is False:
+                    return self._deferred_keyframe_response(
+                        persisted.get("job"),
+                        detail=(
+                            "This keyframe attempt finished after its recovery marker "
+                            "was reconciled or superseded. It did not replace the "
+                            "current shot state."
+                        ),
+                    )
+                public_job = persisted.get("job") if isinstance(persisted, dict) else recovery
+                return self._deferred_keyframe_response(public_job)
+            self._persist_deferred_keyframe_job(
+                shot_id,
+                None,
+                attempt_id=attempt_id,
+            )
             return {"success": False, "error": "Image generation failed"}
+
+        # ImageGenResult means provider work completed and may be billable,
+        # even if local publication or later identity validation fails. Record
+        # the winning provider and any billed Gemini reject before those local
+        # gates so spend cannot disappear behind a recovery/error path.
+        image_api = result.api_name
+        video_id = self.project.get("id", "")
+        try:
+            self.cost_tracker.record_api_call(
+                image_api,
+                operation="keyframe_generation",
+                shot_id=shot_id,
+                video_id=video_id,
+            )
+        except Exception:
+            logger.warning(
+                "keyframe cost record skipped",
+                exc_info=True,
+                extra={"shot_id": shot_id},
+            )
+        for rejected_engine in result.billed_rejects:
+            if rejected_engine == image_api:
+                continue
+            try:
+                self.cost_tracker.record_api_call(
+                    rejected_engine,
+                    operation="image_generation_rejected",
+                    shot_id=shot_id,
+                    video_id=video_id,
+                )
+                logger.info(
+                    "billed-but-rejected image attempt recorded",
+                    extra={"shot_id": shot_id, "engine": rejected_engine},
+                )
+            except Exception:
+                logger.warning(
+                    "billed-reject image cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "engine": rejected_engine},
+                )
+
+        if not os.path.exists(img_path):
+            missing_output = {
+                "engine": result.api_name,
+                "status": "recovery_required",
+                "provider_status": "output_missing",
+                "reason": (
+                    "The provider reported a completed keyframe, but no publishable "
+                    "local image was found. Reconcile the provider output before retrying."
+                ),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            persisted = self._persist_deferred_keyframe_job(
+                shot_id,
+                missing_output,
+                attempt_id=attempt_id,
+            )
+            if isinstance(persisted, dict) and persisted.get("updated") is False:
+                return self._deferred_keyframe_response(
+                    persisted.get("job"),
+                    detail=(
+                        "This completed keyframe attempt was reconciled or superseded "
+                        "before its missing output could be registered."
+                    ),
+                )
+            public_job = persisted.get("job") if isinstance(persisted, dict) else missing_output
+            return self._deferred_keyframe_response(public_job)
 
         actual = result.api_name
         if actual == "FLUX_KONTEXT" and strategy.secondary_specs:
@@ -1139,11 +1538,31 @@ class ShotController:
             # truth — pre-seed removed per operator Lane V #4 F5).
 
         def _mutator(_scene: dict, project_shot: dict):
+            current = project_shot.get("deferred_keyframe_job")
+            if (
+                not isinstance(current, dict)
+                or current.get("attempt_id") != attempt_id
+            ):
+                return MutationResult({
+                    "stored": False,
+                    "job": self._public_deferred_motion_job(current),
+                }, save=False)
             project_shot.setdefault("keyframe_takes", []).append(take)
             project_shot["generated_image"] = self._to_project_relative(img_path)
-            return MutationResult(take, save=True)
+            project_shot.pop("deferred_keyframe_job", None)
+            return MutationResult({"stored": True, "take": take}, save=True)
 
-        stored_take = self._mutate_shot(shot_id, _mutator)
+        stored = self._mutate_shot(shot_id, _mutator)
+        if not isinstance(stored, dict) or stored.get("stored") is not True:
+            current_job = stored.get("job") if isinstance(stored, dict) else {}
+            return self._deferred_keyframe_response(
+                current_job,
+                detail=(
+                    "This completed keyframe attempt was reconciled or superseded "
+                    "before registration. It did not replace the current shot state."
+                ),
+            )
+        stored_take = stored["take"]
         self._runstate.shot_results[shot_id] = {
             "image": img_path,
             "video": None,
@@ -1153,63 +1572,6 @@ class ShotController:
         }
         self._host._rebuild_review_clips()
         self._host._save_checkpoint()
-
-        # Record image generation cost under the backend that ACTUALLY ran.
-        # generate_ai_broll threads the real provenance back via
-        # ImageGenResult.api_name (COMFYUI_PULID on the pod; FLUX_KONTEXT /
-        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; the max tier's
-        # QUALITY_MAX was retired WS1 Task 4) rather than a quality_tier-based
-        # guess — so cost_log can tell a pod generation from a FAL fallback
-        # (both used to log 'fal').
-        # result is a truthy ImageGenResult here (the `if not result` guard above
-        # already returned on failure).
-        _image_api = result.api_name
-        try:
-            video_id = self.project.get("id", "")
-            self.cost_tracker.record_api_call(
-                _image_api,
-                operation="keyframe_generation",
-                shot_id=shot_id,
-                video_id=video_id,
-            )
-        except Exception:
-            # Cost tracking is best-effort; the keyframe itself succeeded.
-            logger.warning(
-                "keyframe cost record skipped",
-                exc_info=True,
-                extra={"shot_id": shot_id},
-            )
-
-        # Billed-but-REJECTED image engines (WS3: Gemini/Nano Banana can BILL
-        # a real frame that then fails identity and falls through to the
-        # pod/FAL cascade above) bill the invoice but never become the
-        # winner — record them too, mirroring _record_billed_rejects on the
-        # video side (money-gate finding 2026-07-11, image-side close-out).
-        # result.billed_rejects only ever contains engines OTHER than the
-        # eventual winner by construction (a rejected engine's own success
-        # return happens before it can be appended — see phase_c_assembly's
-        # _with_rejects), but the _image_api guard is kept anyway to mirror
-        # _record_billed_rejects's own defensive winner-subtraction.
-        for _rejected_engine in result.billed_rejects:
-            if _rejected_engine == _image_api:
-                continue
-            try:
-                self.cost_tracker.record_api_call(
-                    _rejected_engine,
-                    operation="image_generation_rejected",
-                    shot_id=shot_id,
-                    video_id=video_id,
-                )
-                logger.info(
-                    "billed-but-rejected image attempt recorded",
-                    extra={"shot_id": shot_id, "engine": _rejected_engine},
-                )
-            except Exception:
-                logger.warning(
-                    "billed-reject image cost record skipped",
-                    exc_info=True,
-                    extra={"shot_id": shot_id, "engine": _rejected_engine},
-                )
 
         self.progress(
             "KEYFRAME_READY",
@@ -1704,30 +2066,40 @@ class ShotController:
         Other engines use the table default (empty kwargs).
         """
         _engine = str(engine).upper()
+        result: dict = {}
+        _job_id = (cascade_metadata or {}).get("job_id")
+        if isinstance(_job_id, str) and _job_id:
+            # Google/Veo and LTX recovery can observe the same completed job
+            # more than once.  Preserve the provider identity for every engine;
+            # CostTracker namespaces it by provider and ignores duplicate
+            # invoice writes durably.
+            result["provider_job_id"] = _job_id
         if _engine == "SEEDANCE":
             from cost_tracker import API_COST_USD
             from phase_c_ffmpeg import SEEDANCE_DURATIONS
             _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
-            return {"cost_usd": round(API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4)}
+            result["cost_usd"] = round(API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4)
+            return result
         if _engine == "LTX":
             _dur = (cascade_metadata or {}).get("duration_s")
             if isinstance(_dur, (int, float)) and not isinstance(_dur, bool) and _dur > 0:
-                return {"duration_seconds": _dur}
-            return {}
+                result["duration_seconds"] = _dur
+            return result
         if _engine == "GEMINI_OMNI" and video_path and os.path.exists(video_path):
             from cost_tracker import API_COST_USD
             try:
                 _dur = _probe_duration(video_path)
                 if _dur and _dur > 0:
-                    return {"cost_usd": round(API_COST_USD["GEMINI_OMNI"] / 5.0 * _dur, 4)}
+                    result["cost_usd"] = round(API_COST_USD["GEMINI_OMNI"] / 5.0 * _dur, 4)
+                    return result
             except Exception:
                 logger.warning(
                     "GEMINI_OMNI duration probe failed — using flat table cost",
                     exc_info=True,
                     extra={"video_path": video_path},
                 )
-            return {}
-        return {}
+            return result
+        return result
 
     def _record_billed_rejects(
         self,
@@ -1735,6 +2107,7 @@ class ShotController:
         winner_engine: Optional[str],
         shot_id: str,
         resolved_shot_type: str,
+        deferred_job: Optional[dict] = None,
     ) -> None:
         """Record spend for billed-but-REJECTED generation attempts.
 
@@ -1754,12 +2127,30 @@ class ShotController:
                 rejects.remove(_w)
         for engine in rejects:
             try:
+                cost_kwargs = self._motion_cost_kwargs(engine, resolved_shot_type)
+                # A deferred LTX invocation represents one exact accepted job,
+                # not a fresh anonymous reject.  Thread its ID and duration so
+                # repeated Check / Resume actions remain cost-idempotent.  The
+                # metadata is intentionally used only for the single no-winner
+                # deferred record; assigning a winner's job ID to earlier
+                # rejected attempts would collapse distinct provider invoices.
+                if (
+                    winner_engine is None
+                    and len(rejects) == 1
+                    and isinstance(deferred_job, dict)
+                    and str(deferred_job.get("engine") or "").upper() == engine
+                ):
+                    cost_kwargs = self._motion_cost_kwargs(
+                        engine,
+                        resolved_shot_type,
+                        cascade_metadata=deferred_job,
+                    )
                 self.cost_tracker.record_api_call(
                     engine,
                     operation="motion_generation_rejected",
                     shot_id=shot_id,
                     video_id=self.project.get("id", ""),
-                    **self._motion_cost_kwargs(engine, resolved_shot_type),
+                    **cost_kwargs,
                 )
                 logger.info(
                     "billed-but-rejected attempt recorded",
@@ -1920,6 +2311,9 @@ class ShotController:
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("motion_takes", []).append(take)
             project_shot["generated_video"] = self._to_project_relative(final_vid)
+            # The exact accepted provider job has now produced a canonical
+            # take. Its recovery card must disappear in the same atomic write.
+            project_shot.pop("deferred_motion_job", None)
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
@@ -2039,11 +2433,49 @@ class ShotController:
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
+        existing_deferred = shot.get("deferred_motion_job")
+        resuming_deferred = isinstance(existing_deferred, dict)
+        if resuming_deferred:
+            deferred_engine = str(existing_deferred.get("engine") or "").upper()
+            deferred_job_id = existing_deferred.get("job_id")
+            deferred_fingerprint = existing_deferred.get("request_fingerprint")
+            fingerprint_is_valid = (
+                isinstance(deferred_fingerprint, str)
+                and len(deferred_fingerprint) == 64
+                and all(
+                    char in "0123456789abcdefABCDEF"
+                    for char in deferred_fingerprint
+                )
+            )
+            if (
+                deferred_engine != "LTX"
+                or not isinstance(deferred_job_id, str)
+                or not deferred_job_id
+                or (
+                    deferred_fingerprint is not None
+                    and not fingerprint_is_valid
+                )
+            ):
+                recovery_job = dict(existing_deferred)
+                recovery_job["status"] = "recovery_required"
+                recovery_job.setdefault("reason", "recovery_binding_unavailable")
+                return self._deferred_motion_response(
+                    recovery_job,
+                    detail=(
+                        "This accepted provider job has no safe automatic recovery "
+                        "binding. No new provider was started; inspect the server-side "
+                        "job record before clearing it."
+                    ),
+                )
+
         from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
         from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
 
         resolved_shot_type = classify_shot_type(shot)
-        raw_api = shot.get("target_api", "AUTO")
+        # An unresolved accepted LTX job owns this shot until it reaches a
+        # terminal state. A changed target must not launch a second provider;
+        # the dispatcher receives the persisted exact-request binding below.
+        raw_api = "LTX" if resuming_deferred else shot.get("target_api", "AUTO")
 
         # F1a: Read the optimizer cache to recover the purpose + suggested_video_api
         # that was computed during keyframe generation but not forwarded here.
@@ -2063,6 +2495,28 @@ class ShotController:
         # UnboundLocalError on every shot, dialogue or not. P0 regression fix.
         _voice_mode = _dialogue_voice_mode(settings)  # resolve once; reuse at all dialogue sites
 
+        policy_snapshot = _video_policy_runtime_snapshot()
+        policy_date = _video_policy_current_date()
+
+        def _automatic_candidate_is_safe(candidate: object) -> bool:
+            """Admit active, dispatch-safe automatic suggestions only.
+
+            UI selectability is intentionally not required: active fallback-only
+            engines such as LTX are valid optimizer suggestions. Deprecated or
+            retired engines are never introduced automatically, while explicit
+            persisted targets retain the compatibility dispatch fence below.
+            """
+
+            if not isinstance(candidate, str):
+                return False
+            return bool(filter_automatic_dispatch_candidates(
+                (candidate,),
+                snapshot=policy_snapshot,
+                on_date=policy_date,
+                api_engines=settings.get("api_engines"),
+                aspect_ratio=settings.get("aspect_ratio", "16:9"),
+            ).candidates)
+
         if raw_api == "AUTO":
             # The historical optimizer/template values are only an ORDERED
             # seed.  Executability is decided once below by the typed policy.
@@ -2072,15 +2526,18 @@ class ShotController:
             )
             cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
             ordered_seed: list[object] = []
-            if cached_suggestion and cached_suggestion != "AUTO":
+            if (
+                cached_suggestion
+                and cached_suggestion != "AUTO"
+                and _automatic_candidate_is_safe(cached_suggestion)
+            ):
                 ordered_seed.append(cached_suggestion)
             ordered_seed.append(template.get("target_api", "AUTO"))
             ordered_seed.extend(template.get("video_fallbacks") or ())
 
             # Preserve dialogue routing using only policy-eligible engines.
-            # The legacy ranking currently names known-broken GEMINI_OMNI
-            # before VEO_NATIVE; both remain useful seed evidence, but the
-            # typed filter below rejects Gemini and promotes a ready Veo.
+            # GEMINI_OMNI is re-admitted when its runtime is ready; otherwise
+            # the same typed filter naturally promotes VEO_NATIVE.
             if has_dialogue:
                 native_audio_seed = [
                     engine
@@ -2088,6 +2545,7 @@ class ShotController:
                     if (
                         API_REGISTRY.get(engine, {}).get("native_audio")
                         and API_REGISTRY.get(engine, {}).get("modality") == "video"
+                        and _automatic_candidate_is_safe(engine)
                     )
                 ]
                 if native_audio_seed:
@@ -2100,9 +2558,12 @@ class ShotController:
             # global default cascade.
             ordered_seed = [raw_api]
 
-        policy_snapshot = _video_policy_runtime_snapshot()
-        policy_date = _video_policy_current_date()
-        dispatch_policy = filter_dispatch_candidates(
+        policy_filter = (
+            filter_automatic_dispatch_candidates
+            if raw_api == "AUTO"
+            else filter_dispatch_candidates
+        )
+        dispatch_policy = policy_filter(
             ordered_seed,
             snapshot=policy_snapshot,
             on_date=policy_date,
@@ -2155,26 +2616,66 @@ class ShotController:
         # would_exceed reuse record_api_call's own rate/round logic, so the
         # pre-check and the eventual post-fact record can never drift apart.
         engine_info = API_REGISTRY.get(target_api.upper(), {})
+        native_audio_precheck: Optional[bool] = None
+        if target_api.upper() == "VEO_NATIVE":
+            try:
+                from veo_native import veo_native_audio_available
+
+                native_audio_precheck = bool(veo_native_audio_available())
+            except Exception:
+                # Unknown backend capability is budgeted conservatively as a
+                # second lip-sync call; dispatch can later prove Vertex audio.
+                native_audio_precheck = False
         needs_lipsync_precheck = has_dialogue and not _should_tag_audio_embedded(
             engine_info,
             has_dialogue,
             _voice_mode,
+            native_audio_generated=native_audio_precheck,
         )
         _pre_spend_duration_s = _motion_pre_spend_duration_s(target_api, resolved_shot_type)
-        if needs_lipsync_precheck:
+        pending_commitment_usd = self._pending_motion_reservation_usd(
+            project,
+            exclude_shot_id=shot_id if resuming_deferred else "",
+        )
+        if resuming_deferred:
+            # Recovery polls/downloads an already accepted job. Charging it as
+            # a fresh admission can strand paid work behind the budget cap.
+            would_exceed_budget = False
+        elif needs_lipsync_precheck:
             from cost_tracker import API_COST_USD, CostTracker
 
             estimated_cost = (
                 CostTracker.estimate_call_cost_usd(target_api, _pre_spend_duration_s)
                 + API_COST_USD.get("LIPSYNC_DEFAULT", 0.0)
             )
-            would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
-        elif _pre_spend_duration_s is not None:
-            would_exceed_budget = self.cost_tracker.would_exceed(
-                target_api, duration_seconds=_pre_spend_duration_s
+            would_exceed_budget = self.cost_tracker.would_exceed_cost(
+                estimated_cost + pending_commitment_usd
             )
+        elif _pre_spend_duration_s is not None:
+            if pending_commitment_usd:
+                from cost_tracker import CostTracker
+
+                would_exceed_budget = self.cost_tracker.would_exceed_cost(
+                    CostTracker.estimate_call_cost_usd(
+                        target_api,
+                        _pre_spend_duration_s,
+                    )
+                    + pending_commitment_usd
+                )
+            else:
+                would_exceed_budget = self.cost_tracker.would_exceed(
+                    target_api, duration_seconds=_pre_spend_duration_s
+                )
         else:
-            would_exceed_budget = self.cost_tracker.would_exceed(target_api)
+            if pending_commitment_usd:
+                from cost_tracker import CostTracker
+
+                would_exceed_budget = self.cost_tracker.would_exceed_cost(
+                    CostTracker.estimate_call_cost_usd(target_api)
+                    + pending_commitment_usd
+                )
+            else:
+                would_exceed_budget = self.cost_tracker.would_exceed(target_api)
 
         if would_exceed_budget:
             if needs_lipsync_precheck:
@@ -2278,6 +2779,19 @@ class ShotController:
         _video_cascade: dict = {
             "policy_rejections": list(policy_rejections),
         }
+        if resuming_deferred:
+            _video_cascade["expected_ltx_job"] = {
+                "engine": "LTX",
+                "job_id": deferred_job_id,
+            }
+            if fingerprint_is_valid:
+                # Backward-compatible with pre-fix recovery records. New
+                # records intentionally omit this request-derived hash from
+                # the public project JSON; the exact provider job ID plus the
+                # adapter's private sidecar is sufficient to resume safely.
+                _video_cascade["expected_ltx_job"]["request_fingerprint"] = (
+                    deferred_fingerprint
+                )
         # AUTO remains AUTO at the public dispatch boundary.  The controller
         # retains ``target_api`` as the resolved primary for budget/progress/
         # take metadata, while the public dispatcher independently re-filters
@@ -2364,11 +2878,101 @@ class ShotController:
 
         if not final_vid or not os.path.exists(final_vid):
             if _video_cascade.get("policy_error"):
+                if resuming_deferred:
+                    return self._deferred_motion_response(
+                        existing_deferred,
+                        detail=(
+                            "The accepted LTX job is still reserved, but current "
+                            "provider policy or configuration blocks recovery. No "
+                            "new provider was started."
+                        ),
+                    )
                 return {
                     "success": False,
                     **_video_cascade["policy_error"],
                     "rejections": list(
                         _video_cascade.get("policy_rejections", ())
+                    ),
+                }
+            deferred_job = _video_cascade.get("deferred_job")
+            if isinstance(deferred_job, dict):
+                # A provider-accepted job is not a generic generation failure.
+                # Expose only operator-safe recovery fields: local sidecar paths,
+                # request fingerprints, and raw provider detail stay server-side.
+                self._record_billed_rejects(
+                    _video_cascade.get("billed_attempts"),
+                    None,
+                    shot_id,
+                    resolved_shot_type,
+                    deferred_job=deferred_job,
+                )
+                stored_deferred = self._public_deferred_motion_job(deferred_job)
+                stored_deferred["updated_at"] = datetime.now(timezone.utc).isoformat()
+                duration_s = stored_deferred.get("duration_s")
+                if stored_deferred.get("billed") is not True:
+                    try:
+                        from cost_tracker import CostTracker
+
+                        reserved = CostTracker.estimate_call_cost_usd(
+                            str(stored_deferred.get("engine") or ""),
+                            duration_s
+                            if isinstance(duration_s, (int, float))
+                            else _pre_spend_duration_s,
+                        )
+                    except Exception:
+                        reserved = 0.0
+                    if reserved > 0:
+                        stored_deferred["reserved_cost_usd"] = round(reserved, 6)
+                try:
+                    persisted = self._persist_deferred_motion_job(
+                        shot_id,
+                        stored_deferred,
+                    )
+                    if persisted is None:
+                        raise RuntimeError(
+                            "project shot was unavailable during persistence"
+                        )
+                except Exception:
+                    logger.exception(
+                        "Unable to persist deferred provider job",
+                        extra={
+                            "shot_id": shot_id,
+                            "engine": stored_deferred.get("engine", "Provider"),
+                        },
+                    )
+                    # The sidecar remains the recovery authority. Return a
+                    # truthful recovery-required response instead of allowing
+                    # the caller to interpret this as a generic failure.
+                    stored_deferred["status"] = "recovery_required"
+                    stored_deferred["reason"] = "project_recovery_record_write_failed"
+                return self._deferred_motion_response(stored_deferred)
+            if resuming_deferred:
+                # The bound adapter returned no deferred descriptor, so the
+                # accepted job reached a terminal non-success state. Release
+                # the durable reservation; a later operator action may start
+                # genuinely new work, but this invocation never cascades.
+                try:
+                    cleared = self._persist_deferred_motion_job(shot_id, None)
+                    if cleared is None:
+                        raise RuntimeError("project shot was unavailable during clear")
+                except Exception:
+                    logger.exception(
+                        "Unable to clear terminal deferred provider job",
+                        extra={"shot_id": shot_id, "engine": "LTX"},
+                    )
+                    return self._deferred_motion_response(
+                        existing_deferred,
+                        detail=(
+                            "The LTX job reached a terminal state, but its recovery "
+                            "record could not be cleared safely. No fallback was started."
+                        ),
+                    )
+                return {
+                    "success": False,
+                    "code": "provider_job_failed",
+                    "error": (
+                        "The deferred LTX job ended without a publishable video. "
+                        "Its reservation was cleared; no fallback was started."
                     ),
                 }
             # Total cascade failure can still carry BILLED attempts (a provider
@@ -2401,7 +3005,16 @@ class ShotController:
             _video_cascade.get("cascade_metadata", {}).get("engine", target_api).upper()
         )
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if _should_tag_audio_embedded(engine_info, has_dialogue, _voice_mode):
+        verified_native_audio = (
+            _video_cascade.get("cascade_metadata", {})
+            .get("native_audio_generated")
+        )
+        if _should_tag_audio_embedded(
+            engine_info,
+            has_dialogue,
+            _voice_mode,
+            native_audio_generated=verified_native_audio,
+        ):
             take["metadata"]["audio_embedded"] = True
 
         # F1b: Write has_dialogue to the take so the auto-approve gate can
@@ -2421,7 +3034,14 @@ class ShotController:
         # lip_sync correction action) and let the cascade choose.
         if has_dialogue and not take["metadata"].get("audio_embedded"):
             try:
-                from lip_sync import generate_lip_sync_video, validate_lipsync_quality
+                from lip_sync import (
+                    LIPSYNC_QUALITY_FAIL,
+                    LIPSYNC_QUALITY_PASS,
+                    LIPSYNC_QUALITY_UNKNOWN,
+                    classify_lipsync_quality,
+                    generate_lip_sync_video,
+                    validate_lipsync_quality,
+                )
                 # chars_for_sync drives the ref/lip target — in-frame chars with
                 # scene fallback (only the visible character's face is synced).
                 chars_for_sync = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
@@ -2461,19 +3081,46 @@ class ShotController:
                     if ls_result and os.path.exists(ls_result):
                         # Replace take video with the lip-synced output.
                         final_vid = ls_result
-                        take["metadata"]["lipsync_score"] = validate_lipsync_quality(
-                            ls_result, audio_path_for_sync, _generation=True
-                        )
+                        _ls_cascade_metadata = _ls_cascade.get("cascade_metadata", {})
+                        _ls_state = _ls_cascade_metadata.get("validation_state")
+                        if _ls_state in {
+                            LIPSYNC_QUALITY_PASS,
+                            LIPSYNC_QUALITY_FAIL,
+                            LIPSYNC_QUALITY_UNKNOWN,
+                        }:
+                            # The cascade gate already classified this exact
+                            # output. Preserve that evidence so a second probe
+                            # cannot launder an UNKNOWN fallback into PASS.
+                            _ls_score = _ls_cascade_metadata.get("score")
+                        else:
+                            # Backward-compatible path for older/mocked lip-sync
+                            # implementations that do not emit gate metadata.
+                            _ls_score = validate_lipsync_quality(
+                                ls_result, audio_path_for_sync, _generation=True
+                            )
+                            _ls_state = classify_lipsync_quality(
+                                _ls_score,
+                                _finite_or(
+                                    settings.get("lipsync_validation_threshold", 0.65),
+                                    0.65,
+                                ),
+                            )
+                        take["metadata"]["lipsync_score"] = _ls_score
+                        take["metadata"]["lipsync_validation_state"] = _ls_state
                         if "cascade_metadata" in _ls_cascade:
                             take["metadata"]["lipsync_cascade"] = _ls_cascade["cascade_metadata"]
                         # Chunk 3 / Task 7: mark that this clip already carries
                         # per-shot TTS so the assembler (_build_scene_packages)
                         # suppresses the scene-level TTS mux and avoids double-voice.
                         take["metadata"]["dialogue_audio_in_clip"] = True
+                        _ls_score_display = (
+                            "UNKNOWN" if _ls_score is None else f"{_ls_score:.3f}"
+                        )
                         logger.info(
-                            "[DIALOGUE] shot=%s audio=standalone+lipsync score=%.3f",
+                            "[DIALOGUE] shot=%s audio=standalone+lipsync score=%s state=%s",
                             shot_id,
-                            take["metadata"]["lipsync_score"],
+                            _ls_score_display,
+                            _ls_state,
                         )
                         # Cost-track the lipsync generation (Tier F NEW-2: lipsync was
                         # previously untracked). Attribute to the winning cascade engine,
@@ -2490,9 +3137,10 @@ class ShotController:
                         except Exception:
                             logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
                     else:
-                        # Lipsync pass returned nothing — leave lipsync_score absent
-                        # (0.0 sentinel) so the auto-approve gate treats this as FAIL.
-                        take["metadata"]["lipsync_score"] = 0.0
+                        # No scorer result exists: this is UNKNOWN, not a
+                        # measured numeric failure.
+                        take["metadata"]["lipsync_score"] = None
+                        take["metadata"]["lipsync_validation_state"] = "UNKNOWN"
                         logger.warning(
                             "[DIALOGUE] shot=%s audio=DEGRADED-no-lipsync "
                             "(generate_lip_sync_video returned no output)",
@@ -2500,7 +3148,8 @@ class ShotController:
                         )
                 else:
                     # Missing audio or character ref — cannot run lipsync.
-                    take["metadata"]["lipsync_score"] = 0.0
+                    take["metadata"]["lipsync_score"] = None
+                    take["metadata"]["lipsync_validation_state"] = "UNKNOWN"
                     logger.warning(
                         "[DIALOGUE] shot=%s audio=DEGRADED-no-lipsync "
                         "(missing audio_path=%s or primary_ref=%s)",
@@ -2510,8 +3159,9 @@ class ShotController:
                     )
             except Exception:
                 # Lipsync pass is advisory for generation; never fail the take.
-                # Leave lipsync_score absent/0.0 so the gate catches the gap.
-                take["metadata"].setdefault("lipsync_score", 0.0)
+                # No scorer result exists, so preserve UNKNOWN evidence.
+                take["metadata"]["lipsync_score"] = None
+                take["metadata"]["lipsync_validation_state"] = "UNKNOWN"
                 logger.warning(
                     "[DIALOGUE] shot=%s audio=DEGRADED-lipsync-exception",
                     shot_id,
@@ -2519,14 +3169,15 @@ class ShotController:
                 )
         elif has_dialogue and take["metadata"].get("audio_embedded"):
             # Native-audio take: voice is baked in at generation time.
-            # Use a high constant score — the engine's own sync quality is
-            # not measurable offline, but native-audio sync is structurally
-            # reliable (the model generates speech and video together).
-            # The auto-approve gate treats audio_embedded=True as a pass;
-            # this score is stored for telemetry only.
-            NATIVE_AUDIO_LIPSYNC_SCORE = 1.0
-            take["metadata"]["lipsync_score"] = NATIVE_AUDIO_LIPSYNC_SCORE
-            logger.info("[DIALOGUE] shot=%s audio=embedded-native", shot_id)
+            # Audio presence proves only that dialogue exists in the clip; it
+            # does not measure audio/visual synchronization. Preserve that as
+            # UNKNOWN instead of fabricating a perfect score.
+            take["metadata"]["lipsync_score"] = None
+            take["metadata"]["lipsync_validation_state"] = "UNKNOWN"
+            logger.info(
+                "[DIALOGUE] shot=%s audio=embedded-native lipsync=UNKNOWN",
+                shot_id,
+            )
         # Non-dialogue shots: no lipsync_score written → gate defaults to 1.0 (N/A).
 
         # F2a: delegate the post-generation finalize step to the reusable helper.
@@ -3086,14 +3737,55 @@ class ShotController:
                     )
                     if result:
                         variant["path"] = result
+                        from lip_sync import (
+                            LIPSYNC_QUALITY_FAIL,
+                            LIPSYNC_QUALITY_PASS,
+                            LIPSYNC_QUALITY_UNKNOWN,
+                            classify_lipsync_quality,
+                        )
+
+                        _ls_metadata = variant.setdefault("metadata", {})
+                        _cascade_metadata = _lipsync_cascade.get(
+                            "cascade_metadata", {}
+                        )
+                        if not isinstance(_cascade_metadata, dict):
+                            _cascade_metadata = {}
+                        _ls_score = _finite_or(
+                            _cascade_metadata.get("score"), None
+                        )
+                        _ls_state = str(
+                            _cascade_metadata.get("validation_state") or ""
+                        ).upper()
+                        if _ls_state not in {
+                            LIPSYNC_QUALITY_PASS,
+                            LIPSYNC_QUALITY_FAIL,
+                            LIPSYNC_QUALITY_UNKNOWN,
+                        }:
+                            _ls_state = classify_lipsync_quality(
+                                _ls_score,
+                                _finite_or(
+                                    _settings.get(
+                                        "lipsync_validation_threshold", 0.65
+                                    ),
+                                    0.65,
+                                ),
+                            )
+                        elif (
+                            _ls_state == LIPSYNC_QUALITY_PASS
+                            and _ls_score is None
+                        ):
+                            # A PASS label without a finite score is malformed.
+                            _ls_state = LIPSYNC_QUALITY_UNKNOWN
+                        _ls_metadata["lipsync_score"] = _ls_score
+                        _ls_metadata["lipsync_validation_state"] = _ls_state
                         # lip_sync GENERATES embedded dialogue (synced to audio_path)
                         # even when the base take was silent/unflagged, so tag the
                         # variant directly — base-flag inheritance has nothing to copy
                         # from a silent base.  Mirrors the motion path at :1801.
                         # [§3 audio-sibling family, completeness find C4]
-                        variant.setdefault("metadata", {})["dialogue_audio_in_clip"] = True
-                        if "cascade_metadata" in _lipsync_cascade:
-                            variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
+                        _ls_metadata["dialogue_audio_in_clip"] = True
+                        if _cascade_metadata:
+                            variant["cascade_metadata"] = _cascade_metadata
                         # Cost-track the lipsync correction (Tier F NEW-2: previously
                         # untracked). Attribute to the winning cascade engine,
                         # namespaced LIPSYNC_<engine> like the motion path so it

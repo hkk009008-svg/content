@@ -148,7 +148,7 @@ describe('SetupPage', () => {
     expect(JSON.parse((init as RequestInit).body as string).global_settings.aspect_ratio).toBe('9:16')
   })
 
-  it('no inert control: every disabled button on the page discloses a reason', async () => {
+  it('no inert control: any disabled button on the page discloses a reason', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({})))
     render(
       <SetupPage
@@ -163,18 +163,11 @@ describe('SetupPage', () => {
 
     const buttons = screen.getAllByRole('button')
     // Sanity: the composed page renders a substantial set of real controls
-    // (aspect ratio pills, section disclosures, generate button, lipsync
-    // priority reorder buttons), not just the mocked panel placeholders.
+    // (aspect ratio pills, section disclosures, and generate button), not
+    // just the mocked panel placeholders.
     expect(buttons.length).toBeGreaterThan(5)
 
     const disabled = buttons.filter((b) => (b as HTMLButtonElement).disabled)
-    // Sanity: this fixture is expected to actually exercise a disabled case
-    // -- the lipsync engine priority list always has a first/last entry,
-    // so its boundary reorder buttons are disabled by construction. If this
-    // ever hits zero, the fixture stopped exercising the case this test
-    // means to check and needs a look.
-    expect(disabled.length).toBeGreaterThan(0)
-
     for (const button of disabled) {
       const reason = button.getAttribute('title') || button.getAttribute('aria-label') || button.textContent?.trim()
       expect(reason, `disabled button has no discoverable reason: ${button.outerHTML}`).toBeTruthy()

@@ -63,19 +63,19 @@ _LEGACY_API_REGISTRY_SEED = {
     "AUTO":          {"label": "Auto (Smart Routing)",  "category": "smart",     "description": "Picks best API per shot type automatically", "modality": "video", "best_for": ["auto"], "status": "live"},
 
     # --- VIDEO — Native API integrations ---
-    "KLING_NATIVE":  {"label": "Kling Native (legacy v1.6)", "category": "native", "description": "Legacy kling-v1-6 JWT route — fallback-only since 2026-07-11; kept as the proven pre-v3 identity path", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "style_locked_sequence"], "per_shot_cost": 0.50, "quality_score": 0.80, "latency_s": 90, "status": "live"},
-    "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Best motion physics — body momentum, cloth sim (OpenAI retires Sora 2 + Videos API 2026-09-24)", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
-    "VEO_NATIVE":    {"label": "Veo 3.1 Native",       "category": "native",    "description": "Native audio + reference images, 1080p", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "establishing_shot"], "per_shot_cost": 0.40, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
+    "KLING_NATIVE":  {"label": "Kling Native (legacy v1.6)", "category": "native", "description": "Deprecated explicit-only kling-v1-6 JWT compatibility route; automatic Kling uses KLING_3_0", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "style_locked_sequence"], "per_shot_cost": 0.50, "quality_score": 0.80, "latency_s": 90, "status": "live"},
+    "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Deprecated explicit-only, still-image-reference compatibility route before the 2026-09-24 shutdown; driving video is unsupported", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
+    "VEO_NATIVE":    {"label": "Veo 3.1 Native",       "category": "native",    "description": "Start-image video route, 720p/1080p; no additional references or driving video; native audio only on the Vertex backend", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "establishing_shot"], "per_shot_cost": 0.40, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
     "GEMINI_OMNI":   {"label": "Gemini Omni Flash (Preview)", "category": "native", "description": "Google Gemini Developer API native video — Google-first primary per WS2; PREVIEW-tier (no SLA per Google Cloud's standing launch-stage policy), Gemini-API billing only (not on Vertex yet)", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "static_portrait", "action_motion", "establishing_shot"], "per_shot_cost": 0.56, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
     "RUNWAY_GEN4":   {"label": "Runway Gen-4 Turbo",   "category": "native",    "description": "Single-image style anchor (gen4_turbo), turbo preview", "modality": "video", "best_for": ["style_locked_sequence", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.82, "latency_s": 75, "status": "live"},
     "LTX":           {"label": "LTX Video 2.3",        "category": "native",    "description": "4K, keyframe interpolation, cheapest per second (~$0.06/s @1080p; 6s minimum on fal 2.3)", "modality": "video", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.36, "quality_score": 0.74, "latency_s": 60, "status": "live"},
 
     # --- VIDEO — FAL proxy fallbacks ---
     "KLING_3_0":     {"label": "Kling v3 Pro (FAL)",   "category": "fal_proxy", "description": "Kling v3 Pro via FAL — portrait/medium primary since 2026-07-11 (#11 AA i2v arena, Elo 1070); `elements` identity (frontal + reference images)", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait"], "per_shot_cost": 0.56, "quality_score": 0.86, "latency_s": 110, "status": "live"},
-    "SORA_2":        {"label": "Sora 2 (FAL Proxy)",   "category": "fal_proxy", "description": "Sora via FAL — 25s continuous (retires with the 2026-09-24 Sora sunset)", "modality": "video", "best_for": ["action_motion"], "per_shot_cost": 0.55, "quality_score": 0.87, "latency_s": 130, "status": "live"},
+    "SORA_2":        {"label": "Sora 2 (FAL Proxy)",   "category": "historical", "description": "Retired catalog tombstone — no executable dispatch branch", "modality": "video", "best_for": [], "per_shot_cost": 0.55, "quality_score": 0.0, "latency_s": 0, "status": "retired"},
     "SEEDANCE":      {"label": "Seedance 2.0 (FAL)",   "category": "fal_proxy", "description": "ByteDance via FAL — #1 AA i2v arena (2026-07); multi-reference (up to 9 images) binds multi-character shots; action primary since the Sora sunset", "modality": "video", "best_for": ["action_motion"], "per_shot_cost": 1.51, "quality_score": 0.90, "latency_s": 120, "status": "live"},
     "VEO":           {"label": "Veo (FAL Proxy)",      "category": "fal_proxy", "description": "Veo via FAL — 4 reference images", "modality": "video", "best_for": ["dialogue_close_up", "establishing_shot"], "per_shot_cost": 0.45, "quality_score": 0.83, "latency_s": 115, "status": "live"},
-    "RUNWAY":        {"label": "Runway (FAL Proxy)",   "category": "fal_proxy", "description": "Runway via FAL — legacy fallback", "modality": "video", "best_for": ["style_locked_sequence"], "per_shot_cost": 0.32, "quality_score": 0.80, "latency_s": 80, "status": "live"},
+    "RUNWAY":        {"label": "Runway Gen-3 (retired)", "category": "historical", "description": "Retired catalog tombstone — no executable dispatch branch", "modality": "video", "best_for": [], "per_shot_cost": 0.32, "quality_score": 0.0, "latency_s": 0, "status": "retired"},
 
     # --- LIPSYNC / TALKING-HEAD ---
     "MUSETALK":      {"label": "MuseTalk v1.5",        "category": "lipsync",   "description": "Mouth-only overlay on existing video — preserves camera work. Cheap.", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.02, "quality_score": 0.78, "latency_s": 30, "status": "live"},
@@ -130,10 +130,11 @@ _LEGACY_API_REGISTRY_SEED = {
     "CCSR":          {"label": "CCSR (image)",         "category": "upscale",   "description": "Real-world photo restoration — environments, lighter than SUPIR", "modality": "upscale", "best_for": ["upscale_image"], "per_shot_cost": 0.015, "quality_score": 0.88, "latency_s": 25, "status": "planned"},
 }
 
-# Compatibility projection: retain the literal historical rows above, but do
-# not let their stale ``status`` strings claim that retired or broken engines
-# are live.  ``project_legacy_registry`` deep-copies every row, so consumers of
-# this compatibility view cannot mutate the historical ordering/data seed.
+# Compatibility projection: retain the compatibility rows above, including
+# retired tombstones needed to round-trip older projects, without letting any
+# stale lifecycle value claim that a retired or broken engine is live.
+# ``project_legacy_registry`` deep-copies every row, so consumers of this view
+# cannot mutate the ordered seed.
 API_REGISTRY = project_legacy_registry(_LEGACY_API_REGISTRY_SEED)
 
 
@@ -226,7 +227,7 @@ _VIDEO_AUTHORING_PURPOSES = frozenset(
 # provider owns which API.
 BILLING_PROVIDERS = {
     "FAL_AI": [
-        "KLING_3_0", "SORA_2", "VEO", "RUNWAY", "SEEDANCE",
+        "KLING_3_0", "SORA_2", "VEO", "SEEDANCE",
         "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
         "SYNC_SO_V3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",
@@ -1105,15 +1106,11 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
             json_mode=True,
         )
 
-        print(
-            f"   [Ensemble] Models used: {result.models_used} | "
-            f"Scores: {result.scores} | Winner: {result.models_used[result.winner_index]}"
-        )
-        print(f"   [Ensemble] Judge reasoning: {result.reasoning[:200]}")
-
-        winning_raw = result.winner_content
-        if winning_raw is None:
-            print("   [Ensemble] Winning candidate was None — falling back to decompose_scene()")
+        if result.winner_index is None or result.winner_content is None:
+            print(
+                "   [Ensemble] No defensible winner "
+                f"({result.judgment_status}) — falling back to decompose_scene()"
+            )
             return decompose_scene(
                 scene,
                 characters,
@@ -1124,6 +1121,14 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
                 runtime_snapshot=runtime_snapshot,
                 on_date=on_date,
             )
+
+        print(
+            f"   [Ensemble] Models used: {result.models_used} | "
+            f"Scores: {result.scores} | Winner: {result.models_used[result.winner_index]}"
+        )
+        print(f"   [Ensemble] Judge reasoning: {result.reasoning[:200]}")
+
+        winning_raw = result.winner_content
 
         # ------------------------------------------------------------------
         # 8. Parse + validate via the shared executable contract

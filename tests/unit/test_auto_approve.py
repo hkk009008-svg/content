@@ -295,10 +295,8 @@ class TestConfigFromProject:
         config = AutoApproveConfig.from_project(project)
         defaults = AutoApproveConfig()
         assert config.enabled == defaults.enabled
-        # image_min_composite defaults to the production identity-fallback bar
-        # (0.60), not the class default 0.97 (the retired max-tier composite bar
-        # — see TestFromProjectTierAwareCompositeDefault).
-        assert config.image_min_composite == 0.60
+        assert defaults.image_min_composite == 0.60
+        assert config.image_min_composite == defaults.image_min_composite
         assert config.motion_min_identity == defaults.motion_min_identity
         assert config.final_min_lipsync == defaults.final_min_lipsync
 
@@ -568,6 +566,167 @@ class TestV11Fixes:
             {"id": "t2", "metadata": {"other_score": 0.5}},  # unrelated metric
         ]
         assert _best_take_lipsync(takes) == pytest.approx(1.0)
+
+    def test_unknown_lipsync_cannot_be_laundered_by_embedded_audio_flag(self):
+        """UNKNOWN + audio-in-clip is still unverified and vetoes final approval."""
+        take = {
+            "id": "t_unknown",
+            "metadata": {
+                "has_dialogue": True,
+                "dialogue_audio_in_clip": True,
+                "lipsync_score": None,
+                "lipsync_validation_state": "UNKNOWN",
+            },
+        }
+
+        assert _best_take_lipsync([take]) == pytest.approx(0.0)
+        decision = check_gate(
+            "final",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[take],
+            config=AutoApproveConfig(
+                final_min_lipsync=0.8,
+                final_require_human_if_upstream_auto=False,
+            ),
+        )
+        assert decision.auto_approved is False
+        assert "final_lipsync_below_threshold" in decision.rule_names
+
+    def test_final_picker_prefers_measured_lipsync_over_unknown_high_composite(self):
+        measured = {
+            "id": "measured",
+            "metadata": {
+                "has_dialogue": True,
+                "composite": 0.70,
+                "lipsync_score": 0.90,
+                "lipsync_validation_state": "PASS",
+            },
+        }
+        unknown = {
+            "id": "unknown",
+            "metadata": {
+                "has_dialogue": True,
+                "dialogue_audio_in_clip": True,
+                "composite": 0.99,
+            },
+            # Legacy correction variants stored UNKNOWN only here.
+            "cascade_metadata": {
+                "score": None,
+                "validation_state": "UNKNOWN",
+                "fallback": False,
+            },
+        }
+
+        selected = pick_best_take_for_final([measured, unknown])
+        assert selected["id"] == "measured"
+
+    def test_final_threshold_evaluates_selected_candidate_not_pool_max(self):
+        good_lipsync_lower_composite = {
+            "id": "good_sync",
+            "metadata": {
+                "has_dialogue": True,
+                "composite": 0.70,
+                "lipsync_score": 0.95,
+            },
+        }
+        selected_bad_lipsync = {
+            "id": "bad_sync",
+            "metadata": {
+                "has_dialogue": True,
+                "composite": 0.99,
+                "lipsync_score": 0.40,
+            },
+        }
+        takes = [good_lipsync_lower_composite, selected_bad_lipsync]
+        assert pick_best_take_for_final(takes)["id"] == "bad_sync"
+
+        decision = check_gate(
+            "final",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=takes,
+            config=AutoApproveConfig(
+                final_min_lipsync=0.8,
+                final_require_human_if_upstream_auto=False,
+            ),
+        )
+        assert decision.auto_approved is False
+        assert "final_lipsync_below_threshold" in decision.rule_names
+
+    def test_explicit_unknown_vetoes_when_numeric_threshold_is_disabled(self):
+        unknown = {
+            "id": "unknown",
+            "metadata": {
+                "has_dialogue": True,
+                "dialogue_audio_in_clip": True,
+                "lipsync_score": None,
+                "lipsync_validation_state": "UNKNOWN",
+            },
+        }
+
+        decision = check_gate(
+            "final",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[unknown],
+            config=AutoApproveConfig(
+                final_min_lipsync=0.0,
+                final_require_human_if_upstream_auto=False,
+            ),
+        )
+        assert decision.auto_approved is False
+        assert decision.rule_names == ["final_lipsync_unverified"]
+
+    def test_malformed_lipsync_state_vetoes_when_numeric_threshold_is_disabled(self):
+        malformed = {
+            "id": "malformed",
+            "metadata": {
+                "has_dialogue": True,
+                "lipsync_score": 0.9,
+                "lipsync_validation_state": "  bogus  ",
+            },
+        }
+
+        decision = check_gate(
+            "final",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[malformed],
+            config=AutoApproveConfig(
+                final_min_lipsync=0.0,
+                final_require_human_if_upstream_auto=False,
+            ),
+        )
+
+        assert decision.auto_approved is False
+        assert decision.rule_names == ["final_lipsync_unverified"]
+
+    def test_legacy_storyboard_dialogue_without_take_metadata_is_unverified(self):
+        """Persisted pre-fix storyboard takes cannot clear a resumed final gate."""
+        shot = _make_shot()
+        shot["optimizer_cache"] = {
+            "spec": {"purpose": "dialogue_close_up"},
+        }
+        legacy_take = {
+            "id": "legacy_storyboard",
+            "metadata": {},
+            "cascade_metadata": {"engine": "KLING_NATIVE"},
+        }
+
+        decision = check_gate(
+            "final",
+            shot_state=shot,
+            project=_make_project(),
+            takes=[legacy_take],
+            config=AutoApproveConfig(
+                final_min_lipsync=0.0,
+                final_require_human_if_upstream_auto=False,
+            ),
+        )
+
+        assert decision.auto_approved is False
+        assert decision.rule_names == ["final_lipsync_unverified"]
 
     def test_pick_best_take_by_composite_picks_highest_score(self):
         """Image gate: helper should pick the take with max composite, not last."""
@@ -1249,15 +1408,23 @@ class TestRecordDirectorReview:
         )
         assert decision.auto_approved is True
 
-    def test_missing_decision_defaults_to_approved(self):
-        # ChiefDirector parse-fallback can return {} / partial dicts; mirror
-        # validate_shot_prompts' own .get("decision", "APPROVED") default.
+    def test_missing_decision_defaults_to_review_required(self):
+        # A partial/unavailable review must not clear the PLAN gate.
         from cinema.auto_approve import record_director_review_on_shots
 
         shots = [{"id": "a"}]
         record_director_review_on_shots(shots, {})
-        assert shots[0]["director_review"]["decision"] == "APPROVED"
+        assert shots[0]["director_review"]["decision"] == "REVIEW_REQUIRED"
         assert shots[0]["director_review"]["violations"] == []
+        decision = check_gate(
+            "plan",
+            shot_state=shots[0],
+            project={},
+            takes=[],
+            config=AutoApproveConfig(),
+        )
+        assert decision.auto_approved is False
+        assert "plan_decision_not_approved" in decision.rule_names
 
     def test_recorded_approved_review_lets_plan_gate_auto_approve(self):
         # End-to-end contract: a shot with NO director_review cannot pass the
@@ -1290,7 +1457,7 @@ class TestBestTakeCompositeIdentityFallback:
     ONLY in max-tier, quality_max.py). With no fallback, _best_take_composite
     returns 0.0 for every production take, so image_min_composite > 0 vetoes every
     keyframe → headless GateNotSatisfiedError regardless of actual quality (the
-    default image_min_composite=0.97 makes this fire on every unattended run).
+    former image_min_composite=0.97 default made this fire on every unattended run).
     It must fall back to identity_score, the score production DOES populate."""
 
     def test_falls_back_to_identity_when_composite_absent(self):
@@ -1309,14 +1476,13 @@ class TestBestTakeCompositeIdentityFallback:
         assert _best_take_composite(takes) == 0.0
 
 
-class TestFromProjectTierAwareCompositeDefault:
-    """The image_min_composite DEFAULT is production-only now (max tier retired,
+class TestProductionCompositeDefault:
+    """The image_min_composite default is production-only now (max tier retired,
     WS1 Task 2 — workflow_selector.MAX_QUALITY_TEMPLATES/get_max_quality_params
     removed). Production-tier takes write only identity_score (composite absent →
-    _best_take_composite falls back to identity ~0.6-0.8), so the flat 0.97 class
-    default would veto every production keyframe; the default is always 0.60
-    regardless of the project's quality_tier setting (that setting no longer
-    changes this default — it is dormant state, see cinema/context.py).
+    _best_take_composite falls back to identity ~0.6-0.8), so both direct config
+    construction and project loading use 0.60. The project's quality_tier setting
+    no longer changes this default; it is dormant state (see cinema/context.py).
     Explicit project overrides always win over the default."""
 
     def test_production_tier_default_is_identity_bar(self):

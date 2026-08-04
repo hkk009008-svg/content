@@ -13,6 +13,26 @@ import pytest
 from audio.foley import _build_foley_prompt, generate_stability_foley
 
 
+@pytest.fixture(autouse=True)
+def _offline_audio_publication(monkeypatch):
+    """Keep provider-contract tests offline while retaining atomic writes.
+
+    Artifact decoding is covered separately by the media-validation suite; the
+    fake ID3 payloads in this file intentionally exercise only the provider
+    request and publication contract.
+    """
+    import audio.foley as foley
+    from performance._net import atomic_publish_bytes as real_publish
+
+    def publish(payload, destination, **kwargs):
+        kwargs["content_type"] = "audio/mpeg"
+        kwargs["content_validator"] = lambda _path: None
+        return real_publish(payload, destination, **kwargs)
+
+    monkeypatch.setattr(foley, "atomic_publish_bytes", publish)
+    monkeypatch.setattr(foley, "validate_audio_artifact", lambda _path: None)
+
+
 # ---------------------------------------------------------------------------
 # _build_foley_prompt
 # ---------------------------------------------------------------------------

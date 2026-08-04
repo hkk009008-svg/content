@@ -26,7 +26,7 @@ import logging
 import os
 import subprocess
 import urllib.request  # retained for legacy code paths; new downloads use performance._net.safe_download
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 from config.settings import settings as ENV_SETTINGS
@@ -34,6 +34,10 @@ from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S, FAL_TIMEOUT_VIDEO_S
 from cinema.context import _finite_or
 
 logger = logging.getLogger(__name__)
+
+LIPSYNC_QUALITY_PASS = "PASS"
+LIPSYNC_QUALITY_FAIL = "FAIL"
+LIPSYNC_QUALITY_UNKNOWN = "UNKNOWN"
 
 try:
     import fal_client
@@ -54,6 +58,99 @@ class PrerequisiteResult:
     blockers: List[str]
 
 
+def classify_lipsync_quality(score: Optional[float], threshold: float) -> str:
+    """Classify a lip-sync score without converting missing evidence to PASS."""
+    numeric_score = _finite_or(score, None)
+    if numeric_score is None:
+        return LIPSYNC_QUALITY_UNKNOWN
+    numeric_threshold = _finite_or(threshold, 0.65)
+    return (
+        LIPSYNC_QUALITY_PASS
+        if numeric_score >= numeric_threshold
+        else LIPSYNC_QUALITY_FAIL
+    )
+
+
+def _frontal_face_is_large_enough(frame, cv2_module) -> Optional[bool]:
+    """Return whether *frame* contains a usable frontal face.
+
+    ``None`` means the detector itself could not be initialized.  A face must
+    occupy at least one percent of the frame so a tiny/background detection is
+    not treated as satisfying the overlay contract.
+    """
+
+    cascade_path = os.path.join(
+        getattr(cv2_module.data, "haarcascades", ""),
+        "haarcascade_frontalface_default.xml",
+    )
+    detector = cv2_module.CascadeClassifier(cascade_path)
+    if detector.empty():
+        return None
+    gray = cv2_module.cvtColor(frame, cv2_module.COLOR_BGR2GRAY)
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(40, 40),
+    )
+    height, width = gray.shape[:2]
+    frame_area = max(1, int(width) * int(height))
+    return any((int(w) * int(h)) / frame_area >= 0.01 for _x, _y, w, h in faces)
+
+
+def _detect_visible_face_in_video(video_path: str) -> Optional[bool]:
+    """Sample a video for a sufficiently large frontal face.
+
+    Returns ``True``/``False`` when measured and ``None`` when OpenCV or the
+    media decoder is unavailable.  Callers deliberately fail closed on None.
+    """
+
+    try:
+        import cv2
+
+        capture = cv2.VideoCapture(video_path)
+        if not capture.isOpened():
+            return None
+        try:
+            frame_count = max(1, int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 1))
+            positions = sorted(
+                {0, frame_count // 4, frame_count // 2, (3 * frame_count) // 4, frame_count - 1}
+            )
+            measured = False
+            for position in positions:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, position)
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    continue
+                result = _frontal_face_is_large_enough(frame, cv2)
+                if result is None:
+                    return None
+                measured = True
+                if result:
+                    return True
+            return False if measured else None
+        finally:
+            capture.release()
+    except Exception:
+        logger.info("overlay face-visibility preflight unavailable", exc_info=True)
+        return None
+
+
+def _detect_visible_face_in_image(image_path: str) -> Optional[bool]:
+    """Measure whether a source portrait has a usable frontal face."""
+
+    try:
+        import cv2
+
+        frame = cv2.imread(image_path)
+        if frame is None:
+            return None
+        return _frontal_face_is_large_enough(frame, cv2)
+    except Exception:
+        logger.info("generation face-visibility preflight unavailable", exc_info=True)
+        return None
+
+
 def check_overlay_prerequisites(video_path: str, audio_path: str) -> PrerequisiteResult:
     """
     Check if OVERLAY mode (MuseTalk) can work with the given inputs.
@@ -66,6 +163,8 @@ def check_overlay_prerequisites(video_path: str, audio_path: str) -> Prerequisit
     """
     warnings = []
     blockers = []
+    vid_duration: Optional[float] = None
+    audio_duration: Optional[float] = None
 
     # File existence
     if not video_path or not os.path.exists(video_path):
@@ -96,7 +195,7 @@ def check_overlay_prerequisites(video_path: str, audio_path: str) -> Prerequisit
             warnings.append(f"WARNING: Video resolution low ({vid_width}px) — face region may be too small for quality lip sync")
 
     except (subprocess.SubprocessError, ValueError, OSError, KeyError):
-        warnings.append("WARNING: Could not probe video — proceeding anyway")
+        blockers.append("BLOCKER: Could not verify video duration/resolution")
 
     # Check audio duration
     try:
@@ -113,7 +212,23 @@ def check_overlay_prerequisites(video_path: str, audio_path: str) -> Prerequisit
             warnings.append(f"WARNING: Audio very long ({audio_duration:.0f}s) — may cause sync drift")
 
     except (subprocess.SubprocessError, ValueError, OSError, KeyError):
-        warnings.append("WARNING: Could not probe audio — proceeding anyway")
+        blockers.append("BLOCKER: Could not verify audio duration")
+
+    if vid_duration and audio_duration:
+        duration_ratio = max(vid_duration, audio_duration) / max(
+            min(vid_duration, audio_duration), 0.001
+        )
+        if duration_ratio > 2.0:
+            blockers.append(
+                "BLOCKER: Audio/video duration ratio exceeds 2x "
+                f"({audio_duration:.2f}s audio vs {vid_duration:.2f}s video)"
+            )
+
+    face_visible = _detect_visible_face_in_video(video_path)
+    if face_visible is False:
+        blockers.append("BLOCKER: No sufficiently large frontal face detected in video")
+    elif face_visible is None:
+        blockers.append("BLOCKER: Could not verify face visibility in video")
 
     passed = len(blockers) == 0
     return PrerequisiteResult(passed=passed, mode="overlay", warnings=warnings, blockers=blockers)
@@ -146,11 +261,17 @@ def check_generation_prerequisites(image_path: str, audio_path: str) -> Prerequi
         img = Image.open(image_path)
         w, h = img.size
         if w < 512 or h < 512:
-            warnings.append(f"WARNING: Image small ({w}x{h}) — Omnihuman works best at 512x512+")
+            blockers.append(f"BLOCKER: Image too small ({w}x{h}; 512x512 minimum)")
         if w / h > 2.0 or h / w > 2.0:
             warnings.append(f"WARNING: Image aspect ratio extreme ({w}x{h}) — portrait framing recommended")
     except (ImportError, OSError, ValueError):
-        warnings.append("WARNING: Could not check image dimensions")
+        blockers.append("BLOCKER: Could not verify image dimensions")
+
+    face_visible = _detect_visible_face_in_image(image_path)
+    if face_visible is False:
+        blockers.append("BLOCKER: No sufficiently large frontal face detected in image")
+    elif face_visible is None:
+        blockers.append("BLOCKER: Could not verify face visibility in image")
 
     # Check audio duration
     try:
@@ -167,7 +288,7 @@ def check_generation_prerequisites(image_path: str, audio_path: str) -> Prerequi
             warnings.append(f"WARNING: Audio > 30s — will generate at 720p only (not 1080p)")
 
     except (subprocess.SubprocessError, ValueError, OSError, KeyError):
-        warnings.append("WARNING: Could not probe audio duration")
+        blockers.append("BLOCKER: Could not verify audio duration")
 
     passed = len(blockers) == 0
     return PrerequisiteResult(passed=passed, mode="generation", warnings=warnings, blockers=blockers)
@@ -189,20 +310,35 @@ def _return_best_of_failed(
     shared implementation (de-duplicated so the copy-failure contract can't
     regress at only one site — Rule #13).
 
-    Sorts ``candidates`` (``(score, stash_path, engine_name)``) descending by
-    score, copies the best to ``output_path``, cleans up every stash, and writes
-    fallback cascade metadata.
+    Sorts ``candidates`` (``(score_or_none, stash_path, engine_name)``) with
+    measured scores ahead of UNKNOWN evidence, copies the best to
+    ``output_path``, cleans up every stash, and writes fallback cascade
+    metadata. UNKNOWN is retained as ``None`` and is never fabricated into a
+    passing numeric score.
 
     Returns ``output_path`` on a successful copy, else ``None`` — a failed copy
     must NOT hand the caller a path that was never written. ``None`` is the
     router's "no usable output, keep the original video" signal.
     """
     import shutil
-    candidates.sort(key=lambda c: c[0], reverse=True)
+    candidates.sort(
+        key=lambda c: (
+            c[0] is not None,
+            c[0] if c[0] is not None else -1.0,
+        ),
+        reverse=True,
+    )
     best_score, best_path, best_name = candidates[0]
+    validation_state = classify_lipsync_quality(best_score, threshold)
+    serialized_score = None if best_score is None else round(best_score, 4)
     logger.warning(
         f"no {kind} engine cleared sync threshold; returning best-of-failed",
-        extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": threshold},
+        extra={
+            "engine": best_name,
+            "sync_score": serialized_score,
+            "validation_state": validation_state,
+            "threshold": threshold,
+        },
     )
     copied = False
     try:
@@ -222,7 +358,8 @@ def _return_best_of_failed(
     if cascade_out is not None:
         cascade_out["cascade_metadata"] = {
             "engine": best_name,
-            "score": round(best_score, 4),
+            "score": serialized_score,
+            "validation_state": validation_state,
             "threshold": threshold,
             "fallback": True,
             "attempts": list(attempts),
@@ -250,7 +387,8 @@ def lipsync_overlay(
 
     _cascade_out: optional mutable dict — if provided, caller receives
         cascade_metadata written into it on return (both success and fallback).
-        Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
+        Key: "cascade_metadata" →
+            {engine, score?, validation_state?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         logger.warning("FAL not available — lipsync overlay skipped", extra={"engine": "overlay"})
@@ -283,21 +421,31 @@ def lipsync_overlay(
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
                     "engine": engine_name,
+                    "score": None,
+                    "validation_state": LIPSYNC_QUALITY_UNKNOWN,
                     "fallback": False,
                     "attempts": list(overlay_attempts),
                 }
             return True
         score = validate_lipsync_quality(output_path, audio_path)
+        validation_state = classify_lipsync_quality(score, overlay_threshold)
+        serialized_score = None if score is None else round(score, 4)
         logger.info(
             "overlay sync gate scored",
-            extra={"engine": f"overlay/{engine_name}", "sync_score": round(score, 4), "threshold": overlay_threshold},
+            extra={
+                "engine": f"overlay/{engine_name}",
+                "sync_score": serialized_score,
+                "validation_state": validation_state,
+                "threshold": overlay_threshold,
+            },
         )
-        if score >= overlay_threshold:
+        if validation_state == LIPSYNC_QUALITY_PASS:
             # Gate passed — write cascade_metadata for the winning engine
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
                     "engine": engine_name,
-                    "score": round(score, 4),
+                    "score": serialized_score,
+                    "validation_state": validation_state,
                     "threshold": overlay_threshold,
                     "fallback": False,
                     "attempts": list(overlay_attempts),
@@ -330,7 +478,7 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("sync.so v3 download failed", extra={"engine": "syncSoV3"})
             elif _overlay_gate_or_stash("syncSoV3"):
                 logger.info("overlay success", extra={"engine": "syncSoV3", "output_path": output_path})
@@ -354,7 +502,7 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("MuseTalk download failed", extra={"engine": "MuseTalk"})
             elif _overlay_gate_or_stash("MuseTalk"):
                 logger.info("overlay success", extra={"engine": "MuseTalk", "output_path": output_path})
@@ -376,7 +524,7 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("LatentSync download failed", extra={"engine": "LatentSync"})
             elif _overlay_gate_or_stash("LatentSync"):
                 logger.info("overlay success", extra={"engine": "LatentSync", "output_path": output_path})
@@ -398,7 +546,7 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Sync v2 download failed", extra={"engine": "SyncV2"})
             elif _overlay_gate_or_stash("SyncV2"):
                 logger.info("overlay success", extra={"engine": "SyncV2", "output_path": output_path})
@@ -441,9 +589,8 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         import json as _json
     except ImportError as exc:
         # opencv / numpy absent — the scorer cannot run in this container at all.
-        # Fail open (return None) but make it LOUD: silently degrading here drops the
-        # pipeline back to the duration heuristic / neutral-1.0 fallback, re-creating
-        # the "everything passes -> random best-of" bug this scorer exists to fix (D1).
+        # Return UNKNOWN (None) but make it LOUD: silently degrading here removes
+        # the measurable evidence the fail-closed quality gate requires.
         # NB: this guards ONLY the import statements, so a *downstream* ImportError from
         # a partially-broken install falls through to the generic handler (with a
         # traceback) instead of being mislabelled "dependency unavailable".
@@ -513,7 +660,7 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
             # crash) so the loud signal stays meaningful instead of spamming on
             # legitimate cinematography.
             logger.info(
-                "mouth-energy scorer: too many occluded frames — fail-open",
+                "mouth-energy scorer: too many occluded frames — sync unscorable",
                 extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3)},
             )
             return None
@@ -558,8 +705,8 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
                     continue
         except FileNotFoundError:
             # ffprobe binary absent — structural degradation (affects EVERY clip),
-            # the audio-energy mirror of the cv2-absent path: a silent None here drops
-            # the gate to the duration heuristic / neutral-1.0 (D1 bug class). LOUD.
+            # the audio-energy mirror of the cv2-absent path: a silent None here
+            # removes the measurable evidence the quality gate requires. LOUD.
             logger.warning(
                 "mouth-energy scorer: ffprobe not found — audio-energy unavailable; "
                 "lip-sync quality gate DEGRADED to fallback (install ffmpeg)",
@@ -605,9 +752,8 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
 
     except Exception:
         # Unexpected runtime failure (incl. a downstream ImportError from a partial
-        # install) — fail open (never block the pipeline), but do NOT swallow it
-        # silently; an invisible scorer crash is the same silent-gate-degradation
-        # hole (D1 bug class).
+        # install) — preserve UNKNOWN, but do NOT swallow it silently; an invisible
+        # scorer crash is the same silent-gate-degradation hole (D1 bug class).
         logger.warning(
             "mouth-energy scorer: unexpected failure — fail-open (None)",
             exc_info=True,
@@ -621,17 +767,16 @@ def validate_lipsync_quality(
     audio_path: Optional[str] = None,
     *,
     _generation: bool = False,
-) -> float:
+) -> Optional[float]:
     """Score audio-visual sync confidence in [0, 1].
 
     Provider chain (best-effort, all optional):
       1. syncnet_python (open-source SyncNet) — true phoneme-level scoring.
       1.5. mouth-energy Pearson scorer (cv2 + ffprobe astats) — generation
            path only (_generation=True). Skipped on overlay path.
-      2. Duration-match heuristic — catches GROSS sync failures (mismatched
-         clip lengths) but not subtle drift. Better than nothing.
-      3. Neutral 1.0 fallback so the gate is a no-op when no scorer is
-         installed. The pipeline never blocks on a missing dependency.
+      2. Duration prerequisite — catches GROSS failures from mismatched clip
+         lengths. Compatible durations are not positive lip-sync evidence.
+      3. Explicit UNKNOWN (``None``) when no provider can produce evidence.
 
     Args:
         video_path: Path to the video to score.
@@ -640,7 +785,8 @@ def validate_lipsync_quality(
             (mouth-energy scorer). Must NOT be set on the overlay path.
 
     Returns:
-        float in [0, 1]. Higher = better sync. 1.0 = "perfect or unmeasurable".
+        A finite float in [0, 1] when evidence was measurable; otherwise
+        ``None`` (UNKNOWN). UNKNOWN must not satisfy a quality threshold.
     """
     if not video_path or not os.path.exists(video_path):
         return 0.0
@@ -682,7 +828,7 @@ def validate_lipsync_quality(
         except Exception:
             pass
 
-    # Provider 2: duration-match heuristic
+    # Provider 2: duration prerequisite (negative evidence only)
     try:
         import subprocess
         import json as _json
@@ -697,34 +843,66 @@ def validate_lipsync_quality(
         vd = _dur(video_path)
         if vd <= 0:
             logger.warning(
-                "lip-sync gate: cannot probe video duration — sync UNVALIDATED, "
-                "returning neutral 1.0 (gate passed without measuring)",
-                extra={"provider": "duration_heuristic", "degraded": True},
+                "lip-sync gate: cannot probe video duration — sync UNKNOWN",
+                extra={"provider": "duration_prerequisite", "degraded": True},
             )
-            return 1.0  # can't probe — neutral
-        ad = _dur(audio_path) if audio_path and os.path.exists(audio_path) else vd
+            return None
+        if not audio_path or not os.path.exists(audio_path):
+            logger.warning(
+                "lip-sync gate: reference audio unavailable — sync UNKNOWN",
+                extra={"provider": "duration_prerequisite", "degraded": True},
+            )
+            return None
+        ad = _dur(audio_path)
+        if ad <= 0:
+            logger.warning(
+                "lip-sync gate: cannot probe reference audio duration — sync UNKNOWN",
+                extra={"provider": "duration_prerequisite", "degraded": True},
+            )
+            return None
         diff_ratio = abs(vd - ad) / max(vd, ad, 0.1)
-        # Each 1% drift costs 5pts of sync confidence; 20% drift → 0
-        return max(0.0, 1.0 - diff_ratio * 5.0)
+        # Duration can disprove a usable result, but it cannot establish that mouth
+        # motion tracks phonemes. A >=20% mismatch is explicit negative prerequisite
+        # evidence; closer/equal durations remain UNKNOWN until SyncNet or the
+        # mouth-energy scorer measures actual audio-visual correspondence.
+        if diff_ratio >= 0.20:
+            logger.warning(
+                "lip-sync gate: audio/video duration mismatch — sync FAIL",
+                extra={
+                    "provider": "duration_prerequisite",
+                    "duration_diff_ratio": round(diff_ratio, 4),
+                },
+            )
+            return 0.0
+        logger.warning(
+            "lip-sync gate: durations are compatible but do not measure mouth/audio "
+            "correspondence — sync UNKNOWN",
+            extra={
+                "provider": "duration_prerequisite",
+                "duration_diff_ratio": round(diff_ratio, 4),
+                "degraded": True,
+            },
+        )
+        return None
     except Exception:
-        # ffprobe unavailable or unexpected output — per-shot diagnostic; the gate
-        # no-op consequence is surfaced as a WARNING at the neutral return below.
+        # ffprobe unavailable or unexpected output — per-shot diagnostic; the
+        # UNKNOWN consequence is surfaced as a WARNING below.
         logger.info(
-            "lip-sync gate: duration heuristic unavailable — falling through to neutral",
+            "lip-sync gate: duration prerequisite unavailable — falling through to UNKNOWN",
             exc_info=True,
-            extra={"provider": "duration_heuristic"},
+            extra={"provider": "duration_prerequisite"},
         )
 
-    # No scorer produced a score — neutral 1.0 means the sync gate did NOT validate
-    # anything. Surface it: a silent "1.0 = perfect" here passes every shot and
-    # re-creates the D1 bug class at the gate level (sweep finding lip_sync.py:668).
+    # No scorer produced a score. Preserve that truth as UNKNOWN instead of
+    # fabricating a perfect score that silently clears every threshold.
     logger.warning(
         "lip-sync quality gate: no scorer available (syncnet / mouth-energy / duration "
-        "heuristic all unavailable) — returning neutral 1.0; the sync gate is a NO-OP for "
-        "this shot. Install syncnet_python or opencv + ffmpeg to enable real validation.",
+        "prerequisite all unavailable) — sync UNKNOWN; manual review or measurable "
+        "evidence is required. Install syncnet_python or opencv + ffmpeg to enable "
+        "real validation.",
         extra={"provider": "lipsync_gate", "degraded": True},
     )
-    return 1.0
+    return None
 
 
 def _sync_gate_settings(settings: Optional[dict] = None) -> tuple:
@@ -766,7 +944,8 @@ def lipsync_generation(
 
     _cascade_out: optional mutable dict — if provided, caller receives
         cascade_metadata written into it on return (both success and fallback).
-        Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
+        Key: "cascade_metadata" →
+            {engine, score?, validation_state?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         logger.warning("FAL not available — lipsync generation skipped", extra={"engine": "generation"})
@@ -823,20 +1002,30 @@ def lipsync_generation(
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
                     "engine": engine_name,
+                    "score": None,
+                    "validation_state": LIPSYNC_QUALITY_UNKNOWN,
                     "fallback": False,
                     "attempts": list(gen_attempts),
                 }
             return True
         score = validate_lipsync_quality(output_path, audio_path, _generation=True)
+        validation_state = classify_lipsync_quality(score, gate_threshold)
+        serialized_score = None if score is None else round(score, 4)
         logger.info(
             "generation sync gate scored",
-            extra={"engine": engine_name, "sync_score": round(score, 4), "threshold": gate_threshold},
+            extra={
+                "engine": engine_name,
+                "sync_score": serialized_score,
+                "validation_state": validation_state,
+                "threshold": gate_threshold,
+            },
         )
-        if score >= gate_threshold:
+        if validation_state == LIPSYNC_QUALITY_PASS:
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
                     "engine": engine_name,
-                    "score": round(score, 4),
+                    "score": serialized_score,
+                    "validation_state": validation_state,
                     "threshold": gate_threshold,
                     "fallback": False,
                     "attempts": list(gen_attempts),
@@ -874,7 +1063,7 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         duration = result.get("duration", 0)
         if video_url:
-            if safe_download(video_url, output_path) is None:
+            if safe_download(video_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Omnihuman download failed", extra={"engine": "omnihuman"})
             elif _gate_or_stash("Omnihuman"):
                 logger.info(
@@ -900,7 +1089,7 @@ def lipsync_generation(
         )
         video_url = result.get("video", {}).get("url")
         if video_url:
-            if safe_download(video_url, output_path) is None:
+            if safe_download(video_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Aurora download failed", extra={"engine": "aurora"})
             elif _gate_or_stash("Aurora"):
                 logger.info("generation success", extra={"engine": "aurora", "output_path": output_path})
@@ -1146,7 +1335,7 @@ def generate_rife_interpolation(
             # failure (return None) so the caller keeps the original audio-bearing
             # clip rather than a silent one — audio integrity over smoothing.
             rife_tmp = output_path + ".noaudio.mp4"
-            if safe_download(out_url, rife_tmp) is None:
+            if safe_download(out_url, rife_tmp, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("RIFE download failed", extra={"engine": "rife"})
                 return None
             try:
@@ -1220,7 +1409,7 @@ def upscale_video_seedvr2(
 
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("SeedVR2 download failed", extra={"engine": "seedvr2"})
                 return None
             # SeedVR2 (like RIFE) returns VIDEO-ONLY output. Restore the source

@@ -424,6 +424,10 @@ def _service(name: str) -> RuntimeRequirement:
 
 
 _FAL_RUNTIME = ((_credential("fal_key"), _module("fal_client")),)
+_LTX_RUNTIME = (
+    (_credential("ltx_api_key"), _module("requests")),
+    *_FAL_RUNTIME,
+)
 _RUNWAY_RUNTIME = (
     (_credential("runwayml_api_secret"), _module("runwayml")),
 )
@@ -432,7 +436,7 @@ _ELEVENLABS_RUNTIME = (
 )
 
 _SORA_PARAMETERS = (
-    ParameterConstraint("duration", allowed_values=(4, 8, 12, 16, 20)),
+    ParameterConstraint("duration", allowed_values=(4, 8, 12)),
     ParameterConstraint(
         "resolution",
         allowed_values=("720p",),
@@ -442,7 +446,12 @@ _SORA_PARAMETERS = (
     ParameterConstraint(
         "input_references",
         max_items=1,
-        note="At most one still-or-video input reference.",
+        note="At most one still-image input reference; video input is unsupported.",
+    ),
+    ParameterConstraint(
+        "driving_video",
+        allowed_values=(False,),
+        note="The OpenAI Videos API input_reference contract is image-only.",
     ),
 )
 
@@ -645,7 +654,6 @@ _CATALOG_ROWS = (
         runtime_options=(
             (
                 _credential("google_cloud_project"),
-                _service("google_adc"),
                 _module("google.genai"),
             ),
             (_credential("google_api_key"), _module("google.genai")),
@@ -707,7 +715,7 @@ _CATALOG_ROWS = (
         Provider.LTX_FAL,
         (False, True, True),
         parameters=_LTX_PARAMETERS,
-        runtime_options=_FAL_RUNTIME,
+        runtime_options=_LTX_RUNTIME,
         source=_source(
             "https://docs.ltx.io/api-documentation/api-reference/"
             "video-generation/image-to-video",
@@ -780,11 +788,10 @@ _CATALOG_ROWS = (
         "Runway (legacy Gen-3)",
         Modality.VIDEO,
         Maturity.STABLE,
-        Lifecycle.DEPRECATED,
-        ProductSupport.LIMITED,
+        Lifecycle.RETIRED,
+        ProductSupport.UNSUPPORTED,
         Provider.RUNWAY,
-        (False, True, True),
-        runtime_options=_RUNWAY_RUNTIME,
+        (False, False, False),
         source=_source(
             "https://docs.dev.runwayml.com/guides/pricing/",
             SourceKind.LIFECYCLE_NOTICE,

@@ -370,8 +370,19 @@ class _ProjectEventBus:
 # see every event, with a bounded replay log for reconnects).
 _progress_queues: dict[str, _ProjectEventBus] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
+# Short-lived destructive/settings mutations reserve a project here so a
+# generation start cannot race the disk write or cache invalidation. Guarded
+# by the same lock as ``_running_pipelines``.
+_project_admin_in_flight: set[str] = set()
+# Direct per-request stage work (motion/keyframe generation, approval,
+# iteration, diagnostics, and assembly) leases the project here for its full
+# call lifetime. This keeps settings/delete from evicting and closing the
+# shared PipelineCore while an endpoint is still using it, and serializes
+# otherwise-duplicative direct paid operations. Guarded by _pipelines_lock.
+_project_stage_in_flight: set[str] = set()
 
-# Guards _running_pipelines and _progress_queues. The construct-window
+# Guards _running_pipelines, _progress_queues, and both project reservation
+# sets. The construct-window
 # sentinel (_PIPELINE_PENDING) lets us reserve a slot atomically while
 # the heavy CinemaPipeline constructor runs WITHOUT holding the lock.
 # Mirrors the _cores_lock / _lora_training_lock pattern (Session 5 fix
@@ -402,12 +413,22 @@ _GATE_STAGES = frozenset({
 # services (ContinuityEngine, ChiefDirector, LLMEnsemble,
 # QualityTracker, CostTracker) per project_id so that per-endpoint
 # CinemaPipeline construction doesn't re-instantiate them on every
-# request. Lifetime: until process restart. Not invalidated on
-# project-settings change on disk -- known limitation; restart the
-# server if you edit settings.json out-of-band.
+# request. Confirmed API settings writes and project deletion evict the idle
+# entry; direct out-of-band project.json edits remain invisible until another
+# supported mutation or a server restart.
 _running_cores: dict[str, PipelineCore] = {}
 _cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
+_PROJECT_CREATE_NAME_MAX_CHARS = 200
+_COST_ESTIMATE_MAX_SHOTS = 120
+_COST_ESTIMATE_MAX_CANDIDATES = 16
+_COST_ESTIMATE_REQUEST_KEYS = frozenset({
+    "shot_count",
+    "has_dialogue",
+    "dialogue_shot_ratio",
+    "quality_tier",
+    "candidate_count",
+})
 _PUBLIC_SHOT_COMPATIBILITY_TYPES = {
     # Observed historical project fields. They are no longer active
     # production writers/readers, so keep them outside the canonical Shot
@@ -515,6 +536,68 @@ def _get_or_build_core(pid: str) -> PipelineCore:
         return core
 
 
+def _evict_cached_project_core(pid: str) -> None:
+    """Drop an idle project's settings-bound services and close its DB.
+
+    Callers hold an administrative reservation for ``pid``. Generation slots
+    and direct-stage leases both exclude that reservation, preventing any core
+    user from overlapping the pop and close.
+    """
+    with _cores_lock:
+        cached_core = _running_cores.pop(pid, None)
+    if cached_core is None:
+        return
+    try:
+        cached_core.cost_tracker.close()
+    except Exception:
+        logger.warning(
+            "Failed to close cached project cost tracker during eviction",
+            extra={"pid": pid},
+            exc_info=True,
+        )
+
+
+def _reserve_project_admin(pid: str) -> bool:
+    """Atomically exclude core users and another admin mutation for ``pid``."""
+    with _pipelines_lock:
+        if (
+            pid in _running_pipelines
+            or pid in _project_admin_in_flight
+            or pid in _project_stage_in_flight
+        ):
+            return False
+        _project_admin_in_flight.add(pid)
+        return True
+
+
+def _release_project_admin(pid: str) -> None:
+    with _pipelines_lock:
+        _project_admin_in_flight.discard(pid)
+
+
+def _reserve_project_stage(pid: str) -> bool:
+    """Acquire one exclusive direct-stage lease for ``pid``.
+
+    A real running pipeline may be reused by a gate operation, but its
+    construction sentinel may not: the object/core pair is not available yet.
+    """
+
+    with _pipelines_lock:
+        if (
+            pid in _project_admin_in_flight
+            or pid in _project_stage_in_flight
+            or _running_pipelines.get(pid) is _PIPELINE_PENDING
+        ):
+            return False
+        _project_stage_in_flight.add(pid)
+        return True
+
+
+def _release_project_stage(pid: str) -> None:
+    with _pipelines_lock:
+        _project_stage_in_flight.discard(pid)
+
+
 def _get_running_pipeline(pid: str):
     """Return the active CinemaPipeline for pid, or None if absent /
     still mid-construction (sentinel). Callers should treat None as
@@ -564,12 +647,15 @@ def _make_progress_cb(pid: str, bus: "_ProjectEventBus | None" = None):
 
 
 def _get_stage_pipeline(pid: str) -> CinemaPipeline:
+    """Resolve the pipeline protected by the caller's direct-stage lease."""
+
     pipeline = _get_running_pipeline(pid)  # returns None during sentinel window
     if pipeline:
         return pipeline
     # Build a per-request CinemaPipeline that shares the cached core --
     # amortizes the heavy service construction across endpoint calls.
-    # Also reached during the _PIPELINE_PENDING window (treat like absent).
+    # _reserve_project_stage rejects the _PIPELINE_PENDING window, so a
+    # production route can only reach this branch while no generation exists.
     return CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
 
 
@@ -599,14 +685,35 @@ def _project_locked_response(exc: ProjectLockError):
 
 
 def _project_busy_response(pid: str):
+    with _pipelines_lock:
+        stage_busy = pid in _project_stage_in_flight
+        admin_busy = pid in _project_admin_in_flight
+    if stage_busy:
+        detail = (
+            f"Project '{pid}' is busy with another direct stage operation. "
+            "Retry shortly."
+        )
+    elif admin_busy:
+        detail = f"Project '{pid}' is being updated. Retry shortly."
+    else:
+        detail = (
+            f"Project '{pid}' is busy with an active generation run. "
+            "Retry shortly."
+        )
     return _project_conflict_response(
         "project_busy",
-        f"Project '{pid}' is busy with an active generation run. Retry shortly.",
+        detail,
     )
 
 
 def _reject_if_project_busy(pid: str):
-    if pid in _running_pipelines:
+    with _pipelines_lock:
+        busy = (
+            pid in _running_pipelines
+            or pid in _project_admin_in_flight
+            or pid in _project_stage_in_flight
+        )
+    if busy:
         return _project_busy_response(pid)
     return None
 
@@ -689,6 +796,10 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
         before the terminal ``COMPLETE`` progress event) so a completed
         project reports only "start", identically to a project that
         never ran.
+      - idle generation registry but a direct-stage/admin reservation is
+        active: running=False; no generation action is currently legal.
+        This matches api_generate's project_busy fence while keeping
+        ``running`` reserved for a real/pending full-pipeline run.
       - pending-start (``_PIPELINE_PENDING`` sentinel present —
         ``CinemaPipeline.__init__`` is constructing but hasn't registered
         the real object yet): running=True; NO action is currently legal
@@ -714,6 +825,14 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
       - paused (real pipeline object, paused): running=True; "cancel"
         and "resume" are legal.
     """
+    if (
+        pid not in _running_pipelines
+        and (
+            pid in _project_admin_in_flight
+            or pid in _project_stage_in_flight
+        )
+    ):
+        return False, []
     if pid not in _running_pipelines:
         actions = ["start"]
         if checkpoint_info(pid).get("resumable"):
@@ -746,6 +865,37 @@ def _project_lock_guard(fn):
             return _project_locked_response(exc)
 
     return wrapper
+
+
+def _project_stage_guard(fn):
+    """Hold a direct-stage lease across one complete endpoint invocation."""
+
+    @wraps(fn)
+    def wrapper(pid, *args, **kwargs):
+        if not _reserve_project_stage(pid):
+            return _project_busy_response(pid)
+        try:
+            return fn(pid, *args, **kwargs)
+        finally:
+            _release_project_stage(pid)
+
+    return wrapper
+
+
+@app.before_request
+def _reject_non_object_json_body():
+    """Make the HTTP JSON boundary object-only for mutating routes.
+
+    Endpoint code may safely use ``.get`` after this guard. Arrays, scalars,
+    JSON null, and malformed JSON receive a deterministic 400 instead of an
+    AttributeError/500 deeper in a route.
+    """
+
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.is_json:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "JSON object required"}), 400
+    return None
 
 
 @app.before_request
@@ -800,14 +950,24 @@ def serve_static(path):
 # dispatch-side tables (SEEDANCE_DURATIONS in phase_c_ffmpeg.py), so a
 # settings-side duration would fork the figure the budget gate trusts — the
 # 38%-under-record failure the 2026-07-11 money-gate review caught.
+_AUTOMATIC_VIDEO_ENGINE_KEYS = (
+    "GEMINI_OMNI",
+    "VEO_NATIVE",
+    "SEEDANCE",
+    "KLING_3_0",
+    "RUNWAY_GEN4",
+    "LTX",
+    "VEO",
+)
+
+# Ordered automatic-cascade participation controls. Deprecated explicit-only
+# adapters (notably KLING_NATIVE and SORA_NATIVE) deliberately stay out of
+# this surface: historical shots can still discover their compatibility rows,
+# but neither a fresh project nor stale ``api_engines`` JSON advertises them
+# as a current product toggle.
 _API_ENGINE_DEFAULTS = {
-    "KLING_3_0": {"enabled": True},
-    "SEEDANCE": {"enabled": True},
-    "KLING_NATIVE": {"enabled": True, "storyboard_mode": False},
-    "SORA_NATIVE": {"enabled": True},
-    "VEO_NATIVE": {"enabled": True},
-    "LTX": {"enabled": True},
-    "RUNWAY_GEN4": {"enabled": True},
+    key: {"enabled": True}
+    for key in _AUTOMATIC_VIDEO_ENGINE_KEYS
 }
 
 
@@ -854,15 +1014,24 @@ def _project_video_engine_rows(
             if isinstance(source, Mapping)
             else True
         )
-        can_configure = key in _API_ENGINE_DEFAULTS or key in api_engines
+        # Configuration is an allowlist, not a reflection of whatever an old
+        # project happened to persist. The latter would turn stale/unknown
+        # compatibility keys back into live UI controls merely by loading the
+        # project.
+        can_configure = key in _API_ENGINE_DEFAULTS
         return enabled, can_configure
 
     typed_entries = [
         CATALOG["AUTO"],
+        *[CATALOG[key] for key in _AUTOMATIC_VIDEO_ENGINE_KEYS],
         *[
             entry
             for key, entry in CATALOG.items()
-            if key != "AUTO" and entry.modality is Modality.VIDEO
+            if (
+                key != "AUTO"
+                and key not in _API_ENGINE_DEFAULTS
+                and entry.modality is Modality.VIDEO
+            )
         ],
     ]
     rows: list[dict] = []
@@ -1017,27 +1186,34 @@ def api_apply_language_defaults(pid):
     """Apply per-language optimized defaults to a project's global_settings.
 
     Body (JSON):
-      { "language": "Korean", "overwrite_existing": false }
+      {
+        "language": "Korean",
+        "overwrite_existing": false,
+        "expected_revision": 0
+      }
 
     When overwrite_existing is False (default), only fields the user hasn't
     customized are touched. The response includes the list of fields that
     actually changed so the UI can show a diff.
     """
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-
-    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
-    # fast on malformed project before lock acquisition.
-    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY on
-    # shape mismatch (race protection requires deterministic raise; NOT gated
-    # by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-caller.md
-    # §"Variant 1".
-    Project.model_validate(project)  # outer boundary validate
-
-    data = request.json or {}
-    language = data.get("language") or project.get("global_settings", {}).get("language", "English")
-    overwrite = bool(data.get("overwrite_existing", False))
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    if "expected_revision" not in data:
+        return jsonify({
+            "error": "expected_revision is required",
+            "code": "revision_required",
+            "retryable": False,
+        }), 400
+    expected_revision = data["expected_revision"]
+    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        return jsonify({
+            "error": "expected_revision must be an integer",
+            "code": "invalid_revision",
+            "retryable": False,
+        }), 400
 
     try:
         from domain.language_defaults import (
@@ -1049,42 +1225,136 @@ def api_apply_language_defaults(pid):
     except Exception as e:
         return jsonify({"error": f"language_defaults unavailable: {e}"}), 500
 
-    changed_fields: list[str] = []
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
+    try:
+        project = load_project(pid)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
 
-    def _mutate(latest):
-        nonlocal changed_fields
-        # P1-3 part 12 (Variant 1 simplified): inner validate for race
-        # protection — Project.model_validate(...) raises ValidationError
-        # UNCONDITIONALLY on shape mismatch (race protection requires
-        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
-        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
-        # caller.md §"Variant 1".
-        Project.model_validate(latest)
-        settings = latest.setdefault("global_settings", {})
-        _, changed = merge_language_defaults_into_settings(settings, language, overwrite_existing=overwrite)
-        changed_fields = changed
-        return MutationResult(True, save=bool(changed))
+        # Validate the read snapshot before deriving the fallback language.
+        # The authoritative revision check still happens inside mutate_project.
+        Project.model_validate(project)
+        language = (
+            data.get("language")
+            or project.get("global_settings", {}).get("language", "English")
+        )
+        overwrite = bool(data.get("overwrite_existing", False))
+        changed_fields: list[str] = []
+        conflict = None
 
-    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
-    recommended_voices = recommended_voices_for_language(language, VOICE_POOL)
-    return jsonify({
-        "language": language,
-        "changed_fields": changed_fields,
-        "applied_defaults": {k: get_language_defaults(language).get(k) for k in changed_fields},
-        "recommended_voices": recommended_voices,
-    })
+        def _mutate(latest):
+            nonlocal changed_fields, conflict
+            Project.model_validate(latest)
+            current_revision = _current_settings_revision(latest)
+            if expected_revision != current_revision:
+                conflict = _settings_revision_conflict_payload(
+                    current_revision, latest.get("global_settings", {})
+                )
+                return MutationResult(None, save=False)
+
+            settings = latest.setdefault("global_settings", {})
+            _, changed = merge_language_defaults_into_settings(
+                settings,
+                language,
+                overwrite_existing=overwrite,
+            )
+            changed_fields = changed
+            if changed:
+                settings[_SETTINGS_REVISION_KEY] = current_revision + 1
+            return MutationResult(True, save=bool(changed))
+
+        mutation_result = mutate_project(
+            pid,
+            _mutate,
+            timeout=HTTP_PROJECT_TIMEOUT,
+        )
+        if conflict is not None:
+            return jsonify(conflict), 409
+        if mutation_result is None:
+            return jsonify({"error": "Project not found"}), 404
+        if changed_fields:
+            _evict_cached_project_core(pid)
+
+        recommended_voices = recommended_voices_for_language(language, VOICE_POOL)
+        return jsonify({
+            "language": language,
+            "changed_fields": changed_fields,
+            "applied_defaults": {
+                key: get_language_defaults(language).get(key)
+                for key in changed_fields
+            },
+            "recommended_voices": recommended_voices,
+        })
+    finally:
+        _release_project_admin(pid)
 
 
 @app.route("/api/cost-estimate", methods=["POST"])
 def api_cost_estimate():
-    """Live cost estimate. Body: { shot_count, has_dialogue, quality_tier, candidate_count, dialogue_shot_ratio }."""
-    data = request.json or {}
+    """Return a bounded estimate for one strictly typed JSON request."""
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+
+    unknown_keys = sorted(set(data) - _COST_ESTIMATE_REQUEST_KEYS)
+    invalid_keys: dict[str, str] = {}
+
+    shot_count = data.get("shot_count", 60)
+    if (
+        isinstance(shot_count, bool)
+        or not isinstance(shot_count, int)
+        or not 1 <= shot_count <= _COST_ESTIMATE_MAX_SHOTS
+    ):
+        invalid_keys["shot_count"] = "must be an integer between 1 and 120"
+
+    has_dialogue = data.get("has_dialogue", True)
+    if not isinstance(has_dialogue, bool):
+        invalid_keys["has_dialogue"] = "must be a boolean"
+
+    dialogue_shot_ratio = data.get("dialogue_shot_ratio", 0.5)
+    if (
+        isinstance(dialogue_shot_ratio, bool)
+        or not isinstance(dialogue_shot_ratio, (int, float))
+        or not math.isfinite(dialogue_shot_ratio)
+        or not 0 <= dialogue_shot_ratio <= 1
+    ):
+        invalid_keys["dialogue_shot_ratio"] = (
+            "must be a finite number between 0 and 1"
+        )
+
+    quality_tier = data.get("quality_tier", "production")
+    if quality_tier != "production":
+        invalid_keys["quality_tier"] = "must be 'production'"
+
+    candidate_count = data.get("candidate_count", 1)
+    if (
+        isinstance(candidate_count, bool)
+        or not isinstance(candidate_count, int)
+        or not 1 <= candidate_count <= _COST_ESTIMATE_MAX_CANDIDATES
+    ):
+        invalid_keys["candidate_count"] = "must be an integer between 1 and 16"
+
+    if unknown_keys or invalid_keys:
+        payload = {
+            "error": "Invalid cost estimate request",
+            "code": "invalid_cost_estimate",
+            "retryable": False,
+        }
+        if unknown_keys:
+            payload["unknown_keys"] = unknown_keys
+        if invalid_keys:
+            payload["invalid_keys"] = invalid_keys
+        return jsonify(payload), 400
+
     est = estimate_short_cost(
-        shot_count=int(data.get("shot_count", 60)),
-        has_dialogue=bool(data.get("has_dialogue", True)),
-        dialogue_shot_ratio=float(data.get("dialogue_shot_ratio", 0.5)),
-        quality_tier=str(data.get("quality_tier", "production")),
-        candidate_count=int(data.get("candidate_count", 1)),
+        shot_count=shot_count,
+        has_dialogue=has_dialogue,
+        dialogue_shot_ratio=float(dialogue_shot_ratio),
+        quality_tier=quality_tier,
+        candidate_count=candidate_count,
     )
     return jsonify(est)
 
@@ -1100,8 +1370,38 @@ def api_list_projects():
 
 @app.route("/api/projects", methods=["POST"])
 def api_create_project():
-    data = request.json or {}
-    name = data.get("name", "Untitled Project")
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+
+    unknown_keys = sorted(set(data) - {"name"})
+    invalid_keys: dict[str, str] = {}
+    raw_name = data.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
+    if (
+        not isinstance(raw_name, str)
+        or not name
+        or len(name) > _PROJECT_CREATE_NAME_MAX_CHARS
+        or any(not char.isprintable() for char in name)
+    ):
+        invalid_keys["name"] = (
+            "must be a nonblank string of at most 200 characters"
+        )
+
+    if unknown_keys or invalid_keys:
+        payload = {
+            "error": "Invalid project create request",
+            "code": "invalid_project_create",
+            "retryable": False,
+        }
+        if unknown_keys:
+            payload["unknown_keys"] = unknown_keys
+        if invalid_keys:
+            payload["invalid_keys"] = invalid_keys
+        return jsonify(payload), 400
+
     project = create_project(name)
     return jsonify(project), 201
 
@@ -1263,12 +1563,6 @@ def _validate_aspect_ratio_setting(value):
     return value
 
 
-def _validate_string_list_setting(value):
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError("must be a list of strings")
-    return value
-
-
 # Per-key validators for the strict partial-write path (PATCH). Deliberately
 # narrower than every key the legacy whole-object PUT tolerates today —
 # web/src/components/setup/inspector/*.tsx and ShotInspector.tsx already
@@ -1323,10 +1617,10 @@ _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     # VoiceSection.tsx — dialogue-quality toggles.
     "dialogue_mode_enabled": _validate_bool_setting,
     "forced_alignment_enabled": _validate_bool_setting,
-    # VoiceSection.tsx — lipsync cascade cluster (shared with
-    # AudioSyncSection.tsx's LipsyncPriorityList, embedded here).
+    # VoiceSection.tsx — active lip-sync policy controls. Engine ordering is
+    # purpose-owned by the backend; the removed UI priority list must not be
+    # resurrected through this strict settings contract.
     "lip_sync_mode": _validate_string_setting,
-    "lipsync_engine_priority": _validate_string_list_setting,
     "lipsync_quality_validation": _validate_bool_setting,
     "lipsync_validation_threshold": _validate_unit_interval_setting,
     # VoiceSection.tsx — dialogue pace + music mix.
@@ -1458,15 +1752,24 @@ def api_update_project(pid):
             settings[_SETTINGS_REVISION_KEY] = current_revision + 1
         return project
 
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
     try:
-        project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
-    except lora_policy.LoraActivationDormantError as exc:
-        return jsonify(exc.payload), 409
-    if conflict is not None:
-        return jsonify(conflict), 409
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-    return jsonify(project)
+        try:
+            project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+        except lora_policy.LoraActivationDormantError as exc:
+            return jsonify(exc.payload), 409
+        if conflict is not None:
+            return jsonify(conflict), 409
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        # PipelineCore snapshots budget/director/ensemble settings at build
+        # time. A confirmed write must retire that idle snapshot before a
+        # later generation can reuse it.
+        _evict_cached_project_core(pid)
+        return jsonify(project)
+    finally:
+        _release_project_admin(pid)
 
 
 @app.route("/api/projects/<pid>", methods=["PATCH"])
@@ -1551,24 +1854,52 @@ def api_patch_project_settings(pid):
         settings[_SETTINGS_REVISION_KEY] = current_revision + 1
         return project
 
-    project = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
-    if conflict is not None:
-        return jsonify(conflict), 409
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-    return jsonify(project)
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
+    try:
+        project = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+        if conflict is not None:
+            return jsonify(conflict), 409
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        _evict_cached_project_core(pid)
+        return jsonify(project)
+    finally:
+        _release_project_admin(pid)
 
 
 @app.route("/api/projects/<pid>", methods=["DELETE"])
 @_project_lock_guard
 def api_delete_project(pid):
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
+    try:
+        if not delete_project(pid, timeout=HTTP_PROJECT_TIMEOUT):
+            return jsonify({"error": "Project not found"}), 404
 
-    if delete_project(pid, timeout=HTTP_PROJECT_TIMEOUT):
+        # A deleted project must disappear from process-local state as well
+        # as disk. The admin reservation prevents a same-id generation from
+        # acquiring either cache while eviction is in progress.
+        _evict_cached_project_core(pid)
+        with _pipelines_lock:
+            cached_bus = _progress_queues.pop(pid, None)
+
+        # close() may wake subscribers and takes the bus's own lock, so keep
+        # it outside the shared registry lock. Deletion already succeeded;
+        # a close failure is diagnostic rather than a misleading HTTP 500.
+        if cached_bus is not None:
+            try:
+                cached_bus.close()
+            except Exception:
+                logger.warning(
+                    "Failed to close cached project event bus after deletion",
+                    extra={"pid": pid},
+                    exc_info=True,
+                )
+
         return jsonify({"deleted": True})
-    return jsonify({"error": "Project not found"}), 404
+    finally:
+        _release_project_admin(pid)
 
 
 # ---------------------------------------------------------------------------
@@ -2715,57 +3046,82 @@ def api_decompose_scene(pid, sid):
 @app.route("/api/projects/<pid>/style-rules", methods=["POST"])
 @_project_lock_guard
 def api_generate_style_rules(pid):
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    if "expected_revision" not in data:
+        return jsonify({
+            "error": "expected_revision is required",
+            "code": "revision_required",
+            "retryable": False,
+        }), 400
+    expected_revision = data["expected_revision"]
+    if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
+        return jsonify({
+            "error": "expected_revision must be an integer",
+            "code": "invalid_revision",
+            "retryable": False,
+        }), 400
 
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
+    try:
+        project = load_project(pid)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
 
-    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
-    # fast on malformed project before lock acquisition.
-    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
-    # on shape mismatch (race protection requires deterministic raise; NOT
-    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
-    # caller.md §"Variant 1".
-    Project.model_validate(project)  # outer boundary validate
+        Project.model_validate(project)
+        settings = project.get("global_settings", {})
+        current_revision = _current_settings_revision(project)
+        if expected_revision != current_revision:
+            return jsonify(_settings_revision_conflict_payload(
+                current_revision, settings
+            )), 409
 
-    data = request.json or {}
-    settings = project.get("global_settings", {})
+        # use_web_research defaults True: cinematography research is on by
+        # default. Non-empty reference_films additionally triggers per-film
+        # aesthetic research when enabled.
+        rules = generate_style_rules(
+            project_name=project["name"],
+            mood=data.get("mood", settings.get("music_mood", "cinematic")),
+            color_palette=data.get("color_palette", settings.get("color_palette", "")),
+            music_mood=data.get("music_mood", settings.get("music_mood", "suspense")),
+            aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
+            reference_films=data.get("reference_films", ""),
+            use_web_research=data.get("use_web_research", True),
+        )
+        conflict = None
 
-    # use_web_research defaults True: cinematography research is on by default (a client may
-    # send use_web_research=False to skip the Tavily calls). Note a non-empty reference_films
-    # additionally triggers per-film aesthetic research (_research_aesthetic) when enabled.
-    rules = generate_style_rules(
-        project_name=project["name"],
-        mood=data.get("mood", settings.get("music_mood", "cinematic")),
-        color_palette=data.get("color_palette", settings.get("color_palette", "")),
-        music_mood=data.get("music_mood", settings.get("music_mood", "suspense")),
-        aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
-        reference_films=data.get("reference_films", ""),
-        use_web_research=data.get("use_web_research", True),
-    )
+        def _mutate_project(latest_project: dict):
+            nonlocal conflict
+            Project.model_validate(latest_project)
+            latest_revision = _current_settings_revision(latest_project)
+            if expected_revision != latest_revision:
+                conflict = _settings_revision_conflict_payload(
+                    latest_revision, latest_project.get("global_settings", {})
+                )
+                return MutationResult(None, save=False)
 
-    def _mutate_project(latest_project: dict):
-        # P1-3 part 12 (Variant 1 simplified): inner validate for race
-        # protection — Project.model_validate(...) raises ValidationError
-        # UNCONDITIONALLY on shape mismatch (race protection requires
-        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
-        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
-        # caller.md §"Variant 1".
-        Project.model_validate(latest_project)
-        latest_settings = latest_project.setdefault("global_settings", {})
-        latest_settings["style_rules"] = rules
-        return latest_settings["style_rules"]
+            latest_settings = latest_project.setdefault("global_settings", {})
+            latest_settings["style_rules"] = rules
+            latest_settings[_SETTINGS_REVISION_KEY] = latest_revision + 1
+            return True
 
-    mutate_project(
-        pid,
-        _mutate_project,
-        timeout=HTTP_PROJECT_TIMEOUT,
-        snapshot=project,
-    )
-    return jsonify(rules)
+        mutation_result = mutate_project(
+            pid,
+            _mutate_project,
+            timeout=HTTP_PROJECT_TIMEOUT,
+        )
+        if conflict is not None:
+            return jsonify(conflict), 409
+        if mutation_result is None:
+            return jsonify({"error": "Project not found"}), 404
+        _evict_cached_project_core(pid)
+        return jsonify(rules)
+    finally:
+        _release_project_admin(pid)
 
 
 # ---------------------------------------------------------------------------
@@ -2792,16 +3148,30 @@ def api_generate(pid):
     ``GET /pipeline-state`` and re-render from that truth instead of
     assuming its own click had any effect.
     """
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
+    data = _json_object_or_none() if request.is_json else {}
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    resume = bool(data.get("resume", False))
 
-    # Atomic check-then-reserve under the lock. _PIPELINE_PENDING acts as
-    # "busy" to other readers while CinemaPipeline.__init__ runs WITHOUT
-    # holding the lock (ctor takes 100ms–2s; holding the lock would
-    # serialize all /generate calls globally).
+    # Atomic check-then-reserve under the lock BEFORE reading project state.
+    # _PIPELINE_PENDING acts as "busy" to deletion/settings writers and other
+    # generation readers while both existence validation and
+    # CinemaPipeline.__init__ run WITHOUT holding the lock. Reserving after
+    # load_project allowed deletion to complete between the read and reserve,
+    # then a stale request could start a pipeline against the deleted path.
     # Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md Finding #1
     with _pipelines_lock:
+        if pid in _project_admin_in_flight:
+            return _project_conflict_response(
+                "project_busy",
+                f"Project '{pid}' is being updated. Retry shortly.",
+            )
+        if pid in _project_stage_in_flight:
+            return _project_conflict_response(
+                "project_busy",
+                f"Project '{pid}' is busy with another direct stage operation. "
+                "Retry shortly.",
+            )
         if pid in _running_pipelines:
             return _project_conflict_response(
                 "generation_in_progress",
@@ -2809,11 +3179,22 @@ def api_generate(pid):
             )
         _running_pipelines[pid] = _PIPELINE_PENDING
 
+    try:
+        project = load_project(pid)
+    except Exception:
+        with _pipelines_lock:
+            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
+                _running_pipelines.pop(pid, None)
+        raise
+    if not project:
+        with _pipelines_lock:
+            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
+                _running_pipelines.pop(pid, None)
+        return jsonify({"error": "Project not found"}), 404
+
     # Create the event bus for SSE (lock released before this call)
     bus = _ensure_progress_queue(pid)
     progress_cb = _make_progress_cb(pid, bus)
-
-    resume = request.json.get("resume", False) if request.is_json else False
 
     def run_pipeline():
         try:
@@ -2851,7 +3232,16 @@ def api_generate(pid):
             bus.close()
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
-    thread.start()
+    try:
+        thread.start()
+    except Exception:
+        with _pipelines_lock:
+            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
+                _running_pipelines.pop(pid, None)
+            if _progress_queues.get(pid) is bus:
+                _progress_queues.pop(pid, None)
+        bus.close()
+        raise
 
     return jsonify({"started": True, "resume": resume, "message": "Generation started. Connect to /api/projects/<pid>/stream for progress."})
 
@@ -3121,6 +3511,7 @@ def api_serve_file(pid):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/plan/approve", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_approve_shot_plan(pid, shot_id):
     try:
         result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=True)
@@ -3133,6 +3524,7 @@ def api_approve_shot_plan(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/plan/reject", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_reject_shot_plan(pid, shot_id):
     reason = request.json.get("reason", "") if request.is_json else ""
     try:
@@ -3146,6 +3538,7 @@ def api_reject_shot_plan(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/keyframes/generate", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_generate_keyframe(pid, shot_id):
     project = load_project(pid)
     if not project:
@@ -3169,8 +3562,44 @@ def api_generate_keyframe(pid, shot_id):
     return jsonify(result), status
 
 
+@app.route(
+    "/api/projects/<pid>/shots/<shot_id>/keyframes/recovery/resolve",
+    methods=["POST"],
+)
+@_project_lock_guard
+@_project_stage_guard
+def api_resolve_keyframe_recovery(pid, shot_id):
+    data = request.get_json(silent=True)
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"confirmed"}
+        or data.get("confirmed") is not True
+    ):
+        return jsonify({
+            "error": (
+                "Explicit confirmation is required after reconciling the "
+                "provider queue and history"
+            )
+        }), 400
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    _scene, shot = _locate_shot(project, shot_id)
+    if not shot:
+        return jsonify({"error": "Shot not found"}), 404
+
+    try:
+        result = _get_stage_pipeline(pid).resolve_deferred_keyframe_job(shot_id)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
+
+
 @app.route("/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_approve_keyframe_take(pid, shot_id, take_id):
     try:
         result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "keyframe")
@@ -3182,6 +3611,7 @@ def api_approve_keyframe_take(pid, shot_id, take_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_approve_performance_take(pid, shot_id, take_id):
     """Approve a performance take so the PERFORMANCE_REVIEW gate predicate opens.
 
@@ -3200,6 +3630,7 @@ def api_approve_performance_take(pid, shot_id, take_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/motion/generate", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_generate_motion(pid, shot_id):
     project = load_project(pid)
     if not project:
@@ -3219,6 +3650,7 @@ def api_generate_motion(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_approve_final_take(pid, shot_id, take_id):
     try:
         result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "final")
@@ -3230,6 +3662,7 @@ def api_approve_final_take(pid, shot_id, take_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_iterate_take(pid, shot_id, take_id):
     """S16: directorial iteration endpoint.
 
@@ -3605,6 +4038,7 @@ def api_pipeline_state(pid):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/restart", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_restart_shot(pid, shot_id):
     """Full restart for a shot: clear every downstream approval, regenerate
     the keyframe. Take history is preserved; only approval pointers are reset.
@@ -3653,6 +4087,7 @@ def api_restart_shot(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_regenerate_shot(pid, shot_id):
     """Regenerate a single shot (legacy/compat path).
 
@@ -3712,6 +4147,7 @@ def api_regenerate_shot(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/correct", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_correct_shot(pid, shot_id):
     """Apply a correction tool to a clip during Director's Cut review."""
     data = request.json if request.is_json else {}
@@ -3731,6 +4167,8 @@ def api_correct_shot(pid, shot_id):
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/diagnose", methods=["POST"])
+@_project_lock_guard
+@_project_stage_guard
 def api_diagnose_shot(pid, shot_id):
     """Run quality diagnostics on a clip. `deep=true` adds an LLM deep diagnosis."""
     body = request.json if request.is_json else {}
@@ -3745,6 +4183,8 @@ def api_diagnose_shot(pid, shot_id):
 
 @app.route("/api/projects/<pid>/assemble", methods=["POST"])
 @app.route("/api/projects/<pid>/proceed-assembly", methods=["POST"])
+@_project_lock_guard
+@_project_stage_guard
 def api_proceed_assembly(pid):
     """Assemble only from approved final takes, or resume the paused batch wrapper."""
     pipeline = _get_running_pipeline(pid)
@@ -4004,6 +4444,11 @@ def api_assemble_reassemble(pid):
             }), 409
         _reassembly_in_flight.add(pid)
 
+    if not _reserve_project_stage(pid):
+        with _reassembly_lock:
+            _reassembly_in_flight.discard(pid)
+        return _project_busy_response(pid)
+
     try:
         data = request.get_json(silent=True) or {}
         only_if_changed = bool(data.get("only_if_changed", True))
@@ -4120,6 +4565,7 @@ def api_assemble_reassemble(pid):
             "skipped": False,
         }), 200
     finally:
+        _release_project_stage(pid)
         with _reassembly_lock:
             _reassembly_in_flight.discard(pid)
 
@@ -4213,18 +4659,6 @@ def api_preview_scene(pid, sid):
 if __name__ == "__main__":
     bind_host = env_settings.web_bind_host
     cors_origins = env_settings.web_cors_origins
-    lan_note = (
-        "  ⚠ Bound to 0.0.0.0 — reachable from any device on this network. "
-        "Set WEB_BIND_HOST=127.0.0.1 to limit to this machine.\n"
-        if bind_host == "0.0.0.0"
-        else ""
-    )
-    cors_note = (
-        "  ⚠ CORS=* (wide open) — any origin can call the API. "
-        "Unset WEB_CORS_ORIGINS to restore localhost-only default.\n"
-        if cors_origins == ("*",)
-        else ""
-    )
 
     print("\n" + "=" * 60)
     print("🎬 CINEMA PRODUCTION TOOL — Web Server")
@@ -4232,11 +4666,5 @@ if __name__ == "__main__":
     print(f"Open http://localhost:8080 in your browser")
     print(f"  bind:  {bind_host}:8080")
     print(f"  CORS:  {', '.join(cors_origins)}")
-    if lan_note or cors_note:
-        print()
-        if lan_note:
-            print(lan_note, end="")
-        if cors_note:
-            print(cors_note, end="")
     print("=" * 60 + "\n")
     app.run(host=bind_host, port=8080, debug=False, use_reloader=False)

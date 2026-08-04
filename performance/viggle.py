@@ -47,7 +47,7 @@ import os
 from typing import Optional
 
 from config.settings import settings
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 from performance._poll import poll_task
 
 
@@ -199,7 +199,12 @@ def generate_viggle_performance(
     if not out_url:
         print(f"   [VIGGLE] render {render_id} is ready but response has no video_url")
         return None
-    if not safe_download(out_url, output_mp4):
+    if not safe_download(
+        out_url,
+        output_mp4,
+        allowed_content_types=("video/mp4",),
+        content_validator=validate_video_artifact,
+    ):
         return None
     _cost_log(shot_id, video_id, cost_tracker=cost_tracker)
     print(f"   ✅ Viggle: {output_mp4}")

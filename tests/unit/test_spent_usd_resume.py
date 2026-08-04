@@ -9,6 +9,7 @@ admitted.
 from __future__ import annotations
 
 import types
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -87,3 +88,22 @@ def test_checkpoint_restore_rehydrates_budget_spend(tmp_path):
     assert resumed.spent_usd == pytest.approx(0.75)
     assert resumed.would_exceed("SORA_2") is True
     resumed.close()
+
+
+def test_pipeline_core_rehydrates_before_first_generation(monkeypatch, tmp_path):
+    """Fresh/rebuilt cores must not wait for checkpoint restore to see spend."""
+    import cinema.core as core_module
+
+    project = {"id": "proj-1", "global_settings": {"budget_limit_usd": 1.0}}
+    tracker = MagicMock()
+    monkeypatch.setattr(core_module, "load_project", lambda _pid: project)
+    monkeypatch.setattr(core_module, "get_project_dir", lambda _pid: str(tmp_path))
+    monkeypatch.setattr(core_module, "CostTracker", MagicMock(return_value=tracker))
+    monkeypatch.setattr(core_module, "ContinuityEngine", MagicMock())
+    monkeypatch.setattr(core_module, "ChiefDirector", MagicMock())
+    monkeypatch.setattr(core_module, "LLMEnsemble", MagicMock())
+
+    core = core_module.build_pipeline_core("proj-1")
+
+    tracker.rehydrate_spent_usd_from_video.assert_called_once_with("proj-1")
+    assert core.cost_tracker is tracker

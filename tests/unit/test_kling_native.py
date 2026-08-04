@@ -116,6 +116,35 @@ def test_init_succeeds_with_valid_keys():
     assert api._token is not None  # _generate_token() was called
 
 
+def test_download_video_uses_validated_atomic_downloader(tmp_path):
+    api = _make_api()
+    output = tmp_path / "take.mp4"
+
+    def download(url, path, **kwargs):
+        assert url == "https://cdn.example/take.mp4"
+        assert kwargs["allowed_content_types"] == ("video/mp4",)
+        assert kwargs["content_validator"] is kling_native.validate_video_artifact
+        output.write_bytes(b"validated")
+        return path
+
+    with patch.object(kling_native, "safe_download", side_effect=download):
+        result = api.download_video("https://cdn.example/take.mp4", str(output))
+
+    assert result == str(output)
+
+
+def test_download_video_rejects_invalid_artifact(tmp_path):
+    api = _make_api()
+    output = tmp_path / "take.mp4"
+    with (
+        patch.object(kling_native, "safe_download", return_value=None),
+        pytest.raises(RuntimeError, match="valid MP4"),
+    ):
+        api.download_video("https://cdn.example/not-video", str(output))
+
+    assert not output.exists()
+
+
 # ---------------------------------------------------------------------------
 # PRIMARY CONTRACT: create_image_to_video sends NO aspect/ratio/size key
 # ---------------------------------------------------------------------------

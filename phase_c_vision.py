@@ -8,6 +8,7 @@ from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 from llm.image_encoding import encode_image_for_llm
+from performance._net import safe_download, validate_video_artifact
 try:
     from deepface import DeepFace
     VISION_AVAILABLE = True
@@ -85,7 +86,6 @@ def face_swap_video_frames(video_path, reference_image, output_path):
     # PRIORITY 1: fal.ai PixVerse face swap (cloud, no local deps)
     try:
         import fal_client
-        import urllib.request
 
         if settings.fal_key:
             print(f"   [FACESWAP] Uploading to fal.ai...")
@@ -103,7 +103,14 @@ def face_swap_video_frames(video_path, reference_image, output_path):
             )
             out_url = result.get("video", {}).get("url")
             if out_url:
-                urllib.request.urlretrieve(out_url, output_path)
+                downloaded = safe_download(
+                    out_url,
+                    output_path,
+                    allowed_content_types=("video/mp4",),
+                    content_validator=validate_video_artifact,
+                )
+                if downloaded is None:
+                    raise RuntimeError("face-swap output failed MP4 validation")
                 _remux_source_audio_in_place(output_path, video_path, engine="pixverse_swap")
                 print(f"   [FACESWAP] Cloud swap complete: {output_path}")
                 return output_path

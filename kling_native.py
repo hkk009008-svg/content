@@ -33,6 +33,7 @@ from cinema.storyboard import (
     allocate_storyboard_durations,
 )
 from config.settings import settings
+from performance._net import safe_download, validate_video_artifact
 
 
 class KlingNativeAPI:
@@ -266,15 +267,16 @@ class KlingNativeAPI:
         """
         print(f"[KLING-NATIVE] Downloading video to {output_path}")
 
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-
-        resp = requests.get(video_url, stream=True, timeout=120)
-        resp.raise_for_status()
-
-        with open(output_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
+        downloaded = safe_download(
+            video_url,
+            output_path,
+            allowed_content_types=("video/mp4",),
+            content_validator=validate_video_artifact,
+        )
+        if downloaded is None:
+            raise RuntimeError(
+                "[KLING-NATIVE] Download refused: output was not a valid MP4"
+            )
 
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
         print(f"[KLING-NATIVE] Downloaded {size_mb:.1f}MB to {output_path}")

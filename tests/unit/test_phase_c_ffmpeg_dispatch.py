@@ -76,6 +76,34 @@ def _real_ltx_contract_violation() -> type:
             sys.modules["ltx_native"] = cached
 
 
+def _real_ltx_job_pending() -> type:
+    """Resolve the real deferred-job exception despite collection-time stubs."""
+    cached = sys.modules.get("ltx_native")
+    exc = getattr(cached, "LTXJobPending", None)
+    if exc is not None:
+        return exc
+    sys.modules.pop("ltx_native", None)
+    try:
+        return importlib.import_module("ltx_native").LTXJobPending
+    finally:
+        if cached is not None:
+            sys.modules["ltx_native"] = cached
+
+
+def _real_provider_deferred(module_name: str, class_name: str) -> type:
+    """Resolve a real provider exception despite collection-time stubs."""
+    cached = sys.modules.get(module_name)
+    exc = getattr(cached, class_name, None)
+    if exc is not None:
+        return exc
+    sys.modules.pop(module_name, None)
+    try:
+        return getattr(importlib.import_module(module_name), class_name)
+    finally:
+        if cached is not None:
+            sys.modules[module_name] = cached
+
+
 def _provider_import_bomb(name, globals=None, locals=None, fromlist=(), level=0):
     provider_modules = {
         "fal_client",
@@ -257,6 +285,40 @@ def test_auto_safe_chain_skips_rejected_head_and_preserves_order(
     ltx_module.LTXVideoAPI.assert_called_once_with()
 
 
+def test_auto_boundary_rejects_caller_supplied_deprecated_fallbacks(
+    monkeypatch,
+) -> None:
+    """AUTO is never an indirect way to dispatch an explicit-only engine."""
+    snapshot = RuntimeSnapshot(
+        credentials={"openai_api_key", "runwayml_api_secret"},
+        modules={"openai", "runwayml"},
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        lambda: snapshot,
+    )
+    cascade: dict = {}
+
+    with patch.object(builtins, "__import__", side_effect=_provider_import_bomb):
+        result = phase_c_ffmpeg.generate_ai_video(
+            "frame.png",
+            "static",
+            "AUTO",
+            "out.mp4",
+            video_fallbacks=["SORA_NATIVE", "RUNWAY"],
+            _cascade_out=cascade,
+        )
+
+    assert result is None
+    assert cascade["policy_error"]["reason"] == "not_automatic"
+    assert cascade["policy_rejections"] == [
+        {"key": "AUTO", "reason": "auto_sentinel"},
+        {"key": "SORA_NATIVE", "reason": "not_automatic"},
+        {"key": "RUNWAY", "reason": "retired"},
+    ]
+
+
 @pytest.mark.parametrize(
     ("requested_duration", "expected_ltx_duration"),
     [
@@ -316,6 +378,7 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
 
     ltx_instance = MagicMock()
     ltx_instance.generate_video.return_value = output
+    ltx_instance.last_job_id = "job-winner-123"
     ltx_module = types.ModuleType("ltx_native")
     ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
     monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
@@ -348,6 +411,7 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
         "engine": "LTX",
         "attempts": ["VEO_NATIVE", "LTX"],
         "duration_s": 8,  # the shared dispatcher default (no explicit duration passed)
+        "job_id": "job-winner-123",
     }
     assert cascade["policy_rejections"] == [
         {"key": "SORA_2", "reason": "retired"},
@@ -355,6 +419,310 @@ def test_valid_chain_filters_once_dedupes_and_cascades_in_order(
     veo_module.VeoNativeAPI.assert_called_once_with()
     ltx_module.LTXVideoAPI.assert_called_once_with()
     policy_filter.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("engine", "module_name", "exception_name"),
+    [
+        ("VEO_NATIVE", "veo_native", "VeoNativeJobDeferred"),
+        ("GEMINI_OMNI", "gemini_omni_native", "GeminiOmniJobDeferred"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("reason", "status", "job_id", "provider_status", "billed"),
+    [
+        (
+            "submit_outcome_unknown",
+            "recovery_required",
+            None,
+            "submission_unknown",
+            False,
+        ),
+        (
+            "accepted_job_poll_error",
+            "pending",
+            "operations/bound-job-123",
+            "pending",
+            False,
+        ),
+        (
+            "completed_output_unavailable",
+            "recovery_required",
+            "operations/completed-job-456",
+            "completed",
+            True,
+        ),
+    ],
+)
+def test_google_accepted_or_ambiguous_job_never_cascades(
+    monkeypatch,
+    tmp_path,
+    engine,
+    module_name,
+    exception_name,
+    reason,
+    status,
+    job_id,
+    provider_status,
+    billed,
+) -> None:
+    """Submit, poll, and completed-output ambiguity all stop the chain."""
+    deferred_type = _real_provider_deferred(module_name, exception_name)
+    exc_kwargs = {
+        "reason": reason,
+        "status": status,
+        "job_id": job_id,
+        "provider_status": provider_status,
+        "billed": billed,
+    }
+    if engine == "VEO_NATIVE":
+        exc_kwargs["duration_s"] = 6
+    deferred = deferred_type("provider work requires recovery", **exc_kwargs)
+
+    provider_instance = MagicMock()
+    provider_instance.supports_native_audio = True
+    provider_instance.generate_video.side_effect = deferred
+    provider_module = types.ModuleType(module_name)
+    setattr(
+        provider_module,
+        "VeoNativeAPI" if engine == "VEO_NATIVE" else "GeminiOmniAPI",
+        MagicMock(return_value=provider_instance),
+    )
+    setattr(provider_module, exception_name, deferred_type)
+    monkeypatch.setitem(sys.modules, module_name, provider_module)
+
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(
+        side_effect=AssertionError("deferred Google job escaped to LTX")
+    )
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL",
+        0.0,
+    )
+
+    cascade: dict = {}
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        engine,
+        str(tmp_path / "out.mp4"),
+        video_fallbacks=["LTX"],
+        shot_type="medium",
+        duration="5s",
+        ctx=_ctx(cascade_retry_limit=0),
+        _cascade_out=cascade,
+    )
+
+    assert result is None
+    ltx_module.LTXVideoAPI.assert_not_called()
+    assert cascade["attempt_history"] == [engine]
+    expected = {
+        "engine": engine,
+        "status": status,
+        "reason": reason,
+        "attempts": [engine],
+        "billed": billed,
+        "provider_status": provider_status,
+    }
+    if job_id is not None:
+        expected["job_id"] = job_id
+    if engine == "VEO_NATIVE":
+        expected["duration_s"] = 6.0
+    assert cascade["deferred_job"] == expected
+    assert cascade.get("billed_attempts", []) == ([engine] if billed else [])
+    assert "cascade_metadata" not in cascade
+
+
+def test_google_deferred_descriptor_rejects_untrusted_fields(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class MalformedDeferred(RuntimeError):
+        status = ["pending"]
+        reason = "bad\nreason"
+        job_id = "https://provider.invalid/output?token=secret"
+        provider_status = "pending\nsecret"
+        billed = False
+        duration_s = float("nan")
+
+    veo_instance = MagicMock()
+    veo_instance.supports_native_audio = True
+    veo_instance.generate_video.side_effect = MalformedDeferred("unsafe fields")
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(return_value=veo_instance)
+    veo_module.VeoNativeJobDeferred = MalformedDeferred
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(
+        side_effect=AssertionError("malformed deferred job escaped to LTX")
+    )
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade: dict = {}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "VEO_NATIVE",
+        str(tmp_path / "out.mp4"),
+        video_fallbacks=["LTX"],
+        ctx=_ctx(cascade_retry_limit=0),
+        _cascade_out=cascade,
+    ) is None
+
+    ltx_module.LTXVideoAPI.assert_not_called()
+    assert cascade["deferred_job"] == {
+        "engine": "VEO_NATIVE",
+        "status": "recovery_required",
+        "reason": "provider_job_ambiguous",
+        "attempts": ["VEO_NATIVE"],
+        "billed": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("engine", "module_name", "exception_name"),
+    [
+        ("VEO_NATIVE", "veo_native", "VeoNativeJobDeferred"),
+        ("GEMINI_OMNI", "gemini_omni_native", "GeminiOmniJobDeferred"),
+    ],
+)
+def test_google_explicit_terminal_failure_may_cascade(
+    monkeypatch,
+    tmp_path,
+    engine,
+    module_name,
+    exception_name,
+) -> None:
+    deferred_type = _real_provider_deferred(module_name, exception_name)
+    provider_instance = MagicMock()
+    provider_instance.supports_native_audio = True
+    provider_instance.generate_video.return_value = None
+    provider_module = types.ModuleType(module_name)
+    setattr(
+        provider_module,
+        "VeoNativeAPI" if engine == "VEO_NATIVE" else "GeminiOmniAPI",
+        MagicMock(return_value=provider_instance),
+    )
+    setattr(provider_module, exception_name, deferred_type)
+    monkeypatch.setitem(sys.modules, module_name, provider_module)
+
+    output = str(tmp_path / "ltx.mp4")
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.return_value = output
+    ltx_instance.last_job_id = None
+    ltx_instance.last_request_fingerprint = None
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL",
+        0.0,
+    )
+
+    cascade: dict = {}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        engine,
+        output,
+        video_fallbacks=["LTX"],
+        shot_type="medium",
+        ctx=_ctx(cascade_retry_limit=0),
+        _cascade_out=cascade,
+    ) == output
+
+    assert "deferred_job" not in cascade
+    assert cascade["attempt_history"] == [engine, "LTX"]
+    assert cascade["cascade_metadata"]["engine"] == "LTX"
+    ltx_module.LTXVideoAPI.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("engine", "module_name", "exception_name", "job_id"),
+    [
+        (
+            "VEO_NATIVE",
+            "veo_native",
+            "VeoNativeJobDeferred",
+            "operations/veo-success-123",
+        ),
+        (
+            "GEMINI_OMNI",
+            "gemini_omni_native",
+            "GeminiOmniJobDeferred",
+            "interaction-success-456",
+        ),
+    ],
+)
+def test_google_success_records_provider_job_id(
+    monkeypatch,
+    tmp_path,
+    engine,
+    module_name,
+    exception_name,
+    job_id,
+) -> None:
+    deferred_type = _real_provider_deferred(module_name, exception_name)
+    output = str(tmp_path / "winner.mp4")
+    provider_instance = MagicMock()
+    provider_instance.supports_native_audio = True
+    provider_instance.last_job_id = job_id
+    provider_instance.generate_video.return_value = output
+    provider_module = types.ModuleType(module_name)
+    setattr(
+        provider_module,
+        "VeoNativeAPI" if engine == "VEO_NATIVE" else "GeminiOmniAPI",
+        MagicMock(return_value=provider_instance),
+    )
+    setattr(provider_module, exception_name, deferred_type)
+    monkeypatch.setitem(sys.modules, module_name, provider_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_GEMINI_OMNI_QUOTA_EXHAUSTED_UNTIL",
+        0.0,
+    )
+
+    cascade: dict = {}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        engine,
+        output,
+        shot_type="medium",
+        ctx=_ctx(cascade_retry_limit=0),
+        _cascade_out=cascade,
+    ) == output
+
+    assert cascade["cascade_metadata"]["job_id"] == job_id
+    assert cascade["cascade_metadata"]["attempts"] == [engine]
 
 
 def test_ltx_contract_violation_cascades_and_is_surfaced_distinctly(
@@ -407,6 +775,281 @@ def test_ltx_contract_violation_cascades_and_is_surfaced_distinctly(
     assert cascade["contract_violations"] == [
         {"engine": "LTX", "reason": "ltx_contract_violation", "detail": "bad duration"}
     ]
+    veo_module.VeoNativeAPI.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("reason", "status", "job_id", "provider_status", "billed"),
+    [
+        ("poll_window_exhausted", "pending", "job-123", "processing", False),
+        (
+            "submit_outcome_unknown",
+            "recovery_required",
+            None,
+            "submission_unknown",
+            False,
+        ),
+        (
+            "completed_output_invalid",
+            "recovery_required",
+            "job-123",
+            "completed",
+            True,
+        ),
+    ],
+)
+def test_ltx_accepted_or_unknown_job_never_cascades_to_next_provider(
+    monkeypatch,
+    tmp_path,
+    reason,
+    status,
+    job_id,
+    provider_status,
+    billed,
+) -> None:
+    pending_type = _real_ltx_job_pending()
+    output = str(tmp_path / "ltx.mp4")
+
+    def deferred_generation(**kwargs):
+        if billed:
+            kwargs["on_billed"]()
+        raise pending_type(
+            "recover the existing LTX work",
+            reason=reason,
+            status=status,
+            job_id=job_id,
+            state_path=str(tmp_path / ".ltx-job.json"),
+            request_fingerprint="f" * 64,
+            provider_status=provider_status,
+            duration_s=8,
+        )
+
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.side_effect = deferred_generation
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    ltx_module.LTXJobPending = pending_type
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(
+        side_effect=AssertionError("deferred LTX escaped to the next provider")
+    )
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade: dict = {}
+    result = phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        video_fallbacks=["VEO_NATIVE"],
+        shot_type="wide",
+        ctx=_ctx(),
+        _cascade_out=cascade,
+    )
+
+    assert result is None
+    veo_module.VeoNativeAPI.assert_not_called()
+    assert cascade["attempt_history"] == ["LTX"]
+    deferred = cascade["deferred_job"]
+    assert deferred["engine"] == "LTX"
+    assert deferred["status"] == status
+    assert deferred["reason"] == reason
+    assert deferred["attempts"] == ["LTX"]
+    assert deferred["billed"] is billed
+    assert deferred["provider_status"] == provider_status
+    assert deferred["state_path"] == str(tmp_path / ".ltx-job.json")
+    assert deferred["request_fingerprint"] == "f" * 64
+    assert deferred.get("job_id") == job_id
+    assert deferred["duration_s"] == 8
+
+
+def test_ltx_billed_none_result_never_cascades_without_new_exception(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Compatibility/FAL paths may signal accepted spend only by callback."""
+    output = str(tmp_path / "ltx.mp4")
+
+    def billed_failure(**kwargs):
+        kwargs["on_billed"]()
+        return None
+
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.side_effect = billed_failure
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(
+        side_effect=AssertionError("billed LTX escaped to the next provider")
+    )
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade: dict = {}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        video_fallbacks=["VEO_NATIVE"],
+        shot_type="wide",
+        ctx=_ctx(),
+        _cascade_out=cascade,
+    ) is None
+    veo_module.VeoNativeAPI.assert_not_called()
+    assert cascade["deferred_job"] == {
+        "engine": "LTX",
+        "status": "recovery_required",
+        "reason": "billed_output_unavailable",
+        "attempts": ["LTX"],
+        "billed": True,
+        "provider_status": "completed",
+        "duration_s": 8,
+    }
+
+
+def test_ltx_expected_resume_binding_is_forwarded_and_mismatch_never_cascades(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    pending_type = _real_ltx_job_pending()
+    output = str(tmp_path / "ltx.mp4")
+    expected_fingerprint = "a" * 64
+
+    def changed_request(**kwargs):
+        assert kwargs["expected_job_id"] == "job-existing"
+        assert kwargs["expected_request_fingerprint"] == expected_fingerprint
+        raise pending_type(
+            "request changed",
+            reason="request_changed",
+            status="recovery_required",
+            job_id="job-existing",
+            request_fingerprint=expected_fingerprint,
+            provider_status="unknown",
+            duration_s=8,
+        )
+
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.side_effect = changed_request
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    ltx_module.LTXJobPending = pending_type
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(
+        side_effect=AssertionError("binding mismatch escaped to Veo")
+    )
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade = {
+        "expected_ltx_job": {
+            "job_id": "job-existing",
+            "request_fingerprint": expected_fingerprint,
+        }
+    }
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        video_fallbacks=["VEO_NATIVE"],
+        shot_type="wide",
+        ctx=_ctx(),
+        _cascade_out=cascade,
+    ) is None
+
+    ltx_instance.generate_video.assert_called_once()
+    veo_module.VeoNativeAPI.assert_not_called()
+    assert cascade["deferred_job"]["reason"] == "request_changed"
+    assert cascade["deferred_job"]["job_id"] == "job-existing"
+    assert cascade["deferred_job"]["request_fingerprint"] == expected_fingerprint
+    assert cascade["deferred_job"]["duration_s"] == 8
+
+
+def test_ltx_malformed_resume_binding_fails_closed_before_adapter_call(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    output = str(tmp_path / "ltx.mp4")
+    ltx_instance = MagicMock()
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+
+    cascade = {"expected_ltx_job": "not-a-binding"}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        shot_type="wide",
+        _cascade_out=cascade,
+    ) is None
+
+    ltx_instance.generate_video.assert_not_called()
+    assert cascade["deferred_job"]["reason"] == "job_binding_invalid"
+    assert cascade["deferred_job"]["duration_s"] == 8
+
+
+def test_ltx_explicit_terminal_failure_still_cascades(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    output = str(tmp_path / "veo.mp4")
+    ltx_instance = MagicMock()
+    ltx_instance.generate_video.return_value = None
+    ltx_module = types.ModuleType("ltx_native")
+    ltx_module.LTXVideoAPI = MagicMock(return_value=ltx_instance)
+    monkeypatch.setitem(sys.modules, "ltx_native", ltx_module)
+
+    veo_instance = MagicMock()
+    veo_instance.generate_video.return_value = output
+    veo_module = types.ModuleType("veo_native")
+    veo_module.VeoNativeAPI = MagicMock(return_value=veo_instance)
+    monkeypatch.setitem(sys.modules, "veo_native", veo_module)
+    monkeypatch.setattr(phase_c_ffmpeg, "_load_fal_client", lambda: None)
+    monkeypatch.setattr(
+        phase_c_ffmpeg,
+        "_video_policy_runtime_snapshot",
+        _veo_ltx_snapshot,
+    )
+
+    cascade: dict = {}
+    assert phase_c_ffmpeg.generate_ai_video(
+        "frame.png",
+        "static",
+        "LTX",
+        output,
+        video_fallbacks=["VEO_NATIVE"],
+        shot_type="wide",
+        ctx=_ctx(),
+        _cascade_out=cascade,
+    ) == output
+    assert "deferred_job" not in cascade
+    assert cascade["cascade_metadata"]["engine"] == "VEO_NATIVE"
     veo_module.VeoNativeAPI.assert_called_once_with()
 
 
@@ -615,6 +1258,9 @@ def test_auto_without_runtime_cannot_revive_raw_unsafe_defaults(
 ) -> None:
     assert "GEMINI_OMNI" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
     assert "SORA_2" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
+    assert "SORA_NATIVE" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
+    assert "RUNWAY" not in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
+    assert "RUNWAY_GEN4" in phase_c_ffmpeg.DEFAULT_VIDEO_CASCADE
 
     attempted: list[str] = []
     cascade: dict = {}

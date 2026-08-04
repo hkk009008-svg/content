@@ -31,8 +31,18 @@ function api(overrides: Partial<ApiInfo> & Pick<ApiInfo, 'label'>): ApiInfo {
   }
 }
 
-function config(video_engines: VideoEngineRow[], api_registry: Record<string, ApiInfo> = {}): AppConfig {
-  return { video_engines, api_registry } as unknown as AppConfig
+function config(
+  video_engines: VideoEngineRow[],
+  api_registry: Record<string, ApiInfo> = {},
+  primary?: string,
+): AppConfig {
+  return {
+    video_engines,
+    api_registry,
+    workflow_templates: primary
+      ? { portrait: { target_api: primary } }
+      : undefined,
+  } as unknown as AppConfig
 }
 
 describe('videoEngines', () => {
@@ -114,16 +124,25 @@ describe('videoEngines', () => {
     expect(result.map((e) => e.key)).toEqual(['AUTO', 'ENGINE_A'])
   })
 
-  it('marks exactly the GEMINI_OMNI row primary when present, and nothing else', () => {
+  it('marks the workflow-template target primary instead of hardcoding an engine key', () => {
     const c = config([
       row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }),
       row({ key: 'ENGINE_A', label: 'Engine A' }),
-    ])
+    ], {}, 'ENGINE_A')
 
     const result = videoEngines(c)
 
-    expect(result.find((e) => e.key === 'GEMINI_OMNI')?.primary).toBe(true)
+    expect(result.find((e) => e.key === 'GEMINI_OMNI')?.primary).toBe(false)
+    expect(result.find((e) => e.key === 'ENGINE_A')?.primary).toBe(true)
     expect(result.filter((e) => e.primary)).toHaveLength(1)
+  })
+
+  it('does not invent a primary when the server sends no workflow templates', () => {
+    const result = videoEngines(config([
+      row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }),
+    ]))
+
+    expect(result[0].primary).toBe(false)
   })
 
   it('enriches cost/quality/status from api_registry by key, defaulting status to live when absent', () => {
@@ -213,10 +232,11 @@ describe('cascadeEngineOptions', () => {
     expect(cascadeEngineOptions(c)).toEqual([])
   })
 
-  it('marks exactly the GEMINI_OMNI row primary and enriches from api_registry', () => {
+  it('marks the server workflow target primary and enriches it from api_registry', () => {
     const c = config(
       [row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }), row({ key: 'ENGINE_A', label: 'Engine A' })],
       { GEMINI_OMNI: api({ label: 'Gemini Omni Flash', per_shot_cost: 0.5, quality_score: 0.95, status: 'beta' }) },
+      'GEMINI_OMNI',
     )
 
     const result = cascadeEngineOptions(c)

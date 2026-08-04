@@ -72,8 +72,12 @@ CONTROLLER_DELEGATES = {
     "_shot_ctrl": [
         # Public operator API (called from web_server endpoints + tests)
         "generate_keyframe_take",
+        "generate_performance_take",
         "generate_motion_take",
         "regenerate_shot",
+        "restart_shot",
+        "regenerate_with_intent",
+        "resolve_deferred_keyframe_job",
         "diagnose_clip",
         "apply_correction",
         "generate_scene_preview",

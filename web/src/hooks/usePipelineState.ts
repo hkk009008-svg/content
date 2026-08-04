@@ -96,6 +96,7 @@ const PIPELINE_STAGES: PipelineStage[] = RAIL_STAGE_IDS.map((id) => ({
 
 type StageBucket =
   | { kind: 'rail'; id: RailStageId }
+  | { kind: 'route'; id: RailStageId }
   | { kind: 'terminal' }
   | { kind: 'info' }
 
@@ -136,6 +137,10 @@ export const STAGE_RAIL_MAP: Record<string, StageBucket> = {
   BUDGET_EXCEEDED: { kind: 'info' },
   CORRECTING: { kind: 'info' },
   KEYFRAME_DONE: { kind: 'info' },
+  // A durable provider/budget halt must route to Review so its recovery
+  // controls remain visible live. Idle pipeline-state hydration also derives
+  // KEYFRAME_REVIEW from the durable project marker after a reload.
+  KEYFRAME_HALTED: { kind: 'route', id: 'KEYFRAME_REVIEW' },
   KEYFRAME_READY: { kind: 'info' },
   PERFORMANCE_DONE: { kind: 'info' },
   PERFORMANCE_HALTED: { kind: 'info' },
@@ -189,7 +194,7 @@ function railIndexOf(stage: string | null): number {
 }
 
 /** Monotonic forward-only advance across the canonical rail vocabulary.
- *  'info'-bucketed stages never move `activeStage`; a 'rail' stage only
+ *  'info'-bucketed stages never move `activeStage`; a rail/route stage only
  *  wins if its position is STRICTLY ahead of the current one (see the
  *  module comment above STAGE_RAIL_MAP for why side-channel regen calls
  *  during a review gate make this necessary, not just tidy); 'terminal'

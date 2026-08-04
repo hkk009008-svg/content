@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import math
 import os
 import sys
 import warnings
@@ -66,13 +67,77 @@ def build_anthropic_system_blocks(text: str) -> list[dict[str, Any]]:
 @dataclass
 class EnsembleResult:
     """Result of a competitive multi-model generation round."""
-    winner_index: int
+    winner_index: int | None
     winner_content: Any
     scores: list[float]
     reasoning: str
     candidates: list[Any]
     models_used: list[str]
     judge_model: str
+    judgment_status: str = "SELECTED"
+
+
+@dataclass(frozen=True)
+class _JudgeDecision:
+    """Strict, provider-independent result returned by the ensemble judge."""
+
+    scores: list[float]
+    winner: int
+    reasoning: str
+
+
+def _parse_judge_decision(raw: Any, candidate_count: int) -> _JudgeDecision:
+    """Parse and validate the exact judge schema.
+
+    A syntactically valid JSON value is not enough: score count/ranges, winner
+    bounds, and the winner/score relationship are part of the executable
+    contract.  Invalid output remains unjudged rather than silently promoting a
+    roster-position candidate.
+    """
+
+    parsed = json.loads(_strip_json_fences(raw)) if isinstance(raw, str) else raw
+    if not isinstance(parsed, dict):
+        raise ValueError("judge response must be a JSON object")
+
+    required = {"scores", "winner", "reasoning"}
+    if set(parsed) != required:
+        missing = sorted(required - set(parsed))
+        extra = sorted(set(parsed) - required)
+        raise ValueError(
+            f"judge response keys mismatch (missing={missing}, extra={extra})"
+        )
+
+    raw_scores = parsed["scores"]
+    if not isinstance(raw_scores, list) or len(raw_scores) != candidate_count:
+        raise ValueError(
+            f"judge scores must contain exactly {candidate_count} entries"
+        )
+
+    scores: list[float] = []
+    for value in raw_scores:
+        if isinstance(value, bool):
+            raise ValueError("judge scores must be numeric, not boolean")
+        try:
+            score = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("judge scores must be numeric") from exc
+        if not math.isfinite(score) or not 0.0 <= score <= 10.0:
+            raise ValueError("judge scores must be finite values in [0, 10]")
+        scores.append(score)
+
+    winner = parsed["winner"]
+    if isinstance(winner, bool) or not isinstance(winner, int):
+        raise ValueError("judge winner must be an integer")
+    if not 0 <= winner < candidate_count:
+        raise ValueError("judge winner is outside the candidate range")
+    if scores[winner] != max(scores):
+        raise ValueError("judge winner must reference a highest-scored candidate")
+
+    reasoning = parsed["reasoning"]
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        raise ValueError("judge reasoning must be a non-empty string")
+
+    return _JudgeDecision(scores=scores, winner=winner, reasoning=reasoning.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +200,7 @@ class LLMEnsemble:
         # Apply settings overrides
         self.competitive_enabled = True
         self.judge_model_override: str | None = None
+        self.candidate_timeout_s = 120.0
         if settings:
             self.competitive_enabled = settings.get("competitive_generation", True)
             judge_pref = settings.get("quality_judge_llm", "auto")
@@ -206,6 +272,8 @@ class LLMEnsemble:
         judge_model: str | None = None,
         json_mode: bool = False,
         tool_schema: dict | None = None,
+        requirements: list[str] | None = None,
+        rubric: dict[str, str] | None = None,
     ) -> EnsembleResult:
         """Generate outputs from multiple models in parallel, then judge.
 
@@ -229,6 +297,12 @@ class LLMEnsemble:
         tool_schema:
             If provided, Anthropic calls use ``tools=[tool_schema]`` and
             the tool_use result is extracted as the candidate output.
+        requirements:
+            Optional task-specific requirements the judge must apply in
+            addition to the original prompts.
+        rubric:
+            Optional named judging dimensions. Values describe what each
+            dimension means; provider/model identities are never shown.
 
         Notes
         -----
@@ -257,10 +331,28 @@ class LLMEnsemble:
             or _DEFAULT_JUDGE
         )
 
-        # Generate from every (remaining) model in parallel.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(models)) as pool:
-            futures = {
-                pool.submit(
+        if not models:
+            return EnsembleResult(
+                winner_index=None,
+                winner_content=None,
+                scores=[],
+                reasoning="No candidate models were configured.",
+                candidates=[],
+                models_used=[],
+                judge_model=effective_judge,
+                judgment_status="NO_CANDIDATE",
+            )
+
+        # Generate from every model in parallel. Futures are keyed by roster
+        # position, not model ID, so duplicate model entries cannot overwrite
+        # each other. Explicit shutdown(wait=False) prevents the old context-
+        # manager behavior from waiting indefinitely after the ensemble deadline.
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(models))
+        futures: dict[concurrent.futures.Future, int] = {}
+        ordered_candidates: list[Any] = [None] * len(models)
+        try:
+            for index, model in enumerate(models):
+                future = pool.submit(
                     self._generate_single,
                     model,
                     system_prompt,
@@ -268,37 +360,59 @@ class LLMEnsemble:
                     json_mode,
                     tool_schema,
                     operation="llm_ensemble_candidate",
-                ): model
-                for model in models
-            }
-            results: list[tuple[str, Any]] = []
-            for future in concurrent.futures.as_completed(futures, timeout=120):
-                results.append(future.result(timeout=120))
+                )
+                futures[future] = index
 
-        # Preserve original model ordering (as_completed may reorder).
-        result_by_model = {model: output for model, output in results}
-        ordered_models: list[str] = []
-        ordered_candidates: list[Any] = []
-        for m in models:
-            ordered_models.append(m)
-            ordered_candidates.append(result_by_model.get(m))
+            try:
+                for future in concurrent.futures.as_completed(
+                    futures,
+                    timeout=max(
+                        0.001,
+                        float(getattr(self, "candidate_timeout_s", 120.0)),
+                    ),
+                ):
+                    index = futures[future]
+                    _returned_model, output = future.result()
+                    ordered_candidates[index] = output
+            except TimeoutError:
+                print("[LLMEnsemble] Candidate deadline reached; unfinished calls excluded")
+        finally:
+            for future in futures:
+                if not future.done():
+                    future.cancel()
+            pool.shutdown(wait=False, cancel_futures=True)
+
+        ordered_models = list(models)
 
         # Judge the candidates (auto-wins when only one candidate remains).
         winner_index, scores, reasoning = self._judge(
             ordered_candidates,
             ordered_models,
             system_prompt,
+            user_prompt=user_prompt,
+            task_type=task_type,
+            requirements=requirements,
+            rubric=rubric,
             judge_model=effective_judge,
         )
 
+        valid_count = sum(candidate is not None for candidate in ordered_candidates)
+        if winner_index is None:
+            judgment_status = "NO_CANDIDATE" if valid_count == 0 else "UNABLE_TO_JUDGE"
+            winner_content = None
+        else:
+            judgment_status = "SINGLE_CANDIDATE" if valid_count == 1 else "SELECTED"
+            winner_content = ordered_candidates[winner_index]
+
         return EnsembleResult(
             winner_index=winner_index,
-            winner_content=ordered_candidates[winner_index],
+            winner_content=winner_content,
             scores=scores,
             reasoning=reasoning,
             candidates=ordered_candidates,
             models_used=ordered_models,
             judge_model=effective_judge,
+            judgment_status=judgment_status,
         )
 
     # ------------------------------------------------------------------
@@ -477,8 +591,12 @@ class LLMEnsemble:
         candidates: list[Any],
         models: list[str],
         system_prompt: str,
+        user_prompt: str = "",
+        task_type: str = "default",
+        requirements: list[str] | None = None,
+        rubric: dict[str, str] | None = None,
         judge_model: str | None = None,
-    ) -> tuple[int, list[float], str]:
+    ) -> tuple[int | None, list[float], str]:
         """Use a judge model to pick the best candidate.
 
         Returns ``(winner_index, scores, reasoning)``.
@@ -492,33 +610,54 @@ class LLMEnsemble:
 
         if not valid:
             # All candidates failed.
-            return (0, [0.0] * len(candidates), "All candidates failed to generate output.")
+            return (None, [0.0] * len(candidates), "All candidates failed to generate output.")
 
         if len(valid) == 1:
             # Only one succeeded -- auto-win.
             idx = valid[0][0]
             scores = [0.0] * len(candidates)
             scores[idx] = 8.0
-            return (idx, scores, f"Only one candidate ({valid[0][1]}) produced output; auto-win.")
+            return (idx, scores, "Only one candidate produced output; no comparative judgment was needed.")
 
-        # Build the judging prompt.
+        # Build a complete, anonymous judging packet. Candidate provider/model
+        # identities are intentionally excluded to avoid prestige/provider bias.
         candidate_blocks: list[str] = []
-        for seq, (orig_idx, m, content) in enumerate(valid):
-            # Truncate very long outputs for the judge.
-            text = str(content)
-            if len(text) > 6000:
-                text = text[:6000] + "\n... [truncated]"
-            candidate_blocks.append(
-                f"--- Candidate {seq} (model: {m}) ---\n{text}"
-            )
+        for seq, (_orig_idx, _model, content) in enumerate(valid):
+            label = chr(ord("A") + seq) if seq < 26 else str(seq + 1)
+            if isinstance(content, str):
+                text = content
+            else:
+                text = json.dumps(content, ensure_ascii=False, default=str)
+            candidate_blocks.append(f"--- Candidate {label} ---\n{text}")
+
+        effective_requirements = list(requirements or [])
+        effective_rubric = rubric or {
+            "instruction_following": "Satisfies the original request and every explicit constraint.",
+            "technical_accuracy": "Is internally correct, executable, and free of fabricated claims.",
+            "completeness": "Covers the requested task without material omissions.",
+            "cinematic_quality": "Shows coherent, production-appropriate creative judgment.",
+        }
+        judge_packet = {
+            "task_type": task_type,
+            "original_system_prompt": system_prompt,
+            "original_user_prompt": user_prompt,
+            "requirements": effective_requirements,
+            "rubric": effective_rubric,
+            "candidate_labels": [
+                chr(ord("A") + i) if i < 26 else str(i + 1)
+                for i in range(len(valid))
+            ],
+        }
 
         judge_user_prompt = (
-            f"You are a quality judge. Compare these {len(valid)} outputs for a cinema production task.\n"
-            f"The original system prompt was:\n\"\"\"\n{system_prompt}\n\"\"\"\n\n"
+            "Evaluate the anonymous candidates against this complete task packet:\n"
+            + json.dumps(judge_packet, ensure_ascii=False, indent=2)
+            + "\n\n"
             + "\n\n".join(candidate_blocks)
             + "\n\n"
-            "Rate each candidate 0-10 on: creativity, technical accuracy, completeness, style consistency.\n"
-            'Respond with JSON: {"scores": [score1, score2, ...], "winner": <0-indexed among the candidates shown>, "reasoning": "..."}'
+            "Return one aggregate 0-10 score per candidate after applying every rubric dimension.\n"
+            'Respond with exactly this JSON schema and no extra keys: '
+            '{"scores": [score1, score2, ...], "winner": <0-indexed candidate position>, "reasoning": "non-empty explanation"}'
         )
 
         try:
@@ -551,51 +690,38 @@ class LLMEnsemble:
                 return raw
             # ---------------------------------------------------------------------
 
-            # ≤1-retry loop for JSONDecodeError only.
-            # The outer broad except (below) still catches all other failures
-            # (wrong-shape result, missing keys, TypeError, IndexError, etc.).
+            # Retry once for either invalid JSON or a schema-contract failure.
             raw = _call_judge(judge_user_prompt)
             try:
-                parsed = json.loads(_strip_json_fences(raw)) if isinstance(raw, str) else raw
-            except json.JSONDecodeError:
-                # Attempt 1 failed to parse — retry once with a correction appended.
+                decision = _parse_judge_decision(raw, len(valid))
+            except (json.JSONDecodeError, ValueError, TypeError) as first_error:
                 correction_prompt = (
                     judge_user_prompt
-                    + "\n\nYour previous response was not valid JSON. "
-                    "Output ONLY a valid JSON object — no markdown, no prose."
+                    + "\n\nYour previous response violated the JSON contract: "
+                    + str(first_error)
+                    + ". Output ONLY a conforming JSON object."
                 )
                 raw = _call_judge(correction_prompt)
-                # Let JSONDecodeError on attempt 2 propagate to the outer except
-                # (→ first-valid fallback), preserving the existing contract.
-                parsed = json.loads(_strip_json_fences(raw)) if isinstance(raw, str) else raw
-
-            judge_scores: list[float] = [float(s) for s in parsed["scores"]]
-            winner_among_valid: int = int(parsed["winner"])
-            reasoning: str = parsed.get("reasoning", "")
+                decision = _parse_judge_decision(raw, len(valid))
 
             # Map the winner index back to the original candidate list.
-            winner_original_idx = valid[winner_among_valid][0]
+            winner_original_idx = valid[decision.winner][0]
 
             # Build full scores list (0.0 for failed candidates).
             full_scores = [0.0] * len(candidates)
             for seq, (orig_idx, _, _) in enumerate(valid):
-                if seq < len(judge_scores):
-                    full_scores[orig_idx] = judge_scores[seq]
+                full_scores[orig_idx] = decision.scores[seq]
 
             print(
                 f"[Ensemble] Judge: {judge_model} picked candidate "
                 f"{winner_original_idx} with score {full_scores[winner_original_idx]:.2f}"
             )
-            return (winner_original_idx, full_scores, reasoning)
+            return (winner_original_idx, full_scores, decision.reasoning)
 
         except Exception as exc:  # noqa: BLE001
-            # Judging failed -- fall back to first valid candidate.
-            # NOTE: This broad except is INTENTIONALLY preserved to absorb
-            # wrong-shape results (list/str instead of dict), missing "scores"/
-            # "winner" keys, TypeErrors, IndexErrors, etc. — the DP-01
-            # fold-forward from chief_director.py's Lane V CRITICAL finding.
+            # A judge failure is not evidence that roster position zero is best.
+            # Preserve the inability to decide so callers can route to a manual or
+            # deterministic fallback explicitly.
             print(f"[LLMEnsemble] Judging failed: {exc}")
-            idx = valid[0][0]
             scores = [0.0] * len(candidates)
-            scores[idx] = 5.0
-            return (idx, scores, f"Judging failed ({exc}); defaulting to first valid candidate.")
+            return (None, scores, f"Unable to judge candidates: {exc}")

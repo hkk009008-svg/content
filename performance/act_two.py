@@ -56,7 +56,7 @@ import os
 from typing import Optional
 
 from config.settings import settings
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 from performance._poll import poll_task
 
 
@@ -219,7 +219,7 @@ def generate_act_two_performance(
         if not out_url:
             print("   [ACT-TWO] SUCCEEDED but no output URL")
             return None
-        if not safe_download(out_url, output_mp4):
+        if not safe_download(out_url, output_mp4, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact):
             return None
         _cost_log("performance_capture", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Act-Two: {output_mp4}")
@@ -349,7 +349,7 @@ def _raw_rest_call(
         out_url = (final.get("output") or [None])[0]
         if not out_url:
             return None
-        if not safe_download(out_url, output_mp4):
+        if not safe_download(out_url, output_mp4, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact):
             return None
         _cost_log("performance_capture", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Act-Two (REST): {output_mp4}")

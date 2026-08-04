@@ -88,18 +88,25 @@ class TestCascadeRetryLogic:
     def test_default_cascade_order_matches(self):
         """Pin the safe default order seed; executable policy still filters it."""
         cascade = self._default_cascade()
-        assert len(cascade) == 9, "Safe default cascade should have 9 APIs"
-        # Known-broken Gemini Omni and retired fal Sora 2 are not seed truth.
+        assert cascade == [
+            "VEO_NATIVE",
+            "SEEDANCE",
+            "KLING_3_0",
+            "RUNWAY_GEN4",
+            "LTX",
+            "VEO",
+        ]
+        # Explicit-only and retired engines are not automatic seed truth.
         assert "GEMINI_OMNI" not in cascade
         assert "SORA_2" not in cascade
-        # VEO_NATIVE leads, then SEEDANCE; KLING_3_0
-        # (fal v3 Pro) outranks the legacy kling-v1-6 native route.
+        assert "SORA_NATIVE" not in cascade
+        assert "RUNWAY" not in cascade
+        assert "RUNWAY_GEN4" in cascade
+        assert "KLING_NATIVE" not in cascade
+        # VEO_NATIVE leads, then SEEDANCE; KLING_3_0 is the current Kling route.
         assert cascade[0] == "VEO_NATIVE", f"head should be VEO_NATIVE, got {cascade[0]}"
         assert cascade[1] == "SEEDANCE", f"second should be SEEDANCE, got {cascade[1]}"
         assert cascade[2] == "KLING_3_0", f"third should be KLING_3_0, got {cascade[2]}"
-        assert cascade.index("KLING_3_0") < cascade.index("KLING_NATIVE"), (
-            "fal Kling v3 Pro must outrank the legacy kling-v1-6 native route"
-        )
 
     def test_attempted_apis_prevents_retry(self):
         """APIs in attempted_apis set should be skipped."""
@@ -228,9 +235,8 @@ class TestCascadeIntegration:
         """Portrait/medium primaries are GEMINI_OMNI since the 2026-07-18
         google-first-overhaul (WS2) — Gemini Omni Flash is Google-first primary
         for every shot type. The fal Kling v3 Pro route (2026-07-11 promotion)
-        stays the first non-Google fallback, with the legacy kling-v1-6 native
-        route right behind it — the native client silently ran kling-v1-6 for
-        two years because no test pinned the routing; this pin closes that hole."""
+        stays the first non-Google fallback. The deprecated kling-v1-6 native
+        adapter is quarantined from automatic routing."""
         for shot_type in ("portrait", "medium"):
             template = WORKFLOW_TEMPLATES[shot_type]
             assert template["target_api"] == "GEMINI_OMNI", (
@@ -245,7 +251,4 @@ class TestCascadeIntegration:
                 f"{shot_type} second fallback should be the fal v3 Pro route, "
                 f"got {template['video_fallbacks']}"
             )
-            assert template["video_fallbacks"][2] == "KLING_NATIVE", (
-                f"{shot_type} third fallback should be the proven legacy "
-                f"KLING_NATIVE route, got {template['video_fallbacks']}"
-            )
+            assert "KLING_NATIVE" not in template["video_fallbacks"]

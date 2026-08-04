@@ -47,13 +47,11 @@ steps:                     25     # Finer skin texture, pore detail, iris sharpn
 sampler:                   dpmpp_2m
 scheduler:                 sgm_uniform
 pag_scale:                 3.0    # Sharpen face details without oversaturation
-controlnet_depth_strength: 0.35
-ip_adapter_weight:         0.25   # Minimal style transfer
 denoise_default:           0.25   # Tighter temporal consistency
 target_api:                GEMINI_OMNI  # Google-first primary (WS2); native audio
-video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE']
+video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'SEEDANCE']
                            # KLING_3_0 = fal Kling v3 Pro (#11 AA i2v arena), `elements` identity binding
-                           # KLING_NATIVE = legacy kling-v1-6, proven identity fallback
+                           # KLING_NATIVE = deprecated explicit-only compatibility
 ```
 
 ### Medium (Waist-up balanced)
@@ -66,11 +64,9 @@ steps:                     20
 sampler:                   dpmpp_2m
 scheduler:                 sgm_uniform
 pag_scale:                 3.0    # Enhance mid-range detail (clothing, background)
-controlnet_depth_strength: 0.40
-ip_adapter_weight:         0.30
 denoise_default:           0.35
 target_api:                GEMINI_OMNI  # Google-first primary (WS2)
-video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'KLING_NATIVE', 'RUNWAY_GEN4', 'SEEDANCE', 'LTX']
+video_fallbacks:           ['VEO_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'SEEDANCE', 'LTX']
 ```
 
 ### Wide (Establishing shot, environment-primary)
@@ -83,8 +79,6 @@ steps:                     20
 sampler:                   dpmpp_2m
 scheduler:                 sgm_uniform
 pag_scale:                 2.5    # Lower — avoid over-sharpening
-controlnet_depth_strength: 0.50   # Strongest spatial lock
-ip_adapter_weight:         0.35
 denoise_default:           0.45
 target_api:                GEMINI_OMNI  # Google-first primary (WS2)
 video_fallbacks:           ['VEO_NATIVE', 'LTX', 'KLING_3_0', 'RUNWAY_GEN4']
@@ -101,13 +95,11 @@ steps:                     20
 sampler:                   dpmpp_2m
 scheduler:                 sgm_uniform
 pag_scale:                 2.0    # Lower — motion needs softness not crispness
-controlnet_depth_strength: 0.30   # Light spatial guidance
-ip_adapter_weight:         0.25
 denoise_default:           0.40
 target_api:                GEMINI_OMNI  # Google-first primary (WS2)
-video_fallbacks:           ['VEO_NATIVE', 'SEEDANCE', 'SORA_NATIVE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']
+video_fallbacks:           ['VEO_NATIVE', 'SEEDANCE', 'KLING_3_0', 'RUNWAY_GEN4', 'LTX']
                            # SEEDANCE (#1 AA i2v arena 2026-07; multi-ref ≤9 images binds multi-character) demoted to 2nd fallback
-                           # SORA_NATIVE stays 3rd until the 2026-09-24 sunset, then errors fast and cascades on
+                           # SORA_NATIVE is deprecated explicit-only compatibility, never an automatic fallback
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -120,8 +112,6 @@ steps:                     25     # Maximum — environment benefits most
 sampler:                   dpmpp_2m
 scheduler:                 sgm_uniform
 pag_scale:                 3.5    # Maximum detail sharpening
-controlnet_depth_strength: 0.55   # Strong spatial lock
-ip_adapter_weight:         0.40   # Max style transfer
 denoise_default:           0.55
 target_api:                GEMINI_OMNI  # Google-first primary (WS2)
 video_fallbacks:           ['VEO_NATIVE', 'LTX', 'KLING_3_0']
@@ -129,15 +119,17 @@ video_fallbacks:           ['VEO_NATIVE', 'LTX', 'KLING_3_0']
 ```
 
 **Dialogue shots** are not a ComfyUI template — they borrow portrait/medium for
-image gen, then route to a video API with native lipsync. The video cascade is
-`GEMINI_OMNI → VEO_NATIVE → Kling Lip Sync → Omnihuman`, data-driven via
-`PURPOSE_API_RANKING` / `_resolve_dialogue_routing` in
-`domain/scene_decomposer.py`.
+image gen, then route to the first automatically admitted native-audio video
+candidate in `PURPOSE_API_RANKING` (currently `GEMINI_OMNI`). Overlay mode keeps
+the shot-template fallbacks; any result not proven to contain embedded dialogue
+receives the mandatory F1b lip-sync cascade. Kling Lip Sync and Omnihuman are
+post-generation lip-sync providers, not video-routing fallbacks.
 
 **Runtime availability gate**: `GEMINI_OMNI` needs `GOOGLE_API_KEY` or
 `GEMINI_API_KEY`. Without either it is runtime-unavailable and every cascade
-above effectively starts at `VEO_NATIVE` — so a missing key silently changes
-the primary engine for the whole run rather than failing loud
+above effectively starts at `VEO_NATIVE`; that fallback needs either a
+`GOOGLE_API_KEY` Developer-API path or `GOOGLE_CLOUD_PROJECT` plus working ADC
+for Vertex. Only Vertex Veo supports native audio
 (`domain/video_engine_policy.py`, `domain/provider_catalog.py`).
 
 ---
@@ -209,7 +201,7 @@ in `cost_tracker.py`'s `API_COST_USD` — not a hand-maintained `$`-tier guess:
 |--------|---------------|------|
 | VEO_NATIVE | 0.30 | cheapest video engine — and the shared first fallback everywhere |
 | LTX | 0.36 | **floor estimate**: fal ltx-2.3 $0.06/s audio-off @1080p × 6s *minimum*. The dispatcher's default is 8s, so this flat figure under-records ~33% on default shots |
-| KLING_NATIVE | 0.50 | legacy v1.6; pre-v3 estimate |
+| KLING_NATIVE | 0.50 | deprecated explicit-only v1.6; pre-v3 estimate |
 | RUNWAY_GEN4 | 0.50 | 10s fixed |
 | KLING_3_0 | 0.56 | fal kling-video/v3/pro $0.112/s audio-off |
 | GEMINI_OMNI | 0.56 | $0.112/s × ~5s — **web-verified, not repo-measured** (see caveat below) |
@@ -250,7 +242,7 @@ network call.
 | **GEMINI_OMNI** | *prompt-inferred* — **no structured duration kwarg** | Encode the intent in the prompt text. Nothing validates it, and the flat cost estimate assumes ~5s (see the cost caveat above) |
 | VEO_NATIVE | 4s / 6s / 8s | Snaps to nearest valid; `"5s"` is server-rejected (INVALID_ARGUMENT) and clamped 5 → 6 (`veo_native._clamp_image_to_video_duration`) |
 | LTX | 6 / 8 / 10 | **Raises before any network call** on anything else (`LTXVideoAPI.DURATION_SECONDS`; mirrored as `phase_c_ffmpeg._LTX_DURATION_ENUM_S`, drift-pinned by `tests/unit/test_ltx_native.py`). Use `nearest_supported_duration()` to snap-up first |
-| SORA_NATIVE | 4 / 8 / 12 / 16 / 20 | Invalid values silently default to 4 — validate before submitting |
+| SORA_NATIVE | 4 / 8 / 12 | Explicit-only still-image reference; invalid duration or any driving video is rejected before a provider call |
 | SEEDANCE | 4–15s ints | Per shot type via `SEEDANCE_DURATIONS`: action/wide/landscape 8s, portrait/medium 4s |
 | KLING_3_0 / KLING_NATIVE | 5s optimal | Longer durations increase temporal drift |
 | RUNWAY_GEN4 | 10s fixed | No variable length |

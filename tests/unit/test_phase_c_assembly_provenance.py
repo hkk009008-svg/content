@@ -24,6 +24,24 @@ import pytest
 import phase_c_assembly as pca
 
 
+def test_generated_jpeg_download_is_bounded_mime_checked_and_validated(
+    tmp_path, monkeypatch
+):
+    captured = {}
+
+    def _safe_download(url, destination, **kwargs):
+        captured.update(url=url, destination=destination, **kwargs)
+        return destination
+
+    monkeypatch.setattr(pca, "safe_download", _safe_download)
+    destination = str(tmp_path / "out.jpg")
+
+    assert pca._download_generated_jpeg("https://cdn.example/out.jpg", destination) == destination
+    assert captured["max_bytes"] == 64 * 1024 * 1024
+    assert captured["allowed_content_types"] == ("image/jpeg",)
+    assert callable(captured["content_validator"])
+
+
 @pytest.fixture
 def stub_fal(monkeypatch):
     """Stub the lazily-imported `fal_client` + the image download so
@@ -36,11 +54,12 @@ def stub_fal(monkeypatch):
     # every other field) rather than setattr-ing a field.
     monkeypatch.setattr(pca, "settings", dataclasses.replace(pca.settings, fal_key="test-key"))
 
-    def _fake_retrieve(url, filename):
+    def _fake_download(url, filename):
         with open(filename, "wb") as fh:
             fh.write(b"jpeg-bytes")
+        return filename
 
-    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+    monkeypatch.setattr(pca, "_download_generated_jpeg", _fake_download)
     return fake
 
 
@@ -86,11 +105,6 @@ class TestFalFallbackProvenance:
         # enough bytes → POLLINATIONS.
         stub_fal.subscribe.side_effect = RuntimeError("fal down")
 
-        class _Resp:
-            def read(self_inner):
-                return b"x" * 6000  # > 5000-byte floor in _fal_flux_fallback
-
-        monkeypatch.setattr(urllib.request, "urlopen", lambda url: _Resp())
         out = str(tmp_path / "out.jpg")
 
         res = pca._fal_flux_fallback("a prompt", out, seed=7, character_image=None)
@@ -108,15 +122,13 @@ class TestFalFallbackProvenance:
         stub_fal.subscribe.side_effect = RuntimeError("fal down")
         captured_urls = []
 
-        class _Resp:
-            def read(self):
-                return b"x" * 6000
-
-        def _fake_urlopen(url):
+        def _fake_download(url, filename):
             captured_urls.append(url)
-            return _Resp()
+            with open(filename, "wb") as fh:
+                fh.write(b"jpeg-bytes")
+            return filename
 
-        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+        monkeypatch.setattr(pca, "_download_generated_jpeg", _fake_download)
 
         res = pca._fal_flux_fallback(
             "a prompt",
@@ -172,11 +184,12 @@ class TestKontextFailureProvenance:
             dataclasses.replace(pca.settings, fal_key="test-key"),
         )
 
-        def _fake_retrieve(url, filename):
+        def _fake_download(url, filename):
             with open(filename, "wb") as fh:
                 fh.write(b"jpeg-bytes")
+            return filename
 
-        monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+        monkeypatch.setattr(pca, "_download_generated_jpeg", _fake_download)
 
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
@@ -330,25 +343,17 @@ class TestGeminiImagePriorityZero:
         """A failing identity check does NOT return GEMINI_IMAGE — it falls
         through to the pod (PRIORITY-1, mocked queue_prompt reached) and
         appends one logs/gemini_image_arc_comparison.jsonl line."""
-        from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path, _minimal_pulid_workflow
+        from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path
 
         stub_validator["passed"] = False
         stub_validator["score"] = 0.31
 
-        # Reuse the established pod-dispatch stub (pulid.json + queue_prompt
-        # capture) so the pod path is reached exactly like the portrait suite
-        # exercises it — no real GPU/pod/network. Runs AFTER
+        # Reuse the established real-pulid.json pod-dispatch stub so the pod
+        # path is reached exactly like the portrait suite exercises it — no
+        # real GPU/pod/network. Runs AFTER
         # gemini_enabled_settings, so its dataclasses.replace(pca.settings, ...)
         # base already carries google_api_key="test-google-key" forward.
         captured_workflow = _stub_comfyui_path(monkeypatch, tmp_path)
-        # _stub_comfyui_path's minimal workflow has no node "93" (the PuLID
-        # LoadImage node) because its own tests never pass character_image.
-        # This test DOES (the Gemini gate requires it), which walks the
-        # `workflow["93"]["inputs"]["image"] = ...` line (phase_c_assembly.py)
-        # — extend the fixture workflow with that one extra node.
-        extended_workflow = _minimal_pulid_workflow()
-        extended_workflow["93"] = {"inputs": {"image": ""}, "class_type": "LoadImage"}
-        (tmp_path / "pulid.json").write_text(json.dumps(extended_workflow))
 
         monkeypatch.chdir(tmp_path)  # logs/gemini_image_arc_comparison.jsonl is CWD-relative
 
@@ -400,10 +405,11 @@ class TestGeminiImagePriorityZero:
 
         import urllib.request
 
-        def _fake_retrieve(url, filename):
+        def _fake_download(url, filename):
             with open(filename, "wb") as fh:
                 fh.write(b"jpeg-bytes")
-        monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+            return filename
+        monkeypatch.setattr(pca, "_download_generated_jpeg", _fake_download)
 
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
@@ -543,6 +549,67 @@ class TestGeminiImagePriorityZero:
             f"{res.billed_rejects!r}"
         )
 
+    def test_gemini_billed_reject_survives_validator_exception(
+        self, gemini_enabled_settings, stub_gemini_client, stub_fal, tmp_path, monkeypatch
+    ):
+        """A local validator crash happens after Gemini has generated and
+        billed the frame, so fallback attribution must retain that spend."""
+        validator = MagicMock()
+        validator.validate_image.side_effect = RuntimeError("validator crashed")
+        monkeypatch.setattr(
+            "phase_c_vision._get_shared_validator",
+            lambda: validator,
+        )
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url=""),
+        )
+
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+
+        res = pca.generate_ai_broll(
+            "a prompt", out, character_image=str(char),
+            ctx=gemini_enabled_settings,
+        )
+
+        assert res.api_name == "FLUX_KONTEXT"
+        assert res.billed_rejects == ("GEMINI_IMAGE",)
+
+    def test_gemini_billed_reject_survives_total_fallback_failure(
+        self, gemini_enabled_settings, stub_gemini_client, stub_fal, tmp_path, monkeypatch
+    ):
+        """No winning result must not erase spend incurred before all
+        fallback providers fail."""
+        validator = MagicMock()
+        validator.validate_image.side_effect = RuntimeError("validator crashed")
+        monkeypatch.setattr(
+            "phase_c_vision._get_shared_validator",
+            lambda: validator,
+        )
+        stub_fal.subscribe.side_effect = RuntimeError("fal unavailable")
+        monkeypatch.setattr(pca, "_download_generated_jpeg", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, google_api_key="test-google-key",
+                                comfyui_server_url=""),
+        )
+
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        recovery = {}
+        res = pca.generate_ai_broll(
+            "a prompt", str(tmp_path / "out.jpg"),
+            character_image=str(char),
+            ctx=gemini_enabled_settings,
+            _recovery_out=recovery,
+        )
+
+        assert res is None
+        assert recovery == {"_billed_rejects": ("GEMINI_IMAGE",)}
+
     def test_gemini_success_never_populates_billed_rejects(
         self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch
     ):
@@ -635,7 +702,7 @@ class TestGeminiImagePriorityZero:
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
         ctrl._take_output_path = MagicMock(return_value=img_path)
         ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
-        ctrl._mutate_shot = MagicMock()
+        ctrl._mutate_shot = lambda shot_id, mutator: mutator(scene, shot).value
 
         result = ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
 

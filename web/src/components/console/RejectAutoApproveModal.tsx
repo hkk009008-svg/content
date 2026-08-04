@@ -12,11 +12,12 @@
  *
  * Submit is disabled until the reason textarea is non-empty.
  *
- * Follows the existing modal pattern in the project (no shared Modal component exists;
- * the inline overlay approach mirrors GenerationPanel and other overlay surfaces).
+ * Uses the shared Dialog primitive for initial focus, trapped keyboard focus,
+ * Escape/overlay dismissal, scroll locking, and opener-focus restoration.
  */
 
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
+import { Dialog } from '../ui'
 
 interface Props {
   projectId: string
@@ -48,6 +49,8 @@ export function RejectAutoApproveModal({
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const reasonId = useId()
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
 
   if (!isOpen) return null
 
@@ -57,7 +60,7 @@ export function RejectAutoApproveModal({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${apiBase}/projects/${projectId}/shots/${shotId}/reject-auto-approve`, {
+      const res = await fetch(`${apiBase}/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/reject-auto-approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gate, reason: trimmed }),
@@ -70,63 +73,66 @@ export function RejectAutoApproveModal({
       onSubmit(trimmed)
       setReason('')
       onClose()
-    } catch (err) {
+    } catch {
       setError('Network error — please try again.')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') onClose()
-  }
-
   return (
-    /* Overlay */
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
-      onClick={onClose}
-      onKeyDown={handleKeyDown}
-      role="dialog"
-      aria-modal="true"
+    <Dialog
+      isOpen={isOpen}
+      onClose={onClose}
+      closeOnEscape={!submitting}
+      closeOnOverlayClick={!submitting}
       aria-label={`Reject auto-approve decision for ${GATE_LABELS[gate] ?? gate} gate`}
+      initialFocusRef={reasonRef}
+      className="max-w-md"
     >
-      {/* Dialog panel — stops click from bubbling to overlay */}
-      <div
-        className="relative w-full max-w-md rounded-lg border border-line bg-app p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="mb-5">
-          <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-1">
-            Override Auto-Approve
-          </div>
-          <h2 className="text-lg font-semibold text-tx">
-            Reject {GATE_LABELS[gate] ?? gate} Gate Decision
-          </h2>
-          <p className="mt-2 text-sm text-mut">
-            Provide a reason for overriding the auto-approve decision. This will be
-            recorded in the shot's audit log as a user override.
-          </p>
+      {/* Header */}
+      <div className="mb-5">
+        <div className="text-xs font-semibold uppercase tracking-wide text-mut mb-1">
+          Override Auto-Approve
         </div>
+        <h2 className="text-lg font-semibold text-tx">
+          Reject {GATE_LABELS[gate] ?? gate} Gate Decision
+        </h2>
+        <p className="mt-2 text-sm text-mut">
+          Provide a reason for overriding the auto-approve decision. This will be
+          recorded in the shot's audit log as a user override.
+        </p>
+      </div>
 
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          void handleSubmit()
+        }}
+      >
         {/* Reason textarea */}
         <div className="mb-4">
-          <label className="block text-xs font-semibold uppercase tracking-wide text-mut mb-2">
+          <label
+            htmlFor={reasonId}
+            className="block text-xs font-semibold uppercase tracking-wide text-mut mb-2"
+          >
             Reason <span className="text-fail">*</span>
           </label>
           <textarea
+            ref={reasonRef}
+            id={reasonId}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={4}
+            required
+            aria-required="true"
             placeholder="Describe why this auto-approve decision should be rejected…"
             className="w-full rounded border border-line bg-panel px-3 py-2 text-sm text-tx placeholder:text-mut focus:border-acc focus:outline-none"
-            autoFocus
           />
         </div>
 
         {error && (
-          <div className="mb-4 rounded border border-fail/40 bg-fail/10 px-3 py-2 text-sm text-fail">
+          <div role="alert" className="mb-4 rounded border border-fail/40 bg-fail/10 px-3 py-2 text-sm text-fail">
             {error}
           </div>
         )}
@@ -134,6 +140,7 @@ export function RejectAutoApproveModal({
         {/* Action buttons */}
         <div className="flex justify-end gap-3">
           <button
+            type="button"
             onClick={onClose}
             disabled={submitting}
             className="rounded border border-line px-4 py-2 text-sm text-mut hover:bg-panel disabled:opacity-40"
@@ -141,15 +148,15 @@ export function RejectAutoApproveModal({
             Cancel
           </button>
           <button
-            onClick={handleSubmit}
+            type="submit"
             disabled={!reason.trim() || submitting}
             className="rounded border border-fail/50 bg-fail/10 px-4 py-2 text-sm text-fail hover:bg-fail/20 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? 'Submitting…' : 'Reject Decision'}
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </Dialog>
   )
 }
 

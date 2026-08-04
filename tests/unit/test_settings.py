@@ -10,7 +10,14 @@ tests lock down the fields added to absorb three pre-existing bypasses:
 """
 from __future__ import annotations
 
-from config.settings import Settings
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from config.settings import ConfigurationError, Settings
 
 
 class TestNewSettingsFields:
@@ -47,6 +54,56 @@ class TestNewSettingsFields:
         s = Settings.from_env()
         assert s.motion_gate_samples == 16
         assert isinstance(s.motion_gate_samples, int)
+
+    @pytest.mark.parametrize("value", ["not-an-int", "0", "241"])
+    def test_invalid_motion_gate_samples_is_named_configuration_error(
+        self, monkeypatch, value
+    ):
+        monkeypatch.setenv("MOTION_GATE_SAMPLES", value)
+        with pytest.raises(ConfigurationError, match="MOTION_GATE_SAMPLES"):
+            Settings.from_env()
+
+    def test_comfyui_is_unconfigured_when_env_is_absent(self, monkeypatch):
+        monkeypatch.delenv("COMFYUI_SERVER_URL", raising=False)
+        assert Settings.from_env().comfyui_server_url is None
+
+    @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.5", "content.local"])
+    def test_unauthenticated_remote_bind_is_rejected(self, monkeypatch, host):
+        monkeypatch.setenv("WEB_BIND_HOST", host)
+        with pytest.raises(ConfigurationError, match="loopback"):
+            Settings.from_env()
+
+    @pytest.mark.parametrize("host", ["127.0.0.1", "::1", "localhost"])
+    def test_loopback_bind_is_accepted(self, monkeypatch, host):
+        monkeypatch.setenv("WEB_BIND_HOST", host)
+        assert Settings.from_env().web_bind_host == host
+
+    def test_wildcard_cors_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("WEB_CORS_ORIGINS", "*")
+        with pytest.raises(ConfigurationError, match="WEB_CORS_ORIGINS"):
+            Settings.from_env()
+
+
+def test_process_environment_outranks_repository_dotenv():
+    """Deployment-injected values must not be replaced while importing settings."""
+
+    env = os.environ.copy()
+    env["OPENAI_API_KEY"] = "deployment-authority-value"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from config.settings import settings; print(settings.openai_api_key)",
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "deployment-authority-value"
 
 
 class TestSunoTokenAlias:

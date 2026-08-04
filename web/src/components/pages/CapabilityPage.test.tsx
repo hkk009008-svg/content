@@ -52,7 +52,7 @@ const readyScorecard: CapabilityScorecard = {
     { key: 'identity', label: 'Identity · GhostFaceNet', value: 0.82, bar: 0.6, pass: true, n_measured: 3 },
     { key: 'coherence', label: 'Coherence', value: 0.7, bar: 0.6, pass: true, n_measured: 3 },
     { key: 'motion', label: 'Motion fidelity', value: 0.55, bar: null, pass: true, n_measured: 2 },
-    { key: 'lipsync', label: 'Lipsync · SyncNet', value: null, bar: 0.65, pass: null, n_measured: 0 },
+    { key: 'lipsync', label: 'Lipsync evidence', value: null, bar: 0.65, pass: false, n_measured: 0, n_applicable: 1, n_unknown: 1, n_failed: 0 },
   ],
   routing: { first_try: 2, fallback: 1, silent_fallback: 0 },
   gates: {
@@ -89,7 +89,7 @@ const readyScorecard: CapabilityScorecard = {
     },
   ],
   per_shot: [
-    { shot_id: 'sc1_sh1', identity: 0.82, coherence: 0.7, motion: 0.55, lipsync: null, engine: 'KLING_NATIVE' },
+    { shot_id: 'sc1_sh1', identity: 0.82, coherence: 0.7, motion: 0.55, lipsync: null, lipsync_state: 'UNKNOWN', lipsync_applicable: true, engine: 'KLING_NATIVE' },
   ],
   provenance: [
     { shot_id: 'sc1_sh1', engine: 'KLING_NATIVE', attempts: ['KLING_NATIVE'], fallback: false },
@@ -159,6 +159,17 @@ describe('CapabilityPage', () => {
       expect(screen.getByText('Identity · GhostFaceNet')).toBeInTheDocument()
     })
     expect(screen.queryByText(/ArcFace/)).toBeNull()
+  })
+
+  it('renders dialogue UNKNOWN separately from non-dialogue N/A', async () => {
+    mockFetchOnce(readyScorecard)
+    render(<CapabilityPage project={project} />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('UNKNOWN').length).toBeGreaterThan(0)
+    })
+    expect(screen.getByText(/manual review required/i)).toBeInTheDocument()
+    expect(screen.queryByText(/gate needs recal/i)).toBeNull()
   })
 
   it('renders a component that claims wired but failed consumer/test validation as unavailable, with its reason, never as live', async () => {

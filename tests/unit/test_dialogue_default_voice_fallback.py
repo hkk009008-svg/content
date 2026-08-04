@@ -8,7 +8,7 @@ in domain/language_defaults.py -- the project's OWN "Default male voice" /
 "Default female voice" pickers in VoiceSection.tsx were stored in
 global_settings but never read here, even though they use the identical
 field names (a same-name-different-source confusion the audit flagged
-alongside tts_provider and lipsync_engine_priority).
+alongside the active TTS provider settings).
 
 Fallback chain under test (see audio/dialogue.py generate_dialogue_voiceover):
   1. Any other character's assigned voice in this project      (VG-B1, unchanged)

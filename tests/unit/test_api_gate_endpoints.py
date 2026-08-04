@@ -81,6 +81,36 @@ class TestApiGenerateKeyframe:
             assert resp.status_code == 404
 
 
+class TestApiResolveKeyframeRecovery:
+    def test_requires_exact_explicit_confirmation(self, client):
+        resp = client.post(
+            "/api/projects/proj_1/shots/shot_1/keyframes/recovery/resolve",
+            json={"confirmed": True, "force": True},
+        )
+        assert resp.status_code == 400
+        assert "confirmation" in resp.json["error"].lower()
+
+    def test_resolves_through_pipeline(self, client):
+        mock_pipeline = MagicMock()
+        mock_pipeline.resolve_deferred_keyframe_job.return_value = {
+            "success": True,
+            "resolved": True,
+        }
+        project = _fake_project()
+        shot = project["scenes"][0]["shots"][0]
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server._locate_shot", return_value=(project["scenes"][0], shot)), \
+             patch("web_server._get_stage_pipeline", return_value=mock_pipeline):
+            resp = client.post(
+                "/api/projects/proj_1/shots/shot_1/keyframes/recovery/resolve",
+                json={"confirmed": True},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json["resolved"] is True
+        mock_pipeline.resolve_deferred_keyframe_job.assert_called_once_with("shot_1")
+
+
 class TestApiGenerateMotion:
     """Tests for api_generate_motion (trigger, concurrency, budget guards)."""
 

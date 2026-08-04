@@ -98,7 +98,7 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
     """Spend from FLUX_KONTEXT multi-angle calls must land on a caller-supplied tracker.
 
     Passes cost_tracker=shared_tracker (the injection seam the fix adds) and patches
-    fal_client + urlretrieve so the function reaches the cost-recording block without
+    fal_client + safe_download so the function reaches the cost-recording block without
     real network I/O. The shared CostTracker must accumulate nonzero spend.
     """
     from cost_tracker import CostTracker, API_COST_USD
@@ -149,8 +149,8 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
             MagicMock(fal_key="fake-key"),
         ),
         patch(
-            "urllib.request.urlretrieve",
-            return_value=(str(tmp_path / "angle.jpg"), {}),
+            "domain.character_manager.safe_download",
+            side_effect=lambda _url, out, **_kwargs: out,
         ),
     ):
         from domain.character_manager import _generate_multi_angle_refs

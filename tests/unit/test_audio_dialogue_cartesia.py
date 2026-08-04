@@ -18,6 +18,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _offline_audio_publication(monkeypatch):
+    """Keep provider-contract tests offline while retaining atomic file writes."""
+    import audio.dialogue as dialogue
+    from performance._net import atomic_publish_bytes as real_publish
+
+    def publish(payload, destination, **kwargs):
+        kwargs["content_type"] = "audio/mpeg"
+        kwargs["content_validator"] = lambda _path: None
+        return real_publish(payload, destination, **kwargs)
+
+    monkeypatch.setattr(dialogue, "atomic_publish_bytes", publish)
+    monkeypatch.setattr(dialogue, "validate_audio_artifact", lambda _path: None)
+
+
 # ---------------------------------------------------------------------------
 # generate_cartesia — success path
 # ---------------------------------------------------------------------------
@@ -289,6 +304,26 @@ class TestGenerateCartesiaFailures:
             result = generate_cartesia("hi", "vid", output, language="en")
 
         assert result is False
+
+    def test_invalid_audio_publication_returns_false(self, tmp_path, monkeypatch):
+        from audio.dialogue import generate_cartesia
+        import audio.dialogue as dialogue
+
+        output = str(tmp_path / "out.mp3")
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        response.content = b"provider-error"
+        response.headers = {"content-type": "text/html"}
+        mock_settings = MagicMock(cartesia_api_key="sk_test")
+        monkeypatch.setattr(dialogue, "atomic_publish_bytes", lambda *a, **k: None)
+
+        with patch("audio.dialogue.requests.post", return_value=response), patch(
+            "audio.dialogue.settings", mock_settings
+        ):
+            result = generate_cartesia("hi", "vid", output, language="en")
+
+        assert result is False
+        assert not os.path.exists(output)
 
 
 # ---------------------------------------------------------------------------
@@ -860,8 +895,12 @@ class TestDialogueModeSkipsOnCartesiaOverride:
         ]
         characters = [{"id": "c1", "voice_id": "v1"}, {"id": "c2", "voice_id": "v2"}]
 
+        def save_audio(_audio, path):
+            with open(path, "wb") as handle:
+                handle.write(b"fake_audio")
+
         with patch("audio.dialogue.client") as mock_client, \
-             patch("audio.dialogue.save") as mock_save:
+             patch("audio.dialogue.save", side_effect=save_audio) as mock_save:
             mock_client.text_to_dialogue.convert.return_value = b"fake_audio"
             result = _try_dialogue_mode(dialogue_lines, characters, "out.mp3", ctx=ctx)
 

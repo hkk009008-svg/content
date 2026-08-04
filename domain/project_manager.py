@@ -456,8 +456,9 @@ def make_project(name: str) -> dict:
             # Caches optimizer output on the shot (.optimizer_cache) so
             # regen doesn't repeat the LLM call.
             "prompt_optimizer_enabled": True,
-            # P4-3 (Session 11): auto-approve veto rules config. Conservative-on
-            # defaults; operator tunes via project settings. Typed schema is
+            # P4-3 (Session 11): auto-approve veto rules config. Production
+            # image checks start at the 0.60 identity-score floor; operators
+            # can tune it via project settings. Typed schema is
             # Session 10 (P1-3 part 2) work — rides through extra="allow" for now.
             "auto_approve": AutoApproveConfig().to_dict(),
             # api_engines (per-engine config — exactly two live keys: .enabled

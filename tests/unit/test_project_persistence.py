@@ -385,7 +385,7 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
                 "style",
                 "post",
                 f"/api/projects/{project['id']}/style-rules",
-                {"json": {}},
+                {"json": {"expected_revision": 0}},
                 mock.patch.object(
                     self.web_server,
                     "mutate_project",
@@ -425,7 +425,11 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
                 {"data": {"name": "Warehouse", "description": "Dark"}},
             ),
             ("post", f"/api/projects/{project['id']}/scenes", {"json": {"title": "Scene 1"}}),
-            ("post", f"/api/projects/{project['id']}/style-rules", {"json": {}}),
+            (
+                "post",
+                f"/api/projects/{project['id']}/style-rules",
+                {"json": {"expected_revision": 0}},
+            ),
         ]
 
         for method, path, kwargs in cases:

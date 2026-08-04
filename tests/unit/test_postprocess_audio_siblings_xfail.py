@@ -9,10 +9,9 @@ regression for the fixed `lipsync-veto` row: a successful manual `lip_sync`
 postprocess variant with `dialogue_audio_in_clip=True` must be visible to the
 auto-approve final gate.
 
-Two further siblings (capability_scorecard blind-spot — MINOR, advisory display;
-storyboard-batch F1b lipsync-skip — MAJOR, needs the _run_storyboard_scene
-integration harness) are labeled test-infeasible-this-turn in the handoff rather
-than pinned here.
+The storyboard-batch F1b sibling is now pinned in
+``test_f2b_storyboard_mode.py``: dialogue-purpose shots are ineligible for the
+batch and fall through to normal per-shot generation.
 """
 
 from __future__ import annotations
@@ -36,10 +35,8 @@ def test_performance_take_as_final_metadata_is_resolved():
     assert meta.get("audio_embedded") is True
 
 
-def test_best_take_lipsync_credits_successful_postprocess_lipsync():
-    """A successful postprocess lip_sync correction must lift the shot's lipsync gate
-    score above the failed base motion take's 0.0 — otherwise the auto-approve 'final'
-    gate vetoes a shot the operator already fixed."""
+def test_best_take_lipsync_does_not_credit_unmeasured_postprocess_audio():
+    """A produced audio track is not evidence that lip sync was measurable."""
     from cinema.auto_approve import _best_take_lipsync
 
     takes = [
@@ -47,5 +44,22 @@ def test_best_take_lipsync_credits_successful_postprocess_lipsync():
         {"id": "pp_lipsync", "metadata": {"action": "lip_sync", "dialogue_audio_in_clip": True}},
     ]
     score = _best_take_lipsync(takes)
-    # Regression: the postprocess fix must be visible to the final gate.
-    assert score >= 0.8
+    assert score == 0.0
+
+
+def test_best_take_lipsync_credits_measured_postprocess_lipsync():
+    from cinema.auto_approve import _best_take_lipsync
+
+    takes = [
+        {"id": "motion", "metadata": {"has_dialogue": True, "lipsync_score": 0.0}},
+        {
+            "id": "pp_lipsync",
+            "metadata": {
+                "action": "lip_sync",
+                "dialogue_audio_in_clip": True,
+                "lipsync_score": 0.9,
+                "lipsync_validation_state": "PASS",
+            },
+        },
+    ]
+    assert _best_take_lipsync(takes) == 0.9

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -154,6 +155,94 @@ def test_competitive_disabled_dispatches_only_first_model(monkeypatch):
     assert result.winner_index == 0
 
 
+def test_duplicate_model_entries_keep_distinct_candidate_slots(monkeypatch):
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble()
+    calls = iter(["first-duplicate-output", "second-duplicate-output"])
+
+    monkeypatch.setattr(
+        ensemble,
+        "_generate_single",
+        lambda model, *a, **k: (model, next(calls)),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "_judge",
+        lambda candidates, models, system_prompt, **kwargs: (
+            0,
+            [9.0, 8.0],
+            "ok",
+        ),
+    )
+
+    result = ensemble.competitive_generate(
+        task_type="default",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-duplicate", "gpt-duplicate"],
+    )
+
+    assert result.models_used == ["gpt-duplicate", "gpt-duplicate"]
+    assert sorted(result.candidates) == [
+        "first-duplicate-output",
+        "second-duplicate-output",
+    ]
+
+
+def test_judge_failure_returns_no_winner(monkeypatch):
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble()
+    monkeypatch.setattr(
+        ensemble,
+        "_generate_single",
+        lambda model, *a, **k: (model, f"candidate-{model}"),
+    )
+    monkeypatch.setattr(
+        ensemble,
+        "_judge",
+        lambda candidates, models, system_prompt, **kwargs: (
+            None,
+            [0.0, 0.0],
+            "Unable to judge candidates",
+        ),
+    )
+
+    result = ensemble.competitive_generate(
+        task_type="default",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-a", "gpt-b"],
+    )
+
+    assert result.winner_index is None
+    assert result.winner_content is None
+    assert result.judgment_status == "UNABLE_TO_JUDGE"
+
+
+def test_candidate_deadline_does_not_wait_for_executor_shutdown(monkeypatch):
+    monkeypatch.setattr(ensemble_module, "env_settings", _provider_settings())
+    ensemble = LLMEnsemble()
+    ensemble.candidate_timeout_s = 0.01
+
+    def slow_candidate(model, *args, **kwargs):
+        time.sleep(0.15)
+        return (model, "too-late")
+
+    monkeypatch.setattr(ensemble, "_generate_single", slow_candidate)
+    started = time.monotonic()
+    result = ensemble.competitive_generate(
+        task_type="default",
+        system_prompt="sys",
+        user_prompt="user",
+        models=["gpt-slow"],
+    )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.1
+    assert result.winner_index is None
+    assert result.judgment_status == "NO_CANDIDATE"
+
+
 @pytest.mark.parametrize(
     ("judge_alias", "expected_model"),
     [
@@ -177,7 +266,8 @@ def test_configured_judge_override_is_dispatched(
 
     observed: dict = {}
 
-    def fake_judge(candidates, models, system_prompt, judge_model=None):
+    def fake_judge(candidates, models, system_prompt, **kwargs):
+        judge_model = kwargs.get("judge_model")
         observed["judge_model"] = judge_model
         return (0, [9.0] * len(candidates), "ok")
 
@@ -205,7 +295,8 @@ def test_explicit_judge_model_arg_outranks_settings_override(monkeypatch):
     )
     observed: dict = {}
 
-    def fake_judge(candidates, models, system_prompt, judge_model=None):
+    def fake_judge(candidates, models, system_prompt, **kwargs):
+        judge_model = kwargs.get("judge_model")
         observed["judge_model"] = judge_model
         return (0, [8.0], "ok")
 

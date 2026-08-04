@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import base64
 import os
-import secrets
 import time
 from typing import Callable
 
 from google import genai
 from google.genai import types
 from config.settings import settings
+from gemini_image_native import _load_reference_image as _load_bounded_image
+from performance._net import atomic_publish_bytes, validate_video_artifact
 
 # Gemini Omni Flash (Preview) interaction terminal states. Distinct SDK surface
 # from Veo's Operation (`operation.done` / `operation.error`) — interactions
@@ -21,10 +22,76 @@ _TERMINAL_INTERACTION_STATUSES = frozenset({
 })
 
 
+def _safe_interaction_id(value: object) -> str | None:
+    """Return a bounded, log/persistence-safe Google interaction ID."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if (
+        not value
+        or len(value) > 512
+        or any(ord(char) < 32 for char in value)
+        or "://" in value
+        or any(char in value for char in "?#&")
+    ):
+        return None
+    return value
+
+
+def _safe_provider_status(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    value = value.strip().lower()
+    if not value or len(value) > 64:
+        return "unknown"
+    if not all(char.isalnum() or char in "_-" for char in value):
+        return "unknown"
+    return value
+
+
+class GeminiOmniJobDeferred(RuntimeError):
+    """Submission-ambiguous or accepted Omni work must not cascade.
+
+    The exception carries only a bounded interaction identifier and coarse
+    state.  It intentionally excludes prompts, image data, output URIs, and
+    underlying transport details so a caller can persist/surface it safely.
+    """
+
+    engine = "GEMINI_OMNI"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        status: str,
+        job_id: str | None = None,
+        provider_status: str | None = None,
+        billed: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.status = status
+        self.job_id = _safe_interaction_id(job_id)
+        self.provider_status = _safe_provider_status(provider_status)
+        self.billed = bool(billed)
+
+
+def _encode_image_input(image_path: str) -> tuple[str, str]:
+    """Return bounded, decoded-magic-verified base64 data and its MIME type."""
+    try:
+        payload, mime_type = _load_bounded_image(image_path)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"unsupported or malformed Gemini Omni input image: {image_path!r}"
+        ) from exc
+    return base64.b64encode(payload).decode("ascii"), mime_type
+
+
 def _encode_image_b64(image_path: str) -> str:
-    """Read `image_path` and return its base64-encoded contents (ascii str)."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("ascii")
+    """Compatibility helper returning verified input bytes as base64 text."""
+    encoded, _mime_type = _encode_image_input(image_path)
+    return encoded
 
 
 class GeminiOmniAPI:
@@ -43,6 +110,7 @@ class GeminiOmniAPI:
             )
         self.client = genai.Client(api_key=api_key)
         self._model = "gemini-omni-flash-preview"
+        self.last_job_id: str | None = None
 
     def generate_video(
         self,
@@ -74,44 +142,54 @@ class GeminiOmniAPI:
                 interaction is billed regardless of what happens next; see
                 phase_c_ffmpeg._note_billed_attempt). Fires BEFORE the video
                 bytes/file are retrieved so a caller can record the spend
-                even when that retrieval fails and this method still returns
-                None (money-gate 2026-07-11 class, extended to the native
-                adapters in slice M2). Exceptions raised by the callback are
-                logged and swallowed — a broken accounting hook must never
-                abort a generation that would otherwise succeed.
+                even when retrieval later raises GeminiOmniJobDeferred
+                (money-gate 2026-07-11 class, extended to the native adapters
+                in slice M2). Exceptions raised by the callback are logged and
+                swallowed — a broken accounting hook must never abort a
+                generation that would otherwise succeed.
 
         Returns:
-            output_path on success, None on failure (graceful — lets the
-            cascade fall through to the next engine) — either pre-billing
-            (non-completed terminal status) or post-billing (the interaction
-            completed but video content was empty/missing or retrieval/write
-            failed). Publication is atomic: the video is written to a sibling
-            temp file first and moved into place with os.replace, so a
-            mid-write failure never leaves a partial/corrupt file at
-            output_path (mirrors sora_native.py's download pattern).
+            output_path on success, or None when failure is known to be
+            terminal/pre-submission and a provider cascade is safe.
+
+        Raises:
+            GeminiOmniJobDeferred: Submission acknowledgement was lost, an
+                accepted interaction is still pending, or completed output
+                could not be recovered/published.  Callers must not cascade.
         """
         if not os.path.exists(image_path):
             print(f"[GEMINI-OMNI] Start frame not found: {image_path}")
             return None
 
-        temp_output_path: str | None = None
+        self.last_job_id = None
+        submission_started = False
+        interaction_accepted = False
+        interaction_id: str | None = None
+        provider_status: str | None = None
+        billed = False
         try:
             refs = reference_images or []
             print(f"[GEMINI-OMNI] Generating video — aspect_ratio={aspect_ratio}, "
                   f"refs={len(refs)}")
             print(f"[GEMINI-OMNI] Prompt: {prompt[:120]}...")
 
+            start_data, start_mime = _encode_image_input(image_path)
             input_items = [
-                {"type": "image", "data": _encode_image_b64(image_path), "mime_type": "image/jpeg"},
+                {"type": "image", "data": start_data, "mime_type": start_mime},
             ]
             for ref_path in refs:
+                ref_data, ref_mime = _encode_image_input(ref_path)
                 input_items.append({
                     "type": "image",
-                    "data": _encode_image_b64(ref_path),
-                    "mime_type": "image/jpeg",
+                    "data": ref_data,
+                    "mime_type": ref_mime,
                 })
             input_items.append({"type": "text", "text": prompt})
 
+            # Once this call starts, a raised transport/protocol error cannot
+            # prove that the service did not accept a paid interaction.  The
+            # caller must stop the provider cascade on that ambiguity.
+            submission_started = True
             interaction = self.client.interactions.create(
                 model=self._model,
                 input=input_items,
@@ -126,22 +204,42 @@ class GeminiOmniAPI:
                     "delivery": "uri",
                 },
             )
+            interaction_accepted = True
+            interaction_id = _safe_interaction_id(getattr(interaction, "id", None))
+            self.last_job_id = interaction_id
             print("[GEMINI-OMNI] Interaction submitted, polling for completion...")
 
             # Poll until a terminal status (max 20 minutes to avoid indefinite hangs).
             poll_count = 0
             max_polls = 120  # 120 * 10s = 1200s = 20 minutes
-            while interaction.status not in _TERMINAL_INTERACTION_STATUSES:
+            provider_status = str(getattr(interaction, "status", "unknown"))
+            while provider_status not in _TERMINAL_INTERACTION_STATUSES:
                 if poll_count >= max_polls:
-                    raise TimeoutError(f"GEMINI-OMNI interaction timed out after {poll_count * 10}s")
+                    raise GeminiOmniJobDeferred(
+                        "Gemini Omni interaction is still non-terminal; recovery is required",
+                        reason="accepted_job_poll_timeout",
+                        status="pending",
+                        job_id=interaction_id,
+                        provider_status=provider_status,
+                    )
+                if interaction_id is None:
+                    raise GeminiOmniJobDeferred(
+                        "Gemini Omni accepted an interaction without a recoverable ID",
+                        reason="accepted_job_id_missing",
+                        status="recovery_required",
+                        provider_status=provider_status,
+                    )
                 time.sleep(10)
                 poll_count += 1
-                interaction = self.client.interactions.get(interaction.id)
+                interaction = self.client.interactions.get(interaction_id)
+                provider_status = str(getattr(interaction, "status", "unknown"))
                 if poll_count % 6 == 0:
                     print(f"[GEMINI-OMNI] Still generating... ({poll_count * 10}s elapsed)")
 
-            if interaction.status != "completed":
-                print(f"[GEMINI-OMNI] Generation ended with status={interaction.status!r}")
+            if provider_status != "completed":
+                # The interaction is explicitly terminal.  No accepted job is
+                # left running, so a later provider may be selected safely.
+                print(f"[GEMINI-OMNI] Generation ended with status={provider_status!r}")
                 return None
 
             # Interaction completed — billed regardless of what happens next.
@@ -155,17 +253,21 @@ class GeminiOmniAPI:
                     print(
                         f"[GEMINI-OMNI] Warning: on_billed callback raised: {callback_exc}"
                     )
+            billed = True
 
             # A "completed" interaction can still carry no video content step
             # at all (empty output) — classify this explicitly rather than
             # crashing through an unhandled AttributeError on video.data.
             video = interaction.output_video
             if video is None:
-                print(
-                    "[GEMINI-OMNI] Completed interaction has no video content "
-                    "(empty output)"
+                raise GeminiOmniJobDeferred(
+                    "Gemini Omni completed interaction has empty output",
+                    reason="completed_output_missing",
+                    status="recovery_required",
+                    job_id=interaction_id,
+                    provider_status="completed",
+                    billed=True,
                 )
-                return None
 
             # `is not None` (not truthiness) — mirrors veo_native._extract_video_bytes:
             # an empty-but-present inline payload (b"") must still count as inline.
@@ -187,8 +289,13 @@ class GeminiOmniAPI:
                         )
                         return None
                     if file_poll_count >= max_polls:
-                        raise TimeoutError(
-                            f"GEMINI-OMNI file activation timed out after {file_poll_count * 10}s"
+                        raise GeminiOmniJobDeferred(
+                            "Gemini Omni output file is still processing",
+                            reason="completed_output_pending",
+                            status="pending",
+                            job_id=interaction_id,
+                            provider_status="completed",
+                            billed=True,
                         )
                     time.sleep(10)
                     file_poll_count += 1
@@ -202,38 +309,71 @@ class GeminiOmniAPI:
                 # files.download().
                 download_uri = getattr(file_obj, "download_uri", None)
                 if not download_uri:
-                    print(
-                        f"[GEMINI-OMNI] Active file has no download_uri: {video.uri!r}"
+                    raise GeminiOmniJobDeferred(
+                        "Gemini Omni completed output has no downloadable URI",
+                        reason="completed_output_unavailable",
+                        status="recovery_required",
+                        job_id=interaction_id,
+                        provider_status="completed",
+                        billed=True,
                     )
-                    return None
                 video_data = self.client.files.download(file=download_uri)
             else:
-                print("[GEMINI-OMNI] No video data or uri on completed interaction")
-                return None
+                raise GeminiOmniJobDeferred(
+                    "Gemini Omni completed output has no inline data or file URI",
+                    reason="completed_output_missing",
+                    status="recovery_required",
+                    job_id=interaction_id,
+                    provider_status="completed",
+                    billed=True,
+                )
 
-            # Publish atomically — write to a sibling temp file and move it
-            # into place, so a mid-write failure cannot leave a partial or
-            # corrupt file at output_path.
-            out_dir = os.path.dirname(output_path) or "."
-            os.makedirs(out_dir, exist_ok=True)
-            temp_output_path = os.path.join(
-                out_dir, f".gemini-omni-download-{secrets.token_hex(8)}.tmp"
-            )
-            with open(temp_output_path, "wb") as f:
-                f.write(video_data)
-            os.replace(temp_output_path, output_path)
-            temp_output_path = None
+            if atomic_publish_bytes(
+                video_data,
+                output_path,
+                max_bytes=1024 * 1024 * 1024,
+                content_validator=validate_video_artifact,
+            ) is None:
+                raise GeminiOmniJobDeferred(
+                    "Gemini Omni completed output failed publication or validation",
+                    reason="completed_output_invalid",
+                    status="recovery_required",
+                    job_id=interaction_id,
+                    provider_status="completed",
+                    billed=True,
+                )
 
             file_size = os.path.getsize(output_path) / (1024 * 1024)
             print(f"[GEMINI-OMNI] Video saved: {output_path} ({file_size:.1f} MB)")
             return output_path
 
+        except GeminiOmniJobDeferred:
+            raise
         except Exception as e:
+            if submission_started:
+                if billed:
+                    reason = "completed_output_unavailable"
+                    status = "recovery_required"
+                elif interaction_accepted:
+                    reason = "accepted_job_poll_error"
+                    status = "pending" if interaction_id else "recovery_required"
+                else:
+                    reason = "submit_outcome_unknown"
+                    status = "recovery_required"
+                print(
+                    "[GEMINI-OMNI] Remote work may have been accepted; "
+                    "caller must defer instead of cascading"
+                )
+                raise GeminiOmniJobDeferred(
+                    "Gemini Omni work may have been accepted; recovery is required",
+                    reason=reason,
+                    status=status,
+                    job_id=interaction_id,
+                    provider_status=(
+                        provider_status
+                        or ("submitted" if interaction_accepted else "submission_unknown")
+                    ),
+                    billed=billed,
+                ) from e
             print(f"[GEMINI-OMNI] Generation failed: {e}")
             return None
-        finally:
-            if temp_output_path is not None:
-                try:
-                    os.remove(temp_output_path)
-                except OSError:
-                    pass

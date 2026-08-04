@@ -391,10 +391,11 @@ def test_known_parameter_contracts_are_pinned() -> None:
         return {item.name: item for item in CATALOG[key].parameters}
 
     sora = constraints("SORA_NATIVE")
-    assert sora["duration"].allowed_values == (4, 8, 12, 16, 20)
+    assert sora["duration"].allowed_values == (4, 8, 12)
     assert sora["resolution"].allowed_values == ("720p",)
     assert sora["aspect_ratio"].allowed_values == ("16:9", "9:16")
     assert sora["input_references"].max_items == 1
+    assert sora["driving_video"].allowed_values == (False,)
 
     veo = constraints("VEO_NATIVE")
     assert veo["duration"].allowed_values == (4, 6, 8)
@@ -478,26 +479,32 @@ def test_kling_native_availability_requires_both_credentials_and_jwt() -> None:
     ]
 
 
-def test_ltx_only_trusts_fal_alternative_until_adapter_repair() -> None:
-    with pytest.raises(ValueError, match="unknown symbolic names") as exc_info:
-        RuntimeSnapshot(credentials={"ltx_api_key"})
-    assert "ltx_api_key" not in repr(exc_info.value)
-
+def test_ltx_runtime_accepts_repaired_native_or_fal_alternative() -> None:
     no_trustworthy_option = RuntimeSnapshot()
+    trustworthy_native = RuntimeSnapshot(
+        credentials={"ltx_api_key"},
+        modules={"requests"},
+    )
     trustworthy_fal = RuntimeSnapshot(
         credentials={"fal_key"},
         modules={"fal_client"},
     )
 
     native_result = runtime_availability(
+        "LTX", trustworthy_native, on_date=PRE_SUNSET
+    )
+    unavailable_result = runtime_availability(
         "LTX", no_trustworthy_option, on_date=PRE_SUNSET
     )
     fal_result = runtime_availability("LTX", trustworthy_fal, on_date=PRE_SUNSET)
 
-    assert native_result.state is RuntimeAvailabilityState.UNAVAILABLE
+    assert native_result.state is RuntimeAvailabilityState.AVAILABLE
+    assert native_result.effective_dispatchable is True
+    assert native_result.effective_spendable is True
+    assert unavailable_result.state is RuntimeAvailabilityState.UNAVAILABLE
     assert {
-        requirement.name for requirement in native_result.missing_requirements
-    } == {"fal_key", "fal_client"}
+        requirement.name for requirement in unavailable_result.missing_requirements
+    } == {"ltx_api_key", "requests", "fal_key", "fal_client"}
     assert fal_result.state is RuntimeAvailabilityState.AVAILABLE
 
 
@@ -505,13 +512,12 @@ def test_veo_runtime_alternatives_are_or_of_and_groups() -> None:
     vertex = RuntimeSnapshot(
         credentials={"google_cloud_project"},
         modules={"google.genai"},
-        services={"google_adc"},
     )
     api_key = RuntimeSnapshot(
         credentials={"google_api_key"},
         modules={"google.genai"},
     )
-    project_without_adc = RuntimeSnapshot(
+    project_config = RuntimeSnapshot(
         credentials={"google_cloud_project"},
         modules={"google.genai"},
     )
@@ -522,16 +528,9 @@ def test_veo_runtime_alternatives_are_or_of_and_groups() -> None:
     assert runtime_availability(
         "VEO_NATIVE", api_key, on_date=PRE_SUNSET
     ).available
-    result = runtime_availability(
-        "VEO_NATIVE", project_without_adc, on_date=PRE_SUNSET
-    )
-    assert result.state is RuntimeAvailabilityState.UNAVAILABLE
-    assert {requirement.name for requirement in result.missing_options[0]} == {
-        "google_adc"
-    }
-    assert {requirement.name for requirement in result.missing_options[1]} == {
-        "google_api_key"
-    }
+    assert runtime_availability(
+        "VEO_NATIVE", project_config, on_date=PRE_SUNSET
+    ).available
 
 
 def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
@@ -542,7 +541,7 @@ def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
             "openai_api_key",
         },
         modules={"fal_client", "google.genai", "openai"},
-        services={"google_adc", "comfyui_readiness"},
+        services={"comfyui_readiness"},
     )
 
     # Slice 3 re-admitted GEMINI_OMNI: it is dispatchable now (LIMITED, with

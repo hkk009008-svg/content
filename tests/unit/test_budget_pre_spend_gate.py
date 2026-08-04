@@ -65,7 +65,17 @@ def _stub_heavy_video_deps():
     with pytest.MonkeyPatch.context() as mp:
         for dep in _STUBBED_VIDEO_DEPS:
             # kling_native must expose KlingNativeAPI so patch() can find it.
-            attrs = {"KlingNativeAPI": MagicMock} if dep == "kling_native" else {}
+            if dep == "kling_native":
+                attrs = {"KlingNativeAPI": MagicMock}
+            elif dep == "veo_native":
+                # The controller imports this capability probe lazily during
+                # pre-spend.  Keep the module stub honest so patch() remains
+                # collection-order independent.
+                attrs = {
+                    "veo_native_audio_available": MagicMock(return_value=False),
+                }
+            else:
+                attrs = {}
             mp.setitem(sys.modules, dep, _stub_module(dep, **attrs))
         yield
 
@@ -306,6 +316,44 @@ class TestPreSpendBudgetGate:
         lifecycle.pause.assert_called_once()
         events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
         assert "BUDGET_EXCEEDED" in events
+
+    def test_developer_veo_native_mode_budgets_mandatory_lipsync(self, tmp_path):
+        """Key-only Veo cannot omit the second paid call from pre-spend."""
+        project = self._make_project(target_api="VEO_NATIVE")
+        project["global_settings"]["dialogue_voice_mode"] = "native"
+        shot = project["scenes"][0]["shots"][0]
+        shot["optimizer_cache"] = {
+            "spec": {"purpose": "dialogue_close_up"},
+        }
+        ctrl, _host, lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        cost_tracker.would_exceed_cost.return_value = True
+        cost_tracker.spent_usd = 0.8
+        cost_tracker.budget_usd = 1.0
+        gen_vid = MagicMock()
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("veo_native.veo_native_audio_available", return_value=False),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_veo_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("error_kind") == "budget"
+        cost_tracker.would_exceed_cost.assert_called_once()
+        cost_tracker.would_exceed.assert_not_called()
+        gen_vid.assert_not_called()
+        lifecycle.pause.assert_called_once()
 
     def test_proceeds_when_within_budget(self, tmp_path):
         """Control: would_exceed False → generation proceeds, no pause."""
@@ -685,6 +733,338 @@ class TestPreSpendBudgetGate:
             call.kwargs.get("operation") == "motion_generation"
             for call in cost_tracker.record_api_call.call_args_list
         )
+
+    def test_deferred_provider_job_is_sanitized_and_returned_for_ui(
+        self, tmp_path
+    ):
+        project = self._make_project(target_api="LTX")
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        ctrl._persist_deferred_motion_job = MagicMock()
+
+        def _defer_provider_job(*_args, **kwargs):
+            kwargs["_cascade_out"].update(
+                {
+                    "billed_attempts": ["LTX"],
+                    "deferred_job": {
+                        "engine": "LTX",
+                        "status": "pending",
+                        "reason": "poll_timeout",
+                        "job_id": "job-safe-123",
+                        "provider_status": "running",
+                        "attempts": ["LTX"],
+                        "billed": True,
+                        "duration_s": 10,
+                        "state_path": "/private/server/job-state.json",
+                        "request_fingerprint": "a" * 64,
+                        "detail": "raw provider detail",
+                    },
+                }
+            )
+            return None
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_defer_provider_job,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"ltx_api_key"},
+                    modules={"requests"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["success"] is False
+        assert result["code"] == "provider_job_deferred"
+        assert "still pending" in result["error"]
+        assert "Generate Motion will resume it" in result["error"]
+        updated_at = result["deferred_job"].pop("updated_at")
+        assert isinstance(updated_at, str) and updated_at.endswith("+00:00")
+        assert result["deferred_job"] == {
+            "engine": "LTX",
+            "status": "pending",
+            "reason": "poll_timeout",
+            "job_id": "job-safe-123",
+            "provider_status": "running",
+            "attempts": ["LTX"],
+            "billed": True,
+            "duration_s": 10.0,
+        }
+        assert "state_path" not in result["deferred_job"]
+        assert "request_fingerprint" not in result["deferred_job"]
+        assert any(
+            call.kwargs.get("operation") == "motion_generation_rejected"
+            and call.args[0] == "LTX"
+            for call in cost_tracker.record_api_call.call_args_list
+        )
+        deferred_cost_call = next(
+            call
+            for call in cost_tracker.record_api_call.call_args_list
+            if call.kwargs.get("operation") == "motion_generation_rejected"
+            and call.args[0] == "LTX"
+        )
+        assert deferred_cost_call.kwargs["duration_seconds"] == 10
+        assert deferred_cost_call.kwargs["provider_job_id"] == "job-safe-123"
+        persisted = ctrl._persist_deferred_motion_job.call_args.args[1]
+        assert "request_fingerprint" not in persisted
+        assert persisted["duration_s"] == 10.0
+        assert "state_path" not in persisted
+        assert "detail" not in persisted
+
+    def test_google_submit_ambiguity_persists_recovery_without_ltx_claims(
+        self, tmp_path
+    ):
+        project = self._make_project(target_api="VEO_NATIVE")
+        ctrl, _host, _lifecycle, _cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        ctrl._persist_deferred_motion_job = MagicMock()
+
+        def _defer_google_job(*_args, **kwargs):
+            kwargs["_cascade_out"]["deferred_job"] = {
+                "engine": "VEO_NATIVE",
+                "status": "recovery_required",
+                "reason": "submit_outcome_unknown",
+                "job_id": "operations/veo-safe-123",
+                "provider_status": "submission_unknown",
+                "attempts": ["VEO_NATIVE"],
+                "billed": False,
+                "duration_s": 8,
+                "detail": "private transport detail",
+            }
+            return None
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_defer_google_job,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"google_api_key"},
+                    modules={"google.genai"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["code"] == "provider_job_deferred"
+        assert result["deferred_job"]["engine"] == "VEO_NATIVE"
+        assert result["deferred_job"]["job_id"] == "operations/veo-safe-123"
+        persisted = ctrl._persist_deferred_motion_job.call_args.args[1]
+        assert persisted["engine"] == "VEO_NATIVE"
+        assert persisted["job_id"] == "operations/veo-safe-123"
+        assert persisted["reserved_cost_usd"] > 0
+        assert "detail" not in persisted
+        assert "request_fingerprint" not in persisted
+
+    def test_non_ltx_recovery_record_blocks_new_provider_even_with_job_id(
+        self, tmp_path
+    ):
+        project = self._make_project(target_api="LTX")
+        project["scenes"][0]["shots"][0]["deferred_motion_job"] = {
+            "engine": "VEO_NATIVE",
+            "status": "recovery_required",
+            "reason": "accepted_job_poll_error",
+            "job_id": "operations/veo-safe-456",
+        }
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+
+        with patch(
+            "cinema.shots.controller.generate_ai_video",
+            side_effect=AssertionError("new provider started over Google recovery"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["code"] == "provider_job_deferred"
+        assert result["deferred_job"]["engine"] == "VEO_NATIVE"
+        assert "No new provider was started" in result["error"]
+        cost_tracker.would_exceed.assert_not_called()
+        cost_tracker.would_exceed_cost.assert_not_called()
+
+    def test_deferred_job_helper_persists_and_clears_atomically(self, tmp_path):
+        project = self._make_project(target_api="LTX")
+        ctrl, _host, _lifecycle, _cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        shot = project["scenes"][0]["shots"][0]
+
+        def apply_mutator(shot_id, mutator, timeout=10):
+            assert shot_id == shot["id"]
+            return mutator(project["scenes"][0], shot)
+
+        ctrl._mutate_shot = apply_mutator
+        descriptor = {
+            "engine": "LTX",
+            "status": "pending",
+            "job_id": "job-123",
+            "request_fingerprint": "b" * 64,
+        }
+
+        ctrl._persist_deferred_motion_job(shot["id"], descriptor)
+        assert shot["deferred_motion_job"] == descriptor
+
+        ctrl._persist_deferred_motion_job(shot["id"], None)
+        assert "deferred_motion_job" not in shot
+
+    def test_unsafe_deferred_binding_blocks_new_provider_before_spend(self, tmp_path):
+        project = self._make_project(target_api="RUNWAY_GEN4")
+        project["scenes"][0]["shots"][0]["deferred_motion_job"] = {
+            "engine": "LTX",
+            "status": "recovery_required",
+            "reason": "submit_outcome_unknown",
+            "provider_status": "submission_unknown",
+        }
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+
+        with patch(
+            "cinema.shots.controller.generate_ai_video",
+            side_effect=AssertionError("changed target dispatched while job unresolved"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["code"] == "provider_job_deferred"
+        assert result["deferred_job"]["status"] == "recovery_required"
+        assert "No new provider was started" in result["error"]
+        cost_tracker.would_exceed.assert_not_called()
+        cost_tracker.would_exceed_cost.assert_not_called()
+
+    def test_bound_resume_bypasses_new_spend_gate_and_passes_exact_job(
+        self, tmp_path
+    ):
+        project = self._make_project(target_api="RUNWAY_GEN4")
+        marker = {
+            "engine": "LTX",
+            "status": "pending",
+            "reason": "poll_window_exhausted",
+            "job_id": "job-bound-123",
+            "provider_status": "processing",
+            "request_fingerprint": "c" * 64,
+            "reserved_cost_usd": 0.48,
+            "billed": False,
+        }
+        project["scenes"][0]["shots"][0]["deferred_motion_job"] = marker
+        ctrl, _host, _lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        cost_tracker.would_exceed.return_value = True
+        cost_tracker.would_exceed_cost.return_value = True
+        ctrl._persist_deferred_motion_job = MagicMock()
+
+        def keep_pending(*args, **kwargs):
+            assert args[2] == "LTX"
+            assert kwargs["_cascade_out"]["expected_ltx_job"] == {
+                "engine": "LTX",
+                "job_id": "job-bound-123",
+                "request_fingerprint": "c" * 64,
+            }
+            kwargs["_cascade_out"]["deferred_job"] = {
+                **marker,
+                "duration_s": 8,
+            }
+            return None
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=keep_pending,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"ltx_api_key"},
+                    modules={"requests"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["code"] == "provider_job_deferred"
+        cost_tracker.would_exceed.assert_not_called()
+        cost_tracker.would_exceed_cost.assert_not_called()
+        persisted = ctrl._persist_deferred_motion_job.call_args.args[1]
+        assert persisted["job_id"] == "job-bound-123"
+        assert "request_fingerprint" not in persisted
+
+    def test_other_shot_pending_reservation_is_included_in_budget_gate(
+        self, tmp_path
+    ):
+        project = self._make_project(target_api="LTX")
+        project["scenes"][0]["shots"].append(
+            {
+                "id": "shot_pending",
+                "prompt": "Pending shot",
+                "deferred_motion_job": {
+                    "engine": "LTX",
+                    "status": "pending",
+                    "job_id": "job-other",
+                    "reserved_cost_usd": 0.6,
+                    "billed": False,
+                },
+            }
+        )
+        ctrl, _host, lifecycle, cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        cost_tracker.budget_usd = 1.0
+        cost_tracker.would_exceed_cost.return_value = True
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=AssertionError("provider called past reservation gate"),
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"ltx_api_key"},
+                    modules={"requests"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result["error_kind"] == "budget"
+        cost_tracker.would_exceed_cost.assert_called_once()
+        assert cost_tracker.would_exceed_cost.call_args.args[0] > 0.6
+        lifecycle.pause.assert_called_once()
 
     @pytest.mark.parametrize("candidate_kind", ["empty", "symlink"])
     def test_owned_candidate_must_be_nonempty_regular_file(

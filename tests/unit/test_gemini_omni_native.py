@@ -10,20 +10,63 @@ from __future__ import annotations
 import base64
 import os
 import sys
+from io import BytesIO
 from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
+from PIL import Image
 
 # Sibling unit tests stub heavy native-API modules into sys.modules at import
 # time; drop any stub so this module always exercises the REAL implementation
 # (mirrors test_veo_native_config.py's sys.modules.pop guard).
 sys.modules.pop("gemini_omni_native", None)
 
+import gemini_omni_native  # noqa: E402
 from gemini_omni_native import (  # noqa: E402
     GeminiOmniAPI,
+    GeminiOmniJobDeferred,
     _encode_image_b64,
     _TERMINAL_INTERACTION_STATUSES,
 )
+
+
+def _valid_image_bytes(image_format: str) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (2, 2), color=(20, 40, 60)).save(
+        output,
+        format=image_format,
+    )
+    return output.getvalue()
+
+
+JPEG_BYTES = _valid_image_bytes("JPEG")
+PNG_BYTES = _valid_image_bytes("PNG")
+WEBP_BYTES = _valid_image_bytes("WEBP")
+GIF_BYTES = _valid_image_bytes("GIF")
+
+
+@pytest.fixture(autouse=True)
+def _accept_mock_video_payloads(monkeypatch):
+    """These SDK contract tests use sentinel bytes; ffprobe validation has a
+    dedicated artifact-validation suite."""
+    monkeypatch.setattr(
+        gemini_omni_native,
+        "validate_video_artifact",
+        lambda _path: None,
+    )
+    real_loader = gemini_omni_native._load_bounded_image
+
+    def _load_test_image(path):
+        with open(path, "rb") as source:
+            payload = source.read()
+        # Legacy tests in this module use sentinel JPEG bytes while testing
+        # polling/publication rather than image decoding. Input-contract tests
+        # below use the real bounded decoder through the fallback branch.
+        if payload.startswith(b"fake-jpeg"):
+            return payload, "image/jpeg"
+        return real_loader(path)
+
+    monkeypatch.setattr(gemini_omni_native, "_load_bounded_image", _load_test_image)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +129,50 @@ def test_generate_video_missing_image_returns_none():
     api.client.interactions.create.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"not-an-image",
+        b"\x89PNG\r\n\x1a\ntruncated",
+        GIF_BYTES,
+    ],
+)
+def test_unsupported_or_malformed_start_image_rejected_before_submission(
+    tmp_path,
+    payload,
+):
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api.client = MagicMock()
+    api._model = "gemini-omni-flash-preview"
+    image_path = tmp_path / "frame.bin"
+    image_path.write_bytes(payload)
+
+    assert api.generate_video(
+        image_path=str(image_path),
+        prompt="x",
+        output_path=str(tmp_path / "out.mp4"),
+    ) is None
+    api.client.interactions.create.assert_not_called()
+
+
+def test_malformed_reference_rejects_whole_request_before_submission(tmp_path):
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api.client = MagicMock()
+    api._model = "gemini-omni-flash-preview"
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(JPEG_BYTES)
+    bad_reference = tmp_path / "reference.png"
+    bad_reference.write_bytes(b"\x89PNG\r\n\x1a\ntruncated")
+
+    assert api.generate_video(
+        image_path=str(image_path),
+        prompt="x",
+        output_path=str(tmp_path / "out.mp4"),
+        reference_images=[str(bad_reference)],
+    ) is None
+    api.client.interactions.create.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # generate_video — happy path, inline video data
 # ---------------------------------------------------------------------------
@@ -129,6 +216,35 @@ def test_generate_video_writes_inline_bytes_and_returns_output_path(tmp_path):
     api.client.interactions.get.assert_not_called()
 
 
+def test_invalid_video_bytes_do_not_replace_existing_output(tmp_path, monkeypatch):
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+    api.client.interactions.create.return_value = _completed_interaction(
+        with_inline_data=True
+    )
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+    output_path = tmp_path / "out.mp4"
+    output_path.write_bytes(b"known-good")
+    monkeypatch.setattr(
+        gemini_omni_native,
+        "validate_video_artifact",
+        lambda _path: "invalid test container",
+    )
+
+    with pytest.raises(GeminiOmniJobDeferred) as deferred:
+        api.generate_video(
+            image_path=str(image_path),
+            prompt="hello",
+            output_path=str(output_path),
+        )
+    assert deferred.value.reason == "completed_output_invalid"
+    assert deferred.value.job_id == "interaction-123"
+    assert deferred.value.billed is True
+    assert output_path.read_bytes() == b"known-good"
+
+
 def test_generate_video_task_is_image_to_video_without_refs(tmp_path):
     api = GeminiOmniAPI.__new__(GeminiOmniAPI)
     api._model = "gemini-omni-flash-preview"
@@ -157,11 +273,11 @@ def test_generate_video_task_is_reference_to_video_with_refs(tmp_path):
     api.client.interactions.create.return_value = _completed_interaction(with_inline_data=True)
 
     image_path = tmp_path / "frame.jpg"
-    image_path.write_bytes(b"fake-jpeg")
+    image_path.write_bytes(PNG_BYTES)
     ref1 = tmp_path / "ref1.jpg"
-    ref1.write_bytes(b"ref-one")
-    ref2 = tmp_path / "ref2.jpg"
-    ref2.write_bytes(b"ref-two")
+    ref1.write_bytes(JPEG_BYTES)
+    ref2 = tmp_path / "ref2.webp"
+    ref2.write_bytes(WEBP_BYTES)
 
     api.generate_video(
         image_path=str(image_path),
@@ -174,6 +290,17 @@ def test_generate_video_task_is_reference_to_video_with_refs(tmp_path):
     assert kwargs["generation_config"]["video_config"]["task"] == "reference_to_video"
     # start frame + 2 refs + text = 4 input items.
     assert len(kwargs["input"]) == 4
+    image_items = kwargs["input"][:3]
+    assert [item["mime_type"] for item in image_items] == [
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+    ]
+    assert [base64.b64decode(item["data"]) for item in image_items] == [
+        PNG_BYTES,
+        JPEG_BYTES,
+        WEBP_BYTES,
+    ]
 
 
 def test_generate_video_threads_aspect_ratio(tmp_path):
@@ -313,7 +440,7 @@ def test_generate_video_returns_none_on_file_processing_failed(tmp_path):
     )
 
 
-def test_generate_video_returns_none_when_active_file_has_no_download_uri(tmp_path):
+def test_generate_video_defers_when_active_file_has_no_download_uri(tmp_path):
     """An ACTIVE file with no download_uri (e.g. an uploaded, non-generated
     file) must be classified explicitly rather than raising out of
     files.download() into the generic blanket-exception path.
@@ -337,12 +464,16 @@ def test_generate_video_returns_none_when_active_file_has_no_download_uri(tmp_pa
     image_path.write_bytes(b"fake-jpeg")
     output_path = str(tmp_path / "out.mp4")
 
-    result = api.generate_video(
-        image_path=str(image_path), prompt="hello", output_path=output_path,
-        on_billed=on_billed,
-    )
+    with pytest.raises(GeminiOmniJobDeferred) as deferred:
+        api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=output_path,
+            on_billed=on_billed,
+        )
 
-    assert result is None
+    assert deferred.value.reason == "completed_output_unavailable"
+    assert deferred.value.job_id == "interaction-123"
+    assert deferred.value.provider_status == "completed"
+    assert deferred.value.billed is True
     api.client.files.download.assert_not_called()
     assert not os.path.exists(output_path)
     # Post-billing retrieval failure: on_billed must still fire exactly once
@@ -382,6 +513,38 @@ def test_generate_video_polls_interaction_until_terminal(tmp_path):
     api.client.interactions.get.assert_called_once_with("interaction-123")
 
 
+def test_poll_transport_ambiguity_defers_bound_interaction(tmp_path):
+    """A returned interaction ID owns the request after a poll response is lost."""
+    api = GeminiOmniAPI.__new__(GeminiOmniAPI)
+    api._model = "gemini-omni-flash-preview"
+    api.client = MagicMock()
+
+    pending = MagicMock()
+    pending.status = "in_progress"
+    pending.id = "interaction-bound-456"
+    api.client.interactions.create.return_value = pending
+    api.client.interactions.get.side_effect = RuntimeError("connection reset")
+
+    image_path = tmp_path / "frame.jpg"
+    image_path.write_bytes(b"fake-jpeg")
+
+    with (
+        patch("gemini_omni_native.time.sleep", return_value=None),
+        pytest.raises(GeminiOmniJobDeferred) as deferred,
+    ):
+        api.generate_video(
+            image_path=str(image_path),
+            prompt="hello",
+            output_path=str(tmp_path / "out.mp4"),
+        )
+
+    assert deferred.value.reason == "accepted_job_poll_error"
+    assert deferred.value.status == "pending"
+    assert deferred.value.job_id == "interaction-bound-456"
+    assert deferred.value.provider_status == "in_progress"
+    assert deferred.value.billed is False
+
+
 # ---------------------------------------------------------------------------
 # generate_video — non-completed terminal status → graceful None
 # ---------------------------------------------------------------------------
@@ -419,7 +582,7 @@ def test_terminal_statuses_include_budget_exceeded():
 # ---------------------------------------------------------------------------
 
 
-def test_generate_video_returns_none_on_empty_output_video(tmp_path, capsys):
+def test_generate_video_defers_on_empty_completed_output(tmp_path):
     """A completed interaction whose output_video is None (no video content
     step at all — the empty-output terminal case) must be classified
     explicitly. Pre-fix, `video.data` on a None `video` raised an unhandled
@@ -441,25 +604,17 @@ def test_generate_video_returns_none_on_empty_output_video(tmp_path, capsys):
     image_path.write_bytes(b"fake-jpeg")
     output_path = str(tmp_path / "out.mp4")
 
-    result = api.generate_video(
-        image_path=str(image_path), prompt="hello", output_path=output_path,
-        on_billed=on_billed,
-    )
+    with pytest.raises(GeminiOmniJobDeferred) as deferred:
+        api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=output_path,
+            on_billed=on_billed,
+        )
 
-    assert result is None
+    assert deferred.value.reason == "completed_output_missing"
+    assert deferred.value.job_id == "interaction-123"
+    assert deferred.value.billed is True
     assert not os.path.exists(output_path)
     on_billed.assert_called_once()
-    # The discriminating assertion: both the pre-fix crash (an unhandled
-    # AttributeError caught by the blanket except) and the fixed explicit
-    # check return None here, so the return value alone doesn't separate
-    # them. The explicit, intentional classification message does.
-    out = capsys.readouterr().out
-    assert "empty output" in out, (
-        f"Expected an explicit empty-output classification message; got: {out!r}"
-    )
-    assert "AttributeError" not in out and "NoneType" not in out, (
-        f"Must not fall through to the generic blanket-exception path; got: {out!r}"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -485,11 +640,12 @@ def test_atomic_publication_leaves_no_file_on_replace_failure(tmp_path):
     output_path = str(tmp_path / "out.mp4")
 
     with patch("gemini_omni_native.os.replace", side_effect=OSError("simulated rename failure")):
-        result = api.generate_video(
-            image_path=str(image_path), prompt="hello", output_path=output_path,
-        )
+        with pytest.raises(GeminiOmniJobDeferred) as deferred:
+            api.generate_video(
+                image_path=str(image_path), prompt="hello", output_path=output_path,
+            )
 
-    assert result is None
+    assert deferred.value.reason == "completed_output_invalid"
     assert not os.path.exists(output_path)
     leftover = [p.name for p in tmp_path.iterdir() if p.name != "frame.jpg"]
     assert leftover == [], f"partial/temp files leaked: {leftover}"
@@ -500,7 +656,7 @@ def test_atomic_publication_leaves_no_file_on_replace_failure(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_video_returns_none_on_exception(tmp_path, capsys):
+def test_submit_acknowledgement_ambiguity_requires_recovery(tmp_path):
     api = GeminiOmniAPI.__new__(GeminiOmniAPI)
     api._model = "gemini-omni-flash-preview"
     api.client = MagicMock()
@@ -509,14 +665,16 @@ def test_generate_video_returns_none_on_exception(tmp_path, capsys):
     image_path = tmp_path / "frame.jpg"
     image_path.write_bytes(b"fake-jpeg")
 
-    result = api.generate_video(
-        image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
-    )
+    with pytest.raises(GeminiOmniJobDeferred) as deferred:
+        api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
+        )
 
-    assert result is None
-    out = capsys.readouterr().out
-    assert "[GEMINI-OMNI] Generation failed" in out
-    assert "429 quota exceeded" in out
+    assert deferred.value.reason == "submit_outcome_unknown"
+    assert deferred.value.status == "recovery_required"
+    assert deferred.value.job_id is None
+    assert deferred.value.provider_status == "submission_unknown"
+    assert deferred.value.billed is False
 
 
 # ---------------------------------------------------------------------------
@@ -580,12 +738,16 @@ def test_post_billing_retrieval_failure_still_notes_billed(tmp_path):
     image_path = tmp_path / "frame.jpg"
     image_path.write_bytes(b"fake-jpeg")
 
-    result = api.generate_video(
-        image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
-        on_billed=on_billed,
-    )
+    with pytest.raises(GeminiOmniJobDeferred) as deferred:
+        api.generate_video(
+            image_path=str(image_path), prompt="hello", output_path=str(tmp_path / "out.mp4"),
+            on_billed=on_billed,
+        )
 
-    assert result is None
+    assert deferred.value.reason == "completed_output_unavailable"
+    assert deferred.value.job_id == "interaction-123"
+    assert deferred.value.provider_status == "completed"
+    assert deferred.value.billed is True
     on_billed.assert_called_once()
     assert call_order == ["billed", "download"], (
         "on_billed must fire BEFORE the retrieval attempt so a caller's spend "

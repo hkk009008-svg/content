@@ -1,1172 +1,1560 @@
-# tests/unit/test_ltx_native.py
-"""Characterization tests for ltx_native.LTXVideoAPI (offline, mocked fal/urllib).
-Locks in CORRECT behaviour after Part-3 moderate/minor fixes.
-
-NOTE: _native_transition / _fal_transition / _download_native_result /
-_native_request were DELETED 2026-08-01 (ADR-083). They were dormant — private
-methods with no caller anywhere, not even inside their own module — and the
-product ships transitions via ffmpeg xfade_concat, not LTX. Their
-duration-contract tests went with them: an unreachable code path cannot
-overspend, so the money-gate they carried protected nothing.
-"""
+"""Offline contract tests for the LTX 2.3 native/FAL adapter."""
 from __future__ import annotations
-
-import sys
-
-# Other test files (test_dialogue_routing, test_ensure_shot_audio, test_f1b_dialogue_lipsync)
-# inject a lightweight stub module for 'ltx_native' via sys.modules to satisfy
-# import-time deps without the full SDK. When that stub is already in sys.modules
-# at collection time, `from ltx_native import LTXVideoAPI` would fail with
-# "cannot import name 'LTXVideoAPI' from 'ltx_native' (unknown location)".
-# Remove the stub so our import always gets the real module.
-sys.modules.pop("ltx_native", None)
 
 import inspect
 import json
-import urllib.request
-from io import BytesIO
-from unittest.mock import MagicMock, patch, call
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
+
+# A few sibling tests install a deliberately tiny import stub.  This module
+# owns the real adapter contract, so collection must import the real module.
+sys.modules.pop("ltx_native", None)
 
 import ltx_native
-from ltx_native import LTXVideoAPI
+from ltx_native import LTXContractViolation, LTXJobPending, LTXVideoAPI
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"input-image"
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"input-image"
+WEBP_BYTES = b"RIFF\x0c\x00\x00\x00WEBP" + b"input-image"
+MP4_BYTES = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        status_code: int,
+        payload=None,
+        *,
+        text: str = "",
+        headers: dict | None = None,
+    ):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+        self.headers = headers or {}
+
+    def json(self):
+        if isinstance(self._payload, BaseException):
+            raise self._payload
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(
+                f"status {self.status_code}",
+                response=self,
+            )
+
 
 def _fake_settings(ltx_key: str = "", fal_key: str = "") -> MagicMock:
-    """Return a mock settings object with only the fields LTXVideoAPI reads."""
-    s = MagicMock()
-    s.ltx_api_key = ltx_key
-    s.fal_key = fal_key
-    return s
+    configured = MagicMock()
+    configured.ltx_api_key = ltx_key
+    configured.fal_key = fal_key
+    return configured
 
 
-def _make_api(ltx_key: str = "", fal_key: str = "", mode: str | None = None) -> LTXVideoAPI:
-    """Construct an LTXVideoAPI whose __init__ reads from a patched settings.
-
-    settings is a frozen dataclass singleton — patch 'ltx_native.settings'
-    (module-level name) with a MagicMock.
-
-    Optionally override mode/keys directly on the returned instance
-    (since __init__ never raises, the instance is always valid to construct).
-    """
-    with patch("ltx_native.settings", _fake_settings(ltx_key=ltx_key, fal_key=fal_key)):
+def _make_api(
+    ltx_key: str = "",
+    fal_key: str = "",
+    mode: str | None = None,
+) -> LTXVideoAPI:
+    with patch(
+        "ltx_native.settings",
+        _fake_settings(ltx_key=ltx_key, fal_key=fal_key),
+    ):
         api = LTXVideoAPI()
     if mode is not None:
         api.mode = mode
     return api
 
 
-def _urlopen_cm(video_bytes: bytes = b"VIDEOBYTES") -> MagicMock:
-    """Return a MagicMock that can be used as a context manager for urlopen.
-    Its __enter__ returns an object whose .read() returns video_bytes.
-    """
-    resp = MagicMock()
-    resp.read.return_value = video_bytes
-    cm = MagicMock()
-    cm.__enter__ = MagicMock(return_value=resp)
-    cm.__exit__ = MagicMock(return_value=False)
-    return cm
+def _write_image(tmp_path: Path, data: bytes = PNG_BYTES) -> Path:
+    image = tmp_path / "frame.any"
+    image.write_bytes(data)
+    return image
 
 
-# ---------------------------------------------------------------------------
-# __init__ — never raises; mode derivation
-# ---------------------------------------------------------------------------
+def _successful_download(monkeypatch, events: list[str] | None = None):
+    def download(url, destination, **kwargs):
+        if events is not None:
+            events.append("download")
+        Path(destination).write_bytes(MP4_BYTES)
+        return destination
 
-def test_init_no_keys_mode_is_none():
-    """With no LTX key and no FAL key, mode=None (no error)."""
-    api = _make_api()
-    assert api.mode is None
-
-
-def test_init_ltx_key_sets_native_mode():
-    api = _make_api(ltx_key="ltx-real-key")
-    assert api.mode == "native"
+    monkeypatch.setattr(ltx_native, "safe_download", download)
 
 
-def test_init_fal_key_only_sets_fal_mode(monkeypatch):
-    """With no LTX key but a FAL key, mode='fal' (when FAL_AVAILABLE)."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key-xxx")
-    assert api.mode == "fal"
-
-
-def test_init_ltx_key_takes_precedence_over_fal(monkeypatch):
-    """LTX native key takes priority over FAL even when both are set."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    assert api.mode == "native"
-
-
-# ---------------------------------------------------------------------------
-# generate_video — mode None → None
-# ---------------------------------------------------------------------------
-
-def test_no_key_returns_none(tmp_path):
-    api = _make_api()
-    result = api.generate_video(
-        image_path=str(tmp_path / "frame.jpg"),
-        prompt="a scene",
-        output_path=str(tmp_path / "out.mp4"),
+def _seed_terminal_job_state(
+    api: LTXVideoAPI,
+    image: Path,
+    output: Path,
+    status: str,
+) -> Path:
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 6,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    state_path = Path(api._job_state_path(str(output), fingerprint))
+    api._write_job_state(
+        str(state_path),
+        {
+            "schema_version": api.JOB_STATE_SCHEMA_VERSION,
+            "provider": "ltx",
+            "endpoint": "image-to-video",
+            "job_id": "job-terminal",
+            "request_fingerprint": fingerprint,
+            "duration_s": 6,
+            "status": status,
+            "updated_at": 1.0,
+        },
     )
-    assert result is None
+    return state_path
 
 
-# ---------------------------------------------------------------------------
-# G(ltx)3: resolution "720p" maps to 1080p (1920x1080) via RESOLUTION_MAP
-# DOCUMENTED-INTENTIONAL: LTX has no true 720p; "720p" upgraded to 1080p
-# (capability-positive); zero live 720p callers.
-# ---------------------------------------------------------------------------
-
-def test_resolution_720p_maps_to_1080p_in_fal(monkeypatch, tmp_path):
-    """G(ltx)3: '720p' key in RESOLUTION_MAP maps to width=1920, height=1080.
-    DOCUMENTED-INTENTIONAL: LTX has no true 720p; "720p" upgraded to 1080p
-    (capability-positive); zero live 720p callers.
-    """
-    assert LTXVideoAPI.RESOLUTION_MAP["720p"] == {"width": 1920, "height": 1080}
-
-
-def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_path):
-    """When generate_video is called with resolution='720p' in fal mode, the
-    subscribe arguments carry resolution='1080p' (the fal-ai/ltx-2.3 enum
-    floor — same capability-positive upgrade as the native map).
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, path: None)
-
-    api.generate_video(
-        image_path=str(img),
-        prompt="test",
-        output_path=out,
-        resolution="720p",
+def _install_native_http(
+    monkeypatch,
+    *,
+    poll_payloads: list[dict] | None = None,
+    required_headers: dict | None = None,
+):
+    calls: dict[str, list] = {"post": [], "put": [], "get": []}
+    post_responses = iter(
+        [
+            FakeResponse(
+                200,
+                {
+                    "upload_url": "https://uploads.example.test/signed",
+                    "storage_uri": "ltx://uploads/input-1",
+                    "expires_at": "2026-08-04T01:00:00Z",
+                    "required_headers": required_headers or {},
+                },
+            ),
+            FakeResponse(
+                202,
+                {
+                    "id": "job-123",
+                    "created_at": "2026-08-04T00:00:00Z",
+                },
+            ),
+        ]
+    )
+    polls = iter(
+        poll_payloads
+        or [
+            {"id": "job-123", "status": "processing"},
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            },
+        ]
     )
 
-    args = subscribe_mock.call_args
-    # 2026-07-11 bump: endpoint is fal-ai/ltx-2.3, payload uses the string
-    # resolution enum — no width/height/num_frames (old ltx-2 shape).
-    assert args.args[0] == "fal-ai/ltx-2.3/image-to-video"
-    subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    assert subscribe_arguments["resolution"] == "1080p"
-    for legacy_key in ("width", "height", "num_frames"):
-        assert legacy_key not in subscribe_arguments, (
-            f"legacy ltx-2 param {legacy_key!r} sent to the 2.3 endpoint"
-        )
-    assert subscribe_arguments["generate_audio"] is False
+    def fake_post(url, **kwargs):
+        calls["post"].append((url, kwargs))
+        return next(post_responses)
+
+    def fake_put(url, **kwargs):
+        calls["put"].append((url, kwargs))
+        # Read while the adapter-owned file handle is open.
+        calls["put_bytes"] = [kwargs["data"].read()]
+        return FakeResponse(200)
+
+    def fake_get(url, **kwargs):
+        calls["get"].append((url, kwargs))
+        return FakeResponse(200, next(polls))
+
+    monkeypatch.setattr(ltx_native.requests, "post", fake_post)
+    monkeypatch.setattr(ltx_native.requests, "put", fake_put)
+    monkeypatch.setattr(ltx_native.requests, "get", fake_get)
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_POLL_INTERVAL_S", 0)
+    return calls
 
 
-def test_fal_duration_helper_snaps_frame_counts_up(monkeypatch, tmp_path):
-    """Pure-function pin: `_fal_duration` snaps a frame count UP to the
-    fal-ai/ltx-2.3 duration enum {6, 8, 10}s (6-floor, 7-8s->8, 9s+->10).
-
-    This is exercised in isolation only — generate_video() now validates
-    duration against the same enum BEFORE ever computing a frame count
-    (see test_invalid_duration_rejected_before_any_network_call), so a
-    real caller can no longer reach this helper with an out-of-enum value.
-    """
-    assert ltx_native.LTXVideoAPI._fal_duration(4 * 24) == 6
-    assert ltx_native.LTXVideoAPI._fal_duration(8 * 24) == 8
-    assert ltx_native.LTXVideoAPI._fal_duration(12 * 24) == 10
+def test_init_modes_and_native_precedence(monkeypatch):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    assert _make_api().mode is None
+    assert _make_api(fal_key="fal").mode == "fal"
+    assert _make_api(ltx_key="ltx").mode == "native"
+    assert _make_api(ltx_key="ltx", fal_key="fal").mode == "native"
 
 
-def test_nearest_supported_duration_snaps_seconds_up():
-    """`nearest_supported_duration` is the dispatcher-facing counterpart of
-    `_fal_duration` — same snap-up bias, seconds in rather than frames in."""
-    assert ltx_native.LTXVideoAPI.nearest_supported_duration(4) == 6
-    assert ltx_native.LTXVideoAPI.nearest_supported_duration(6) == 6
-    assert ltx_native.LTXVideoAPI.nearest_supported_duration(7) == 8
-    assert ltx_native.LTXVideoAPI.nearest_supported_duration(9) == 10
-    assert ltx_native.LTXVideoAPI.nearest_supported_duration(15) == 10
+def test_native_host_and_async_paths_are_current():
+    assert LTXVideoAPI.NATIVE_BASE_URL == "https://api.ltx.io"
+    assert LTXVideoAPI.NATIVE_UPLOAD_PATH == "/v1/upload"
+    assert LTXVideoAPI.NATIVE_ASYNC_PATH == "/v2/image-to-video"
 
 
-def test_phase_c_ffmpeg_duration_enum_matches_ltx_native():
-    """Sync-pin (money-gate finding 2026-07-30): phase_c_ffmpeg.py keeps its
-    OWN literal copy of the ltx-2-3-pro duration enum
-    (``_LTX_DURATION_ENUM_S``) rather than reading ``LTXVideoAPI.
-    DURATION_SECONDS`` off the imported class — an attribute lookup on the
-    class would silently break under the sibling dispatch tests'
-    ``ltx_native.LTXVideoAPI = MagicMock(...)`` module-stub pattern
-    (verified empirically: iterating a bare MagicMock attribute yields ZERO
-    items with no TypeError, and indexing it returns another MagicMock, not
-    an int — the snap-up logic would silently pass a MagicMock as
-    `duration` instead of a real value). This test is the drift guard: if
-    either copy of the enum changes without the other, it fails."""
+def test_default_and_supported_duration_contract():
+    default = inspect.signature(LTXVideoAPI.generate_video).parameters["duration"].default
+    assert default == 6
+    assert LTXVideoAPI.DURATION_SECONDS == (6, 8, 10)
+    assert LTXVideoAPI.nearest_supported_duration(4) == 6
+    assert LTXVideoAPI.nearest_supported_duration(7) == 8
+    assert LTXVideoAPI.nearest_supported_duration(9) == 10
+    assert LTXVideoAPI.nearest_supported_duration(15) == 10
+
+
+def test_phase_c_duration_enum_matches_adapter():
     import phase_c_ffmpeg
 
     assert phase_c_ffmpeg._LTX_DURATION_ENUM_S == LTXVideoAPI.DURATION_SECONDS
 
 
-# ---------------------------------------------------------------------------
-# Duration contract: default 6s; {6, 8, 10} only; rejected BEFORE any
-# network call in EITHER mode (audited 2026-07-30 — native previously
-# defaulted to 4s, invalid for the ltx-2-3-pro profile, and sent it straight
-# to the wire with no validation at all).
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mode", ["native", "fal"])
+def test_invalid_duration_is_rejected_before_network(monkeypatch, tmp_path, mode):
+    api = _make_api(ltx_key="ltx", fal_key="fal", mode=mode)
+    image = _write_image(tmp_path)
+    post = MagicMock()
+    subscribe = MagicMock()
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe)
 
-def test_default_duration_is_six_seconds():
-    """RED before the fix: the public default was 4s, invalid for
-    ltx-2-3-pro (allowed {6, 8, 10}). GREEN: default is 6s."""
-    default = inspect.signature(ltx_native.LTXVideoAPI.generate_video).parameters["duration"].default
-    assert default == 6
-    assert default in ltx_native.LTXVideoAPI.DURATION_SECONDS
-
-
-def test_invalid_duration_rejected_before_any_native_http_call(monkeypatch, tmp_path):
-    """duration=4 (the old default) must be rejected before urlopen is ever
-    called — no HTTP attempt for an invalid duration."""
-    api = _make_api(ltx_key="ltx-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-
-    urlopen_mock = MagicMock()
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
-    upload_mock = MagicMock()
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", upload_mock)
-
-    with pytest.raises(ltx_native.LTXContractViolation):
+    with pytest.raises(LTXContractViolation):
         api.generate_video(
-            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+            str(image),
+            "prompt",
+            str(tmp_path / "out.mp4"),
+            duration=4,
         )
 
-    urlopen_mock.assert_not_called()
-    upload_mock.assert_not_called()
+    post.assert_not_called()
+    subscribe.assert_not_called()
 
 
-def test_invalid_duration_rejected_before_any_fal_call(monkeypatch, tmp_path):
-    """Same duration=4 rejection in FAL mode — no upload/subscribe attempt."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
+@pytest.mark.parametrize("prompt", ["", "   ", "x" * 5001, None])
+def test_invalid_prompt_is_rejected_before_network(monkeypatch, tmp_path, prompt):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    post = MagicMock()
+    monkeypatch.setattr(ltx_native.requests, "post", post)
 
-    upload_mock = MagicMock()
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", upload_mock)
-    subscribe_mock = MagicMock()
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-
-    with pytest.raises(ltx_native.LTXContractViolation):
+    with pytest.raises(LTXContractViolation):
         api.generate_video(
-            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
+            str(image),
+            prompt,
+            str(tmp_path / "out.mp4"),
         )
 
-    upload_mock.assert_not_called()
-    subscribe_mock.assert_not_called()
+    post.assert_not_called()
 
 
-def test_invalid_duration_not_swallowed_by_generic_fallback_handler(monkeypatch, tmp_path):
-    """The contract violation must surface as LTXContractViolation, NOT be
-    absorbed by _native_generate's generic except-Exception→FAL fallback
-    (which would silently reroute a malformed local request through FAL and
-    conceal the bug — the specific defect this slice repairs). Proven by
-    configuring a FAL key that WOULD satisfy the fallback path and asserting
-    it is never reached."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-
-    with pytest.raises(ltx_native.LTXContractViolation):
-        api.generate_video(
-            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=4,
-        )
-
-    subscribe_mock.assert_not_called()
-
-
-def test_valid_durations_do_not_raise(monkeypatch, tmp_path):
-    """Sanity check: 6, 8, and 10 are all accepted (no-op mode, so each
-    just returns None via the no-key guard — the point is no raise)."""
+def test_no_key_returns_none_without_reading_input(tmp_path):
     api = _make_api()
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    for valid in (6, 8, 10):
-        assert api.generate_video(
-            image_path=str(img), prompt="t", output_path=str(tmp_path / "o.mp4"), duration=valid,
-        ) is None
+    assert api.generate_video(
+        str(tmp_path / "missing.png"),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+    ) is None
 
 
-# ---------------------------------------------------------------------------
-# Native payload: duration threaded through + audio explicitly disabled
-# (audited 2026-07-30 — the native JSON body carried no generate_audio key
-# at all, so requests silently rode the provider's default-true and
-# generated audio the product discards).
-# ---------------------------------------------------------------------------
-
-def test_native_payload_sends_duration_and_disables_audio(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
-    urlopen_mock = MagicMock(return_value=cm)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
-
-    api.generate_video(image_path=str(img), prompt="cinematic", output_path=out, duration=8)
-
-    sent_request = urlopen_mock.call_args[0][0]
-    payload = json.loads(sent_request.data.decode("utf-8"))
-    assert payload["duration"] == 8
-    assert payload["model"] == "ltx-2-3-pro"
-    assert payload["generate_audio"] is False
-
-
-def test_native_and_fal_payloads_agree_on_duration(monkeypatch, tmp_path):
-    """Same requested duration -> the same wire-level `duration` value on
-    BOTH the native JSON payload and the FAL subscribe arguments."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-
-    native_api = _make_api(ltx_key="ltx-key")
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
-    urlopen_mock = MagicMock(return_value=cm)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
-    native_api.generate_video(
-        image_path=str(img), prompt="t", output_path=str(tmp_path / "n.mp4"), duration=8,
+@pytest.mark.parametrize(
+    ("image_bytes", "expected_mime"),
+    [
+        (PNG_BYTES, "image/png"),
+        (JPEG_BYTES, "image/jpeg"),
+        (WEBP_BYTES, "image/webp"),
+    ],
+)
+def test_signed_upload_uses_mime_from_bytes(
+    monkeypatch,
+    tmp_path,
+    image_bytes,
+    expected_mime,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path, image_bytes)
+    calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
     )
-    native_payload = json.loads(urlopen_mock.call_args[0][0].data.decode("utf-8"))
+    _successful_download(monkeypatch)
 
-    fal_api = _make_api(fal_key="fal-key")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, path: None)
-    fal_api.generate_video(
-        image_path=str(img), prompt="t", output_path=str(tmp_path / "f.mp4"), duration=8,
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+    ) == str(tmp_path / "out.mp4")
+
+    upload_url, upload_kwargs = calls["put"][0]
+    assert upload_url == "https://uploads.example.test/signed"
+    assert upload_kwargs["headers"]["Content-Type"] == expected_mime
+    assert upload_kwargs["allow_redirects"] is False
+    assert calls["put_bytes"] == [image_bytes]
+
+
+def test_signed_upload_preserves_provider_required_headers(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    calls = _install_native_http(
+        monkeypatch,
+        required_headers={
+            "x-goog-content-length-range": "1,15728640",
+            "content-type": "image/png",
+        },
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
     )
-    fal_arguments = subscribe_mock.call_args.kwargs.get("arguments", {})
+    _successful_download(monkeypatch)
 
-    assert native_payload["duration"] == fal_arguments["duration"] == 8
+    api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+
+    headers = calls["put"][0][1]["headers"]
+    assert headers == {
+        "x-goog-content-length-range": "1,15728640",
+        "content-type": "image/png",
+    }
 
 
-# ---------------------------------------------------------------------------
-# FAL mode — happy path
-# ---------------------------------------------------------------------------
+def test_upload_ticket_mime_mismatch_fails_before_put(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path, PNG_BYTES)
+    put = MagicMock()
+    monkeypatch.setattr(
+        ltx_native.requests,
+        "post",
+        MagicMock(
+            return_value=FakeResponse(
+                200,
+                {
+                    "upload_url": "https://uploads.example.test/signed",
+                    "storage_uri": "ltx://uploads/input-1",
+                    "required_headers": {"Content-Type": "image/jpeg"},
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(ltx_native.requests, "put", put)
 
-def test_fal_happy_path_writes_output(monkeypatch, tmp_path):
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) is None
+    put.assert_not_called()
+
+
+def test_native_flow_uses_ltx_upload_not_fal_and_submits_ltx_uri(
+    monkeypatch,
+    tmp_path,
+):
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path)
+    fal_upload = MagicMock(side_effect=AssertionError("native path touched FAL upload"))
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", fal_upload)
+    calls = _install_native_http(monkeypatch)
+    _successful_download(monkeypatch)
 
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-
-    written = {}
-    def fake_urlretrieve(url, dest):
-        written["url"] = url
-        written["dest"] = dest
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", fake_urlretrieve)
-
-    result = api.generate_video(image_path=str(img), prompt="scene", output_path=out)
-
-    assert result == out
-    assert written["url"] == "http://cdn/v.mp4"
-    assert written["dest"] == out
-
-
-# ---------------------------------------------------------------------------
-# FAL mode — no video URL in response → None
-# ---------------------------------------------------------------------------
-
-def test_fal_no_video_url_returns_none(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    # Response has no "url" under "video"
-    subscribe_mock = MagicMock(return_value={"video": {}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# FAL mode — camera_motion valid → included in subscribe args
-# ---------------------------------------------------------------------------
-
-def test_fal_valid_camera_motion_included(monkeypatch, tmp_path):
-    """A recognised camera_motion is folded into the PROMPT (fal-ai/ltx-2.3
-    has no camera_motion parameter — language-steered camera only)."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    api.generate_video(
-        image_path=str(img),
-        prompt="test",
-        output_path=out,
+    result = api.generate_video(
+        str(image),
+        "cinematic",
+        str(tmp_path / "out.mp4"),
+        duration=8,
+        resolution="1080p",
         camera_motion="dolly_in",
     )
 
-    args = subscribe_mock.call_args
-    subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    assert "camera_motion" not in subscribe_arguments, (
-        "ltx-2.3 has no camera_motion param — must be prompt-folded"
+    assert result == str(tmp_path / "out.mp4")
+    fal_upload.assert_not_called()
+    assert [item[0] for item in calls["post"]] == [
+        "https://api.ltx.io/v1/upload",
+        "https://api.ltx.io/v2/image-to-video",
+    ]
+    submit = calls["post"][1][1]
+    assert submit["json"] == {
+        "image_uri": "ltx://uploads/input-1",
+        "prompt": "cinematic. Camera: dolly in.",
+        "model": "ltx-2-3-pro",
+        "duration": 8,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    assert submit["allow_redirects"] is False
+
+
+def test_job_id_is_persisted_before_first_poll(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    events: list[str] = []
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
     )
-    assert "dolly in" in subscribe_arguments["prompt"]
+    _successful_download(monkeypatch)
+    real_write = LTXVideoAPI._write_job_state.__func__
 
+    def recording_write(cls, path, state):
+        events.append(f"persist:{state['status']}")
+        return real_write(cls, path, state)
 
-# ---------------------------------------------------------------------------
-# FAL mode — camera_motion invalid → excluded from subscribe args
-# ---------------------------------------------------------------------------
-
-def test_fal_invalid_camera_motion_excluded(monkeypatch, tmp_path):
-    """An unrecognised camera_motion string is silently dropped."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    api.generate_video(
-        image_path=str(img),
-        prompt="test",
-        output_path=out,
-        camera_motion="hover_rotate",   # not in CAMERA_MOTIONS
-    )
-
-    args = subscribe_mock.call_args
-    subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    assert "camera_motion" not in subscribe_arguments
-    assert "hover_rotate" not in subscribe_arguments["prompt"], (
-        "invalid camera motion must not leak into the prompt"
-    )
-
-
-# ---------------------------------------------------------------------------
-# FAL mode — exception → None
-# ---------------------------------------------------------------------------
-
-def test_fal_exception_returns_none(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
+    def recording_get(url, **kwargs):
+        events.append("poll")
+        return FakeResponse(
+            200,
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            },
+        )
 
     monkeypatch.setattr(
-        ltx_native.fal_client, "upload_file", MagicMock(side_effect=RuntimeError("network"))
+        LTXVideoAPI,
+        "_write_job_state",
+        classmethod(recording_write),
     )
+    monkeypatch.setattr(ltx_native.requests, "get", recording_get)
 
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-    assert result is None
+    api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+
+    assert events[:2] == ["persist:submitted", "poll"]
+    state_files = list(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    assert len(state_files) == 1
+    state = json.loads(state_files[0].read_text())
+    assert state["job_id"] == "job-123"
+    assert state["request_fingerprint"]
+    assert state["status"] == "completed"
 
 
-# ---------------------------------------------------------------------------
-# FAL mode — on_billed fires exactly at the provider's billed-URL boundary
-# (money-gate 2026-07-11 class, extended to ltx_native in slice M2: a
-# post-billing download failure must still be distinguishable from a
-# pre-billing failure to the caller). Mirrors kling_native.py's on_billed
-# tests (commit 55c0797e).
-# ---------------------------------------------------------------------------
+def test_exclusive_submission_claim_is_durable_before_generation_post(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    observed_claim: dict = {}
 
-def test_fal_pre_billing_failure_does_not_call_on_billed(monkeypatch, tmp_path):
-    """No video URL in the fal response => the provider never delivered a
-    video => never billed => on_billed must NOT fire."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-    on_billed = MagicMock()
+    monkeypatch.setattr(api, "_native_upload", lambda _path: "ltx://uploads/input-1")
 
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    def submit(_payload):
+        state_path = next(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+        observed_claim.update(json.loads(state_path.read_text(encoding="utf-8")))
+        return "job-claim-1", "2026-08-04T00:00:00Z"
+
+    monkeypatch.setattr(api, "_submit_native_job", submit)
     monkeypatch.setattr(
-        ltx_native.fal_client, "subscribe", MagicMock(return_value={"video": {}})
+        api,
+        "_poll_native_job",
+        lambda *_args: {"status": "failed", "error": {"message": "terminal"}},
     )
 
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        duration=8,
+    ) is None
+
+    assert observed_claim["status"] == "submission_claimed"
+    assert observed_claim["duration_s"] == 8
+    assert observed_claim["request_fingerprint"] == api.last_request_fingerprint
+    assert "job_id" not in observed_claim
+    assert api.last_job_id == "job-claim-1"
+    assert api.last_duration_s == 8
+
+
+def test_concurrent_identical_requests_cross_generation_post_once(
+    monkeypatch,
+    tmp_path,
+):
+    first = _make_api(ltx_key="ltx")
+    second = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    submit_entered = threading.Event()
+    release_submit = threading.Event()
+    submit_count = 0
+    submit_count_lock = threading.Lock()
+
+    for api in (first, second):
+        monkeypatch.setattr(
+            api,
+            "_native_upload",
+            lambda _path: "ltx://uploads/input-1",
+        )
+        monkeypatch.setattr(
+            api,
+            "_poll_native_job",
+            lambda *_args: {"status": "failed", "error": {"message": "terminal"}},
+        )
+
+    def submit(_payload):
+        nonlocal submit_count
+        with submit_count_lock:
+            submit_count += 1
+        submit_entered.set()
+        assert release_submit.wait(timeout=5)
+        return "job-concurrent", "2026-08-04T00:00:00Z"
+
+    monkeypatch.setattr(first, "_submit_native_job", submit)
+    monkeypatch.setattr(
+        second,
+        "_submit_native_job",
+        MagicMock(side_effect=AssertionError("duplicate generation POST")),
     )
 
-    assert result is None
-    on_billed.assert_not_called()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        winner = pool.submit(
+            first.generate_video,
+            str(image),
+            "prompt",
+            str(tmp_path / "first.mp4"),
+        )
+        assert submit_entered.wait(timeout=5)
+        try:
+            with pytest.raises(LTXJobPending) as pending:
+                second.generate_video(
+                    str(image),
+                    "prompt",
+                    str(tmp_path / "second.mp4"),
+                )
+            assert pending.value.reason == "submit_outcome_unknown"
+            assert pending.value.provider_status == "submission_claimed"
+            assert pending.value.duration_s == 6
+        finally:
+            release_submit.set()
+        assert winner.result(timeout=5) is None
+
+    assert submit_count == 1
+    second._submit_native_job.assert_not_called()
 
 
-def test_fal_post_billing_download_failure_still_notes_billed(monkeypatch, tmp_path):
-    """RED->GREEN target: a download failure AFTER fal returned a video URL
-    must still fire on_billed. Pre-fix, urlretrieve's failure fell into the
-    blanket `except Exception: return None`, indistinguishable from a
-    pre-billing failure and losing the spend to the caller's budget gate.
-    on_billed must fire BEFORE the download attempt, not after."""
+@pytest.mark.parametrize("terminal_status", ["failed", "expired"])
+def test_terminal_sidecar_allows_one_fresh_submission(
+    terminal_status,
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    output = tmp_path / "out.mp4"
+    state_path = _seed_terminal_job_state(
+        api,
+        image,
+        output,
+        terminal_status,
+    )
+    monkeypatch.setattr(api, "_native_upload", lambda _path: "ltx://uploads/retry")
+    submit = MagicMock(return_value=("job-retry", "2026-08-05T00:00:00Z"))
+    monkeypatch.setattr(api, "_submit_native_job", submit)
+    poll = MagicMock(
+        return_value={"status": "failed", "error": {"message": "terminal"}}
+    )
+    monkeypatch.setattr(api, "_poll_native_job", poll)
+
+    assert api.generate_video(str(image), "prompt", str(output)) is None
+
+    submit.assert_called_once()
+    assert poll.call_args.args[0] == "job-retry"
+    replacement = json.loads(state_path.read_text(encoding="utf-8"))
+    assert replacement["job_id"] == "job-retry"
+    assert replacement["status"] == "submitted"
+
+
+def test_concurrent_terminal_retries_cross_generation_post_once(
+    monkeypatch,
+    tmp_path,
+):
+    first = _make_api(ltx_key="ltx")
+    second = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    output = tmp_path / "out.mp4"
+    _seed_terminal_job_state(first, image, output, "failed")
+    submit_entered = threading.Event()
+    release_submit = threading.Event()
+
+    for api in (first, second):
+        monkeypatch.setattr(
+            api,
+            "_native_upload",
+            lambda _path: "ltx://uploads/retry",
+        )
+    monkeypatch.setattr(
+        first,
+        "_poll_native_job",
+        lambda *_args: {"status": "failed", "error": {"message": "terminal"}},
+    )
+
+    def submit(_payload):
+        submit_entered.set()
+        assert release_submit.wait(timeout=5)
+        return "job-retry", "2026-08-05T00:00:00Z"
+
+    monkeypatch.setattr(first, "_submit_native_job", submit)
+    duplicate_submit = MagicMock(
+        side_effect=AssertionError("duplicate generation POST")
+    )
+    monkeypatch.setattr(second, "_submit_native_job", duplicate_submit)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        winner = pool.submit(
+            first.generate_video,
+            str(image),
+            "prompt",
+            str(output),
+        )
+        assert submit_entered.wait(timeout=5)
+        try:
+            with pytest.raises(LTXJobPending) as pending:
+                second.generate_video(str(image), "prompt", str(output))
+            assert pending.value.reason == "submit_outcome_unknown"
+            assert pending.value.provider_status == "submission_claimed"
+        finally:
+            release_submit.set()
+        assert winner.result(timeout=5) is None
+
+    duplicate_submit.assert_not_called()
+
+
+def test_abandoned_submission_claim_blocks_upload_and_resubmit(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 6,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    state_path = api._job_state_path(str(tmp_path / "out.mp4"), fingerprint)
+    api._claim_submission_state(state_path, fingerprint, 6)
+    upload = MagicMock(side_effect=AssertionError("claim retry uploaded"))
+    submit = MagicMock(side_effect=AssertionError("claim retry submitted"))
+    monkeypatch.setattr(api, "_native_upload", upload)
+    monkeypatch.setattr(api, "_submit_native_job", submit)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+
+    assert pending.value.reason == "submit_outcome_unknown"
+    assert pending.value.provider_status == "submission_claimed"
+    assert pending.value.duration_s == 6
+    upload.assert_not_called()
+    submit.assert_not_called()
+
+
+def test_known_job_id_recovers_claim_left_by_accepted_state_write_failure(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    output = tmp_path / "out.mp4"
+    monkeypatch.setattr(api, "_native_upload", lambda _path: "ltx://uploads/input-1")
+    monkeypatch.setattr(
+        api,
+        "_submit_native_job",
+        lambda _payload: ("job-known-after-post", "2026-08-04T00:00:00Z"),
+    )
+    real_write = LTXVideoAPI._write_job_state.__func__
+
+    def fail_accepted_state_write(cls, path, state):
+        if state.get("status") == "submitted":
+            raise OSError("accepted state disk write failed")
+        return real_write(cls, path, state)
+
+    monkeypatch.setattr(
+        LTXVideoAPI,
+        "_write_job_state",
+        classmethod(fail_accepted_state_write),
+    )
+
+    with pytest.raises(LTXJobPending) as deferred:
+        api.generate_video(str(image), "prompt", str(output), duration=8)
+
+    assert deferred.value.reason == "accepted_job_local_error"
+    assert deferred.value.job_id == "job-known-after-post"
+    assert deferred.value.duration_s == 8
+    fingerprint = deferred.value.request_fingerprint
+    state_path = Path(deferred.value.state_path)
+    assert json.loads(state_path.read_text(encoding="utf-8"))["status"] == (
+        "submission_claimed"
+    )
+
+    monkeypatch.setattr(
+        LTXVideoAPI,
+        "_write_job_state",
+        classmethod(real_write),
+    )
+    upload = MagicMock(side_effect=AssertionError("known job recovery uploaded"))
+    submit = MagicMock(side_effect=AssertionError("known job recovery submitted"))
+    monkeypatch.setattr(api, "_native_upload", upload)
+    monkeypatch.setattr(api, "_submit_native_job", submit)
+    monkeypatch.setattr(
+        api,
+        "_poll_native_job",
+        lambda job_id, *_args: {
+            "id": job_id,
+            "status": "completed",
+            "result": {"video_url": "https://cdn.example.test/output.mp4"},
+        },
+    )
+    _successful_download(monkeypatch)
+
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(output),
+        duration=8,
+        expected_job_id="job-known-after-post",
+        expected_request_fingerprint=fingerprint,
+    ) == str(output)
+    assert api.last_job_id == "job-known-after-post"
+    upload.assert_not_called()
+    submit.assert_not_called()
+
+
+def test_pending_job_is_resumed_without_upload_or_resubmit(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[{"id": "job-123", "status": "processing"}],
+    )
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_MAX_POLLS", 1)
+    _successful_download(monkeypatch)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "first.mp4"))
+    assert pending.value.reason == "poll_window_exhausted"
+    assert pending.value.status == "pending"
+    assert pending.value.job_id == "job-123"
+
+    post = MagicMock(side_effect=AssertionError("resume submitted a new job"))
+    put = MagicMock(side_effect=AssertionError("resume uploaded input again"))
+    get = MagicMock(
+        return_value=FakeResponse(
+            200,
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            },
+        )
+    )
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+    monkeypatch.setattr(ltx_native.requests, "put", put)
+    monkeypatch.setattr(ltx_native.requests, "get", get)
+
+    second_output = tmp_path / "second.mp4"
+    assert api.generate_video(
+        str(image), "prompt", str(second_output)
+    ) == str(second_output)
+    post.assert_not_called()
+    put.assert_not_called()
+    assert get.call_args.args[0].endswith("/v2/image-to-video/job-123")
+
+
+def test_changed_request_does_not_resume_prior_job(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    first_calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[{"id": "job-123", "status": "processing"}],
+    )
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_MAX_POLLS", 1)
+    _successful_download(monkeypatch)
+    with pytest.raises(LTXJobPending):
+        api.generate_video(str(image), "first prompt", str(tmp_path / "one.mp4"))
+    assert len(first_calls["post"]) == 2
+
+    second_calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
+    )
+    api.generate_video(str(image), "different prompt", str(tmp_path / "two.mp4"))
+    assert len(second_calls["post"]) == 2
+    assert len(list(tmp_path.glob(".ltx-image-to-video-*.job.json"))) == 2
+
+
+def test_expected_fingerprint_mismatch_blocks_before_upload_or_submit(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    upload = MagicMock(side_effect=AssertionError("changed request uploaded"))
+    submit = MagicMock(side_effect=AssertionError("changed request submitted"))
+    monkeypatch.setattr(api, "_native_upload", upload)
+    monkeypatch.setattr(api, "_submit_native_job", submit)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(
+            str(image),
+            "current prompt",
+            str(tmp_path / "out.mp4"),
+            duration=10,
+            expected_job_id="job-original",
+            expected_request_fingerprint="f" * 64,
+        )
+
+    assert pending.value.reason == "request_changed"
+    assert pending.value.status == "recovery_required"
+    assert pending.value.job_id == "job-original"
+    assert pending.value.request_fingerprint == "f" * 64
+    assert pending.value.duration_s == 10
+    assert api.last_duration_s == 10
+    upload.assert_not_called()
+    submit.assert_not_called()
+
+
+def test_expected_binding_requires_existing_state_before_upload(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 6,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    upload = MagicMock(side_effect=AssertionError("missing state uploaded"))
+    monkeypatch.setattr(api, "_native_upload", upload)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(
+            str(image),
+            "prompt",
+            str(tmp_path / "out.mp4"),
+            expected_job_id="job-123",
+            expected_request_fingerprint=fingerprint,
+        )
+
+    assert pending.value.reason == "job_state_missing"
+    assert pending.value.job_id == "job-123"
+    assert pending.value.duration_s == 6
+    upload.assert_not_called()
+
+
+def test_expected_job_id_mismatch_blocks_poll_and_submit(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 6,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    state_path = api._job_state_path(str(tmp_path / "out.mp4"), fingerprint)
+    api._write_job_state(
+        state_path,
+        {
+            "schema_version": api.JOB_STATE_SCHEMA_VERSION,
+            "provider": "ltx",
+            "endpoint": "image-to-video",
+            "job_id": "job-actual",
+            "request_fingerprint": fingerprint,
+            "duration_s": 6,
+            "status": "processing",
+        },
+    )
+    upload = MagicMock(side_effect=AssertionError("job mismatch uploaded"))
+    poll = MagicMock(side_effect=AssertionError("job mismatch polled"))
+    monkeypatch.setattr(api, "_native_upload", upload)
+    monkeypatch.setattr(api, "_poll_native_job", poll)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(
+            str(image),
+            "prompt",
+            str(tmp_path / "out.mp4"),
+            expected_job_id="job-expected",
+            expected_request_fingerprint=fingerprint,
+        )
+
+    assert pending.value.reason == "job_id_mismatch"
+    assert pending.value.job_id == "job-expected"
+    assert pending.value.duration_s == 6
+    upload.assert_not_called()
+    poll.assert_not_called()
+
+
+def test_exact_expected_binding_resumes_and_surfaces_job_metadata(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    output = tmp_path / "out.mp4"
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 8,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    state_path = api._job_state_path(str(output), fingerprint)
+    api._write_job_state(
+        state_path,
+        {
+            "schema_version": api.JOB_STATE_SCHEMA_VERSION,
+            "provider": "ltx",
+            "endpoint": "image-to-video",
+            "job_id": "job-resume",
+            "request_fingerprint": fingerprint,
+            "duration_s": 8,
+            "status": "processing",
+        },
+    )
+    monkeypatch.setattr(
+        api,
+        "_native_upload",
+        MagicMock(side_effect=AssertionError("exact resume uploaded")),
+    )
+    monkeypatch.setattr(
+        api,
+        "_submit_native_job",
+        MagicMock(side_effect=AssertionError("exact resume submitted")),
+    )
+    monkeypatch.setattr(
+        api,
+        "_poll_native_job",
+        lambda *_args: {
+            "status": "completed",
+            "result": {"video_url": "https://cdn.example.test/output.mp4"},
+        },
+    )
+    _successful_download(monkeypatch)
+
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(output),
+        duration=8,
+        expected_job_id="job-resume",
+        expected_request_fingerprint=fingerprint,
+    ) == str(output)
+    assert api.last_job_id == "job-resume"
+    assert api.last_request_fingerprint == fingerprint
+    assert api.last_duration_s == 8
+
+
+def test_polling_is_bounded_and_retains_processing_state(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {"id": "job-123", "status": "pending"},
+            {"id": "job-123", "status": "processing"},
+            {"id": "job-123", "status": "processing"},
+        ],
+    )
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_MAX_POLLS", 3)
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_POLL_INTERVAL_S", 5)
+    sleep = MagicMock()
+    monkeypatch.setattr(ltx_native.time, "sleep", sleep)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+    assert pending.value.reason == "poll_window_exhausted"
+    assert pending.value.provider_status == "processing"
+    assert len(calls["get"]) == 3
+    assert sleep.call_count == 2
+    state_file = next(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    assert json.loads(state_file.read_text())["status"] == "processing"
+
+
+def test_accepted_job_poll_protocol_error_requires_recovery_not_fal(
+    monkeypatch,
+    tmp_path,
+):
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path)
+    _install_native_http(monkeypatch)
+    monkeypatch.setattr(
+        ltx_native.requests,
+        "get",
+        lambda *a, **k: FakeResponse(
+            200,
+            {"id": "job-123", "status": "provider-added-unknown-state"},
+        ),
+    )
+    fal = MagicMock()
+    monkeypatch.setattr(api, "_fal_generate", fal)
 
-    call_order: list[str] = []
-    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
 
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    assert pending.value.reason == "accepted_job_error"
+    assert pending.value.status == "recovery_required"
+    assert pending.value.job_id == "job-123"
+    assert pending.value.provider_status == "submitted"
+    fal.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "transient",
+    [
+        requests.ConnectionError("connection reset"),
+        FakeResponse(503, {"error": {"message": "busy"}}),
+    ],
+    ids=["network", "http-503"],
+)
+def test_transient_poll_failure_retries_same_persisted_job(
+    monkeypatch,
+    tmp_path,
+    transient,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
+    )
+    poll_events = iter(
+        [
+            transient,
+            FakeResponse(
+                200,
+                {
+                    "id": "job-123",
+                    "status": "completed",
+                    "result": {"video_url": "https://cdn.example.test/output.mp4"},
+                },
+            ),
+        ]
+    )
+
+    def get(url, **kwargs):
+        calls["get"].append((url, kwargs))
+        event = next(poll_events)
+        if isinstance(event, BaseException):
+            raise event
+        return event
+
+    monkeypatch.setattr(ltx_native.requests, "get", get)
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_MAX_POLLS", 2)
+    sleep = MagicMock()
+    monkeypatch.setattr(ltx_native.time, "sleep", sleep)
+    _successful_download(monkeypatch)
+
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) == str(tmp_path / "out.mp4")
+    assert len(calls["post"]) == 2
+    assert len(calls["get"]) == 2
+    sleep.assert_called_once()
+
+
+def test_ambiguous_poll_404_preserves_and_retries_accepted_job(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    calls = _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            },
+        ],
+    )
+    poll_events = iter(
+        [
+            FakeResponse(404),
+            FakeResponse(
+                200,
+                {
+                    "id": "job-123",
+                    "status": "completed",
+                    "result": {"video_url": "https://cdn.example.test/output.mp4"},
+                },
+            ),
+        ]
+    )
+
+    def get(url, **kwargs):
+        calls["get"].append((url, kwargs))
+        return next(poll_events)
+
+    monkeypatch.setattr(ltx_native.requests, "get", get)
+    monkeypatch.setattr(LTXVideoAPI, "NATIVE_MAX_POLLS", 2)
+    sleep = MagicMock()
+    monkeypatch.setattr(ltx_native.time, "sleep", sleep)
+    _successful_download(monkeypatch)
+
+    output = tmp_path / "out.mp4"
+    assert api.generate_video(str(image), "prompt", str(output)) == str(output)
+    assert len(calls["post"]) == 2
+    assert len(calls["get"]) == 2
+    sleep.assert_called_once()
+    state_path = next(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["job_id"] == "job-123"
+    assert state["status"] == "completed"
+
+
+def test_terminal_failed_job_does_not_fallback_to_fal(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "failed",
+                "error": {"type": "content_filtered_error", "message": "blocked"},
+            }
+        ],
+    )
+    fal = MagicMock()
+    monkeypatch.setattr(api, "_fal_generate", fal)
+
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) is None
+    fal.assert_not_called()
+    state_file = next(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    state = json.loads(state_file.read_text())
+    assert state["status"] == "failed"
+    assert state["error"]["type"] == "content_filtered_error"
+
+
+def test_ambiguous_submit_failure_never_falls_back(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path)
+    post_responses = iter(
+        [
+            FakeResponse(
+                200,
+                {
+                    "upload_url": "https://uploads.example.test/signed",
+                    "storage_uri": "ltx://uploads/input-1",
+                    "required_headers": {},
+                },
+            ),
+            requests.ConnectionError("response lost after POST"),
+        ]
+    )
+
+    def post(*args, **kwargs):
+        response = next(post_responses)
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+    monkeypatch.setattr(ltx_native.requests, "put", lambda *a, **k: FakeResponse(200))
+    fal = MagicMock()
+    monkeypatch.setattr(api, "_fal_generate", fal)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+    assert pending.value.reason == "submit_outcome_unknown"
+    assert pending.value.status == "recovery_required"
+    assert pending.value.job_id is None
+    fal.assert_not_called()
+    marker = next(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    assert json.loads(marker.read_text(encoding="utf-8"))["status"] == (
+        "submission_unknown"
+    )
+
+    post_again = MagicMock(side_effect=AssertionError("ambiguous submit repeated"))
+    monkeypatch.setattr(ltx_native.requests, "post", post_again)
+    with pytest.raises(LTXJobPending) as resumed:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+    assert resumed.value.reason == "submit_outcome_unknown"
+    post_again.assert_not_called()
+
+
+def test_invalid_submitted_job_id_blocks_resubmit_and_is_not_polled(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    responses = iter(
+        [
+            FakeResponse(
+                200,
+                {
+                    "upload_url": "https://uploads.example.test/signed",
+                    "storage_uri": "ltx://uploads/input-1",
+                    "required_headers": {},
+                },
+            ),
+            FakeResponse(202, {"id": "../other-endpoint", "created_at": "now"}),
+        ]
+    )
+    monkeypatch.setattr(ltx_native.requests, "post", lambda *a, **k: next(responses))
+    monkeypatch.setattr(ltx_native.requests, "put", lambda *a, **k: FakeResponse(200))
+    get = MagicMock()
+    monkeypatch.setattr(ltx_native.requests, "get", get)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+    assert pending.value.reason == "submit_outcome_unknown"
+    get.assert_not_called()
+    state_files = list(tmp_path.glob(".ltx-image-to-video-*.job.json"))
+    assert len(state_files) == 1
+    state = json.loads(state_files[0].read_text(encoding="utf-8"))
+    assert state["status"] == "submission_unknown"
+    assert "job_id" not in state
+
+
+def test_unreadable_job_sidecar_blocks_duplicate_submit(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    request = {
+        "prompt": "prompt",
+        "model": "ltx-2-3-pro",
+        "duration": 6,
+        "resolution": "1920x1080",
+        "generate_audio": False,
+    }
+    fingerprint = api._request_fingerprint(str(image), request)
+    state_path = Path(api._job_state_path(str(tmp_path / "out.mp4"), fingerprint))
+    state_path.write_text("{not-json", encoding="utf-8")
+    post = MagicMock(side_effect=AssertionError("corrupt recovery state resubmitted"))
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(tmp_path / "out.mp4"))
+
+    assert pending.value.reason == "job_state_unreadable"
+    assert pending.value.status == "recovery_required"
+    assert pending.value.state_path == str(state_path)
+    post.assert_not_called()
+
+
+def test_pre_submission_upload_failure_can_use_configured_fal(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path)
+    monkeypatch.setattr(
+        ltx_native.requests,
+        "post",
+        MagicMock(side_effect=requests.ConnectionError("upload ticket unavailable")),
+    )
+    fal = MagicMock(return_value=str(tmp_path / "out.mp4"))
+    monkeypatch.setattr(api, "_fal_generate", fal)
+
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) == str(tmp_path / "out.mp4")
+    fal.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "bad_bytes",
+    [b"", b"GIF89a", b"not-an-image"],
+)
+def test_invalid_input_image_fails_locally_without_network_or_fal(
+    monkeypatch,
+    tmp_path,
+    bad_bytes,
+):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx", fal_key="fal")
+    image = _write_image(tmp_path, bad_bytes)
+    post = MagicMock()
+    fal = MagicMock()
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+    monkeypatch.setattr(api, "_fal_generate", fal)
+
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) is None
+    post.assert_not_called()
+    fal.assert_not_called()
+
+
+def test_oversized_input_fails_before_network(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path, PNG_BYTES)
+    monkeypatch.setattr(LTXVideoAPI, "INPUT_IMAGE_MAX_BYTES", 1)
+    post = MagicMock()
+    monkeypatch.setattr(ltx_native.requests, "post", post)
+
+    assert api.generate_video(
+        str(image), "prompt", str(tmp_path / "out.mp4")
+    ) is None
+    post.assert_not_called()
+
+
+def test_completed_output_bills_before_download(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
+    )
+    events: list[str] = []
+    _successful_download(monkeypatch, events)
+
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        on_billed=lambda: events.append("billed"),
+    ) == str(tmp_path / "out.mp4")
+    assert events == ["billed", "download"]
+
+
+def test_download_failure_still_bills_and_preserves_existing_output(
+    monkeypatch,
+    tmp_path,
+):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    output = tmp_path / "out.mp4"
+    output.write_bytes(MP4_BYTES)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
+    )
+    billed = MagicMock()
+    monkeypatch.setattr(ltx_native, "safe_download", MagicMock(return_value=None))
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(str(image), "prompt", str(output), on_billed=billed)
+    assert pending.value.reason == "completed_output_invalid"
+    assert pending.value.provider_status == "completed"
+    billed.assert_called_once()
+    assert output.read_bytes() == MP4_BYTES
+
+
+def test_billing_callback_exception_does_not_abort_publication(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {
+                "id": "job-123",
+                "status": "completed",
+                "result": {"video_url": "https://cdn.example.test/output.mp4"},
+            }
+        ],
+    )
+    _successful_download(monkeypatch)
+
+    def broken_callback():
+        raise RuntimeError("accounting hook failed")
+
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        on_billed=broken_callback,
+    ) == str(tmp_path / "out.mp4")
+
+
+def test_completed_job_without_video_url_fails_without_billing(monkeypatch, tmp_path):
+    api = _make_api(ltx_key="ltx")
+    image = _write_image(tmp_path)
+    _install_native_http(
+        monkeypatch,
+        poll_payloads=[
+            {"id": "job-123", "status": "completed", "result": {}},
+        ],
+    )
+    billed = MagicMock()
+
+    with pytest.raises(LTXJobPending) as pending:
+        api.generate_video(
+            str(image),
+            "prompt",
+            str(tmp_path / "out.mp4"),
+            on_billed=billed,
+        )
+    assert pending.value.reason == "completed_output_missing"
+    assert pending.value.provider_status == "completed"
+    billed.assert_not_called()
+
+
+def test_download_requests_strict_mp4_mime_and_container_validation(monkeypatch):
+    captured = {}
+
+    def download(url, destination, **kwargs):
+        captured.update(kwargs)
+        return destination
+
+    monkeypatch.setattr(ltx_native, "safe_download", download)
+
+    assert LTXVideoAPI._download_video(
+        "https://cdn.example.test/output.mp4", "out.mp4"
+    ) == "out.mp4"
+    assert captured["allowed_content_types"] == ("video/mp4",)
+    assert captured["content_validator"] == ltx_native.validate_video_artifact
+
+
+def test_fal_payload_and_validated_download(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal")
+    image = _write_image(tmp_path)
+    monkeypatch.setattr(
+        ltx_native.fal_client,
+        "upload_file",
+        MagicMock(return_value="https://fal.example.test/input.png"),
+    )
+    subscribe = MagicMock(
+        return_value={"video": {"url": "https://fal.example.test/output.mp4"}}
+    )
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe)
+    download = MagicMock(return_value=str(tmp_path / "out.mp4"))
+    monkeypatch.setattr(api, "_download_video", download)
+
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        duration=8,
+        resolution="720p",
+        camera_motion="dolly_in",
+    ) == str(tmp_path / "out.mp4")
+
+    arguments = subscribe.call_args.kwargs["arguments"]
+    assert subscribe.call_args.args[0] == "fal-ai/ltx-2.3/image-to-video"
+    assert arguments == {
+        "prompt": "prompt. Camera: dolly in.",
+        "image_url": "https://fal.example.test/input.png",
+        "duration": 8,
+        "resolution": "1080p",
+        "generate_audio": False,
+    }
+    assert "width" not in arguments
+    assert "height" not in arguments
+    assert "num_frames" not in arguments
+    download.assert_called_once_with(
+        "https://fal.example.test/output.mp4",
+        str(tmp_path / "out.mp4"),
+    )
+
+
+def test_fal_no_video_url_is_prebilling_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(fal_key="fal")
+    image = _write_image(tmp_path)
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "url")
     monkeypatch.setattr(
         ltx_native.fal_client,
         "subscribe",
-        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+        MagicMock(return_value={"video": {}}),
     )
+    billed = MagicMock()
 
-    def _failing_urlretrieve(url, dest):
-        call_order.append("download")
-        raise RuntimeError("simulated post-billing download failure")
-
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", _failing_urlretrieve)
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
-
-    assert result is None
-    on_billed.assert_called_once()
-    assert call_order == ["billed", "download"], (
-        "on_billed must fire BEFORE the download attempt so a caller's spend "
-        f"record is never lost to a post-billing download failure; got {call_order!r}"
-    )
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        on_billed=billed,
+    ) is None
+    billed.assert_not_called()
 
 
-def test_fal_success_fires_on_billed_exactly_once(monkeypatch, tmp_path):
-    """The happy path also bills — on_billed must fire exactly once, before
-    download, even when the download subsequently succeeds."""
+def test_fal_download_failure_still_bills(monkeypatch, tmp_path):
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
-    on_billed = MagicMock()
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    api = _make_api(fal_key="fal")
+    image = _write_image(tmp_path)
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "url")
     monkeypatch.setattr(
         ltx_native.fal_client,
         "subscribe",
-        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
+        MagicMock(return_value={"video": {"url": "https://cdn/output.mp4"}}),
     )
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+    monkeypatch.setattr(api, "_download_video", MagicMock(return_value=None))
+    billed = MagicMock()
 
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
+    assert api.generate_video(
+        str(image),
+        "prompt",
+        str(tmp_path / "out.mp4"),
+        on_billed=billed,
+    ) is None
+    billed.assert_called_once()
 
-    assert result == out
-    on_billed.assert_called_once()
 
+def test_job_state_write_is_atomic_and_leaves_no_temp(monkeypatch, tmp_path):
+    state_path = tmp_path / ".ltx-job.json"
+    state_path.write_text('{"old":true}\n')
+    real_replace = ltx_native.os.replace
+    observations = []
 
-def test_fal_on_billed_exception_does_not_abort_download(monkeypatch, tmp_path):
-    """A broken accounting callback must never abort an otherwise-successful
-    generation — the callback's own exception must be swallowed and logged,
-    not allowed to propagate into the outer except and blank out a real
-    video."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"img")
-    out = str(tmp_path / "out.mp4")
+    def observing_replace(source, destination):
+        observations.append(
+            (Path(source).read_text(), Path(destination).read_text())
+        )
+        real_replace(source, destination)
 
-    def _bad_callback():
-        raise RuntimeError("accounting hook bug")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    monkeypatch.setattr(
-        ltx_native.fal_client,
-        "subscribe",
-        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
-    )
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=_bad_callback
+    monkeypatch.setattr(ltx_native.os, "replace", observing_replace)
+    LTXVideoAPI._write_job_state(
+        str(state_path),
+        {
+            "schema_version": 1,
+            "job_id": "job-123",
+            "status": "submitted",
+        },
     )
 
-    assert result == out, (
-        "A broken on_billed callback must not abort an otherwise-successful download"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Native mode — happy path (urlopen CM → bytes → path)
-# ---------------------------------------------------------------------------
-
-def test_native_happy_path_writes_output(monkeypatch, tmp_path):
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    # Native path: fal_client.upload_file is called to get a hosted image URL.
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    result = api.generate_video(image_path=str(img), prompt="cinematic", output_path=out)
-
-    assert result == out
-    with open(out, "rb") as f:
-        assert f.read() == b"NATIVE_VIDEO_BYTES"
-
-
-def test_native_empty_200_body_is_not_false_success(monkeypatch, tmp_path):
-    """A 200 response with an EMPTY body must NOT be written as a 0-byte file and
-    reported as success.
-
-    Regression (Pair-B lane-health baseline): _native_generate read the body and
-    wrote it unconditionally, so an empty 200 produced a 0-byte file and returned
-    output_path — a false success the caller accepts as a real clip. With no
-    fal_key the guard must route to None (failure → the caller cascades), and no
-    0-byte file may be left behind.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")          # fal_key="" -> no FAL fallback on failure
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out_path = tmp_path / "out.mp4"
-    out = str(out_path)
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    cm = _urlopen_cm(b"")                        # empty 200 body
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    result = api.generate_video(image_path=str(img), prompt="cinematic", output_path=out)
-
-    assert result is None, f"empty 200 body was reported as success: result={result!r}"
-    assert not out_path.exists(), "a 0-byte output file was written for an empty 200 body"
-
-
-def test_native_empty_200_body_falls_back_to_fal(monkeypatch, tmp_path):
-    """When fal_key is configured, an empty 200 body must route to the FAL
-    fallback (via the broad except) rather than be accepted as a 0-byte success.
-
-    This exercises the OTHER branch of the empty-body guard's except-chain: the
-    RuntimeError raised on an empty body is caught by `except Exception`, which
-    retries via FAL when fal_key + FAL_AVAILABLE.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out_path = tmp_path / "out.mp4"
-    out = str(out_path)
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"")                        # empty 200 body
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    fal_spy = MagicMock(return_value=out)        # stand in for the FAL recovery path
-    monkeypatch.setattr(api, "_fal_generate", fal_spy)
-
-    result = api.generate_video(image_path=str(img), prompt="cinematic", output_path=out)
-
-    fal_spy.assert_called_once()
-    assert result == out, "empty 200 body did not recover via the FAL fallback"
-
-
-def test_native_empty_200_no_fal_available_base64_branch_returns_none(monkeypatch, tmp_path):
-    """Empty-200 guard on the BASE64 branch, with NO fallback available.
-
-    Direct _native_generate call (not via generate_video) exercising the path the
-    sibling empty-200 tests do NOT: FAL_AVAILABLE is False, so the image-URL step
-    takes the `else` base64 branch (open(image_path,'rb') -> data: URI) instead of
-    fal_client.upload_file. The real temp .jpg only needs to be openable.
-
-    With urlopen returning an EMPTY 200 body, the :258-263 guard raises
-    RuntimeError before any file is written. That RuntimeError is NOT an HTTPError /
-    URLError-group / OSError, so it falls to the broad `except Exception`; with no
-    fal_key AND FAL_AVAILABLE False, that branch's `if self.fal_key and FAL_AVAILABLE`
-    is False -> returns None (the documented intent). So:
-      - NO file is left at output_path (the empty body is never written), and
-      - the method returns None (failure -> caller cascades), not a false success.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", False)   # force the base64 branch + no fallback
-    api = _make_api(ltx_key="ltx-key")                        # fal_key="" -> no FAL fallback
-
-    # A real, openable tiny temp image (base64 branch does open(image_path,'rb')).
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"\xff\xd8\xff\xe0tiny-jpeg-bytes\xff\xd9")
-    out_path = tmp_path / "out.mp4"
-
-    cm = _urlopen_cm(b"")                                     # empty 200 body
-    urlopen_mock = MagicMock(return_value=cm)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
-
-    result = api._native_generate(
-        image_path=str(img),
-        prompt="x",
-        output_path=str(out_path),
-        num_frames=24,
-        resolution={"width": 768, "height": 512},
-    )
-
-    # Pin the empty-200 / no-fallback contract on the base64 branch:
-    assert not out_path.exists(), "a 0-byte output file was written for an empty 200 body"
-    # Documented intent (:258-261): the empty body must NOT be a false success.
-    # ACTUAL behavior here matches intent — the RuntimeError reaches `except Exception`,
-    # and with no fal_key + FAL_AVAILABLE False it returns None (no propagation),
-    # so no xfail is needed.
-    assert result is None, f"empty 200 body was reported as success: result={result!r}"
-    urlopen_mock.assert_called_once()                        # the native HTTP attempt did happen
-
-
-# ---------------------------------------------------------------------------
-# G(ltx)1 FIXED: native HTTP 5xx → triggers FAL fallback (transient server error)
-# ---------------------------------------------------------------------------
-
-def test_http_5xx_falls_back_to_fal(monkeypatch, tmp_path):
-    """A 5xx HTTPError from the native API triggers the FAL fallback when
-    fal_key is set and FAL_AVAILABLE — transient server errors should be retried
-    via FAL, not silently dropped.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    http_error = urllib.request.HTTPError(
-        url="http://api.ltx.video/v1/image-to-video",
-        code=503,
-        msg="Service Unavailable",
-        hdrs=MagicMock(),
-        fp=BytesIO(b'{"error":"overloaded"}'),
-    )
-    monkeypatch.setattr(
-        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
-    )
-
-    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # 5xx HTTPError DOES trigger FAL fallback
-    assert result == out
-    subscribe_spy.assert_called_once()
-
-
-def test_http_4xx_does_not_fallback_to_fal(monkeypatch, tmp_path):
-    """A 4xx HTTPError (client error / bad auth) does NOT trigger FAL fallback —
-    it is not a transient error; retrying via FAL would not help.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    http_error = urllib.request.HTTPError(
-        url="http://api.ltx.video/v1/image-to-video",
-        code=422,
-        msg="Unprocessable Entity",
-        hdrs=MagicMock(),
-        fp=BytesIO(b'{"error":"bad payload"}'),
-    )
-    monkeypatch.setattr(
-        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
-    )
-
-    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # 4xx HTTPError does NOT trigger FAL fallback — returns None
-    assert result is None
-    subscribe_spy.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# CRITICAL FIX: transient network errors (URLError / TimeoutError) → FAL fallback
-# ---------------------------------------------------------------------------
-
-
-def test_native_urlerror_falls_back_to_fal(monkeypatch, tmp_path):
-    """A urllib.request.URLError from urlopen (e.g., DNS failure, connection refused)
-    is a TRANSIENT NETWORK error and MUST trigger the FAL fallback — exactly like a
-    5xx HTTPError. Before the fix this returned None (OSError clause caught it).
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    # urllib.request.URLError is raised by urlopen on DNS / connection failures
-    url_error = urllib.request.URLError(reason="Name or service not known")
-    monkeypatch.setattr(
-        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=url_error)
-    )
-
-    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # URLError (transient network) MUST trigger FAL fallback, not return None
-    assert result == out
-    subscribe_spy.assert_called_once()
-
-
-def test_native_timeout_falls_back_to_fal(monkeypatch, tmp_path):
-    """A TimeoutError from urlopen (600s timeout elapsed) is a TRANSIENT NETWORK
-    error and MUST trigger the FAL fallback. Before the fix this returned None.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    # TimeoutError is an OSError subclass raised on socket timeout
-    monkeypatch.setattr(
-        ltx_native.urllib.request,
-        "urlopen",
-        MagicMock(side_effect=TimeoutError("timed out after 600s")),
-    )
-
-    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # TimeoutError (transient network) MUST trigger FAL fallback, not return None
-    assert result == out
-    subscribe_spy.assert_called_once()
-
-
-def test_native_urlerror_no_fal_key_returns_none(monkeypatch, tmp_path):
-    """With no fal_key configured, a URLError returns None (no fallback possible)."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")  # no fal_key
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    # _native_generate uploads the frame via fal_client.upload_file (→ rest.fal.ai)
-    # before it ever reaches urlopen, whenever FAL_AVAILABLE — stub it so the native
-    # attempt stays offline (sibling tests already mock this; this one missed it).
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    url_error = urllib.request.URLError(reason="Connection refused")
-    monkeypatch.setattr(
-        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=url_error)
-    )
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# G(ltx)1 FIXED: native local file-I/O OSError → does NOT fall back to FAL
-# ---------------------------------------------------------------------------
-
-
-def test_local_oserror_does_not_fallback_to_fal(monkeypatch, tmp_path):
-    """A local file-I/O OSError (disk full, permission denied) from the file-WRITE
-    path does NOT trigger the FAL fallback — a disk/permission error cannot be
-    fixed by retrying via FAL.  The OSError is raised from open(output_path, 'wb')
-    AFTER urlopen succeeds, so it genuinely tests the file-I/O no-fallback path.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    # urlopen succeeds and returns video bytes; OSError happens at file-write time
-    urlopen_cm = _urlopen_cm(b"VIDEOBYTES")
-    monkeypatch.setattr(
-        ltx_native.urllib.request,
-        "urlopen",
-        MagicMock(return_value=urlopen_cm),
-    )
-
-    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
-
-    # Patch builtins.open so the file-write raises OSError (disk-full simulation)
-    import builtins
-    original_open = builtins.open
-
-    def _open_raises_on_write(path, mode="r", *args, **kwargs):
-        if mode == "wb" and str(path) == out:
-            raise OSError("no space left on device")
-        return original_open(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", _open_raises_on_write)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # Local file-I/O OSError does NOT trigger FAL fallback — returns None
-    assert result is None
-    subscribe_spy.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# G(ltx)1: native generic unknown Exception → FAL fallback still fires
-# ---------------------------------------------------------------------------
-
-def test_native_generic_exception_triggers_fal_fallback(monkeypatch, tmp_path):
-    """A generic non-HTTP, non-OS exception (e.g. a library bug) from within
-    _native_generate falls into the generic 'except Exception' clause
-    which DOES trigger the FAL fallback when fal_key and FAL_AVAILABLE.
-    """
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    # A RuntimeError from some library (not HTTPError, not OSError).
-    monkeypatch.setattr(
-        ltx_native.urllib.request,
-        "urlopen",
-        MagicMock(side_effect=RuntimeError("unexpected library error")),
-    )
-
-    subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
-    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-
-    # Generic exception DOES trigger FAL fallback
-    assert result == out
-    subscribe_mock.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# native 5xx HTTPError + no fal_key → None (no fallback possible)
-# ---------------------------------------------------------------------------
-
-def test_native_http_5xx_no_fal_key_returns_none(monkeypatch, tmp_path):
-    """With no fal_key configured, a 5xx HTTPError returns None
-    (5xx would qualify for fallback, but there's no FAL key to use)."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")  # no fal_key
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-
-    http_error = urllib.request.HTTPError(
-        url="http://api.ltx.video/v1/image-to-video",
-        code=503,
-        msg="Service Unavailable",
-        hdrs=MagicMock(),
-        fp=BytesIO(b""),
-    )
-    monkeypatch.setattr(
-        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
-    )
-
-    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Native mode — on_billed fires exactly when video bytes are confirmed
-# non-empty (the native response IS the delivery — no separate URL step —
-# so this doubles as the "download" boundary). Money-gate 2026-07-11 class,
-# extended to ltx_native in slice M2: a post-billing write failure must
-# still be distinguishable from a pre-billing failure to the caller. Mirrors
-# kling_native.py's on_billed tests (commit 55c0797e).
-# ---------------------------------------------------------------------------
-
-def test_native_pre_billing_empty_body_does_not_call_on_billed(monkeypatch, tmp_path):
-    """An empty 200 body => no video bytes were ever delivered => never
-    billed => on_billed must NOT fire."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")  # no fal_key -> no fallback, clean None
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-    on_billed = MagicMock()
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"")  # empty 200 body
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
-
-    assert result is None
-    on_billed.assert_not_called()
-
-
-def test_native_post_billing_write_failure_still_notes_billed(monkeypatch, tmp_path):
-    """RED->GREEN target: a disk write failure AFTER the native API delivered
-    non-empty video bytes must still fire on_billed. Pre-fix, the write's
-    OSError fell into the no-fallback local-error branch with no accounting
-    signal at all, losing the spend to the caller's budget gate. on_billed
-    must fire BEFORE the disk write, not after."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    call_order: list[str] = []
-    on_billed = MagicMock(side_effect=lambda: call_order.append("billed"))
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"VIDEOBYTES")
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    import builtins
-    original_open = builtins.open
-
-    def _open_raises_on_write(path, mode="r", *args, **kwargs):
-        if mode == "wb" and str(path) == out:
-            call_order.append("write")
-            raise OSError("no space left on device")
-        return original_open(path, mode, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", _open_raises_on_write)
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
-
-    # Local file-I/O OSError does NOT trigger FAL fallback (existing contract,
-    # see test_local_oserror_does_not_fallback_to_fal) — still returns None.
-    assert result is None
-    on_billed.assert_called_once()
-    assert call_order == ["billed", "write"], (
-        "on_billed must fire BEFORE the disk write so a caller's spend record "
-        f"is never lost to a post-billing write failure; got {call_order!r}"
-    )
-
-
-def test_native_success_fires_on_billed_exactly_once(monkeypatch, tmp_path):
-    """The happy path also bills — on_billed must fire exactly once, before
-    the disk write, even when the write subsequently succeeds."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-    on_billed = MagicMock()
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
-
-    assert result == out
-    on_billed.assert_called_once()
-
-
-def test_native_on_billed_exception_does_not_abort_write(monkeypatch, tmp_path):
-    """A broken accounting callback must never abort an otherwise-successful
-    generation — the callback's own exception must be swallowed and logged,
-    not allowed to propagate into the outer except and blank out a real
-    video."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-
-    def _bad_callback():
-        raise RuntimeError("accounting hook bug")
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    cm = _urlopen_cm(b"NATIVE_VIDEO_BYTES")
-    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=_bad_callback
-    )
-
-    assert result == out, (
-        "A broken on_billed callback must not abort an otherwise-successful write"
-    )
-
-
-def test_native_fallback_to_fal_threads_on_billed(monkeypatch, tmp_path):
-    """A PRE-billing native failure (urlopen raises immediately — nothing was
-    ever delivered) falls back to FAL, which then bills and succeeds.
-    on_billed must fire exactly once, through the FAL path — the same
-    callback threaded through the native→fal fallback, not a fresh one."""
-    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
-    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
-    img = tmp_path / "frame.jpg"
-    img.write_bytes(b"imgdata")
-    out = str(tmp_path / "out.mp4")
-    on_billed = MagicMock()
-
-    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
-    monkeypatch.setattr(
-        ltx_native.urllib.request,
-        "urlopen",
-        MagicMock(side_effect=RuntimeError("unexpected library error")),
-    )
-    monkeypatch.setattr(
-        ltx_native.fal_client,
-        "subscribe",
-        MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}}),
-    )
-    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
-
-    result = api.generate_video(
-        image_path=str(img), prompt="test", output_path=out, on_billed=on_billed
-    )
-
-    assert result == out
-    on_billed.assert_called_once()
+    assert observations[0][1] == '{"old":true}\n'
+    assert json.loads(state_path.read_text())["job_id"] == "job-123"
+    assert list(tmp_path.glob("..ltx-job.json.*.tmp")) == []

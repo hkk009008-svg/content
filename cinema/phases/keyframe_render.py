@@ -114,6 +114,19 @@ class KeyframeRenderPhase:
                         ),
                         elapsed_s=time.time() - start,
                     )
+                elif result.get("error_kind") == "deferred":
+                    # The provider may still own a live or recoverable job.
+                    # Stop without recording a shot failure; the durable
+                    # recovery marker and Review UI are the source of truth.
+                    return PhaseResult(
+                        ok=False,
+                        message=(
+                            f"keyframe recovery required at {shot['id']} — "
+                            f"phase stopped (ok={ok_count}, skip={skip_count}, "
+                            f"fail={fail_count})"
+                        ),
+                        elapsed_s=time.time() - start,
+                    )
                 else:
                     fail_count += 1
                     self._on_failure(scene["id"], shot["id"], result.get("error", ""))

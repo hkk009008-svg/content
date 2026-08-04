@@ -14,12 +14,15 @@ to veo_native.py / gemini_omni_native.py; this is the WS3 image-side client
 """
 from __future__ import annotations
 
+from io import BytesIO
 import os
 
 from google import genai
 from google.genai import types
+from PIL import Image
 from config.settings import settings
 from cinema.aspect import fal_aspect_ratio
+from performance._net import atomic_publish_bytes, validate_image_artifact
 
 # Combined reference-image budget (character_image + multi_angle_refs +
 # secondary_char_refs) threaded into a single generate_content call. The
@@ -28,12 +31,97 @@ from cinema.aspect import fal_aspect_ratio
 # only after a live-API empirical probe recorded as a logs/ artifact per
 # R-MEASURE (CLAUDE.md).
 GEMINI_MULTIREF_MAX_REFS = 8
+_IMAGE_MIME_FORMATS = {
+    "image/jpeg": "JPEG",
+    "image/png": "PNG",
+    "image/webp": "WEBP",
+}
+_IMAGE_FORMAT_MIMES = {image_format: mime for mime, image_format in _IMAGE_MIME_FORMATS.items()}
+_IMAGE_SUFFIX_FORMATS = {
+    ".jpg": ("JPEG", "image/jpeg"),
+    ".jpeg": ("JPEG", "image/jpeg"),
+    ".png": ("PNG", "image/png"),
+    ".webp": ("WEBP", "image/webp"),
+}
 
 
 def _load_image_bytes(image_path: str) -> bytes:
     """Read `image_path` and return its raw bytes."""
     with open(image_path, "rb") as f:
         return f.read()
+
+
+def _load_reference_image(image_path: str) -> tuple[bytes, str]:
+    """Load a bounded reference image and derive MIME from decoded magic."""
+    payload = _load_image_bytes(image_path)
+    if not payload or len(payload) > 64 * 1024 * 1024:
+        raise ValueError("reference image is empty or exceeds 64 MiB")
+    with Image.open(BytesIO(payload)) as image:
+        image_format = (image.format or "").upper()
+        width, height = image.size
+        image.verify()
+    mime_type = _IMAGE_FORMAT_MIMES.get(image_format)
+    if mime_type is None:
+        raise ValueError(f"unsupported reference image format {image_format!r}")
+    if width <= 0 or height <= 0 or width * height > 100_000_000:
+        raise ValueError(f"invalid reference image dimensions {(width, height)!r}")
+    return payload, mime_type
+
+
+def _publish_generated_image(
+    payload: bytes,
+    mime_type: str,
+    output_path: str,
+) -> str | None:
+    """Verify provider MIME/magic, normalize to the requested suffix, publish atomically."""
+    normalized_mime = (mime_type or "").split(";", 1)[0].strip().lower()
+    source_format = _IMAGE_MIME_FORMATS.get(normalized_mime)
+    target = _IMAGE_SUFFIX_FORMATS.get(os.path.splitext(output_path)[1].lower())
+    if source_format is None or target is None:
+        print(
+            "[GEMINI-IMAGE] Unsupported response MIME or output extension: "
+            f"mime={normalized_mime or '<missing>'!r}, path={output_path!r}"
+        )
+        return None
+    if not isinstance(payload, bytes) or not payload or len(payload) > 64 * 1024 * 1024:
+        print("[GEMINI-IMAGE] Image response is empty, non-bytes, or oversized")
+        return None
+
+    target_format, target_mime = target
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            actual_format = (image.format or "").upper()
+            if actual_format != source_format:
+                print(
+                    "[GEMINI-IMAGE] Response MIME/magic mismatch: "
+                    f"mime={normalized_mime!r}, magic={actual_format!r}"
+                )
+                return None
+            width, height = image.size
+            if width <= 0 or height <= 0 or width * height > 100_000_000:
+                print(f"[GEMINI-IMAGE] Invalid image dimensions: {image.size!r}")
+                return None
+            image.load()
+            if actual_format != target_format:
+                converted = BytesIO()
+                normalized_image = image.convert("RGB") if target_format == "JPEG" else image
+                normalized_image.save(converted, format=target_format, quality=95)
+                payload = converted.getvalue()
+    except Exception as exc:
+        print(f"[GEMINI-IMAGE] Image decode failed: {exc}")
+        return None
+
+    return atomic_publish_bytes(
+        payload,
+        output_path,
+        max_bytes=64 * 1024 * 1024,
+        content_type=target_mime,
+        allowed_content_types=(target_mime,),
+        content_validator=lambda path: validate_image_artifact(
+            path,
+            expected_formats=(target_format,),
+        ),
+    )
 
 
 class GeminiImageAPI:
@@ -122,11 +210,13 @@ class GeminiImageAPI:
             # encoding path — reusing it rather than inventing a new one.
             contents = [full_prompt]
             for ref_path in ref_paths:
+                try:
+                    ref_payload, ref_mime_type = _load_reference_image(ref_path)
+                except (OSError, ValueError) as exc:
+                    print(f"[GEMINI-IMAGE] Skipping invalid reference {ref_path!r}: {exc}")
+                    continue
                 contents.append(
-                    types.Part.from_bytes(
-                        data=_load_image_bytes(ref_path),
-                        mime_type="image/jpeg",
-                    )
+                    types.Part.from_bytes(data=ref_payload, mime_type=ref_mime_type)
                 )
 
             response = self.client.models.generate_content(
@@ -142,20 +232,26 @@ class GeminiImageAPI:
             )
 
             image_bytes = None
+            image_mime_type = ""
             parts = response.candidates[0].content.parts if response.candidates else []
             for part in parts:
                 inline = getattr(part, "inline_data", None)
                 data = getattr(inline, "data", None) if inline is not None else None
                 if data is not None:
                     image_bytes = data
+                    image_mime_type = getattr(inline, "mime_type", "") or ""
                     break
 
             if image_bytes is None:
                 print("[GEMINI-IMAGE] No image data in response")
                 return None
 
-            with open(output_path, "wb") as f:
-                f.write(image_bytes)
+            if _publish_generated_image(
+                image_bytes,
+                image_mime_type,
+                output_path,
+            ) is None:
+                return None
 
             file_size = os.path.getsize(output_path) / 1024
             print(f"[GEMINI-IMAGE] Image saved: {output_path} ({file_size:.1f} KB)")

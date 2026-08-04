@@ -62,6 +62,51 @@ class TestReturnBestOfFailedHelper:
         assert md["engine"] == "Aurora"                  # highest score wins
         assert md["fallback"] is True
         assert md["attempts"] == ["Aurora", "Kling"]
+        assert md["validation_state"] == "FAIL"
+
+    def test_unknown_evidence_remains_null_and_cannot_outrank_measured_failure(self, tmp_path):
+        """UNKNOWN is serialized as null, and a measured failed candidate wins."""
+        unknown = tmp_path / "unknown.tmp"
+        unknown.write_bytes(b"unknown")
+        measured = tmp_path / "measured.tmp"
+        measured.write_bytes(b"measured")
+        out = str(tmp_path / "out.mp4")
+        cascade: dict = {}
+
+        result = lip_sync._return_best_of_failed(
+            [(None, str(unknown), "UnknownEngine"), (0.4, str(measured), "MeasuredEngine")],
+            out,
+            threshold=0.8,
+            attempts=["UnknownEngine", "MeasuredEngine"],
+            cascade_out=cascade,
+            kind="generation",
+        )
+
+        assert result == out
+        assert (tmp_path / "out.mp4").read_bytes() == b"measured"
+        assert cascade["cascade_metadata"]["score"] == 0.4
+        assert cascade["cascade_metadata"]["validation_state"] == "FAIL"
+
+    def test_all_unknown_fallback_serializes_explicit_unknown(self, tmp_path):
+        unknown = tmp_path / "unknown.tmp"
+        unknown.write_bytes(b"unknown")
+        out = str(tmp_path / "out.mp4")
+        cascade: dict = {}
+
+        result = lip_sync._return_best_of_failed(
+            [(None, str(unknown), "UnknownEngine")],
+            out,
+            threshold=0.8,
+            attempts=["UnknownEngine"],
+            cascade_out=cascade,
+            kind="overlay",
+        )
+
+        assert result == out
+        metadata = cascade["cascade_metadata"]
+        assert metadata["score"] is None
+        assert metadata["validation_state"] == "UNKNOWN"
+        assert metadata["fallback"] is True
 
 
 class TestBothCallSitesUseHelper:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ssl
 from pathlib import Path
 
 import pytest
@@ -41,15 +42,48 @@ class _FakeResponse:
 
 def _install_response(monkeypatch, response, *, expected_url="https://example.test/video.mp4"):
     _allow_public_resolution(monkeypatch)
+    closed = []
 
-    def fake_get(url, *, stream, timeout, allow_redirects=True):
-        assert url == expected_url
-        assert stream is True
-        assert allow_redirects is False
-        assert timeout == (_net.DEFAULT_CONNECT_TIMEOUT, _net.DEFAULT_READ_TIMEOUT)
-        return response
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.proxies = {"https": "http://environment-proxy.invalid"}
+            self.adapter = None
 
-    monkeypatch.setattr(_net.requests, "get", fake_get)
+        def mount(self, prefix, adapter):
+            assert prefix == "https://"
+            self.adapter = adapter
+
+        def get(
+            self,
+            url,
+            *,
+            stream,
+            timeout,
+            allow_redirects=True,
+            headers=None,
+            proxies=None,
+        ):
+            assert url == expected_url
+            assert stream is True
+            assert allow_redirects is False
+            assert headers is None
+            assert timeout == (_net.DEFAULT_CONNECT_TIMEOUT, _net.DEFAULT_READ_TIMEOUT)
+            assert proxies == {}
+            assert self.trust_env is False
+            assert self.proxies == {}
+            assert isinstance(self.adapter, _net._PinnedHTTPSAdapter)
+            assert self.adapter._target.ip_address == "93.184.216.34"
+            prepared = requests.Request("GET", url, headers=headers).prepare()
+            self.adapter.add_headers(prepared)
+            assert prepared.headers["Host"] == "example.test"
+            return response
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(_net.requests, "Session", FakeSession)
+    return closed
 
 
 def _allow_public_resolution(monkeypatch, host="example.test", ip="93.184.216.34"):
@@ -274,6 +308,82 @@ def test_empty_content_fails_without_replacing_destination(tmp_path, monkeypatch
     assert _temp_residue(destination) == []
 
 
+def test_content_type_allowlist_rejects_before_publication(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    _install_response(
+        monkeypatch,
+        _FakeResponse(
+            [b"not-a-video"],
+            headers={"content-type": "text/html; charset=utf-8"},
+        ),
+    )
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+        allowed_content_types=("video/mp4",),
+    )
+
+    assert result is None
+    assert destination.read_bytes() == b"known-good"
+    assert _temp_residue(destination) == []
+
+
+def test_content_validator_runs_on_temp_before_atomic_publication(
+    tmp_path, monkeypatch
+):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    _install_response(
+        monkeypatch,
+        _FakeResponse(
+            [b"bad-container"],
+            headers={"content-type": "video/mp4"},
+        ),
+    )
+    observations = []
+
+    def reject_container(temp_path):
+        observations.append((Path(temp_path).read_bytes(), destination.read_bytes()))
+        return "missing expected container signature"
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+        allowed_content_types=("VIDEO/MP4",),
+        content_validator=reject_container,
+    )
+
+    assert result is None
+    assert observations == [(b"bad-container", b"known-good")]
+    assert destination.read_bytes() == b"known-good"
+    assert _temp_residue(destination) == []
+
+
+def test_content_type_and_validator_accept_then_publish(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    _install_response(
+        monkeypatch,
+        _FakeResponse(
+            [b"valid-container"],
+            headers={"content-type": "video/mp4; codecs=avc1"},
+        ),
+    )
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+        allowed_content_types=("video/mp4",),
+        content_validator=lambda path: (
+            None if Path(path).read_bytes() == b"valid-container" else "bad"
+        ),
+    )
+
+    assert result == str(destination)
+    assert destination.read_bytes() == b"valid-container"
+
+
 def test_declared_size_overflow_fails_without_replacing_destination(
     tmp_path, monkeypatch
 ):
@@ -374,9 +484,10 @@ def test_ssrf_blocks_private_metadata_and_non_https(tmp_path, monkeypatch, block
 
     def fail_if_called(*a, **k):
         called.append((a, k))
-        raise AssertionError("requests.get must not run for blocked URLs")
+        raise AssertionError("no HTTP session may be created for blocked URLs")
 
     monkeypatch.setattr(_net.requests, "get", fail_if_called)
+    monkeypatch.setattr(_net.requests, "Session", fail_if_called)
 
     result = _net.safe_download(blocked_url, str(destination))
 
@@ -402,6 +513,7 @@ def test_ssrf_blocks_hostname_resolving_to_loopback(tmp_path, monkeypatch):
         raise AssertionError("must not fetch")
 
     monkeypatch.setattr(_net.requests, "get", fail_if_called)
+    monkeypatch.setattr(_net.requests, "Session", fail_if_called)
 
     result = _net.safe_download(
         "https://evil.example/video.mp4",
@@ -413,26 +525,64 @@ def test_ssrf_blocks_hostname_resolving_to_loopback(tmp_path, monkeypatch):
     assert called == []
 
 
+def test_ssrf_rejects_mixed_public_and_private_dns_answers(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    destination.write_bytes(b"known-good")
+    monkeypatch.setattr(
+        _net.socket,
+        "getaddrinfo",
+        lambda hostname, port, *a, **k: [
+            (0, 0, 0, "", ("93.184.216.34", port)),
+            (0, 0, 0, "", ("127.0.0.1", port)),
+        ],
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("mixed DNS answers must be rejected before connect")
+
+    monkeypatch.setattr(_net.requests, "Session", fail_if_called)
+
+    result = _net.safe_download(
+        "https://mixed.example/video.mp4",
+        str(destination),
+    )
+
+    assert result is None
+    assert destination.read_bytes() == b"known-good"
+
+
 def test_redirect_to_private_ip_is_refused(tmp_path, monkeypatch):
     destination = tmp_path / "artifact.mp4"
     destination.write_bytes(b"known-good")
     _allow_public_resolution(monkeypatch)
-    responses = iter(
-        [
-            _FakeResponse(
-                status_code=302,
-                headers={"Location": "https://127.0.0.1/internal"},
-            ),
-        ]
+    response = _FakeResponse(
+        status_code=302,
+        headers={"Location": "https://127.0.0.1/internal"},
     )
     seen = []
+    closed = []
 
-    def fake_get(url, *, stream, timeout, allow_redirects=True):
-        seen.append(url)
-        assert allow_redirects is False
-        return next(responses)
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.proxies = {}
+            self.adapter = None
 
-    monkeypatch.setattr(_net.requests, "get", fake_get)
+        def mount(self, prefix, adapter):
+            self.adapter = adapter
+
+        def get(self, url, **kwargs):
+            seen.append(url)
+            assert kwargs["allow_redirects"] is False
+            assert kwargs["headers"] is None
+            assert kwargs["proxies"] == {}
+            assert self.adapter._target.ip_address == "93.184.216.34"
+            return response
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(_net.requests, "Session", FakeSession)
 
     result = _net.safe_download(
         "https://example.test/video.mp4",
@@ -441,16 +591,259 @@ def test_redirect_to_private_ip_is_refused(tmp_path, monkeypatch):
 
     assert result is None
     assert seen == ["https://example.test/video.mp4"]
+    assert closed == [True]
     assert destination.read_bytes() == b"known-good"
+
+
+def test_pinned_pool_uses_validated_ip_but_original_tls_identity(monkeypatch):
+    _allow_public_resolution(monkeypatch)
+    target, reason = _net._download_target(
+        "https://example.test/video.mp4",
+        allow_http=False,
+    )
+    assert reason is None
+    assert target is not None
+
+    calls = []
+    sentinel = object()
+
+    class CapturingPoolManager:
+        def connection_from_host(self, **kwargs):
+            calls.append(kwargs)
+            return sentinel
+
+    adapter = _net._PinnedHTTPSAdapter(target)
+    adapter.poolmanager = CapturingPoolManager()
+    prepared = requests.Request(
+        "GET",
+        "https://example.test/video.mp4",
+        headers={"Host": "attacker.invalid"},
+    ).prepare()
+
+    adapter.add_headers(prepared)
+    connection = adapter.get_connection_with_tls_context(
+        prepared,
+        verify=True,
+        proxies={},
+        cert=None,
+    )
+
+    assert connection is sentinel
+    assert prepared.headers["Host"] == "example.test"
+    assert len(calls) == 1
+    pool_call = calls[0]
+    assert pool_call["host"] == "93.184.216.34"
+    assert pool_call["port"] == 443
+    assert pool_call["scheme"] == "https"
+    assert pool_call["pool_kwargs"]["server_hostname"] == "example.test"
+    assert pool_call["pool_kwargs"]["assert_hostname"] == "example.test"
+    assert pool_call["pool_kwargs"].get("cert_reqs") != "CERT_NONE"
+    context = pool_call["pool_kwargs"].get("ssl_context")
+    if context is not None:
+        assert context.verify_mode != ssl.CERT_NONE
+        assert context.check_hostname is True
+
+
+def test_pinned_adapter_refuses_proxy_and_disabled_certificate_verification():
+    target = _net._PinnedHTTPSTarget(
+        hostname="example.test",
+        port=443,
+        ip_address="93.184.216.34",
+        host_header="example.test",
+    )
+    adapter = _net._PinnedHTTPSAdapter(target)
+    prepared = requests.Request(
+        "GET",
+        "https://example.test/video.mp4",
+    ).prepare()
+
+    with pytest.raises(requests.exceptions.SSLError, match="certificate verification"):
+        adapter.get_connection_with_tls_context(
+            prepared,
+            verify=False,
+            proxies={},
+            cert=None,
+        )
+    with pytest.raises(requests.exceptions.InvalidURL, match="do not permit proxies"):
+        adapter.get_connection_with_tls_context(
+            prepared,
+            verify=True,
+            proxies={"https": "http://proxy.invalid"},
+            cert=None,
+        )
+    adapter.close()
+
+
+def test_public_dns_validation_cannot_rebind_private_at_connect(
+    tmp_path,
+    monkeypatch,
+):
+    destination = tmp_path / "artifact.mp4"
+    dns_calls = []
+    sessions = []
+
+    def flip_dns(hostname, port, *args, **kwargs):
+        dns_calls.append((hostname, port))
+        address = "93.184.216.34" if len(dns_calls) == 1 else "127.0.0.1"
+        return [(0, 0, 0, "", (address, port))]
+
+    monkeypatch.setattr(_net.socket, "getaddrinfo", flip_dns)
+
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.proxies = {"https": "http://proxy.invalid"}
+            self.adapter = None
+            self.closed = False
+            sessions.append(self)
+
+        def mount(self, prefix, adapter):
+            assert prefix == "https://"
+            self.adapter = adapter
+
+        def get(self, url, **kwargs):
+            assert url == "https://example.test/video.mp4"
+            assert self.trust_env is False
+            assert self.proxies == {}
+            assert kwargs["proxies"] == {}
+            assert self.adapter._target.hostname == "example.test"
+            assert self.adapter._target.ip_address == "93.184.216.34"
+            return _FakeResponse([b"pinned-public-response"])
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(_net.requests, "Session", FakeSession)
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+    )
+
+    assert result == str(destination)
+    assert destination.read_bytes() == b"pinned-public-response"
+    assert dns_calls == [("example.test", 443)]
+    assert len(sessions) == 1
+    assert sessions[0].closed is True
+
+
+def test_redirect_revalidates_and_repins_each_hostname(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    dns_calls = []
+    session_records = []
+    responses = iter(
+        [
+            _FakeResponse(
+                status_code=302,
+                headers={"Location": "https://cdn.example.test/final.mp4"},
+            ),
+            _FakeResponse([b"redirected-artifact"]),
+        ]
+    )
+    expected = {
+        "origin.example.test": "93.184.216.34",
+        "cdn.example.test": "8.8.8.8",
+    }
+
+    def resolve(hostname, port, *args, **kwargs):
+        dns_calls.append((hostname, port))
+        return [(0, 0, 0, "", (expected[hostname], port))]
+
+    monkeypatch.setattr(_net.socket, "getaddrinfo", resolve)
+
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.proxies = {}
+            self.adapter = None
+            self.record = {"closed": False}
+            session_records.append(self.record)
+
+        def mount(self, prefix, adapter):
+            self.adapter = adapter
+            self.record["hostname"] = adapter._target.hostname
+            self.record["ip"] = adapter._target.ip_address
+
+        def get(self, url, **kwargs):
+            prepared = requests.Request("GET", url, headers=kwargs["headers"]).prepare()
+            self.adapter.add_headers(prepared)
+            self.record["host_header"] = prepared.headers["Host"]
+            self.record["url"] = url
+            return next(responses)
+
+        def close(self):
+            self.record["closed"] = True
+
+    monkeypatch.setattr(_net.requests, "Session", FakeSession)
+
+    result = _net.safe_download(
+        "https://origin.example.test/start.mp4",
+        str(destination),
+    )
+
+    assert result == str(destination)
+    assert destination.read_bytes() == b"redirected-artifact"
+    assert dns_calls == [
+        ("origin.example.test", 443),
+        ("cdn.example.test", 443),
+    ]
+    assert session_records == [
+        {
+            "closed": True,
+            "hostname": "origin.example.test",
+            "ip": "93.184.216.34",
+            "host_header": "origin.example.test",
+            "url": "https://origin.example.test/start.mp4",
+        },
+        {
+            "closed": True,
+            "hostname": "cdn.example.test",
+            "ip": "8.8.8.8",
+            "host_header": "cdn.example.test",
+            "url": "https://cdn.example.test/final.mp4",
+        },
+    ]
+
+
+def test_pinned_session_closes_when_request_raises(tmp_path, monkeypatch):
+    destination = tmp_path / "artifact.mp4"
+    _allow_public_resolution(monkeypatch)
+    closed = []
+
+    class FailingSession:
+        def __init__(self):
+            self.trust_env = True
+            self.proxies = {}
+
+        def mount(self, prefix, adapter):
+            pass
+
+        def get(self, url, **kwargs):
+            raise requests.exceptions.ConnectionError("connect failed")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(_net.requests, "Session", FailingSession)
+
+    result = _net.safe_download(
+        "https://example.test/video.mp4",
+        str(destination),
+    )
+
+    assert result is None
+    assert closed == [True]
+    assert not destination.exists()
 
 
 def test_allow_http_permits_trusted_private_host(tmp_path, monkeypatch):
     destination = tmp_path / "artifact.mp4"
     response = _FakeResponse([b"pod-bytes"])
 
-    def fake_get(url, *, stream, timeout, allow_redirects=True):
+    def fake_get(url, *, stream, timeout, allow_redirects=True, headers=None):
         assert url == "http://10.0.0.8:8188/view"
         assert allow_redirects is False
+        assert headers is None
         return response
 
     monkeypatch.setattr(_net.requests, "get", fake_get)

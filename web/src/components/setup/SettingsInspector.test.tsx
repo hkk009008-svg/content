@@ -8,7 +8,7 @@ import type { AppConfig, Project } from '../../types/project'
  * Two mutation sites here mishandled failure on endpoints ShotInspector also
  * writes:
  *
- *   `update(key, value)` (PUT /api/projects/{pid}) was a PARTIAL instance --
+ *   `update(key, value)` (formerly PUT /api/projects/{pid}) was a PARTIAL instance --
  *   it gated the refresh on `res.ok`, so it never clobbered state, but it
  *   swallowed the failure entirely: no error surfaced and the control kept
  *   rendering the old value with no explanation. That is a repeatable
@@ -18,9 +18,10 @@ import type { AppConfig, Project } from '../../types/project'
  *   `generateStyleRules` (POST /api/projects/{pid}/style-rules) was the full
  *   defect: no `.ok` check and an unconditional `onRefresh()`.
  *
- * Both now run through the shared `runMutation`, so the contract below is the
- * same one ShotInspector pins: a non-2xx or network failure surfaces the
- * inline banner and does NOT refresh; a confirmed 2xx clears it and refreshes.
+ * Both now share truthful failure handling: a non-conflict HTTP/network
+ * failure surfaces the inline banner without refresh; a revision conflict is
+ * adopted and retried once (then refreshed if a second race wins); a confirmed
+ * 2xx clears the banner and refreshes authoritative project state.
  */
 
 function makeProject(globalSettings: Record<string, unknown> = {}): Project {
@@ -99,7 +100,7 @@ afterEach(() => {
 })
 
 describe('SettingsInspector -- truthful update()', () => {
-  it('surfaces a non-2xx settings PUT instead of silently no-op-ing', async () => {
+  it('surfaces a non-2xx settings PATCH instead of silently no-op-ing', async () => {
     stubFetch({ ok: false, status: 409, body: REVISION_CONFLICT_BODY })
     const onRefresh = vi.fn()
 
@@ -115,7 +116,7 @@ describe('SettingsInspector -- truthful update()', () => {
     expect(screen.getByRole('button', { name: '9:16' })).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('surfaces a network failure on the settings PUT', async () => {
+  it('surfaces a network failure on the settings PATCH', async () => {
     stubFetch({ throws: 'settings unreachable' })
     const onRefresh = vi.fn()
 
@@ -137,11 +138,11 @@ describe('SettingsInspector -- truthful update()', () => {
     expect(onRefresh).not.toHaveBeenCalled()
   })
 
-  it('refreshes and shows no banner after a confirmed 2xx settings PUT', async () => {
+  it('PATCHes only the changed setting with the current revision, then refreshes', async () => {
     const fetchMock = stubFetch({ ok: true })
     const onRefresh = vi.fn()
 
-    render(<SettingsInspector project={makeProject()} config={CONFIG} onRefresh={onRefresh} />)
+    render(<SettingsInspector project={makeProject({ revision: 7 })} config={CONFIG} onRefresh={onRefresh} />)
     clickPortraitAspectRatio()
 
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
@@ -149,18 +150,115 @@ describe('SettingsInspector -- truthful update()', () => {
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/projects/proj-settings')
-    expect(init!.method).toBe('PUT')
-    expect(JSON.parse(init!.body as string).global_settings.aspect_ratio).toBe('9:16')
+    expect(init!.method).toBe('PATCH')
+    expect(JSON.parse(init!.body as string)).toEqual({
+      global_settings: { revision: 7, aspect_ratio: '9:16' },
+    })
   })
 
-  it('clears a previous banner once a later write succeeds', async () => {
+  it('PATCHes auto-approve as one nested setting without dropping its unexposed gate rules', async () => {
+    const fetchMock = stubFetch({ ok: true })
+    const current = {
+      enabled: true,
+      final_min_lipsync: 0.8,
+      final_require_human_if_upstream_auto: true,
+      image_min_composite: 0.6,
+    }
+
+    render(
+      <SettingsInspector
+        project={makeProject({ revision: 3, auto_approve: current })}
+        config={CONFIG}
+        onRefresh={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('switch', { name: 'Auto-approve eligible gates' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/projects/proj-settings')
+    expect(init!.method).toBe('PATCH')
+    expect(JSON.parse(init!.body as string)).toEqual({
+      global_settings: {
+        revision: 3,
+        auto_approve: { ...current, enabled: false },
+      },
+    })
+  })
+
+  it('serializes rapid settings writes and advances the revision from each success', async () => {
+    let resolveFirst: ((value: Response) => void) | undefined
+    let resolveSecond: ((value: Response) => void) | undefined
     const fetchMock = vi.fn()
-      .mockImplementationOnce(async () => response(REVISION_CONFLICT_BODY, false, 409))
-      .mockImplementationOnce(async () => response({}, true, 200))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveFirst = resolve }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveSecond = resolve }))
     vi.stubGlobal('fetch', fetchMock)
     const onRefresh = vi.fn()
 
-    render(<SettingsInspector project={makeProject()} config={CONFIG} onRefresh={onRefresh} />)
+    render(
+      <SettingsInspector
+        project={makeProject({ revision: 7 })}
+        config={CONFIG}
+        onRefresh={onRefresh}
+      />,
+    )
+    clickPortraitAspectRatio()
+    fireEvent.click(screen.getByRole('switch', { name: 'Auto-approve eligible gates' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    resolveFirst?.(response(makeProject({ revision: 8, aspect_ratio: '9:16' })))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    const secondBody = JSON.parse(fetchMock.mock.calls[1][1]!.body as string)
+    expect(secondBody.global_settings.revision).toBe(8)
+    expect(secondBody.global_settings.auto_approve.enabled).toBe(false)
+
+    resolveSecond?.(response(makeProject({ revision: 9 })))
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(2))
+  })
+
+  it('adopts the authoritative 409 snapshot, rebases the intent, and retries once', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response({
+        ...REVISION_CONFLICT_BODY,
+        global_settings: { revision: 4, aspect_ratio: '16:9', concurrent_key: 'preserved' },
+      }, false, 409))
+      .mockImplementationOnce(async () => response(makeProject({
+        revision: 5,
+        aspect_ratio: '9:16',
+        concurrent_key: 'preserved',
+      }), true, 200))
+    vi.stubGlobal('fetch', fetchMock)
+    const onRefresh = vi.fn()
+
+    render(<SettingsInspector project={makeProject({ revision: 1 })} config={CONFIG} onRefresh={onRefresh} />)
+    clickPortraitAspectRatio()
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toEqual({
+      global_settings: { revision: 4, aspect_ratio: '9:16' },
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('adopts a second raced conflict so the next user edit does not stay wedged on an old revision', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response({
+        ...REVISION_CONFLICT_BODY,
+        current_revision: 4,
+        global_settings: { revision: 4, aspect_ratio: '16:9' },
+      }, false, 409))
+      .mockImplementationOnce(async () => response({
+        ...REVISION_CONFLICT_BODY,
+        current_revision: 5,
+        global_settings: { revision: 5, aspect_ratio: '16:9' },
+      }, false, 409))
+      .mockImplementationOnce(async () => response(makeProject({ revision: 6, aspect_ratio: '9:16' })))
+    vi.stubGlobal('fetch', fetchMock)
+    const onRefresh = vi.fn()
+
+    render(<SettingsInspector project={makeProject({ revision: 1 })} config={CONFIG} onRefresh={onRefresh} />)
     clickPortraitAspectRatio()
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Project settings changed since last read',
@@ -168,11 +266,40 @@ describe('SettingsInspector -- truthful update()', () => {
 
     clickPortraitAspectRatio()
     await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(fetchMock.mock.calls[2][1]!.body as string).global_settings.revision).toBe(5)
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 
 describe('SettingsInspector -- truthful generateStyleRules()', () => {
+  it('sends the revision token, adopts a 409 snapshot, and retries style generation once', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response({
+        ...REVISION_CONFLICT_BODY,
+        current_revision: 4,
+        global_settings: { revision: 4, music_mood: 'cinematic', color_palette: '' },
+      }, false, 409))
+      .mockImplementationOnce(async () => response({ style_rules: { lighting: 'soft' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const onRefresh = vi.fn()
+
+    render(
+      <SettingsInspector
+        project={makeProject({ revision: 1 })}
+        config={CONFIG}
+        onRefresh={onRefresh}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: '+ Generate' }))
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(fetchMock.mock.calls[1][1]!.body as string)).toMatchObject({
+      expected_revision: 4,
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('surfaces a non-2xx style-rules POST and does not refresh', async () => {
     stubFetch({ ok: false, status: 500, body: { error: 'style rule generation failed' } })
     const onRefresh = vi.fn()
@@ -218,11 +345,12 @@ describe('SettingsInspector -- truthful generateStyleRules()', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('/api/projects/proj-settings/style-rules')
     expect(init!.method).toBe('POST')
+    expect(JSON.parse(init!.body as string)).toMatchObject({ expected_revision: 0 })
   })
 })
 
 describe('SettingsInspector -- slice 13b busy/success feedback', () => {
-  it('shows a BusyState pill while the settings PUT is in flight, and clears it once resolved', async () => {
+  it('shows a BusyState pill while the settings PATCH is in flight, and clears it once resolved', async () => {
     let resolveFetch: ((res: Response) => void) | undefined
     const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolveFetch = resolve }))
     vi.stubGlobal('fetch', fetchMock)

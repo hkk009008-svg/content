@@ -110,6 +110,10 @@ export function apiPut<T = unknown>(url: string, body?: unknown): Promise<ApiRes
   return apiRequest<T>(url, jsonInit('PUT', body))
 }
 
+export function apiPatch<T = unknown>(url: string, body?: unknown): Promise<ApiResult<T>> {
+  return apiRequest<T>(url, jsonInit('PATCH', body))
+}
+
 export function apiDelete<T = unknown>(url: string): Promise<ApiResult<T>> {
   return apiRequest<T>(url, { method: 'DELETE' })
 }

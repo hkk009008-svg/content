@@ -91,7 +91,7 @@ def _mock_seedvr_cloud(monkeypatch, cloud_returns_path):
     fake_fal.subscribe.return_value = {"video": {"url": "https://fake/seedvr.mp4"}}
     monkeypatch.setattr(lip_sync, "fal_client", fake_fal, raising=False)
 
-    def _fake_download(url, dest):
+    def _fake_download(url, dest, **_kwargs):
         shutil.copyfile(cloud_returns_path, dest)
         return dest
 
@@ -187,14 +187,13 @@ class TestFaceSwapAudioRemux:
         mock_fal.upload_file.return_value = "http://fal/upload"
         mock_fal.subscribe.return_value = {"video": {"url": "http://fal/swap.mp4"}}
 
-        import urllib.request as _urllib_req
-
-        def _fake_retrieve(url, dest):
+        def _fake_download(url, dest, **_kwargs):
             _make_clip(dest, with_audio=False)  # cloud swap output is video-only
+            return dest
 
         with patch.object(pcv, "settings", _fal_settings()), \
              patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(_urllib_req, "urlretrieve", _fake_retrieve):
+             patch.object(pcv, "safe_download", _fake_download):
             result = pcv.face_swap_video_frames(str(source), str(tmp_path / "ref.jpg"), str(out))
 
         assert result == str(out)
@@ -212,14 +211,13 @@ class TestFaceSwapAudioRemux:
         mock_fal.upload_file.return_value = "http://fal/upload"
         mock_fal.subscribe.return_value = {"video": {"url": "http://fal/swap.mp4"}}
 
-        import urllib.request as _urllib_req
-
-        def _fake_retrieve(url, dest):
+        def _fake_download(url, dest, **_kwargs):
             _make_clip(dest, with_audio=False)
+            return dest
 
         with patch.object(pcv, "settings", _fal_settings()), \
              patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(_urllib_req, "urlretrieve", _fake_retrieve):
+             patch.object(pcv, "safe_download", _fake_download):
             result = pcv.face_swap_video_frames(str(source), str(tmp_path / "ref.jpg"), str(out))
 
         assert result == str(out)
@@ -374,6 +372,35 @@ class TestApplyCorrectionFlagPropagation:
 
         assert result["success"] is True, result
         assert result["take"]["metadata"].get("dialogue_audio_in_clip") is True
+
+    def test_lip_sync_variant_propagates_unknown_quality_into_metadata(self, tmp_path):
+        """Top-level cascade UNKNOWN must survive beside the embedded-audio flag."""
+        ctrl = _make_correction_ctrl(tmp_path, {"has_dialogue": True})
+
+        def _lipsync(*a, **k):
+            out = k["output_path"]
+            _make_clip(out, with_audio=True)
+            k["_cascade_out"]["cascade_metadata"] = {
+                "engine": "syncSoV3",
+                "score": None,
+                "validation_state": "UNKNOWN",
+                "fallback": True,
+            }
+            return out
+
+        with patch("cinema.shots.controller.generate_lip_sync_video", _lipsync), \
+             patch("cinema.shots.controller.get_reference_image", return_value=str(tmp_path / "ref.jpg")):
+            result = ctrl.apply_correction("shot_1_0", "lip_sync", take_id="take_base")
+
+        assert result["success"] is True, result
+        take = result["take"]
+        assert take["cascade_metadata"]["validation_state"] == "UNKNOWN"
+        assert take["metadata"]["lipsync_score"] is None
+        assert take["metadata"]["lipsync_validation_state"] == "UNKNOWN"
+        assert take["metadata"]["dialogue_audio_in_clip"] is True
+
+        from cinema.auto_approve import _best_take_lipsync
+        assert _best_take_lipsync([take]) == pytest.approx(0.0)
 
     def test_lip_sync_variant_records_namespaced_lipsync_cost(self, tmp_path):
         """Postprocess lip_sync records the cascade winner with a LIPSYNC_* key.

@@ -8,10 +8,12 @@ All tests are offline — no real API calls, no network, no spend (COST CONTROL)
 """
 from __future__ import annotations
 
+from io import BytesIO
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+from PIL import Image
 
 # Sibling unit tests stub heavy native-API modules into sys.modules at import
 # time; drop any stub so this module always exercises the REAL implementation
@@ -70,19 +72,30 @@ def test_load_image_bytes_roundtrips(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _write_jpeg(path, color=(32, 64, 96)):
+    Image.new("RGB", (8, 6), color=color).save(path, format="JPEG")
+
+
 def _make_refs(tmp_path, n, prefix="ref"):
     paths = []
     for i in range(n):
         p = tmp_path / f"{prefix}_{i}.jpg"
-        p.write_bytes(b"x")
+        _write_jpeg(p)
         paths.append(str(p))
     return paths
 
 
-def _mock_response_with_image(data: bytes = b"IMAGE_BYTES"):
+def _jpeg_bytes(color=(24, 48, 96)) -> bytes:
+    buffer = BytesIO()
+    Image.new("RGB", (8, 6), color=color).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def _mock_response_with_image(data: bytes | None = None, mime_type="image/jpeg"):
     response = MagicMock()
     part = MagicMock()
-    part.inline_data.data = data
+    part.inline_data.data = data if data is not None else _jpeg_bytes()
+    part.inline_data.mime_type = mime_type
     response.candidates = [MagicMock(content=MagicMock(parts=[part]))]
     return response
 
@@ -94,7 +107,7 @@ def test_generate_image_truncates_refs_at_budget_with_warning(tmp_path, capsys):
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
     char_img = tmp_path / "char.jpg"
-    char_img.write_bytes(b"char")
+    _write_jpeg(char_img)
     # 1 primary + 10 multi-angle refs = 11 total, well over the budget.
     multi_refs = _make_refs(tmp_path, 10, prefix="angle")
     output_path = str(tmp_path / "out.jpg")
@@ -122,7 +135,7 @@ def test_generate_image_no_truncation_under_budget(tmp_path, capsys):
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
     char_img = tmp_path / "char.jpg"
-    char_img.write_bytes(b"char")
+    _write_jpeg(char_img)
     output_path = str(tmp_path / "out.jpg")
 
     result = api.generate_image(
@@ -148,7 +161,7 @@ def test_generate_image_drops_missing_ref_paths(tmp_path):
     api.client.models.generate_content.return_value = _mock_response_with_image()
 
     char_img = tmp_path / "char.jpg"
-    char_img.write_bytes(b"char")
+    _write_jpeg(char_img)
     output_path = str(tmp_path / "out.jpg")
 
     result = api.generate_image(
@@ -161,6 +174,25 @@ def test_generate_image_drops_missing_ref_paths(tmp_path):
     assert result == output_path
     kwargs = api.client.models.generate_content.call_args.kwargs
     assert len(kwargs["contents"]) == 2  # prompt + the one EXISTING ref
+
+
+def test_generate_image_detects_reference_mime_from_magic(tmp_path):
+    api = GeminiImageAPI.__new__(GeminiImageAPI)
+    api._model = "gemini-3.1-flash-image"
+    api.client = MagicMock()
+    api.client.models.generate_content.return_value = _mock_response_with_image()
+    png_ref = tmp_path / "reference.bin"
+    Image.new("RGB", (9, 7), color=(1, 2, 3)).save(png_ref, format="PNG")
+
+    output_path = str(tmp_path / "out.jpg")
+    assert api.generate_image(
+        prompt="p",
+        output_path=output_path,
+        character_image=str(png_ref),
+    ) == output_path
+
+    part = api.client.models.generate_content.call_args.kwargs["contents"][1]
+    assert part.inline_data.mime_type == "image/png"
 
 
 # ---------------------------------------------------------------------------
@@ -241,14 +273,48 @@ def test_generate_image_writes_bytes_and_returns_output_path(tmp_path):
     api = GeminiImageAPI.__new__(GeminiImageAPI)
     api._model = "gemini-3.1-flash-image"
     api.client = MagicMock()
-    api.client.models.generate_content.return_value = _mock_response_with_image(b"REAL_IMAGE_DATA")
+    expected = _jpeg_bytes(color=(120, 30, 10))
+    api.client.models.generate_content.return_value = _mock_response_with_image(expected)
 
     output_path = str(tmp_path / "out.jpg")
     result = api.generate_image(prompt="p", output_path=output_path)
 
     assert result == output_path
     with open(output_path, "rb") as f:
-        assert f.read() == b"REAL_IMAGE_DATA"
+        assert f.read() == expected
+
+
+def test_generate_image_converts_png_response_to_true_jpeg(tmp_path):
+    api = GeminiImageAPI.__new__(GeminiImageAPI)
+    api._model = "gemini-3.1-flash-image"
+    api.client = MagicMock()
+    buffer = BytesIO()
+    Image.new("RGBA", (7, 5), color=(10, 20, 30, 255)).save(buffer, format="PNG")
+    api.client.models.generate_content.return_value = _mock_response_with_image(
+        buffer.getvalue(),
+        mime_type="image/png",
+    )
+
+    output_path = str(tmp_path / "out.jpg")
+    assert api.generate_image(prompt="p", output_path=output_path) == output_path
+    with Image.open(output_path) as image:
+        assert image.format == "JPEG"
+        assert image.size == (7, 5)
+
+
+def test_generate_image_rejects_mime_magic_mismatch_without_replacing(tmp_path):
+    api = GeminiImageAPI.__new__(GeminiImageAPI)
+    api._model = "gemini-3.1-flash-image"
+    api.client = MagicMock()
+    api.client.models.generate_content.return_value = _mock_response_with_image(
+        _jpeg_bytes(),
+        mime_type="image/png",
+    )
+    output_path = tmp_path / "out.jpg"
+    output_path.write_bytes(b"existing")
+
+    assert api.generate_image(prompt="p", output_path=str(output_path)) is None
+    assert output_path.read_bytes() == b"existing"
 
 
 def test_generate_image_negative_prompt_appended_to_contents(tmp_path):

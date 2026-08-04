@@ -35,9 +35,30 @@ export interface CascadeEngineOption {
   quality?: number
 }
 
-/** Recommended/flagship engine badge — UI decoration only, not a
- *  selectability signal (that's `row.can_select`, from the server). */
-const PRIMARY_ENGINE = 'GEMINI_OMNI'
+/**
+ * Derive the flagship badge from the workflow templates delivered by the
+ * server. Templates currently agree on one primary; counting them keeps the
+ * UI deterministic if a future shot type temporarily diverges while avoiding
+ * a second, client-hardcoded routing policy.
+ */
+function primaryEngineKey(config: AppConfig | null): string | null {
+  const templates = Object.values(config?.workflow_templates ?? {})
+  const counts = new Map<string, number>()
+  let primary: string | null = null
+  let primaryCount = 0
+
+  for (const template of templates) {
+    const key = template?.target_api
+    if (typeof key !== 'string' || !key) continue
+    const count = (counts.get(key) ?? 0) + 1
+    counts.set(key, count)
+    if (count > primaryCount) {
+      primary = key
+      primaryCount = count
+    }
+  }
+  return primary
+}
 
 /** `reason_snake_case` -> `reason snake case`, for tooltip/label display. */
 export function humanizeEngineReason(reason: string | null): string {
@@ -71,6 +92,7 @@ export function videoEngines(config: AppConfig | null): VideoEngineOption[] {
   if (!rows) return []
 
   const registry = config?.api_registry
+  const primaryKey = primaryEngineKey(config)
 
   return rows
     .filter((row) => row.can_select || row.in_use)
@@ -82,7 +104,7 @@ export function videoEngines(config: AppConfig | null): VideoEngineOption[] {
         selectable: row.can_select,
         reason: row.reason,
         status: info?.status ?? 'live',
-        primary: row.key === PRIMARY_ENGINE,
+        primary: row.key === primaryKey,
         cost: info?.per_shot_cost,
         quality: info?.quality_score,
       }
@@ -113,6 +135,7 @@ export function cascadeEngineOptions(config: AppConfig | null): CascadeEngineOpt
   if (!rows) return []
 
   const registry = config?.api_registry
+  const primaryKey = primaryEngineKey(config)
 
   return rows
     .filter((row) => row.key !== 'AUTO' && row.can_configure)
@@ -125,7 +148,7 @@ export function cascadeEngineOptions(config: AppConfig | null): CascadeEngineOpt
         reason: row.reason,
         configuredEnabled: row.configured_enabled,
         status: info?.status ?? 'live',
-        primary: row.key === PRIMARY_ENGINE,
+        primary: row.key === primaryKey,
         cost: info?.per_shot_cost,
         quality: info?.quality_score,
       }

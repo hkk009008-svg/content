@@ -17,7 +17,7 @@ import os
 from typing import Optional
 
 from config.settings import settings
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 from performance._poll import poll_task
 
 
@@ -154,7 +154,13 @@ def generate_live_portrait_performance(
                         f"?filename={fname}&subfolder={sub}&type={ftype}"
                     )
                     # ComfyUI pod is internal-trusted; allow http.
-                    if not safe_download(view, output_mp4, allow_http=True):
+                    if not safe_download(
+                        view,
+                        output_mp4,
+                        allow_http=True,
+                        allowed_content_types=("video/mp4",),
+                        content_validator=validate_video_artifact,
+                    ):
                         return None
                     _cost_log(duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                     print(f"   ✅ LivePortrait: {output_mp4}")

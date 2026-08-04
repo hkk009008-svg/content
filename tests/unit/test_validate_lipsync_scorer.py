@@ -1,7 +1,7 @@
 """
 Tests for the Provider-1.5 mouth-energy scorer added to validate_lipsync_quality.
 
-RED first: all 4 tests must FAIL before implementation.
+The suite pins measurable scoring and fail-closed UNKNOWN behavior.
 """
 import logging
 import types
@@ -140,11 +140,11 @@ def test_mouth_energy_scorer_returns_real_float_in_range(monkeypatch, tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────
-# test (b) — occlusion → fail-open (return 1.0)
+# test (b) — occlusion leaves sync UNKNOWN
 # ─────────────────────────────────────────────────────────────
 
-def test_mouth_energy_scorer_occlusion_fails_open(monkeypatch, tmp_path):
-    """When >50% of frames have no detected mouth, scorer returns 1.0 (fail-open)."""
+def test_mouth_energy_scorer_occlusion_is_unknown(monkeypatch, tmp_path):
+    """No detected mouth plus equal duration is UNKNOWN, never a perfect score."""
     import lip_sync, subprocess
 
     # Create dummy files so os.path.exists passes
@@ -190,11 +190,10 @@ def test_mouth_energy_scorer_occlusion_fails_open(monkeypatch, tmp_path):
         _generation=True,
     )
 
-    # When mouth scoring fails open (occlusion), _score_mouth_energy returns None.
-    # Provider 2 (duration heuristic) then runs; both files are 2.0s → ratio=0 → score=1.0
-    assert result == 1.0, (
-        f"Occlusion-fail-open should return 1.0 (via Provider 2 duration heuristic), got {result}"
-    )
+    # The mouth scorer produced no evidence. Equal duration only establishes that
+    # the files are compatible; it cannot establish phoneme/mouth correspondence.
+    assert result is None
+    assert lip_sync.classify_lipsync_quality(result, 0.65) == "UNKNOWN"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -238,7 +237,73 @@ def test_scorer_not_run_on_overlay_path(monkeypatch, tmp_path):
         # _generation defaults to False — overlay path
     )
 
-    assert isinstance(result, float), f"expected float, got {type(result)}"
+    assert result is None
+    assert lip_sync.classify_lipsync_quality(result, 0.65) == "UNKNOWN"
+
+
+def test_arbitrary_equal_duration_inputs_do_not_fabricate_pass(
+    monkeypatch, tmp_path
+):
+    """Equal durations alone are not measurable audio-visual sync evidence."""
+    import json
+    import subprocess
+    import sys
+    import lip_sync
+
+    video_file = tmp_path / "arbitrary.mp4"
+    audio_file = tmp_path / "unrelated.wav"
+    video_file.write_bytes(b"arbitrary video payload")
+    audio_file.write_bytes(b"unrelated audio payload")
+
+    # Make the lack of a real scorer deterministic even on a developer machine
+    # that happens to have SyncNet installed.
+    monkeypatch.setitem(sys.modules, "SyncNetInstance", None)
+
+    def _equal_duration(_cmd, *args, **kwargs):
+        return types.SimpleNamespace(
+            stdout=json.dumps({"format": {"duration": "7.25"}}),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(subprocess, "run", _equal_duration)
+
+    score = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
+
+    assert score is None
+    assert lip_sync.classify_lipsync_quality(score, 0.65) == "UNKNOWN"
+
+
+def test_gross_duration_mismatch_is_negative_prerequisite_evidence(
+    monkeypatch, tmp_path
+):
+    """A gross duration mismatch may fail the gate, but never pass it."""
+    import json
+    import subprocess
+    import sys
+    import lip_sync
+
+    video_file = tmp_path / "video.mp4"
+    audio_file = tmp_path / "audio.wav"
+    video_file.write_bytes(b"video")
+    audio_file.write_bytes(b"audio")
+    monkeypatch.setitem(sys.modules, "SyncNetInstance", None)
+
+    durations = iter((2.0, 4.0))
+
+    def _mismatched_duration(_cmd, *args, **kwargs):
+        return types.SimpleNamespace(
+            stdout=json.dumps({"format": {"duration": str(next(durations))}}),
+            stderr="",
+            returncode=0,
+        )
+
+    monkeypatch.setattr(subprocess, "run", _mismatched_duration)
+
+    score = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
+
+    assert score == 0.0
+    assert lip_sync.classify_lipsync_quality(score, 0.65) == "FAIL"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -294,14 +359,24 @@ def test_logs_frame_detection_rate(monkeypatch, tmp_path, caplog):
 
 
 # ─────────────────────────────────────────────────────────────
-# GATE-LEVEL observability — the neutral-1.0 fall-through (sweep finding lip_sync.py:668)
-# validate_lipsync_quality returns 1.0 = "perfect OR unmeasurable". When it is the
-# latter (no scorer could measure), the gate PASSES every shot without validating.
-# That degradation must be observable (WARNING), same bug class as scorer D1.
+# GATE-LEVEL truthfulness — unavailable evidence is UNKNOWN, never perfect.
+# validate_lipsync_quality returns None when no scorer could measure. The gate
+# must reject that as non-PASS and surface the degradation as a WARNING.
 # ─────────────────────────────────────────────────────────────
 
+
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [(None, "UNKNOWN"), (0.64, "FAIL"), (0.65, "PASS")],
+)
+def test_lipsync_quality_classification_is_three_state(score, expected):
+    import lip_sync
+
+    assert lip_sync.classify_lipsync_quality(score, 0.65) == expected
+
+
 def test_gate_warns_when_no_scorer_available(monkeypatch, tmp_path, caplog):
-    """Every provider unavailable -> neutral 1.0 (gate no-op) MUST emit a WARNING."""
+    """Every provider unavailable -> UNKNOWN (None) and a WARNING."""
     import lip_sync, subprocess
 
     video_file = tmp_path / "fake.mp4"
@@ -319,16 +394,16 @@ def test_gate_warns_when_no_scorer_available(monkeypatch, tmp_path, caplog):
     with caplog.at_level("WARNING"):
         result = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
 
-    assert result == 1.0, "neutral fallback preserved when no scorer is available"
+    assert result is None, "missing scorer evidence must remain UNKNOWN"
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert warnings, (
-        "the sync gate returning neutral 1.0 (passing without validating) must WARN so an "
-        "operator knows sync is UNVALIDATED — none was logged"
+        "the sync gate returning UNKNOWN must WARN so an operator knows sync "
+        "was not validated — none was logged"
     )
 
 
 def test_gate_warns_when_video_unprobeable(monkeypatch, tmp_path, caplog):
-    """ffprobe reports 0 duration (corrupt/empty video) -> neutral 1.0 MUST WARN."""
+    """ffprobe reports 0 duration (corrupt/empty video) -> UNKNOWN + WARNING."""
     import lip_sync, subprocess, json, types
 
     video_file = tmp_path / "fake.mp4"
@@ -345,9 +420,8 @@ def test_gate_warns_when_video_unprobeable(monkeypatch, tmp_path, caplog):
     with caplog.at_level("WARNING"):
         result = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
 
-    assert result == 1.0, "neutral fallback preserved when the video can't be probed"
+    assert result is None, "unprobeable video evidence must remain UNKNOWN"
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert warnings, (
-        "an unprobeable video falling through to neutral 1.0 (gate passed without "
-        "validating) must WARN — none was logged"
+        "an unprobeable video returning UNKNOWN must WARN — none was logged"
     )

@@ -60,6 +60,9 @@ function mockConfig(): AppConfig {
         historical: true,
       }),
     ],
+    workflow_templates: {
+      portrait: { target_api: 'GEMINI_OMNI' },
+    },
     billing_providers: {
       RUNPOD_GPU: ['FLUX_DEV', 'HIDREAM_I1', 'SUPIR_V0Q'],
       GOOGLE_GEMINI_API: ['GEMINI_OMNI'],
@@ -109,7 +112,9 @@ describe('VideoSection', () => {
 
     // Re-enabling writes enabled:true through the settings-write contract.
     await userEvent.click(toggle)
-    expect(update).toHaveBeenCalledWith('api_engines', { ENGINE_X: { enabled: true } })
+    expect(update).toHaveBeenCalledWith('api_engines', expect.any(Function))
+    const queuedUpdate = update.mock.calls[0][1]
+    expect(queuedUpdate(undefined)).toEqual({ ENGINE_X: { enabled: true } })
 
     // Simulate the write landing in draft state (`s.api_engines`): the row
     // must still be present and now render its toggle on.
@@ -141,6 +146,27 @@ describe('VideoSection', () => {
     ])
     const toggle = screen.getByRole('switch', { name: 'Enable Engine Y' })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps a runtime-unavailable engine configured on and displays the server reason', () => {
+    const config = {
+      api_registry: { ENGINE_Y: api({ label: 'Engine Y' }) },
+      video_engines: [
+        row({
+          key: 'ENGINE_Y',
+          label: 'Engine Y',
+          can_select: false,
+          reason: 'runtime_unavailable',
+          configured_enabled: true,
+          can_configure: true,
+        }),
+      ],
+    } as unknown as AppConfig
+
+    render(<VideoSection s={{}} config={config} update={vi.fn()} />)
+
+    expect(screen.getByRole('switch', { name: 'Enable Engine Y' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('runtime unavailable')).toBeInTheDocument()
   })
 
   it('marks GEMINI_OMNI Primary and every surfaced engine Cloud (none pod)', () => {
@@ -221,6 +247,9 @@ describe('settings reconciliation (slice 9b — video/spend defaults)', () => {
 
     const toggle = screen.getByRole('switch', { name: 'Native dialogue audio' })
     expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText(/Veo runs through Vertex AI with ADC/i)).toBeInTheDocument()
+    expect(screen.getByText(/Veo Developer API and other routes use the F1b/i)).toBeInTheDocument()
+    expect(screen.getByText(/UNKNOWN and requires review/i)).toBeInTheDocument()
 
     await userEvent.click(toggle)
     expect(update).toHaveBeenCalledWith('dialogue_voice_mode', 'native')

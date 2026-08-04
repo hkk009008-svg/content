@@ -118,7 +118,7 @@ def _build_verb_prefix(verb: Optional[str], params: dict, scene_context: dict) -
         return (
             "<VERB_GUIDANCE verb=\"tighten_framing\">\n"
             f"Operator selected the TIGHTEN_FRAMING verb (degree: {degree}, {pct} tighter).\n"
-            "Reduce the subject's size in frame by the indicated amount. Adjust the "
+            "Increase the subject's size in frame by the indicated amount. Adjust the "
             "prompt's framing/camera language (push in, tighter shot, closer crop) without "
             "changing subject, action, lighting, or mood. Preserve all other prompt structure.\n"
             "</VERB_GUIDANCE>\n\n"

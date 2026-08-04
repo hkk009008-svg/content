@@ -3,16 +3,16 @@
 
 ``config/settings.py`` is the single source of truth for which environment
 variables this pipeline reads (its own docstring says so — every var goes
-through ``Settings.from_env()`` via the ``_env("KEY", ...)`` helper).
+through ``Settings.from_env()`` via a small environment-reader helper).
 ``.env.example`` makes the same authoritative claim for operators: "every
 variable read by config/settings.py appears below."
 
 This script makes that claim machine-checked instead of hand-maintained trust:
 
-  1. missing_key   — a key ``_env()``-read in config/settings.py does not
+  1. missing_key   — a key read in config/settings.py does not
                       appear anywhere (row or comment) in .env.example.
-  2. dead_row      — a ``KEY=`` row in .env.example is not read via
-                      ``_env()`` in config/settings.py at all (e.g. the
+  2. dead_row      — a ``KEY=`` row in .env.example is not read by a supported
+                      environment helper in config/settings.py at all (e.g. the
                       SEEDANCE_API_KEY / HEDRA_API_KEY rows removed in Slice
                       14a: Seedance actually dispatches through FAL_KEY, and
                       Hedra has zero remaining consumers post-WS4 removal).
@@ -25,7 +25,7 @@ script enforces exactly that promise, not a whole-repo env-var sweep.
 
 Public API
 ----------
-read_settings_env_keys(settings_path) -> set[str]   keys read via _env("KEY"...)
+read_settings_env_keys(settings_path) -> set[str]   keys read by env helpers
 read_example_row_keys(example_path)   -> set[str]    "KEY=" row keys
 read_example_text(example_path)       -> str
 check(repo_root) -> list[str]                        drift messages (empty = clean)
@@ -46,12 +46,17 @@ ROOT = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = ROOT / "config" / "settings.py"
 EXAMPLE_PATH = ROOT / ".env.example"
 
-_ENV_CALL_RE = re.compile(r'_env\(\s*"([A-Z0-9_]+)"')
+# Settings.from_env() uses these helpers with a literal key as their first
+# argument. Keep this list explicit so unrelated string-bearing calls cannot
+# accidentally make a dead .env.example row look consumed.
+_ENV_CALL_RE = re.compile(
+    r'_(?:env|optional_env|parse_int)\(\s*"([A-Z0-9_]+)"'
+)
 _ROW_KEY_RE = re.compile(r'^([A-Z][A-Z0-9_]*)=', re.MULTILINE)
 
 
 def read_settings_env_keys(settings_path: Path = SETTINGS_PATH) -> set[str]:
-    """Return every KEY literal passed to ``_env("KEY", ...)`` in settings.py."""
+    """Return every literal KEY passed to a supported env-reader helper."""
     src = settings_path.read_text()
     return set(_ENV_CALL_RE.findall(src))
 
@@ -79,7 +84,7 @@ def check(repo_root: Path = ROOT) -> list[str]:
     missing = sorted(k for k in consumed if k not in example_text)
     for key in missing:
         messages.append(
-            f"missing_key: {key} is read by config/settings.py._env(...) but "
+            f"missing_key: {key} is read by config/settings.py but "
             f"does not appear anywhere in .env.example"
         )
 
@@ -87,7 +92,7 @@ def check(repo_root: Path = ROOT) -> list[str]:
     for key in dead:
         messages.append(
             f"dead_row: .env.example has a '{key}=' row, but config/settings.py "
-            f"never reads {key} via _env(...) — verify the real consumer (it may "
+            f"never reads {key} via a supported env helper — verify the real consumer (it may "
             f"be routed through a different provider's key, e.g. FAL_KEY) before "
             f"either wiring it or removing the row"
         )
@@ -106,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     messages = check()
     if not messages:
-        print("OK: .env.example exactly covers config/settings.py's _env(...) keys.")
+        print("OK: .env.example exactly covers config/settings.py's environment keys.")
         return 0
 
     print(f"DRIFT: {len(messages)} finding(s) between .env.example and "

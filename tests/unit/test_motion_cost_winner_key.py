@@ -110,6 +110,23 @@ class TestMotionCostWinnerKey:
         assert call.args[0] == "LTX"
         assert call.kwargs.get("duration_seconds") == 8
 
+    def test_ltx_winner_records_provider_job_id_for_idempotency(self):
+        """A recovered LTX result may be observed repeatedly; the exact
+        provider job ID must reach CostTracker so only one invoice is logged."""
+        mock_self = _run_finalize(
+            {
+                "cascade_metadata": {
+                    "engine": "LTX",
+                    "duration_s": 8,
+                    "job_id": "job-winner-123",
+                }
+            }
+        )
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "LTX"
+        assert call.kwargs.get("duration_seconds") == 8
+        assert call.kwargs.get("provider_job_id") == "job-winner-123"
+
     def test_ltx_winner_without_duration_metadata_uses_flat_floor(self):
         """LTX win with no duration_s in metadata → no duration kwarg; the
         conservative flat table floor applies (never crash, never $0)."""
@@ -124,6 +141,18 @@ class TestMotionCostWinnerKey:
         call = mock_self.cost_tracker.record_api_call.call_args
         assert call.args[0] == "LTX"
         assert "cost_usd" not in call.kwargs
+
+    def test_non_ltx_provider_job_id_reaches_cost_tracker(self):
+        """The idempotency key is provider-generic, not LTX-specific."""
+        mock_self = _run_finalize({
+            "cascade_metadata": {
+                "engine": "VEO_NATIVE",
+                "job_id": "operations/veo-job-123",
+            }
+        })
+        call = mock_self.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "VEO_NATIVE"
+        assert call.kwargs.get("provider_job_id") == "operations/veo-job-123"
 
 
 class TestGeminiOmniDurationProbeCost:

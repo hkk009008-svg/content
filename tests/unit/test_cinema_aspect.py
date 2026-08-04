@@ -103,14 +103,12 @@ def test_fal_aspect_ratio_maps_orientation():
 
 def test_runway_ratio_landscape_is_default():
     assert runway_ratio("16:9", "gen4_turbo") == "1280:720"
-    assert runway_ratio("16:9", "gen3a_turbo") == "1280:768"
     assert runway_ratio(None, "gen4_turbo") == "1280:720"
-    assert runway_ratio("4:3", "gen3a_turbo") == "1280:768"
+    assert runway_ratio("4:3", "gen4_turbo") == "1280:720"
 
 
-def test_runway_ratio_portrait_per_model():
+def test_runway_ratio_portrait():
     assert runway_ratio("9:16", "gen4_turbo") == "720:1280"
-    assert runway_ratio("9:16", "gen3a_turbo") == "768:1280"
 
 
 # --- Real-ffmpeg behavioral tests: normalize upscales sub-1080 portrait clips ---

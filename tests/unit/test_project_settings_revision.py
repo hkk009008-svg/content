@@ -32,10 +32,18 @@ def client():
     import web_server
 
     web_server.app.config["TESTING"] = True
-    web_server._running_pipelines.clear()
+    with web_server._pipelines_lock:
+        web_server._running_pipelines.clear()
+        web_server._project_admin_in_flight.clear()
+    with web_server._cores_lock:
+        web_server._running_cores.clear()
     with web_server.app.test_client() as test_client:
         yield test_client
-    web_server._running_pipelines.clear()
+    with web_server._pipelines_lock:
+        web_server._running_pipelines.clear()
+        web_server._project_admin_in_flight.clear()
+    with web_server._cores_lock:
+        web_server._running_cores.clear()
 
 
 def _make_project(tmp_path, monkeypatch, name: str = "settings-contract") -> str:
@@ -91,6 +99,25 @@ def test_patch_applies_only_sent_keys(client, tmp_path, monkeypatch):
     assert persisted["global_settings"]["aspect_ratio"] == "9:16"
     assert persisted["global_settings"]["music_mood"] == "hopeful"
     assert persisted["global_settings"]["revision"] == 2
+
+
+def test_patch_evicts_settings_bound_idle_core(client, tmp_path, monkeypatch):
+    """The next run must rebuild budget/director/ensemble from new settings."""
+    import web_server
+
+    pid = _make_project(tmp_path, monkeypatch)
+    cached_core = MagicMock()
+    with web_server._cores_lock:
+        web_server._running_cores[pid] = cached_core
+
+    response = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 0, "budget_limit_usd": 42}},
+    )
+
+    assert response.status_code == 200
+    assert pid not in web_server._running_cores
+    cached_core.cost_tracker.close.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------
@@ -664,9 +691,7 @@ def test_patch_accepts_dialogue_toggle_settings_voicesection_family(client, tmp_
 
 
 def test_patch_accepts_lipsync_cluster_settings_voicesection_family(client, tmp_path, monkeypatch):
-    """VoiceSection.tsx's lipsync cascade cluster -- includes
-    lipsync_engine_priority, the first PATCH-covered setting shaped as an
-    array rather than a scalar/object."""
+    """VoiceSection.tsx's active lip-sync validation settings."""
     pid = _make_project(tmp_path, monkeypatch)
 
     resp = client.patch(
@@ -675,7 +700,6 @@ def test_patch_accepts_lipsync_cluster_settings_voicesection_family(client, tmp_
             "global_settings": {
                 "revision": 0,
                 "lip_sync_mode": "generation",
-                "lipsync_engine_priority": ["SYNC_SO_V3", "MUSETALK"],
                 "lipsync_quality_validation": False,
                 "lipsync_validation_threshold": 0.7,
             }
@@ -685,32 +709,24 @@ def test_patch_accepts_lipsync_cluster_settings_voicesection_family(client, tmp_
     assert resp.status_code == 200
     settings = resp.get_json()["global_settings"]
     assert settings["lip_sync_mode"] == "generation"
-    assert settings["lipsync_engine_priority"] == ["SYNC_SO_V3", "MUSETALK"]
     assert settings["lipsync_quality_validation"] is False
     assert settings["lipsync_validation_threshold"] == 0.7
 
 
-@pytest.mark.parametrize(
-    "bad_priority",
-    ["SYNC_SO_V3", {"0": "SYNC_SO_V3"}, ["SYNC_SO_V3", 7], [None]],
-    ids=["bare-string", "object", "list-with-int", "list-with-none"],
-)
-def test_patch_rejects_non_string_list_lipsync_engine_priority(client, tmp_path, monkeypatch, bad_priority):
-    """The new list-of-strings validator must fail closed on a non-list,
-    and on a list containing a non-string item -- not just accept anything
-    JSON-serializable the way _validate_object_setting would."""
+def test_patch_rejects_removed_lipsync_engine_priority(client, tmp_path, monkeypatch):
+    """Backend-owned engine ordering cannot be resurrected by stale clients."""
     pid = _make_project(tmp_path, monkeypatch)
     before = _project_file(tmp_path, pid).read_bytes()
 
     resp = client.patch(
         f"/api/projects/{pid}",
-        json={"global_settings": {"revision": 0, "lipsync_engine_priority": bad_priority}},
+        json={"global_settings": {"revision": 0, "lipsync_engine_priority": ["SYNC_SO_V3"]}},
     )
 
     assert resp.status_code == 400
     body = resp.get_json()
     assert body["code"] == "invalid_setting_key"
-    assert "lipsync_engine_priority" in body["invalid_keys"]
+    assert body["unknown_keys"] == ["lipsync_engine_priority"]
     assert _project_file(tmp_path, pid).read_bytes() == before
 
 

@@ -42,9 +42,9 @@ def _patch_env(monkeypatch, settings_obj=None):
     monkeypatch.setattr(_cfg, "settings", settings_obj or _FakeSettings())
     monkeypatch.setattr("time.sleep", lambda *a, **k: None)
 
-    # Regression guard: the audioUrl download must go through requests.get (with a
-    # browser User-Agent), NOT urllib.urlretrieve — the default Python-urllib UA
-    # 403s sunoapi.org's CDN. If the code regresses to urlretrieve, fail loudly.
+    # Regression guard: the audioUrl download must go through safe_download with
+    # a browser User-Agent, NOT urllib.urlretrieve — the default Python-urllib UA
+    # 403s sunoapi.org's CDN.
     def _forbidden_urlretrieve(*a, **k):
         raise AssertionError("download must use requests.get, not urllib.urlretrieve")
     monkeypatch.setattr("urllib.request.urlretrieve", _forbidden_urlretrieve)
@@ -63,12 +63,17 @@ def test_suno_happy_path(monkeypatch, tmp_path):
             calls.update(get_url=url, params=params)
             return _FakeResp({"data": {"status": "SUCCESS",
                                        "response": {"sunoData": [{"audioUrl": "https://cdn/x.mp3"}]}}})
-        # audio asset download (the CDN URL parsed out of sunoData)
-        calls.update(download_url=url, download_headers=headers)
-        return _FakeResp(content=b"ID3-FAKE-MP3")
+        raise AssertionError(f"unexpected requests.get URL: {url}")
+
+    def _download(url, destination, **kwargs):
+        calls.update(download_url=url, download_headers=kwargs["request_headers"])
+        from pathlib import Path
+        Path(destination).write_bytes(b"ID3-FAKE-MP3")
+        return destination
 
     monkeypatch.setattr("requests.post", _post)
     monkeypatch.setattr("requests.get", _get)
+    monkeypatch.setattr(music, "safe_download", _download)
 
     out = str(tmp_path / "bgm.mp3")
     assert music.generate_suno_v5("epic", out, instrumental=True) is True
@@ -104,10 +109,16 @@ def test_suno_polls_through_in_progress_then_success(monkeypatch, tmp_path):
     def _get(url, params=None, headers=None, timeout=None):
         if "record-info" in url:
             return next(poll_seq)
+        raise AssertionError(f"unexpected requests.get URL: {url}")
+
+    def _download(url, destination, **_kwargs):
         captured["download_url"] = url
-        return _FakeResp(content=b"MP3")
+        from pathlib import Path
+        Path(destination).write_bytes(b"MP3")
+        return destination
 
     monkeypatch.setattr("requests.get", _get)
+    monkeypatch.setattr(music, "safe_download", _download)
     out = str(tmp_path / "b.mp3")
     assert music.generate_suno_v5("calm", out) is True
     assert captured["download_url"] == "https://cdn/y.mp3"
@@ -137,6 +148,30 @@ def test_suno_no_key_skips(monkeypatch, tmp_path):
         suno_api_base = "https://api.sunoapi.org"
     _patch_env(monkeypatch, _NoKey())
     assert music.generate_suno_v5("epic", str(tmp_path / "b.mp3")) is False
+
+
+def test_suno_rejects_invalid_download(monkeypatch, tmp_path):
+    _patch_env(monkeypatch)
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: _FakeResp({"code": 200, "data": {"taskId": "t"}}),
+    )
+    monkeypatch.setattr(
+        "requests.get",
+        lambda *a, **k: _FakeResp(
+            {
+                "data": {
+                    "status": "SUCCESS",
+                    "response": {"sunoData": [{"audioUrl": "https://cdn/bad"}]},
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(music, "safe_download", lambda *a, **k: None)
+
+    output = tmp_path / "bad.mp3"
+    assert music.generate_suno_v5("epic", str(output)) is False
+    assert not output.exists()
 
 
 # --- generate_bgm router threads cost_tracker + AUTO-degrades (capacity audit wf_6be2ee18-f4b) ---

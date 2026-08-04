@@ -8,17 +8,33 @@ from unittest.mock import MagicMock, patch
 import pytest
 from flask import json
 
-from web_server import app, _running_pipelines, _pipelines_lock
+from web_server import (
+    app,
+    _cores_lock,
+    _pipelines_lock,
+    _project_admin_in_flight,
+    _progress_queues,
+    _running_cores,
+    _running_pipelines,
+)
 
 
 @pytest.fixture(autouse=True)
 def clean_pipeline_state():
-    """Clear _running_pipelines before and after each test."""
+    """Clear project runtime registries before and after each test."""
     with _pipelines_lock:
         _running_pipelines.clear()
+        _progress_queues.clear()
+        _project_admin_in_flight.clear()
+    with _cores_lock:
+        _running_cores.clear()
     yield
     with _pipelines_lock:
         _running_pipelines.clear()
+        _progress_queues.clear()
+        _project_admin_in_flight.clear()
+    with _cores_lock:
+        _running_cores.clear()
 
 
 @pytest.fixture()
@@ -48,14 +64,24 @@ def test_api_delete_project_busy(mock_delete, client):
 
 @patch("web_server.delete_project")
 def test_api_delete_project_success(mock_delete, client):
-    """If no pipeline is running and project exists, delete succeeds."""
+    """A successful delete also evicts and closes cached runtime state."""
     pid = "test_pid"
     mock_delete.return_value = True
+    cached_core = MagicMock()
+    cached_bus = MagicMock()
+    with _cores_lock:
+        _running_cores[pid] = cached_core
+    with _pipelines_lock:
+        _progress_queues[pid] = cached_bus
     
     resp = client.delete(f"/api/projects/{pid}")
     assert resp.status_code == 200
     assert resp.json.get("deleted") is True
     mock_delete.assert_called_once_with(pid, timeout=pytest.approx(5.0, abs=10.0))  # HTTP_PROJECT_TIMEOUT is usually 5 or 15
+    assert pid not in _running_cores
+    assert pid not in _progress_queues
+    cached_core.cost_tracker.close.assert_called_once_with()
+    cached_bus.close.assert_called_once_with()
 
 
 @patch("web_server.delete_project")
@@ -68,6 +94,63 @@ def test_api_delete_project_not_found(mock_delete, client):
     assert resp.status_code == 404
     assert resp.json.get("error") == "Project not found"
     mock_delete.assert_called_once()
+
+
+@patch("web_server.load_project", return_value={"id": "test_pid"})
+@patch("web_server.delete_project")
+def test_api_delete_project_reservation_blocks_generation_start(
+    mock_delete,
+    _mock_load,
+    client,
+):
+    """Generation cannot reserve a slot while deletion owns admin state."""
+    nested_status = {}
+
+    def delete_while_probing(_pid, *, timeout):
+        with app.test_client() as other_client:
+            nested = other_client.post("/api/projects/test_pid/generate")
+        nested_status.update(status=nested.status_code, body=nested.get_json())
+        return True
+
+    mock_delete.side_effect = delete_while_probing
+
+    response = client.delete("/api/projects/test_pid")
+
+    assert response.status_code == 200
+    assert nested_status["status"] == 409
+    assert nested_status["body"]["code"] == "project_busy"
+    assert "test_pid" not in _running_pipelines
+    assert "test_pid" not in _project_admin_in_flight
+
+
+@patch("web_server.threading.Thread")
+@patch("web_server.delete_project")
+@patch("web_server.load_project")
+def test_api_generation_reserves_before_project_load_blocks_delete(
+    mock_load,
+    mock_delete,
+    mock_thread,
+    client,
+):
+    """A delete interleaving inside load_project cannot win then start stale."""
+    nested_status = {}
+
+    def load_while_probing_delete(_pid):
+        with app.test_client() as other_client:
+            nested = other_client.delete("/api/projects/test_pid")
+        nested_status.update(status=nested.status_code, body=nested.get_json())
+        return {"id": "test_pid"}
+
+    mock_load.side_effect = load_while_probing_delete
+
+    response = client.post("/api/projects/test_pid/generate")
+
+    assert response.status_code == 200
+    assert nested_status["status"] == 409
+    assert nested_status["body"]["code"] == "project_busy"
+    mock_delete.assert_not_called()
+    assert _running_pipelines["test_pid"] is not None
+    mock_thread.return_value.start.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

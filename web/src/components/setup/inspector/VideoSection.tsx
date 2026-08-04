@@ -1,6 +1,6 @@
 import { Section, Badge, Toggle } from '../../ui'
-import type { AppConfig, ApiEngineConfig } from '../../../types/project'
-import { cascadeEngineOptions } from '../../../lib/engines'
+import type { AppConfig } from '../../../types/project'
+import { cascadeEngineOptions, humanizeEngineReason } from '../../../lib/engines'
 import { isPodGated } from '../../../lib/podGating'
 import { RangeRow, ToggleRow, SelectRow } from './controls'
 
@@ -32,34 +32,28 @@ const COLOR_GRADE_PRESETS = [
  * project's own disable state, so keying retention on it would make
  * disabling a not-yet-in-use engine delete its row — and therefore its
  * toggle — with no way to re-enable it. `AUTO` is excluded (a routing
- * directive, not a dispatchable engine you toggle on/off). GEMINI_OMNI is
- * marked primary. Each row's cloud-vs-pod badge is derived from
+ * directive, not a dispatchable engine you toggle on/off). The primary badge
+ * follows the server-provided workflow templates. Each row's cloud-vs-pod badge is derived from
  * `isPodGated` — provider-keyed, so a future pod-billed video engine
  * surfaces ⚙ Pod without a code change here. Enable state writes the whole
  * nested `api_engines` object (settings write contract), with the touched
- * engine's entry narrowed to the fields the backend reads — see
- * `setEngineEnabled` and ADR-080.
+ * engine's entry narrowed to the only live automatic-cascade field:
+ * `enabled`.
  */
 export function VideoSection({ s, config, update }: Props) {
   const engines = cascadeEngineOptions(config)
   const engineState = s.api_engines ?? {}
 
   // Enable/disable is the only per-engine write path. Rebuild the touched
-  // entry from the fields the backend actually reads rather than spreading
-  // `existing` wholesale: a project saved before the ADR-080 schema trim can
-  // still hold inert keys (duration/resolution/generate_audio/...) on disk,
-  // and a blind spread would re-persist them on every toggle. Only the
-  // toggled key is rebuilt — sweeping every engine off one click would be a
-  // silent migration hiding in a click handler.
+  // entry from the one field automatic routing reads rather than spreading a
+  // possibly stale compatibility entry wholesale. Deprecated explicit-only
+  // engines never reach this list because the server marks them
+  // can_configure=false; their sibling JSON remains untouched.
   const setEngineEnabled = (key: string, enabled: boolean) => {
-    const current = s.api_engines ?? config?.api_engine_defaults ?? {}
-    const existing: ApiEngineConfig | undefined =
-      current[key] ?? config?.api_engine_defaults?.[key]
-    const next: ApiEngineConfig = { enabled }
-    if (existing?.storyboard_mode !== undefined) {
-      next.storyboard_mode = existing.storyboard_mode
-    }
-    update('api_engines', { ...current, [key]: next })
+    update('api_engines', (queued: typeof engineState | undefined) => ({
+      ...(queued ?? s.api_engines ?? config?.api_engine_defaults ?? {}),
+      [key]: { enabled },
+    }))
   }
 
   const sceneTransitions = s.scene_transitions === true
@@ -87,6 +81,11 @@ export function VideoSection({ s, config, update }: Props) {
                   <span className="truncate text-[11px] text-tx">{e.label}</span>
                   <Badge variant={pod ? 'pod' : 'cloud'}>{pod ? 'Pod' : 'Cloud'}</Badge>
                   {e.primary && <Badge variant="pri">Primary</Badge>}
+                  {!e.selectable && e.reason && (
+                    <Badge variant="warn" className="normal-case">
+                      {humanizeEngineReason(e.reason)}
+                    </Badge>
+                  )}
                 </div>
                 <Toggle
                   checked={enabled}
@@ -112,7 +111,7 @@ export function VideoSection({ s, config, update }: Props) {
           label="Native dialogue audio"
           checked={s.dialogue_voice_mode === 'native'}
           onChange={(v) => update('dialogue_voice_mode', v ? 'native' : 'overlay')}
-          hint="Let the winning video engine (Veo, Gemini Omni) generate its own embedded dialogue voice instead of silent video + ElevenLabs TTS overlay. Overlay (off) is the default and works with every engine, including ones with no native voice."
+          hint="Requests embedded dialogue only when Veo runs through Vertex AI with ADC. The Veo Developer API and other routes use the F1b TTS/lip-sync overlay. Native audio without measured lip-sync is UNKNOWN and requires review."
         />
 
         <div className="space-y-3 border-t border-line pt-3">

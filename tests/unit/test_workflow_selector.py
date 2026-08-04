@@ -122,7 +122,7 @@ class TestGetWorkflowParams:
 
 
 class TestResolvedWorkflowRouting:
-    def test_raw_templates_remain_historical_order_seeds(self):
+    def test_raw_templates_are_automatic_order_seeds(self):
         assert {
             template["target_api"]
             for template in WORKFLOW_TEMPLATES.values()
@@ -130,11 +130,14 @@ class TestResolvedWorkflowRouting:
         assert WORKFLOW_TEMPLATES["action"]["video_fallbacks"] == [
             "VEO_NATIVE",
             "SEEDANCE",
-            "SORA_NATIVE",
             "KLING_3_0",
             "RUNWAY_GEN4",
             "LTX",
         ]
+        assert all(
+            "SORA_NATIVE" not in template["video_fallbacks"]
+            for template in WORKFLOW_TEMPLATES.values()
+        )
 
     def test_resolved_accessor_filters_broken_and_unavailable_in_seed_order(self):
         routing = get_resolved_workflow_routing(
@@ -151,7 +154,6 @@ class TestResolvedWorkflowRouting:
             # availability, not product support (invariant 4).
             ("GEMINI_OMNI", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("VEO_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
-            ("KLING_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("RUNWAY_GEN4", VideoPolicyReason.RUNTIME_UNAVAILABLE),
         ]
 
@@ -187,7 +189,7 @@ class TestResolvedWorkflowRouting:
             if item.reason is VideoPolicyReason.PROJECT_DISABLED
         } == {"SEEDANCE", "KLING_3_0", "LTX"}
 
-    def test_sora_native_is_pre_sunset_fallback_only(self):
+    def test_sora_native_is_not_reintroduced_by_automatic_action_routing(self):
         snapshot = RuntimeSnapshot(
             credentials={"fal_key", "openai_api_key"},
             modules={"fal_client", "openai"},
@@ -199,10 +201,10 @@ class TestResolvedWorkflowRouting:
         )
         assert before.candidates == (
             "SEEDANCE",
-            "SORA_NATIVE",
             "KLING_3_0",
             "LTX",
         )
+        assert "SORA_NATIVE" not in before.candidates
 
         on_boundary = get_resolved_workflow_routing(
             "action",
@@ -210,11 +212,7 @@ class TestResolvedWorkflowRouting:
             on_date=SUNSET,
         )
         assert "SORA_NATIVE" not in on_boundary.candidates
-        assert any(
-            item.key == "SORA_NATIVE"
-            and item.reason is VideoPolicyReason.RETIRED
-            for item in on_boundary.rejections
-        )
+        assert all(item.key != "SORA_NATIVE" for item in on_boundary.rejections)
 
     def test_get_workflow_params_consumes_resolved_accessor(self):
         params = get_workflow_params(
@@ -416,6 +414,12 @@ class TestWorkflowTemplatesShape:
             assert api in _VALID_APIS, (
                 f"{shot_type} video_fallback {api!r} not in valid API set"
             )
+
+    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
+    def test_removed_graph_controls_are_absent(self, shot_type):
+        template = WORKFLOW_TEMPLATES[shot_type]
+        assert "controlnet_depth_strength" not in template
+        assert "ip_adapter_weight" not in template
 
 
 # --- MOTION_FIDELITY_FLOORS keys and sentinels ----------------------------

@@ -9,7 +9,7 @@ This pipeline transforms scripts into photorealistic cinematic video through a m
 
 ```
 Scene Decomposition → Continuity Enhancement → Image Gen (FLUX+PuLID)
-    → Video Gen (6 APIs) → Identity Validation → Face Swap (if needed)
+    → Policy-gated Video Provider Cascade → Identity Validation → Face Swap (if needed)
     → Lip Sync → Frame Interpolation (RIFE) → Upscale (SeedVR2)
     → FFmpeg Assembly (color grade + audio + subtitles)
 ```
@@ -20,10 +20,10 @@ Choose the primary API based on shot type. Each has an ordered fallback cascade:
 
 | Shot Type | Primary API | Why | Fallback Chain |
 |-----------|------------|-----|----------------|
-| **Portrait** | GEMINI_OMNI | Google-first primary (WS2) — native audio, repaired + re-admitted 2026-07-30 | VEO_NATIVE → KLING_3_0 (fal Kling v3 Pro, `elements` identity binding) → KLING_NATIVE (legacy v1.6) → RUNWAY_GEN4 → SEEDANCE |
-| **Medium** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → KLING_3_0 → KLING_NATIVE → RUNWAY_GEN4 → SEEDANCE → LTX |
+| **Portrait** | GEMINI_OMNI | Google-first primary (WS2) — native audio, repaired + re-admitted 2026-07-30 | VEO_NATIVE → KLING_3_0 (fal Kling v3 Pro, `elements` identity binding) → RUNWAY_GEN4 → SEEDANCE |
+| **Medium** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → KLING_3_0 → RUNWAY_GEN4 → SEEDANCE → LTX |
 | **Wide** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → LTX (4K, depth-aware, cheapest) → KLING_3_0 → RUNWAY_GEN4 |
-| **Action** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → SEEDANCE (#1 AA i2v arena, 2026-07; multi-reference ≤9 images binds multi-character action) → SORA_NATIVE (deprecated, pre-sunset fallback only) → KLING_3_0 → RUNWAY_GEN4 → LTX |
+| **Action** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → SEEDANCE (#1 AA i2v arena, 2026-07; multi-reference ≤9 images binds multi-character action) → KLING_3_0 → RUNWAY_GEN4 → LTX |
 | **Landscape** | GEMINI_OMNI | Google-first primary (WS2) | VEO_NATIVE → LTX (no face needed, 4K, lowest cost) → KLING_3_0 |
 
 GEMINI_OMNI (Gemini Omni Flash, Preview tier) became the primary for every shot
@@ -32,17 +32,18 @@ type in the Google-first migration (WS2), then was repaired and re-admitted
 and failed/empty-terminal handling fixed in `gemini_omni_native.py`) — it
 needs `GOOGLE_API_KEY` or `GEMINI_API_KEY`; without either it is
 runtime-unavailable and the cascade starts at VEO_NATIVE. VEO_NATIVE is the
-shared first fallback everywhere (also native-audio; see dialogue routing
+shared first fallback everywhere; only its Vertex/ADC backend supports native
+audio, while its Developer-API backend requires F1b (see dialogue routing
 below). SEEDANCE remains the action purpose's strongest non-Google fallback
 (still #1 AA i2v arena, 2026-07; multi-reference up to 9 images binds
 multi-character action). The Seedance dispatch is fal-based:
 `bytedance/seedance-2.0/image-to-video`, or `.../reference-to-video` (keyframe
 first, ≤9 images) when multi-angle refs exist (`phase_c_ffmpeg.py`,
-`workflow_selector.py`). SORA_NATIVE is a deprecated, date-gated fallback
-through the 2026-09-24 OpenAI Sora sunset, then becomes non-dispatchable
-automatically; the FAL-proxied **SORA_2 is already fully RETIRED/UNSUPPORTED**
-(not selectable, not dispatchable, not spendable) — do not route new work to
-it, in code or in prompts.
+`workflow_selector.py`). SORA_NATIVE is deprecated compatibility only: an
+explicit pre-sunset pin may still dispatch, but automatic templates, optimizer
+suggestions, and fallback cascades must never select it. The FAL-proxied
+**SORA_2 is already fully RETIRED/UNSUPPORTED** (not selectable, not
+dispatchable, not spendable) — do not route new work to it, in code or prompts.
 
 LTX (`ltx_native.py`, native `ltx-2-3-pro` profile) accepts only 6/8/10-second
 clips (6s default) — snap or reject any other requested duration before the
@@ -108,7 +109,7 @@ The 0.40/0.30 split is by shot index within the scene — there is no time-skip 
 ## Quality Gates
 
 ### 1. Chief Director (Metacognitive QA)
-LLM layer (Claude → GPT-4o fallback) that validates ALL pipeline outputs. Can REJECT and REWRITE prompts violating structural constraints. Sits above all other LLMs.
+LLM layer (Claude → GPT-4o fallback) that validates ALL pipeline outputs. Can REJECT and REWRITE prompts violating structural constraints. Missing clients, malformed replies, or unusable modifications produce REVIEW_REQUIRED, never synthetic approval.
 
 ### 2. Scene Coherence Score
 ```
@@ -204,11 +205,10 @@ This is appended to every image generation prompt via the Style Director.
 
 The pipeline now uses these previously-idle tools:
 
-### ComfyUI Enhanced Workflow (dynamic node injection in `phase_c_assembly.py`)
-- **ControlNet Depth** (nodes 400-402): DepthAnythingV2 extracts depth map from prev shot → guides spatial consistency
-- **IP-Adapter Style Transfer** (nodes 410-411): Locks color/lighting/atmosphere from previous shot via style-only weight
+### ComfyUI Production Workflow (`phase_c_assembly.py`)
+- **img2img chaining** (nodes 200-201): Load and VAE-encode the previous shot, then rewire the sampler latent for temporal consistency
+- **No dynamic ControlNet/IP-Adapter branch**: the former nodes 400-402 and 410-411 were structurally invalid for the production FLUX graph and are not injected
 - **ReActor face swap** (ComfyUI-native, was injected via the retired `quality_max.py` max tier — no longer available in-graph post-WS1; face swap now runs as a post-process via `phase_c_vision.py` DeepFace)
-- **img2img chaining** (nodes 200-201): VAEEncode prev shot → controlled denoise for temporal consistency
 
 ### Quality-Gated Post-Processing
 - **Motion quality assessment**: `assess_motion_quality()` (`phase_c_ffmpeg.py`, called from `cinema/shots/controller.py`) runs optical flow analysis → auto-triggers RIFE if jittery

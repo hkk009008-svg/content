@@ -42,12 +42,49 @@ from typing import Callable, Optional
 from cinema.phases.base import PhaseResult
 from cinema.storyboard import allocate_storyboard_durations
 from domain.provider_catalog import RuntimeSnapshot
+from domain.optimizer_cache import sanitize_optimizer_cache
 from domain.video_engine_policy import (
     build_runtime_snapshot,
     filter_dispatch_candidates,
 )
 
 logger = logging.getLogger(__name__)
+
+_DIALOGUE_PURPOSES = frozenset({"dialogue_close_up", "talking_head_full"})
+_DEFERRED_JOB_STRING_FIELDS = (
+    "engine",
+    "status",
+    "reason",
+    "job_id",
+    "provider_status",
+)
+
+
+def _sanitize_deferred_job(value: object) -> dict:
+    """Keep only bounded, JSON-safe recovery fields from a provider result."""
+
+    if not isinstance(value, dict):
+        return {}
+    safe: dict[str, object] = {}
+    for key in _DEFERRED_JOB_STRING_FIELDS:
+        item = value.get(key)
+        if isinstance(item, str) and item:
+            safe[key] = item[:256]
+
+    attempts = value.get("attempts")
+    if isinstance(attempts, list):
+        safe_attempts = [
+            item[:64]
+            for item in attempts[:16]
+            if isinstance(item, str) and item
+        ]
+        if safe_attempts:
+            safe["attempts"] = safe_attempts
+
+    billed = value.get("billed")
+    if isinstance(billed, bool):
+        safe["billed"] = billed
+    return safe
 
 
 def _storyboard_policy_runtime_snapshot() -> RuntimeSnapshot:
@@ -74,6 +111,17 @@ def _get_storyboard_mode(project: dict) -> bool:
     return bool(kling_cfg.get("storyboard_mode", False))
 
 
+def _requires_per_shot_dialogue_sync(shot: object) -> bool:
+    """Return whether a shot must traverse the per-shot F1b sync path."""
+
+    if not isinstance(shot, dict):
+        return False
+    cache = sanitize_optimizer_cache(shot.get("optimizer_cache"))
+    spec = cache.get("spec")
+    purpose = spec.get("purpose") if isinstance(spec, dict) else ""
+    return purpose in _DIALOGUE_PURPOSES
+
+
 class MotionRenderPhase:
     """Iterate all shots, generate a motion take for each unfinalized one."""
 
@@ -90,6 +138,11 @@ class MotionRenderPhase:
         self._gen = shot_generator
         self._project = project
         self._on_failure = on_failure or (lambda scene_id, shot_id, error: None)
+        # Populated only when an accepted provider job requires resume or
+        # operator recovery. The orchestrator emits and checkpoints this
+        # sanitized payload before halting; raw sidecar paths/fingerprints never
+        # cross the phase boundary.
+        self.deferred_job: dict = {}
 
     # ------------------------------------------------------------------
     # Storyboard eligibility helpers
@@ -524,6 +577,7 @@ class MotionRenderPhase:
 
     def run(self, ctx) -> PhaseResult:
         start = time.time()
+        self.deferred_job = {}
         if self._gen is None or self._project is None:
             return PhaseResult(
                 ok=False,
@@ -587,7 +641,26 @@ class MotionRenderPhase:
             # keyframes).  Falls through to per-shot loop on any failure.
             # -----------------------------------------------------------------
             batch_handled = False
-            if storyboard_batch_admitted and 2 <= len(unapproved) <= 6:
+            storyboard_count_eligible = 2 <= len(unapproved) <= 6
+            storyboard_has_dialogue = any(
+                _requires_per_shot_dialogue_sync(shot)
+                for shot in unapproved
+            )
+            if (
+                storyboard_batch_admitted
+                and storyboard_count_eligible
+                and storyboard_has_dialogue
+            ):
+                logger.info(
+                    "storyboard batch: dialogue shot requires per-shot F1b; "
+                    "falling through for scene=%s",
+                    scene.get("id"),
+                )
+            if (
+                storyboard_batch_admitted
+                and storyboard_count_eligible
+                and not storyboard_has_dialogue
+            ):
                 if ctx.lifecycle.is_cancelled():
                     return PhaseResult(
                         ok=False,
@@ -632,6 +705,31 @@ class MotionRenderPhase:
                 result = self._gen.generate_motion_take(scene["id"], shot["id"])
                 if result.get("success"):
                     ok_count += 1
+                elif result.get("code") == "provider_job_deferred":
+                    public_job = _sanitize_deferred_job(result.get("deferred_job"))
+                    engine = str(public_job.get("engine") or "Provider")
+                    status = str(public_job.get("status") or "recovery_required")
+                    job_id = public_job.get("job_id")
+                    job_suffix = f" (job {job_id})" if job_id else ""
+                    detail = (
+                        f"{engine} accepted generation{job_suffix} and is still pending."
+                        if status == "pending"
+                        else f"{engine} generation{job_suffix} requires recovery."
+                    )
+                    self.deferred_job = {
+                        "code": "provider_job_deferred",
+                        "scene_id": str(scene.get("id") or "")[:128],
+                        "shot_id": str(shot.get("id") or "")[:128],
+                        "deferred_job": public_job,
+                    }
+                    return PhaseResult(
+                        ok=False,
+                        message=(
+                            f"{detail} Motion phase halted "
+                            f"(ok={ok_count}, skip={skip_count}, fail={fail_count})."
+                        ),
+                        elapsed_s=time.time() - start,
+                    )
                 elif result.get("error_kind") == "budget":
                     # Pre-spend gate refused (ADR-022): stop the phase rather
                     # than marching through every remaining shot — each would

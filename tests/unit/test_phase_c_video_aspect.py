@@ -1,11 +1,10 @@
-"""Unit tests for Phase-3 portrait video: Veo native + fal + Runway emit 9:16.
+"""Unit tests for Phase-3 portrait video: Veo native + fal + Runway Gen-4 emit 9:16.
 
 TC-4 — VEO_NATIVE path threads aspect_ratio="9:16" into veo.generate_video().
 TC-5 — VEO fal path puts aspect_ratio="9:16" into fal_client.subscribe arguments
        (+ landscape refute: 16:9 → "16:9").
 TC-6 — retired SORA_2 is rejected before its legacy fal payload for either aspect.
 TC-7 — RUNWAY_GEN4 route uses model='gen4_turbo' (valid SDK enum) + emits portrait ratio.
-TC-8 — RUNWAY (gen3a) route emits portrait ratio via runway_ratio.
 
 All tests are offline — no Vertex, no network, no spend.
 """
@@ -367,7 +366,7 @@ class TestRunwayGen4Model:
         2. Reads open(image_path, "rb") — use a real temp file.
         3. Polls client.tasks.retrieve in a while loop — mock must return
            status=="SUCCEEDED" immediately to avoid a 300-second spin.
-        4. On SUCCEEDED reads task.output[0] then calls urllib.request.urlretrieve.
+        4. On SUCCEEDED reads task.output[0] then uses the validated downloader.
         """
         import tempfile
         import os
@@ -405,7 +404,6 @@ class TestRunwayGen4Model:
             # unscoped footgun (and can't be narrowed to phase_c_ffmpeg.* here, since the
             # module is imported inside this with-block).
             with patch.dict("sys.modules", {"runwayml": mock_runway_module}), \
-                 patch("urllib.request.urlretrieve"), \
                  patch("time.sleep"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
@@ -416,10 +414,8 @@ class TestRunwayGen4Model:
                 )
                 # The RUNWAY_GEN4 branch downloads via performance._net.safe_download
                 # (bound into phase_c_ffmpeg at import) — NOT urllib.request.urlretrieve.
-                # On a fake URL safe_download returns None, which _download_video_or_cascade
-                # treats as a failed download and CASCADES to the gen3a engine — so the last
-                # create() call the test inspects would be gen3a_turbo, not gen4_turbo. Stub it
-                # to "succeed" (return the out path) so the gen4 happy path is exercised.
+                # Stub the fake CDN download to succeed so the Gen-4 happy path
+                # remains network-free and never enters the broader cascade.
                 phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path=tmp_image,
@@ -458,10 +454,8 @@ class TestRunwayGen4Model:
     def test_runway_gen4_portrait_ratio(self):
         """TC-4: RUNWAY_GEN4 portrait ctx → ratio=='720:1280'.
 
-        Note: gen4_turbo is NOT a key in cinema.aspect._RUNWAY_PORTRAIT (which only
-        special-cases gen3a_turbo→'768:1280'); runway_ratio falls to its portrait
-        default '720:1280'. If a contributor adds a gen4_turbo entry there, this test
-        will (correctly) flag the change.
+        The retired Gen-3 ratio special case is gone; Gen-4 has one canonical
+        portrait ratio of 720:1280.
         """
         mock_client = self._run_runway_gen4(aspect="9:16")
         call_kwargs = mock_client.image_to_video.create.call_args.kwargs
@@ -475,107 +469,6 @@ class TestRunwayGen4Model:
         call_kwargs = mock_client.image_to_video.create.call_args.kwargs
         assert call_kwargs.get("ratio") == "1280:720", (
             f"Expected ratio='1280:720' for landscape; got: {call_kwargs}"
-        )
-
-
-# ---------------------------------------------------------------------------
-# TC-8 — RUNWAY (gen3a): generate_ai_video emits portrait ratio via runway_ratio
-# ---------------------------------------------------------------------------
-class TestRunwayGen3aRatio:
-    """Drive generate_ai_video(target_api='RUNWAY', ...) and assert that
-    runway_client.image_to_video.create is called with ratio='768:1280' for portrait
-    and ratio='1280:768' for landscape (refute).
-
-    The RUNWAY route uses runwayml SDK: create() returns a task object, then
-    task.wait_for_task_output() is called (blocking; mock returns immediately),
-    then task.output[0] is the download URL.
-    """
-
-    def _run_runway(self, aspect: str):
-        """Drive generate_ai_video(RUNWAY) with the given aspect; return the
-        mock RunwayML client whose .image_to_video.create.call_args the tests inspect.
-
-        The route (phase_c_ffmpeg ~:672-703):
-        1. Imports RunwayML inside the branch — patch via sys.modules.
-        2. Reads open(image_path, "rb") — use a real temp file.
-        3. Calls video_task.wait_for_task_output() (no spin loop — mock returns immediately).
-        4. Reads completed_task.output[0] then calls urllib.request.urlretrieve.
-        """
-        import tempfile
-        import os
-
-        # The RUNWAY route calls video_task.wait_for_task_output() — returns completed_task.
-        # completed_task.output[0] must be a URL string.
-        completed_task = MagicMock()
-        completed_task.output = ["https://cdn.runway.ml/gen3a_out.mp4"]
-
-        video_task = MagicMock()
-        video_task.id = "runway-gen3a-task-001"
-        video_task.wait_for_task_output.return_value = completed_task
-
-        mock_client = MagicMock()
-        mock_client.image_to_video.create.return_value = video_task
-
-        mock_runway_module = MagicMock()
-        mock_runway_module.RunwayML.return_value = mock_client
-
-        stub_settings = MagicMock()
-        stub_settings.runwayml_api_secret = "rw-gen3a-secret"
-
-        # Write a tiny temp image file so open(image_path,"rb") works
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
-            tf.write(b"\xff\xd8\xff\xe0" + b"\x00" * 12)  # minimal JPEG header
-            tmp_image = tf.name
-
-        sys.modules.pop("phase_c_ffmpeg", None)
-
-        try:
-            # No os.path.exists patch: the RUNWAY branch (~:672-703) never calls
-            # os.path.exists — it only reads open(image_path,"rb"), satisfied by the
-            # real temp file above.
-            with patch.dict("sys.modules", {"runwayml": mock_runway_module}), \
-                 patch("urllib.request.urlretrieve"):
-                import phase_c_ffmpeg
-                phase_c_ffmpeg.settings = stub_settings
-                _observe_video_policy(
-                    phase_c_ffmpeg,
-                    credentials={"runwayml_api_secret"},
-                    modules={"runwayml"},
-                )
-                # The gen3a route downloads completed_task.output[0] via
-                # performance._net.safe_download (requests) — NOT urllib.urlretrieve.
-                # On the fake cdn.runway.ml URL it hits the network then cascades to
-                # Kling (api.klingai.com). Stub it to "succeed" so the route stays
-                # offline; the create-ratio assertion runs before the download.
-                phase_c_ffmpeg.safe_download = lambda url, out: out
-                phase_c_ffmpeg.generate_ai_video(
-                    image_path=tmp_image,
-                    camera_motion="zoom_in_slow",
-                    target_api="RUNWAY",
-                    output_mp4="/tmp/runway_gen3a_out.mp4",
-                    shot_type="portrait",
-                    ctx=_ctx(aspect),
-                )
-        finally:
-            sys.modules.pop("phase_c_ffmpeg", None)
-            os.unlink(tmp_image)
-
-        return mock_client
-
-    def test_runway_portrait_ratio(self):
-        """TC-4: RUNWAY (gen3a) portrait ctx → ratio=='768:1280'."""
-        mock_client = self._run_runway("9:16")
-        call_kwargs = mock_client.image_to_video.create.call_args.kwargs
-        assert call_kwargs.get("ratio") == "768:1280", (
-            f"Expected ratio='768:1280' for portrait; got: {call_kwargs}"
-        )
-
-    def test_runway_landscape_ratio(self):
-        """TC-4 (refute): RUNWAY (gen3a) landscape ctx → ratio=='1280:768' (no regression)."""
-        mock_client = self._run_runway("16:9")
-        call_kwargs = mock_client.image_to_video.create.call_args.kwargs
-        assert call_kwargs.get("ratio") == "1280:768", (
-            f"Expected ratio='1280:768' for landscape; got: {call_kwargs}"
         )
 
 

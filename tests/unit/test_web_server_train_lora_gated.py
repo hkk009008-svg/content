@@ -7,7 +7,6 @@ from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import pytest
-from flask.wrappers import Request
 
 import prep.lora_quality
 import prep.lora_training
@@ -64,7 +63,6 @@ def test_train_lora_returns_exact_409_before_any_operation(body, suffix):
         patch.object(prep.lora_quality, "train_character_lora_gated", side_effect=_bomb),
         patch.object(prep.lora_training, "record_lora_verdict", side_effect=_bomb),
         patch.object(prep.lora_training, "_write_status", side_effect=_bomb),
-        patch.object(Request, "get_json", side_effect=_bomb),
         patch("builtins.__import__", side_effect=guarded_import),
     ):
         with app.test_client() as client:

@@ -615,6 +615,8 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
     tmp_path,
     monkeypatch,
 ):
+    import web_server
+
     pid, _scene_id, _shot_ids = _persist_project(
         tmp_path,
         monkeypatch,
@@ -635,10 +637,19 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
     assert rows[0]["key"] == "AUTO"
     assert all(set(row) == _ROW_FIELDS for row in rows)
 
-    typed_video_keys = [
+    compatibility_video_keys = [
         key
         for key, entry in CATALOG.items()
-        if entry.modality is Modality.VIDEO
+        if (
+            key != "AUTO"
+            and key not in web_server._API_ENGINE_DEFAULTS
+            and entry.modality is Modality.VIDEO
+        )
+    ]
+    typed_video_keys = [
+        "AUTO",
+        *web_server._API_ENGINE_DEFAULTS,
+        *compatibility_video_keys,
     ]
     assert [row["key"] for row in rows[:len(typed_video_keys)]] == (
         typed_video_keys
@@ -677,7 +688,7 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
         "can_select": False,
         "reason": "unknown",
         "configured_enabled": False,
-        "can_configure": True,
+        "can_configure": False,
         "in_use": True,
         "historical": True,
     }
@@ -687,6 +698,55 @@ def test_project_config_exposes_typed_rows_and_in_use_legacy_target(
     assert "credentials" not in serialized_rows
     assert "modules" not in serialized_rows
     assert "runtime_options" not in serialized_rows
+
+
+def test_project_config_advertises_only_the_ordered_automatic_roster(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    import web_server
+
+    expected = [
+        "GEMINI_OMNI",
+        "VEO_NATIVE",
+        "SEEDANCE",
+        "KLING_3_0",
+        "RUNWAY_GEN4",
+        "LTX",
+        "VEO",
+    ]
+    pid, _scene_id, _shot_ids = _persist_project(
+        tmp_path,
+        monkeypatch,
+        targets=("KLING_NATIVE", "SORA_NATIVE"),
+        api_engines={
+            "KLING_NATIVE": {"enabled": False, "storyboard_mode": True},
+            "SORA_NATIVE": {"enabled": False},
+            "STALE_VIDEO_X": {"enabled": True},
+        },
+    )
+
+    response = client.get(f"/api/config?project_id={pid}")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert list(web_server._API_ENGINE_DEFAULTS) == expected
+    assert [
+        row["key"]
+        for row in body["video_engines"]
+        if row["can_configure"]
+    ] == expected
+
+    by_key = {row["key"]: row for row in body["video_engines"]}
+    # Explicitly pinned compatibility targets remain discoverable, but old
+    # settings do not resurrect them as automatic-cascade toggles.
+    assert by_key["KLING_NATIVE"]["in_use"] is True
+    assert by_key["KLING_NATIVE"]["can_configure"] is False
+    assert by_key["SORA_NATIVE"]["in_use"] is True
+    assert by_key["SORA_NATIVE"]["can_configure"] is False
+    # A stale unknown settings key is not a catalog/shot row at all.
+    assert "STALE_VIDEO_X" not in by_key
 
 
 def test_project_config_applies_project_aspect_policy(
@@ -1235,6 +1295,8 @@ _STRICT_INVALID_SHOT_VALUES = [
     ("motion_auto_approved", 1),
     ("final_auto_approved", 1),
     ("approved", "true"),
+    ("deferred_motion_job", []),
+    ("deferred_keyframe_job", []),
 ]
 
 
@@ -1521,6 +1583,27 @@ _ACTIVE_SHOT_EXTENSIONS = [
     ("motion_auto_approved", True),
     ("final_auto_approved", True),
     ("approved", None),
+    (
+        "deferred_motion_job",
+        {
+            "engine": "LTX",
+            "status": "pending",
+            "job_id": "job-schema-roundtrip",
+            "attempts": ["LTX"],
+            "billed": False,
+            "duration_s": 8,
+        },
+    ),
+    (
+        "deferred_keyframe_job",
+        {
+            "engine": "COMFYUI_PULID",
+            "status": "recovery_required",
+            "provider_status": "job_state_unknown",
+            "job_id": "prompt-schema-roundtrip",
+            "reason": "Reconcile provider history before retrying.",
+        },
+    ),
 ]
 
 

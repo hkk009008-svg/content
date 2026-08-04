@@ -197,6 +197,9 @@ class TestCinemaDirectorVerbDSL:
         prompt = _captured_user_prompt(director)
         assert 'verb="tighten_framing"' in prompt
         assert "moderate" in prompt
+        assert "Increase the subject's size in frame" in prompt
+        assert "Reduce the subject's size in frame" not in prompt
+        assert "push in, tighter shot, closer crop" in prompt
         # The verb prefix sits BEFORE the JSON payload (per-call injection,
         # not system-prompt append — preserves cache surface for freeform).
         assert prompt.index("<VERB_GUIDANCE") < prompt.index('"task":')

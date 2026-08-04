@@ -18,9 +18,10 @@ from domain.video_engine_policy import (
     PORTRAIT_CAPABLE_VIDEO_ENGINES,
     VideoCandidateResult,
     build_runtime_snapshot,
+    filter_automatic_dispatch_candidates,
     filter_dispatch_candidates,
 )
-from performance._net import safe_download
+from performance._net import safe_download, validate_video_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -83,17 +84,17 @@ _FAL_MISSING_WARNED = False
 # Default engine cascade for generate_ai_video when the caller passes no
 # video_fallbacks — quality order. Module-level so tests pin the REAL list
 # (the old test kept a local copy that silently drifted for two migrations).
-# Retired SORA_2 is absent (endpoint deprecated). GEMINI_OMNI was repaired
-# and re-admitted in the catalog (Slice 3, 2026-07-30) but is deliberately
-# left out of this DEFAULT blind order: duration/resolution/audio are
-# prompt-inferred with no structured kwargs, a worse blind-default than the
-# explicit-parameter engines above — opt in via an explicit target_api or
-# fallbacks list instead. This remains an order seed only: the typed entry
+# Retired SORA_2 and explicit-only SORA_NATIVE/legacy RUNWAY are absent.
+# RUNWAY_GEN4 stays automatic. GEMINI_OMNI was repaired and re-admitted in
+# the catalog (Slice 3, 2026-07-30) but is deliberately left out of this
+# DEFAULT blind order: duration/resolution/audio are prompt-inferred with no
+# structured kwargs, a worse blind-default — opt in via an explicit
+# target_api or fallbacks list. This remains an order seed: the typed entry
 # guard below is the executable authority for lifecycle, runtime, project,
 # and aspect eligibility.
 DEFAULT_VIDEO_CASCADE = [
-    "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "SORA_NATIVE",
-    "RUNWAY_GEN4", "LTX", "KLING_NATIVE", "VEO", "RUNWAY",
+    "VEO_NATIVE", "SEEDANCE", "KLING_3_0", "RUNWAY_GEN4",
+    "LTX", "VEO",
 ]
 
 
@@ -251,7 +252,12 @@ def generate_ai_video(
         # failure or policy rejection must not revive global defaults.
         policy_seed = [requested_upper]
 
-    dispatch_policy = filter_dispatch_candidates(
+    policy_filter = (
+        filter_automatic_dispatch_candidates
+        if requested_upper == "AUTO"
+        else filter_dispatch_candidates
+    )
+    dispatch_policy = policy_filter(
         policy_seed,
         snapshot=_video_policy_runtime_snapshot(),
         on_date=_video_policy_current_date(),
@@ -337,9 +343,9 @@ def _execute_admitted_video_chain(
 
     v3 changes:
     - Native Kling API (JWT auth, subject binding, face_consistency)
-    - Native Google Veo 3.1 (reference images, native audio)
-    - Native OpenAI Sora 2 (best motion physics)
-    - LTX Video (4K, keyframe interpolation, cheapest)
+    - Native Google Veo 3.1 (start-image I2V, conditional native audio)
+    - Native OpenAI Sora 2 (deprecated explicit image-only compatibility)
+    - LTX Video (4K, persisted asynchronous jobs, cheapest)
     - Runway Gen-4 Turbo (single reference image, turbo preview)
     - Smart routing: shot_type determines primary API
     - Fallback cascade per shot type from workflow_selector
@@ -347,14 +353,12 @@ def _execute_admitted_video_chain(
     v4 addition — driving_video_path:
         Optional path to a performance-capture clip (output of Act-Two /
         LivePortrait / Viggle). When supplied, engines that accept a
-        reference video use it as motion guidance:
-          - Veo 3.1 native : reference-video mode
-          - Sora 2 native  : init_video parameter
-          - Kling, LTX, Runway Gen-4 Turbo : ignored (no clean
-                             motion-reference input — Gen-4 Turbo's
-                             image_to_video API takes a single
-                             prompt_image, no video/reference-clip field) —
-                             fall through silently to text-to-video baseline.
+        reference video use it as motion guidance. The current Veo, Sora,
+        Kling, LTX, and Runway Gen-4 I2V adapters do not accept that clip.
+        In particular, Sora rejects the argument before submission; Veo keeps
+        its interface-compatible argument unused because video extension and
+        start-image I2V are mutually exclusive. The performance-aware engines
+        are selected elsewhere in the pipeline.
         Empty string disables the feature — preserves existing behavior
         for all callers that haven't been updated yet.
 
@@ -382,17 +386,22 @@ def _execute_admitted_video_chain(
     if _cascade_out is not None:
         _cascade_out["attempt_history"] = list(_attempt_history)
 
-    def _record_video_cascade(winning_engine: str) -> None:
+    def _record_video_cascade(
+        winning_engine: str,
+        **verified_capabilities: object,
+    ) -> None:
         """Write cascade_metadata into _cascade_out when this engine succeeds.
         ``_attempt_history`` reflects every actual dispatch in chronological
         order, including repeated engines across cooldown cycles.  The separate
         ``attempted_apis`` list remains the current cycle's dedupe guard.
         """
         if _cascade_out is not None:
-            _cascade_out["cascade_metadata"] = {
+            metadata = {
                 "engine": winning_engine,
                 "attempts": list(_attempt_history),
             }
+            metadata.update(verified_capabilities)
+            _cascade_out["cascade_metadata"] = metadata
 
     def _note_billed_attempt(engine: str) -> None:
         # A provider that RETURNED a video is billed regardless of what
@@ -407,9 +416,86 @@ def _execute_admitted_video_chain(
         if _cascade_out is not None:
             _cascade_out.setdefault("billed_attempts", []).append(engine.upper())
 
+    def _safe_deferred_job_id(value: object) -> str | None:
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        if (
+            not value
+            or len(value) > 1024
+            or any(ord(char) < 32 for char in value)
+            or "://" in value
+            or any(char in value for char in "?#&")
+        ):
+            return None
+        return value
+
+    def _record_native_deferred(
+        engine: str,
+        exc: BaseException,
+        *,
+        billed: bool,
+        duration_s: object = None,
+    ) -> None:
+        """Publish one bounded accepted-job descriptor for the controller."""
+        if _cascade_out is None:
+            return
+
+        raw_status = getattr(exc, "status", None)
+        status = (
+            raw_status
+            if isinstance(raw_status, str)
+            and raw_status in {"pending", "recovery_required"}
+            else "recovery_required"
+        )
+        raw_reason = getattr(exc, "reason", None)
+        reason = (
+            raw_reason
+            if isinstance(raw_reason, str)
+            and 0 < len(raw_reason) <= 100
+            and all(char.isalnum() or char in "_-" for char in raw_reason)
+            else "provider_job_ambiguous"
+        )
+        raw_provider_status = getattr(exc, "provider_status", None)
+        provider_status = (
+            raw_provider_status
+            if isinstance(raw_provider_status, str)
+            and 0 < len(raw_provider_status) <= 64
+            and all(
+                char.isalnum() or char in "_-"
+                for char in raw_provider_status
+            )
+            else None
+        )
+        deferred = {
+            "engine": engine,
+            "status": status,
+            "reason": reason,
+            "attempts": list(_attempt_history),
+            "billed": bool(billed),
+        }
+        job_id = _safe_deferred_job_id(getattr(exc, "job_id", None))
+        if job_id is not None:
+            deferred["job_id"] = job_id
+        if provider_status is not None:
+            deferred["provider_status"] = provider_status
+        if (
+            isinstance(duration_s, (int, float))
+            and not isinstance(duration_s, bool)
+            and math.isfinite(float(duration_s))
+            and float(duration_s) > 0
+        ):
+            deferred["duration_s"] = float(duration_s)
+        _cascade_out["deferred_job"] = deferred
+
     def _download_video_or_cascade(video_url: str, engine: str) -> bool:
         _note_billed_attempt(engine)
-        if safe_download(video_url, output_mp4) is None:
+        if safe_download(
+            video_url,
+            output_mp4,
+            allowed_content_types=("video/mp4",),
+            content_validator=validate_video_artifact,
+        ) is None:
             logger.warning(
                 "Generated video download failed — cascading (spend still billed)",
                 extra={"engine": engine, "output_mp4": output_mp4},
@@ -465,10 +551,10 @@ def _execute_admitted_video_chain(
                     # (site 2) increments it.
                     _cascade_retries=_cascade_retries,
                     # Forward both cascade-sensitive params across the hop:
-                    #  - driving_video_path: else Veo/Sora silently fall back
-                    #    to image-only motion (no perf-capture guidance).
-                    #    Runway Gen-4 Turbo never consumes this param — its
-                    #    image_to_video API has no video/reference-clip input.
+                    #  - driving_video_path: preserve the caller contract so
+                    #    unsupported engines fail closed. Sora rejects it;
+                    #    Veo retains but ignores the compatibility argument;
+                    #    Runway Gen-4 has no driving-video input.
                     #  - negative_prompt: else an EXPLICIT caller negative is
                     #    re-derived from shot_type only (override lost). W1.1's
                     #    builder (line 124) supplies the default; this preserves
@@ -511,8 +597,8 @@ def _execute_admitted_video_chain(
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
             duration=duration,
-            # Forward both cascade-sensitive params across the quota-cooldown
-            # retry too — same loss as the next-engine hop above if dropped here.
+            # Preserve the same fail-closed input contract and negative-prompt
+            # override across the quota-cooldown retry.
             driving_video_path=driving_video_path,
             negative_prompt=negative_prompt,
             ctx=ctx, _cascade_out=_cascade_out,
@@ -623,16 +709,16 @@ def _execute_admitted_video_chain(
             from sora_native import SoraNativeAPI
             sora = SoraNativeAPI()
 
-            # Smart duration: Sora accepts [4,8,12,16,20] — pick based on shot type
+            # Smart duration within Sora's exact [4, 8, 12] enum.
             # Action/dynamic shots benefit from 8s for full physics arcs
             # Portrait/medium stay at 4s to minimize temporal drift
             _sora_durations = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
             sora_duration = _sora_durations.get(shot_type, 4)
 
             # Sora excels at cloth simulation and gravity — emphasize these.
-            # When a performance-capture driving clip exists, Sora uses it as
-            # input_reference (video conditioning) so the character's motion
-            # follows the real human performance.
+            # The adapter receives driving_video_path only to reject nonempty
+            # values before image/temp/client work; the Videos API reference
+            # input is a still image, not a performance-driving video.
             result = sora.generate_video(
                 image_path=image_path,
                 prompt=(
@@ -677,7 +763,7 @@ def _execute_admitted_video_chain(
         # _veo_billed_noted makes _note_billed_attempt idempotent for this
         # attempt: generate_video's on_billed hook fires the moment the
         # operation response reports a generated video (covers a post-billing
-        # bytes-retrieval/write failure that still returns None — money-gate
+        # bytes-retrieval/write failure that raises a deferred-job signal — money-gate
         # 2026-07-11, extended to this branch in slice M2), AND the post-call
         # `if result:` compat path below fires for any caller (test double /
         # stub) that hands back a truthy result without ever invoking
@@ -693,8 +779,25 @@ def _execute_admitted_video_chain(
             _note_billed_attempt(target_api.upper())
 
         try:
+            from veo_native import VeoNativeJobDeferred
+        except Exception:
+            VeoNativeJobDeferred = ()
+
+        try:
             from veo_native import VeoNativeAPI
             veo = VeoNativeAPI()
+            veo_audio_requested = (
+                shot_type == "landscape"
+                or (
+                    shot_type == "wide"
+                    and not (has_dialogue and not dialogue_native_audio)
+                )
+                or dialogue_native_audio
+            )
+            veo_audio_generated = bool(
+                veo_audio_requested
+                and getattr(veo, "supports_native_audio", True)
+            )
             result = veo.generate_video(
                 image_path=image_path,
                 prompt=(
@@ -706,11 +809,9 @@ def _execute_admitted_video_chain(
                 ),
                 output_path=output_mp4,
                 reference_images=multi_angle_refs,
-                generate_audio=(  # Environments + native dialogue + char-landscape→wide ambient
-                    shot_type == "landscape"
-                    or (shot_type == "wide" and not (has_dialogue and not dialogue_native_audio))
-                    or dialogue_native_audio
-                ),  # guarded: NO Veo ambient on overlay-dialogue (has_dialogue & not native) → no double-voice
+                # Developer-API Veo has no native-audio surface. Preserve the
+                # request only on the ADC-backed Vertex client.
+                generate_audio=veo_audio_generated,
                 driving_video_path=driving_video_path,
                 duration=duration,
                 aspect_ratio=fal_aspect_ratio(_aspect),
@@ -727,24 +828,54 @@ def _execute_admitted_video_chain(
                         extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
                     )
                     return try_next_api()
-                _record_video_cascade(target_api.upper())
+                veo_job_id = _safe_deferred_job_id(
+                    getattr(veo, "last_job_id", None)
+                )
+                veo_success_metadata: dict[str, object] = {
+                    "native_audio_generated": veo_audio_generated,
+                }
+                if veo_job_id is not None:
+                    veo_success_metadata["job_id"] = veo_job_id
+                _record_video_cascade(
+                    target_api.upper(),
+                    **veo_success_metadata,
+                )
                 return result
             # result is None here whether or not the provider billed before
             # failing (on_billed already noted it in the billed case) —
             # cascade to the next engine either way.
             return try_next_api()
+        except VeoNativeJobDeferred as e:
+            if getattr(e, "billed", False):
+                _note_veo_billed()
+            logger.warning(
+                "Veo Native job deferred — suppressing provider cascade",
+                extra={
+                    "engine": "VEO_NATIVE",
+                    "reason": getattr(e, "reason", "provider_job_ambiguous"),
+                    "status": getattr(e, "status", "recovery_required"),
+                    "job_id": getattr(e, "job_id", None),
+                },
+            )
+            _record_native_deferred(
+                "VEO_NATIVE",
+                e,
+                billed=_veo_billed_noted,
+                duration_s=getattr(e, "duration_s", None),
+            )
+            return None
         except Exception as e:
             logger.warning("Veo Native error", extra={"engine": "VEO_NATIVE", "error": str(e)})
             return try_next_api()
 
     elif target_api.upper() == "LTX":
-        # LTX Video 2.3 — 4K, cheapest, best for environments + transitions
+        # LTX Video 2.3 — 4K, cheapest, best for environments + depth/detail
         #
         # _ltx_billed_noted makes _note_billed_attempt idempotent for this
         # attempt: generate_video's on_billed hook fires the moment the
-        # provider confirms billable video output (a URL on the fal path, or
-        # the video bytes themselves on the native path — covers a
-        # post-billing download/write failure that still returns None —
+        # provider confirms billable video output (a URL on either path —
+        # covers a post-billing download/write failure even when no clip is
+        # ultimately published —
         # money-gate 2026-07-11, extended to this branch in slice M2), AND
         # the post-call `if result:` compat path below fires for any caller
         # (test double / stub) that hands back a truthy result without ever
@@ -759,8 +890,42 @@ def _execute_admitted_video_chain(
             _ltx_billed_noted = True
             _note_billed_attempt(target_api.upper())
 
-        # Bind LTXContractViolation BEFORE the main try below so the
-        # `except LTXContractViolation` clause always has a real name to
+        def _record_ltx_deferred(
+            *,
+            reason: str,
+            status: str,
+            detail: str = "",
+            job_id: str | None = None,
+            state_path: str | None = None,
+            request_fingerprint: str | None = None,
+            provider_status: str | None = None,
+            duration_s: int | None = None,
+        ) -> None:
+            """Expose a non-terminal/recovery result without naming a winner."""
+            if _cascade_out is None:
+                return
+            deferred = {
+                "engine": "LTX",
+                "status": status,
+                "reason": reason,
+                "attempts": list(_attempt_history),
+                "billed": _ltx_billed_noted,
+            }
+            optional = {
+                "job_id": job_id,
+                "state_path": state_path,
+                "request_fingerprint": request_fingerprint,
+                "provider_status": provider_status,
+                "duration_s": duration_s,
+                "detail": detail[:500] if detail else None,
+            }
+            deferred.update(
+                (key, value) for key, value in optional.items() if value is not None
+            )
+            _cascade_out["deferred_job"] = deferred
+
+        # Bind exception types BEFORE the main try below so the corresponding
+        # except clauses always have real names to
         # evaluate — if `from ltx_native import LTXVideoAPI` itself fails
         # inside that try (module missing, etc.), Python must still be able
         # to resolve the except clause's type expression without a
@@ -771,6 +936,10 @@ def _execute_admitted_video_chain(
             from ltx_native import LTXContractViolation
         except Exception:
             LTXContractViolation = ()
+        try:
+            from ltx_native import LTXJobPending
+        except Exception:
+            LTXJobPending = ()
 
         try:
             from ltx_native import LTXVideoAPI
@@ -808,6 +977,37 @@ def _execute_admitted_video_chain(
                 _LTX_DURATION_ENUM_S[-1],
             )
 
+            # A controller may seed this private cascade channel when retrying
+            # deferred native work.  Presence means "resume only": malformed
+            # bindings fail closed here, while well-formed values are verified
+            # again by the adapter against the freshly computed fingerprint and
+            # durable sidecar before any upload/submission.
+            _ltx_resume_kwargs: dict[str, object] = {}
+            if _cascade_out is not None and "expected_ltx_job" in _cascade_out:
+                _ltx_binding = _cascade_out.get("expected_ltx_job")
+                if not isinstance(_ltx_binding, dict):
+                    _record_ltx_deferred(
+                        reason="job_binding_invalid",
+                        status="recovery_required",
+                        provider_status="unknown",
+                        duration_s=ltx_duration,
+                    )
+                    return None
+                _expected_job_id = _ltx_binding.get("job_id")
+                _expected_fingerprint = _ltx_binding.get("request_fingerprint")
+                if _expected_job_id is None and _expected_fingerprint is None:
+                    _record_ltx_deferred(
+                        reason="job_binding_invalid",
+                        status="recovery_required",
+                        provider_status="unknown",
+                        duration_s=ltx_duration,
+                    )
+                    return None
+                _ltx_resume_kwargs = {
+                    "expected_job_id": _expected_job_id,
+                    "expected_request_fingerprint": _expected_fingerprint,
+                }
+
             result = ltx.generate_video(
                 image_path=image_path,
                 prompt=(
@@ -821,7 +1021,14 @@ def _execute_admitted_video_chain(
                 resolution=ltx_resolution,
                 duration=ltx_duration,
                 on_billed=_note_ltx_billed,
+                **_ltx_resume_kwargs,
             )
+            _ltx_job_id = getattr(ltx, "last_job_id", None)
+            if not isinstance(_ltx_job_id, str) or not _ltx_job_id:
+                _ltx_job_id = None
+            _ltx_fingerprint = getattr(ltx, "last_request_fingerprint", None)
+            if not isinstance(_ltx_fingerprint, str) or not _ltx_fingerprint:
+                _ltx_fingerprint = None
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
                 # before the aspect backstop so a reject still records spend.
@@ -829,24 +1036,71 @@ def _execute_admitted_video_chain(
                 _note_ltx_billed()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
-                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        "Aspect backstop rejected billed LTX output — deferring",
                         extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
                     )
-                    return try_next_api()
-                _record_video_cascade(target_api.upper())
-                if _cascade_out is not None:
-                    # Surface the TRUE dispatched duration (not the flat
-                    # per-clip API_COST_USD estimate's assumed 6s) so a
-                    # duration-aware cost record (cost_tracker.record_api_call
-                    # ``duration_seconds=``) can be computed from what was
-                    # actually billed, not guessed — money-gate finding
-                    # 2026-07-30.
-                    _cascade_out["cascade_metadata"]["duration_s"] = ltx_duration
+                    _record_ltx_deferred(
+                        reason="output_aspect_rejected",
+                        status="recovery_required",
+                        job_id=_ltx_job_id,
+                        request_fingerprint=_ltx_fingerprint,
+                        provider_status="completed",
+                        duration_s=ltx_duration,
+                    )
+                    return None
+                # Surface the true dispatched duration and native provider job
+                # ID so accounting can use a durable idempotency key.
+                _ltx_success_metadata: dict[str, object] = {
+                    "duration_s": ltx_duration,
+                }
+                if _ltx_job_id is not None:
+                    _ltx_success_metadata["job_id"] = _ltx_job_id
+                _record_video_cascade(
+                    target_api.upper(),
+                    **_ltx_success_metadata,
+                )
                 return result
-            # result is None here whether or not the provider billed before
-            # failing (on_billed already noted it in the billed case) —
-            # cascade to the next engine either way.
+            # A billed LTX result that could not be published must not trigger
+            # another provider. Legacy/test-double paths may report this only
+            # through the billing callback instead of LTXJobPending.
+            if _ltx_billed_noted:
+                _record_ltx_deferred(
+                    reason="billed_output_unavailable",
+                    status="recovery_required",
+                    job_id=_ltx_job_id,
+                    request_fingerprint=_ltx_fingerprint,
+                    provider_status="completed",
+                    duration_s=ltx_duration,
+                )
+                return None
+            # An explicit terminal provider failure or a wholly pre-submission
+            # failure remains safe to cascade.
             return try_next_api()
+        except LTXJobPending as e:
+            logger.warning(
+                "LTX job deferred — suppressing provider cascade",
+                extra={
+                    "engine": "LTX",
+                    "reason": getattr(e, "reason", "job_pending"),
+                    "status": getattr(e, "status", "pending"),
+                    "job_id": getattr(e, "job_id", None),
+                },
+            )
+            _record_ltx_deferred(
+                reason=getattr(e, "reason", "job_pending"),
+                status=getattr(e, "status", "pending"),
+                detail=str(e),
+                job_id=getattr(e, "job_id", None),
+                state_path=getattr(e, "state_path", None),
+                request_fingerprint=getattr(e, "request_fingerprint", None),
+                provider_status=getattr(e, "provider_status", None),
+                duration_s=(
+                    getattr(e, "duration_s", None)
+                    if isinstance(getattr(e, "duration_s", None), int)
+                    else ltx_duration
+                ),
+            )
+            return None
         except LTXContractViolation as e:
             # A LOCAL request-construction bug (e.g. an out-of-enum duration
             # reaching generate_video despite the snap above), not a
@@ -876,16 +1130,14 @@ def _execute_admitted_video_chain(
         # reference image (prompt_image accepts ONE image here; there is no
         # multi-reference style-lock on this endpoint), best prompt adherence.
         try:
+            # Validate content and build the correctly typed data URI before
+            # constructing the SDK client or submitting a paid request.
+            data_uri = _runway_image_data_uri(image_path)
+
             from runwayml import RunwayML
             client = RunwayML(api_key=settings.runwayml_api_secret)
 
             logger.info("Runway Gen-4 I2V with style lock", extra={"engine": "RUNWAY_GEN4"})
-
-            # Upload image as data URI or use URL
-            import base64
-            with open(image_path, "rb") as f:
-                img_b64 = base64.b64encode(f.read()).decode()
-            data_uri = f"data:image/jpeg;base64,{img_b64}"
 
             task = client.image_to_video.create(
                 model="gen4_turbo",
@@ -933,64 +1185,6 @@ def _execute_admitted_video_chain(
     # ═══════════════════════════════════════════════════════════════
     # FAL PROXY HANDLERS (fallback — when native APIs unavailable)
     # ═══════════════════════════════════════════════════════════════
-
-    elif target_api.upper() == "SORA_2":
-        # Legacy Sora 2 fal payload. Typed policy always retires this key, so
-        # this branch is intentionally unreachable for executable dispatch.
-        fal_key = settings.fal_key
-        if fal_key and FAL_AVAILABLE:
-            try:
-                logger.info("fal.ai Sora 2 I2V (25s continuous)", extra={"engine": "SORA_2"})
-
-                start_url = fal_client.upload_file(image_path)
-
-                sora_prompt = (
-                    f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration, "
-                    f"no abrupt speed changes. "
-                    f"SUBJECT: Maintain rigid facial bone structure — zero face deformation between frames. "
-                    f"Same hair, skin, clothing texture in every frame. "
-                    f"PRESERVE: Do not morph, distort, or alter character identity at any frame. "
-                    f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
-                    f"consistent gravity, cloth physics responding to movement. "
-                    f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, "
-                    f"no flickering or sudden lighting shifts. "
-                    f"QUALITY: Photorealistic cinematic footage, natural film grain, high definition."
-                )
-
-                result = fal_client.subscribe(
-                    "fal-ai/sora-2/image-to-video",
-                    client_timeout=FAL_TIMEOUT_VIDEO_S,
-                    arguments={
-                        "prompt": sora_prompt,
-                        "image_url": start_url,
-                        "aspect_ratio": fal_aspect_ratio(_aspect),
-                        "duration": 4,
-                    },
-                    with_logs=True,
-                )
-
-                video_url = result.get("video", {}).get("url")
-                if video_url:
-                    if not _download_video_or_cascade(video_url, "SORA_2"):
-                        return try_next_api()
-                    logger.info("Sora 2 success", extra={"engine": "SORA_2", "output_mp4": output_mp4})
-                    if not _accept_or_reject(output_mp4, _aspect):
-                        logger.warning(
-                            "Aspect backstop: wrong orientation — rejecting → cascade",
-                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
-                        )
-                        return try_next_api()
-                    _record_video_cascade(target_api.upper())
-                    return output_mp4
-
-                return try_next_api()
-
-            except Exception as e:
-                logger.warning("Sora 2 error", extra={"engine": "SORA_2", "error": str(e)})
-                return try_next_api()
-        else:
-            logger.warning("FAL_KEY missing for Sora 2 — cascading", extra={"engine": "SORA_2"})
-            return try_next_api()
 
     elif target_api.upper() == "VEO":
         # Veo 3.1 reference-to-video via fal.ai — preserves subject from reference images
@@ -1082,11 +1276,11 @@ def _execute_admitted_video_chain(
             return try_next_api()
             
     elif target_api.upper() == "KLING_3_0":
-        # Kling v3 Pro via fal.ai (fal-ai/kling-video/v3/pro) — portrait/medium
-        # PRIMARY since 2026-07-11 (best-ranked Kling: #11 AA i2v arena, Elo
-        # 1070). Identity via the v3-era `elements` mechanism (frontal +
-        # reference images, addressed as @Element1 in the prompt); the legacy
-        # KLING_NATIVE (kling-v1-6) route stays first fallback.
+        # Kling v3 Pro via fal.ai (fal-ai/kling-video/v3/pro) — the current
+        # automatic Kling route in templates and the default cascade. Identity
+        # uses the v3-era `elements` mechanism (frontal + reference images,
+        # addressed as @Element1 in the prompt); legacy KLING_NATIVE
+        # (kling-v1-6) remains explicit-only compatibility.
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             max_attempts = 2
@@ -1279,48 +1473,6 @@ def _execute_admitted_video_chain(
             logger.warning("FAL_KEY missing — re-routing", extra={"engine": "FAL_SVD"})
             return try_next_api()
             
-    elif target_api.upper() == "RUNWAY":
-        # RunwayML Elite Cinematic Generation
-        runway_key = settings.runwayml_api_secret
-        if runway_key:
-            try:
-                from runwayml import RunwayML
-                import base64
-                with open(image_path, "rb") as f:
-                    b64_img = base64.b64encode(f.read()).decode('utf-8')
-                data_uri = f"data:image/jpeg;base64,{b64_img}"
-
-                runway_client = RunwayML(api_key=runway_key)
-                video_task = runway_client.image_to_video.create(
-                    model="gen3a_turbo",
-                    prompt_image=data_uri,
-                    prompt_text=f"Smooth {camera_motion}. Cinematic lighting.",
-                    ratio=runway_ratio(_aspect, "gen3a_turbo"),
-                    duration=5
-                )
-                logger.info(
-                    "Runway task queued — polling",
-                    extra={"engine": "RUNWAY", "task_id": video_task.id},
-                )
-                completed_task = video_task.wait_for_task_output()
-                final_video_url = completed_task.output[0]
-                if not _download_video_or_cascade(final_video_url, "RUNWAY"):
-                    return try_next_api()
-                if not _accept_or_reject(output_mp4, _aspect):
-                    logger.warning(
-                        "Aspect backstop: wrong orientation — rejecting → cascade",
-                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
-                    )
-                    return try_next_api()
-                _record_video_cascade(target_api.upper())
-                return output_mp4
-            except Exception as e:
-                logger.warning("Runway API error", extra={"engine": "RUNWAY", "error": str(e)})
-                return try_next_api()
-        else:
-            logger.warning("RunwayML key missing — re-routing", extra={"engine": "RUNWAY"})
-            return try_next_api()
-            
     elif target_api.upper() == "SEEDANCE":
         # Seedance 2.0 (ByteDance) via fal.ai — action-tier primary since the
         # Sora sunset (OpenAI retires Sora 2 + the Videos API on 2026-09-24).
@@ -1432,7 +1584,7 @@ def _execute_admitted_video_chain(
         # _gemini_omni_billed_noted makes _note_billed_attempt idempotent for
         # this attempt: generate_video's on_billed hook fires the moment the
         # interaction reaches "completed" status (covers a post-billing video
-        # retrieval/write failure that still returns None — money-gate
+        # retrieval/write failure that raises a deferred-job signal — money-gate
         # 2026-07-11, extended to this branch in slice M2), AND the post-call
         # `if result:` compat path below fires for any caller (test double /
         # stub) that hands back a truthy result without ever invoking
@@ -1455,6 +1607,11 @@ def _execute_admitted_video_chain(
                 extra={"engine": "GEMINI_OMNI", "cooldown_remaining_s": remaining},
             )
             return try_next_api()
+
+        try:
+            from gemini_omni_native import GeminiOmniJobDeferred
+        except Exception:
+            GeminiOmniJobDeferred = ()
 
         try:
             from gemini_omni_native import GeminiOmniAPI
@@ -1500,12 +1657,36 @@ def _execute_admitted_video_chain(
                         extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
                     )
                     return try_next_api()
-                _record_video_cascade(target_api.upper())
+                omni_job_id = _safe_deferred_job_id(
+                    getattr(omni, "last_job_id", None)
+                )
+                _record_video_cascade(
+                    target_api.upper(),
+                    **({"job_id": omni_job_id} if omni_job_id else {}),
+                )
                 return result
             # result is None here whether or not the provider billed before
             # failing (on_billed already noted it in the billed case) —
             # cascade to the next engine either way.
             return try_next_api()
+        except GeminiOmniJobDeferred as e:
+            if getattr(e, "billed", False):
+                _note_gemini_omni_billed()
+            logger.warning(
+                "Gemini Omni job deferred — suppressing provider cascade",
+                extra={
+                    "engine": "GEMINI_OMNI",
+                    "reason": getattr(e, "reason", "provider_job_ambiguous"),
+                    "status": getattr(e, "status", "recovery_required"),
+                    "job_id": getattr(e, "job_id", None),
+                },
+            )
+            _record_native_deferred(
+                "GEMINI_OMNI",
+                e,
+                billed=_gemini_omni_billed_noted,
+            )
+            return None
         except Exception as e:
             error_str = str(e).lower()
             if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "budget_exceeded" in error_str:
@@ -2538,3 +2719,48 @@ def xfade_concat(scene_videos: list, out_path: str,
         )
         raise
     return out_path
+
+
+_RUNWAY_IMAGE_MIME_BY_SUFFIX = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def _runway_image_data_uri(image_path: str) -> str:
+    """Return a content-validated JPEG, PNG, or WebP Runway data URI."""
+
+    import base64
+    from pathlib import Path
+
+    path = Path(image_path)
+    expected_mime = _RUNWAY_IMAGE_MIME_BY_SUFFIX.get(path.suffix.lower())
+    if expected_mime is None:
+        raise ValueError(
+            "Runway input must use a .jpg, .jpeg, .png, or .webp suffix"
+        )
+
+    payload = path.read_bytes()
+    if payload.startswith(b"\xff\xd8\xff"):
+        detected_mime = "image/jpeg"
+    elif payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected_mime = "image/png"
+    elif (
+        len(payload) >= 12
+        and payload.startswith(b"RIFF")
+        and payload[8:12] == b"WEBP"
+    ):
+        detected_mime = "image/webp"
+    else:
+        raise ValueError("Runway input is not a supported JPEG, PNG, or WebP image")
+
+    if detected_mime != expected_mime:
+        raise ValueError(
+            "Runway input suffix/content mismatch: "
+            f"{path.suffix.lower()} declares {expected_mime}, bytes are {detected_mime}"
+        )
+
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"data:{detected_mime};base64,{encoded}"
