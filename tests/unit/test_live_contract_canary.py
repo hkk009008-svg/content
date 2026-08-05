@@ -305,7 +305,7 @@ def test_workflow_restores_and_retains_complete_runway_attempt_state():
     assert "runway-act-two-ledger-v3-97471b93-" in workflow
     assert "restore-keys:" in workflow
     assert workflow.count("if: always() && inputs.target == 'runway-act-two'") == 2
-    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
+    assert "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f" in workflow
     assert "path: ${{ runner.temp }}/live-contract-canary/" in workflow
     assert "if-no-files-found: warn" in workflow
     live_job = workflow.split("  live-canary:\n", 1)[1]
@@ -445,6 +445,28 @@ def test_accepted_runway_task_is_appended_as_deployment_status(
     assert calls[-1][0] == "POST"
     assert calls[-1][2]["description"] == f"runway_task_id={task_id}"
     assert calls[-1][2]["auto_inactive"] is False
+
+
+def test_terminal_runway_result_finalizes_deployment_status(monkeypatch, tmp_path):
+    task_id = "d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b"
+    environment = _github_fence_environment(tmp_path)
+    calls = []
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        calls.append((method, path, payload))
+        if method == "GET" and "/deployments?" in path:
+            return 200, [_deployment()]
+        if method == "GET":
+            return 200, [
+                {"state": "in_progress", "description": f"runway_task_id={task_id}"}
+            ]
+        return 201, {"id": 100}
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    canary.finalize_runway_deployment(environment, task_id, "succeeded")
+    assert calls[-1][0] == "POST"
+    assert calls[-1][2]["state"] == "success"
+    assert calls[-1][2]["description"] == f"runway_task_id={task_id}"
 
 
 def test_non_main_runway_authority_is_refused_before_remote_write(tmp_path):

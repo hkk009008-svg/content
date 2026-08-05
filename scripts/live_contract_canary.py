@@ -500,6 +500,60 @@ def checkpoint_runway_task(environ: Mapping[str, str], task_id: str) -> None:
     raise last_error or CanaryPreflightError("Runway task checkpoint failed")
 
 
+def finalize_runway_deployment(
+    environ: Mapping[str, str],
+    task_id: str,
+    attempt_state: str,
+) -> None:
+    """Append the terminal provider result to the authority Deployment."""
+    task_id = _canonical_runway_task_id(task_id)
+    github_state = {
+        "succeeded": "success",
+        "failed_billed": "failure",
+        "failed_unbilled": "failure",
+        "cancelled": "inactive",
+    }.get(attempt_state)
+    if github_state is None:
+        raise CanaryPreflightError("Runway attempt is not terminal")
+    repository, token, _head_sha, _run_id, _run_attempt = _github_run_identity(environ)
+    deployments = _list_runway_deployments(repository, token)
+    if len(deployments) != 1:
+        raise CanaryPreflightError("Runway authority Deployment is unavailable")
+    deployment_id, known_id, _payload = _deployment_recovery(
+        repository, token, deployments[0]
+    )
+    if known_id != task_id:
+        raise CanaryPreflightError("Runway terminal result does not match authority")
+    _status, statuses = _github_api_json(
+        "GET",
+        f"/repos/{repository}/deployments/{deployment_id}/statuses?per_page=100",
+        token=token,
+        accepted_statuses=(200,),
+    )
+    description = f"runway_task_id={task_id}"
+    if isinstance(statuses, list) and any(
+        isinstance(status, dict)
+        and status.get("state") == github_state
+        and status.get("description") == description
+        for status in statuses
+    ):
+        print("Runway terminal Deployment status was already recorded")
+        return
+    _github_api_json(
+        "POST",
+        f"/repos/{repository}/deployments/{deployment_id}/statuses",
+        token=token,
+        payload={
+            "state": github_state,
+            "description": description,
+            "environment": RUNWAY_AUTHORITY_ENVIRONMENT,
+            "auto_inactive": False,
+        },
+        accepted_statuses=(201,),
+    )
+    print(f"Runway authority Deployment finalized: state={github_state}")
+
+
 def _runway_attempt_identity(environ: Mapping[str, str]) -> tuple[str, str]:
     from performance.runway_tasks import build_attempt_id
 

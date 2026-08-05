@@ -51,8 +51,10 @@ uploads finish first. At the final boundary before the provider POST, the
 adapter creates one logical-attempt Deployment preclaim, then issues one POST
 with SDK retries disabled. Immediately after Runway returns a task ID, it
 records that UUID as a Deployment status before any local ledger write or
-polling. A replacement runner reconstructs its local ledger from that remote
-task ID and performs retrieval only. If a runner is lost in the narrow
+polling, then appends the provider's terminal success, failure, or cancellation
+so the Deployment UI does not remain falsely in progress. A replacement runner
+reconstructs its local ledger from that remote task ID and performs retrieval
+only. If a runner is lost in the narrow
 preclaim/acceptance/checkpoint interval, the Deployment remains but has no task
 ID, so every later run fails closed for manual provider reconciliation instead
 of risking a second paid task. GitHub Deployments are trusted-writer crash and
@@ -84,3 +86,22 @@ target submits the LivePortrait workflow only to its separately configured
 endpoint. A gateway health response alone is insufficient: authorization,
 workflow queueing, polling, artifact download, and validation must all work
 through the selected deployed boundary.
+
+## Reconciled evidence
+
+The fixed Runway canary completed successfully on 2026-08-05 in
+[workflow run 30993506462](https://github.com/hkk009008-svg/content/actions/runs/30993506462)
+at head `7e82baaa9a6de33bc8893e88f32469cf63f60729`. Runway task
+`36a7e1f9-d615-4fb1-ad1e-4de034eea6de` reported `SUCCEEDED` and an actual
+provider cost of 15 credits. The downloaded SQLite authority ledger passed
+`PRAGMA integrity_check`, recorded one `succeeded` attempt, and reconciled the
+configured `$0.15` estimate once. Provider invoices remain authoritative for
+the currency value.
+
+The 30-day ledger artifact is `8925181275`, with ZIP digest
+`sha256:c9e58784b9049e28c02533b6381d4ee9eb1064ee0356b2f7c624cb85520dcf49`
+and expiry `2026-09-04T09:32:02Z`. Deployment authority `5759174510` has a
+terminal `success` status for the same task UUID. This evidence does not cover
+either RunPod target; those remain unrun until their separately pinned
+deployments, credentials, infrastructure budget, and applicable model-license
+approval exist.

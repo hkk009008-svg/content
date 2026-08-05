@@ -133,6 +133,7 @@ def test_act_two_minimal_call_returns_mp4():
     from scripts.live_contract_canary import (
         checkpoint_runway_task,
         claim_runway_submission,
+        finalize_runway_deployment,
     )
 
     if len(os.environ.get("CANARY_AUTHORITY_GITHUB_TOKEN", "")) < 16:
@@ -187,6 +188,23 @@ def test_act_two_minimal_call_returns_mp4():
                 engine="ACT_ONE",
                 operation="performance_capture",
             )
+        if (
+            attempt
+            and attempt.get("provider_job_id")
+            and attempt.get("state")
+            in {"succeeded", "failed_billed", "failed_unbilled", "cancelled"}
+        ):
+            try:
+                finalize_runway_deployment(
+                    os.environ,
+                    str(attempt["provider_job_id"]),
+                    str(attempt["state"]),
+                )
+            except Exception as exc:
+                pytest.fail(
+                    "durable Runway terminal-status checkpoint failed: "
+                    f"{type(exc).__name__}"
+                )
         if result is None:
             evidence = {
                 key: (attempt or {}).get(key)
