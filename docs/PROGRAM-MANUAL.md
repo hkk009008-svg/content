@@ -723,7 +723,7 @@ single env-var settings singleton.
 | `PipelineJobStore` / `PipelineJobDispatcher` | `pipeline_jobs.py:123`, `:769` | SQLite/WAL queue, one active job per project, FIFO claims, leases/heartbeats/process fences, fixed global worker pool, checkpoint-resume recovery. |
 | `CostTracker` | `cost_tracker.py:392` | SQLite cost + paid-attempt ledger (`data/experiments.db`) and atomic budget gate. Project spend is rehydrated before new work is admitted. |
 | `reserve_paid_attempt` / `reconcile_paid_attempt` | `cost_tracker.py` | Legal-transition ledger for reserved/submitting/running/ambiguous/terminal paid media and planning calls; a provider job ID, when the provider supplies one, is immutable once acknowledged. |
-| `run_durable_fal_job` / `run_durable_comfy_job` | `paid_provider.py:283`, `:515` | Resume exact provider IDs and block blind submit replay. `run_nonresumable_paid_call` (`:148`) fail-closes ambiguous no-ID providers. |
+| `run_durable_fal_job` / `run_durable_comfy_job` | `paid_provider.py:692`, `:1038` | Resume exact provider IDs and block blind submit replay. `run_nonresumable_paid_call` (`:500`) fail-closes ambiguous no-ID providers. |
 | `get_provider_usage_analytics` | `cost_tracker.py` | Paid-media plus planning/research observation success, latency, failure, reservation and reconciled-estimate aggregation by engine/provider. |
 | `assess_provider_health` | `domain/provider_health.py:36` | Conservative deterministic health from durable paid-attempt evidence; the base-video `AUTO` path removes only `unhealthy`. |
 | `record_api_call` | `cost_tracker.py:1735` | Ordinary API cost logging path. |
