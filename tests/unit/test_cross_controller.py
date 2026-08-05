@@ -60,6 +60,8 @@ import threading
 import time
 import traceback
 
+import pytest
+
 # Bootstrap sys.path for standalone invocation (python tests/integration/X.py).
 # Pytest sets this up via tests/conftest.py; this branch covers the
 # no-pytest case. Two dirs up from this file is the project root.
@@ -221,6 +223,33 @@ def _make_setup(tmpdir: str, lifecycle=None):
     return host, runstate, core, lifecycle
 
 
+def _routing_skip_decision(shot_id: str, driving_video_path: str = "") -> dict:
+    return {
+        "id": f"skip-routing-{shot_id}",
+        "action": "skip",
+        "reason": "routing",
+        "decision_source": "routing",
+        "created_at": "2026-08-05T00:00:00+00:00",
+        "routed_engine": "SKIP",
+        "driving_video_path": driving_video_path,
+    }
+
+
+def _operator_skip_decision(shot: dict, scene: dict) -> dict:
+    from domain.performance import route_performance_engine
+
+    return {
+        "id": f"skip-operator-{shot.get('id', 'shot')}",
+        "action": "skip",
+        "reason": "operator",
+        "decision_source": "operator",
+        "operator_reason": "Intentional performance omission for this take.",
+        "created_at": "2026-08-05T00:00:00+00:00",
+        "routed_engine": route_performance_engine(shot, scene),
+        "driving_video_path": shot.get("driving_video_path", ""),
+    }
+
+
 def _richer_project(tmpdir: str) -> dict:
     """A larger project dict for branch-coverage tests (approve_take,
     PERFORMANCE_REVIEW gate, postprocess chain walks).
@@ -258,6 +287,7 @@ def _richer_project(tmpdir: str) -> dict:
                         "id": "sh1",
                         "plan_status": "approved",
                         "performance_engine": "SKIP",
+                        "performance_skip": _routing_skip_decision("sh1"),
                         "keyframe_takes": [
                             {
                                 "id": "tk_kf_1", "kind": "keyframe",
@@ -298,6 +328,7 @@ def _richer_project(tmpdir: str) -> dict:
                         "id": "sh2",
                         "plan_status": "approved",
                         "performance_engine": "ACT_ONE",
+                        "driving_video_path": os.path.join(tmpdir, "driving2.mp4"),
                         "keyframe_takes": [
                             {
                                 "id": "tk_kf_2", "kind": "keyframe",
@@ -313,7 +344,9 @@ def _richer_project(tmpdir: str) -> dict:
                                 "id": "tk_perf_2", "kind": "performance",
                                 "path": os.path.join(tmpdir, "perf2.mp4"),
                                 "source_take_id": "tk_kf_2", "status": "generated",
-                                "created_at": "", "metadata": {},
+                                "created_at": "", "metadata": {
+                                    "driving_video_path": os.path.join(tmpdir, "driving2.mp4"),
+                                },
                             },
                         ],
                         "approved_keyframe_take_id": "tk_kf_2",
@@ -325,6 +358,7 @@ def _richer_project(tmpdir: str) -> dict:
                         "id": "sh3",
                         "plan_status": "approved",
                         "performance_engine": "SKIP",
+                        "performance_skip": _routing_skip_decision("sh3"),
                         "keyframe_takes": [
                             {
                                 "id": "tk_kf_3", "kind": "keyframe",
@@ -392,6 +426,7 @@ def _richer_project(tmpdir: str) -> dict:
                         "id": "sh6",
                         "plan_status": "approved",
                         "performance_engine": "SKIP",
+                        "performance_skip": _routing_skip_decision("sh6"),
                         "keyframe_takes": [],
                         "motion_takes": [],
                         "postprocess_variants": [
@@ -478,7 +513,7 @@ def _make_richer_setup(tmpdir: str, lifecycle=None):
     """
     for asset in (
         "kf1.jpg", "kf2.jpg", "kf3.jpg", "kf4.jpg", "kf5.jpg",
-        "m1.mp4", "perf2.mp4", "perf5.mp4",
+        "m1.mp4", "perf2.mp4", "perf5.mp4", "driving2.mp4",
         "pv_a.mp4", "pv_b.mp4",
         "loop_a.mp4", "loop_b.mp4",
     ):
@@ -915,6 +950,18 @@ def test_wait_for_gate_headless_proceeds_when_satisfied():
         assert out is True
 
 
+def test_wait_for_gate_headless_never_ignores_direct_stage_lease():
+    from cinema.review.controller import GateNotSatisfiedError
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, runstate, _core, _ = _make_setup(tmpdir)
+        runstate.headless = True
+        host._direct_stage_in_flight = True
+
+        with pytest.raises(GateNotSatisfiedError, match="direct-stage action"):
+            host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+
+
 def test_wait_for_gate_non_headless_does_not_raise():
     """Non-headless (default) keeps the existing behavior: an unsatisfied gate
     is handled by lifecycle.wait_for_gate (here NullLifecycle -> True), never
@@ -1003,9 +1050,44 @@ def test_gate_satisfied_performance_all_skip():
         host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
         with patch_ctx:
             # Force every shot to SKIP regardless of its other state
-            for shot in core.project["scenes"][0]["shots"]:
+            scene = core.project["scenes"][0]
+            for shot in scene["shots"]:
+                decision = _operator_skip_decision(shot, scene)
                 shot["performance_engine"] = "SKIP"
+                shot["performance_skip"] = decision
             assert host._review_ctrl._gate_satisfied("PERFORMANCE_REVIEW") is True
+
+
+def test_gate_satisfied_performance_rejects_bare_skip_without_decision():
+    """A stale legacy engine value cannot bypass performance review."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
+        with patch_ctx:
+            scene = core.project["scenes"][0]
+            for shot in scene["shots"]:
+                decision = _operator_skip_decision(shot, scene)
+                shot["performance_engine"] = "SKIP"
+                shot["performance_skip"] = decision
+            scene["shots"][0].pop("performance_skip")
+
+            assert host._review_ctrl._gate_satisfied("PERFORMANCE_REVIEW") is False
+
+
+def test_gate_satisfied_performance_rejects_skip_for_old_driving_revision():
+    """A skip decision stops being authority when its driving input changes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
+        with patch_ctx:
+            scene = core.project["scenes"][0]
+            for shot in scene["shots"]:
+                decision = _operator_skip_decision(shot, scene)
+                shot["performance_engine"] = "SKIP"
+                shot["performance_skip"] = decision
+            scene["shots"][0]["driving_video_path"] = os.path.join(
+                tmpdir, "replacement-driving.mp4",
+            )
+
+            assert host._review_ctrl._gate_satisfied("PERFORMANCE_REVIEW") is False
 
 
 def test_gate_satisfied_performance_all_approved():
@@ -1184,6 +1266,39 @@ def test_approve_take_performance_in_performance_takes_sets_field():
             result = host._review_ctrl.approve_take("sh2", "tk_perf_2", "performance")
             assert "error" not in result, f"unexpected error: {result}"
             assert core.project["scenes"][0]["shots"][1]["approved_performance_take_id"] == "tk_perf_2"
+
+
+@pytest.mark.parametrize("take_revision", ["", "different-driving.mp4"])
+def test_approve_take_performance_rejects_unknown_or_stale_driving_revision(
+    take_revision,
+):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
+        with patch_ctx as project_file:
+            shot = core.project["scenes"][0]["shots"][1]
+            shot["approved_performance_take_id"] = ""
+            shot["performance_takes"][0]["metadata"]["driving_video_path"] = (
+                os.path.join(tmpdir, take_revision) if take_revision else ""
+            )
+            with open(project_file, "r", encoding="utf-8") as handle:
+                disk = json.load(handle)
+            disk_shot = disk["scenes"][0]["shots"][1]
+            disk_shot["approved_performance_take_id"] = ""
+            disk_shot["performance_takes"][0]["metadata"]["driving_video_path"] = (
+                os.path.join(tmpdir, take_revision) if take_revision else ""
+            )
+            with open(project_file, "w", encoding="utf-8") as handle:
+                json.dump(disk, handle)
+
+            result = host._review_ctrl.approve_take(
+                "sh2", "tk_perf_2", "performance"
+            )
+
+            assert result["code"] == "stale_performance_input"
+            assert "different or unknown" in result["error"]
+            assert core.project["scenes"][0]["shots"][1][
+                "approved_performance_take_id"
+            ] == ""
 
 
 def test_approve_take_performance_in_keyframe_takes_errors_not_performance():

@@ -4,7 +4,7 @@ WHY THIS EXISTS
 ---------------
 Several adapters in this package (act_two, viggle, live_portrait, driving_video)
 download generated artifacts from URLs returned by external APIs (Runway,
-Viggle) or from the internal ComfyUI pod. The original code used
+Viggle) or from the internal ComfyUI worker. The original code used
 `urllib.request.urlretrieve(url, path)` which:
 
   - Accepts ANY URL with no scheme check (could be `file://`, `ftp://`, etc.)
@@ -24,7 +24,7 @@ When ``allow_http=False`` (default — untrusted external HTTPS), the helper:
     multicast / reserved / unspecified / cloud-metadata addresses
   - Revalidates every redirect target the same way (manual redirect follow)
 
-When ``allow_http=True`` (trusted internal ComfyUI / RunPod), HTTP is permitted
+When ``allow_http=True`` (trusted internal ComfyUI), HTTP is permitted
 and private/link-local addresses are allowed. Do not pass untrusted operator
 URLs through ``allow_http=True``.
 """
@@ -129,6 +129,13 @@ def _ffprobe_artifact(path: str) -> tuple[dict | None, Optional[str]]:
 
 
 def _positive_duration(payload: dict, stream: dict) -> bool:
+    return _media_duration_seconds(payload, stream) is not None
+
+
+def _media_duration_seconds(payload: dict, stream: dict) -> float | None:
+    """Return the largest finite positive stream/container duration."""
+
+    durations = []
     for raw in (
         stream.get("duration"),
         (payload.get("format") or {}).get("duration"),
@@ -138,8 +145,8 @@ def _positive_duration(payload: dict, stream: dict) -> bool:
         except (TypeError, ValueError):
             continue
         if math.isfinite(value) and value > 0:
-            return True
-    return False
+            durations.append(value)
+    return max(durations) if durations else None
 
 
 def _decode_media_stream(path: str, stream_selector: str) -> Optional[str]:
@@ -183,8 +190,17 @@ def validate_video_artifact(
     path: str,
     *,
     expected_dimensions: tuple[int, int] | None = None,
+    min_dimensions: tuple[int, int] | None = None,
+    max_dimensions: tuple[int, int] | None = None,
+    max_pixels: int | None = None,
+    max_duration_s: float | None = None,
 ) -> Optional[str]:
-    """Require an MP4-family container with a decodable nonempty video stream."""
+    """Require a bounded, decodable MP4-family video stream.
+
+    Optional geometry and duration limits let untrusted upload boundaries use
+    the same ffprobe + full-decode validation as provider downloads without a
+    second metadata probe.
+    """
 
     try:
         with open(path, "rb") as artifact:
@@ -212,10 +228,26 @@ def validate_video_artifact(
         return f"video dimensions are invalid: {dimensions!r}"
     if expected_dimensions is not None and dimensions != expected_dimensions:
         return f"video dimensions {dimensions!r} != expected {expected_dimensions!r}"
+    if min_dimensions is not None and (
+        dimensions[0] < min_dimensions[0] or dimensions[1] < min_dimensions[1]
+    ):
+        return f"video dimensions {dimensions!r} below minimum {min_dimensions!r}"
+    if max_dimensions is not None and (
+        dimensions[0] > max_dimensions[0] or dimensions[1] > max_dimensions[1]
+    ):
+        return f"video dimensions {dimensions!r} exceed maximum {max_dimensions!r}"
+    if max_pixels is not None and dimensions[0] * dimensions[1] > max_pixels:
+        return (
+            f"video pixel count {dimensions[0] * dimensions[1]} "
+            f"exceeds maximum {max_pixels}"
+        )
     if not stream.get("codec_name"):
         return "video codec is missing"
-    if not _positive_duration(payload, stream):
+    duration_s = _media_duration_seconds(payload, stream)
+    if duration_s is None:
         return "video duration is missing or nonpositive"
+    if max_duration_s is not None and duration_s > max_duration_s:
+        return f"video duration {duration_s:.3f}s exceeds maximum {max_duration_s:.3f}s"
     return _decode_media_stream(path, "0:v:0")
 
 
@@ -748,8 +780,8 @@ def safe_download(
         allow_http: When False (default), only https URLs are accepted and
             resolved addresses in private/loopback/link-local/multicast/
             reserved/cloud-metadata ranges are refused, including redirect
-            targets. Set True only for trusted internal hosts (ComfyUI pod,
-            RunPod) where private HTTP is expected.
+            targets. Set True only for trusted internal hosts (ComfyUI gateway,
+            internal GPU workers) where private HTTP is expected.
         request_headers: Optional non-secret request headers required by an
             artifact CDN (for example a browser-compatible User-Agent).
         allowed_content_types: Optional exact MIME allowlist. Parameters such

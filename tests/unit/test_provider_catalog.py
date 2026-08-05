@@ -45,13 +45,20 @@ def test_catalog_exactly_covers_legacy_registry_plus_fal_svd_mutation_pin() -> N
     expected = set(API_REGISTRY) | {"FAL_SVD", "VIGGLE"}
 
     assert isinstance(CATALOG, MappingProxyType)
-    assert len(API_REGISTRY) == 40
-    assert len(CATALOG) == 42
+    assert len(API_REGISTRY) == 35
+    assert len(CATALOG) == 37
     assert set(CATALOG) == expected
     assert "FAL_SVD" in CATALOG
     assert CATALOG["FAL_SVD"].legacy_visible is False
     assert "VIGGLE" in CATALOG
     assert CATALOG["VIGGLE"].legacy_visible is False
+
+
+def test_retired_runpod_image_catalog_is_removed() -> None:
+    removed = {"FLUX_DEV", "HIDREAM_I1", "SD3_5_LARGE", "SUPIR_V0Q", "CCSR"}
+
+    assert removed.isdisjoint(CATALOG)
+    assert "runpod_comfyui" not in {provider.value for provider in Provider}
 
 
 def test_viggle_is_limited_and_not_a_selectable_video_engine() -> None:
@@ -104,7 +111,7 @@ def test_legacy_projection_is_exact_nonmutating_copy() -> None:
     projected = project_legacy_registry(API_REGISTRY, on_date=PRE_SUNSET)
 
     assert set(projected) == set(API_REGISTRY)
-    assert len(projected) == 40
+    assert len(projected) == 35
     assert "FAL_SVD" not in projected
     assert API_REGISTRY == source_before
     assert CATALOG["AUTO"] is canonical_auto
@@ -542,7 +549,7 @@ def test_non_dispatchable_entries_have_no_options_and_short_circuit() -> None:
             "openai_api_key",
         },
         modules={"fal_client", "google.genai", "openai"},
-        services={"comfyui_readiness"},
+        services=set(),
     )
 
     # Slice 3 re-admitted GEMINI_OMNI: it is dispatchable now (LIMITED, with

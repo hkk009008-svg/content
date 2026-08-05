@@ -4,6 +4,7 @@ import TakeStrip, { LipsyncStatusBadge } from '../console/TakeStrip'
 import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 import IterationPanel from './IterationPanel'
+import DrivingVideoUploadControl from './DrivingVideoUploadControl'
 import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
 import { canResumeDeferredProviderJob } from '../../lib/providerRecovery'
 
@@ -42,6 +43,8 @@ interface Props {
   onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
   onApprovePerformance: (shotId: string, takeId: string) => Promise<any>
+  onGeneratePerformance: (shotId: string) => Promise<any>
+  onSkipPerformance: (shotId: string, reason: string) => Promise<any>
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onCorrect: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
@@ -247,6 +250,8 @@ function ClipCard({
   onGenerateKeyframe,
   onApproveKeyframe,
   onApprovePerformance,
+  onGeneratePerformance,
+  onSkipPerformance,
   onGenerateMotion,
   onApproveFinal,
   onCorrect,
@@ -265,6 +270,8 @@ function ClipCard({
   onGenerateKeyframe: Props['onGenerateKeyframe']
   onApproveKeyframe: Props['onApproveKeyframe']
   onApprovePerformance: Props['onApprovePerformance']
+  onGeneratePerformance: Props['onGeneratePerformance']
+  onSkipPerformance: Props['onSkipPerformance']
   onGenerateMotion: Props['onGenerateMotion']
   onApproveFinal: Props['onApproveFinal']
   onCorrect: Props['onCorrect']
@@ -287,8 +294,18 @@ function ClipCard({
   /** S18: Performance-card iteration toggle. Inline drawer below the
    *  side-by-side preview, mirroring TakeCard's iteration UX shape. */
   const [iteratingPerformance, setIteratingPerformance] = useState(false)
+  const [performanceFeedback, setPerformanceFeedback] = useState<{
+    kind: 'status' | 'error'
+    message: string
+  } | null>(null)
+  const [performanceUploadBusy, setPerformanceUploadBusy] = useState(false)
+  const [performanceSkipReason, setPerformanceSkipReason] = useState('')
   const deferredKeyframeJobTitleId = useId()
   const deferredJobTitleId = useId()
+  const performanceHelpId = useId()
+  const performanceFeedbackId = useId()
+  const performanceSkipReasonId = useId()
+  const performanceInputWarningId = useId()
 
   const audit = shot.auto_approve_audit || []
   const [selectedKeyframeTakeId, setSelectedKeyframeTakeId] = useState(shot.approved_keyframe_take_id || lastTake(shot.keyframe_takes || [])?.id || '')
@@ -314,11 +331,39 @@ function ClipCard({
   const latestPerformanceTake = performanceTakes.length > 0
     ? performanceTakes[performanceTakes.length - 1]
     : null
-  const approvedPerformanceTakeId = shot.approved_performance_take_id || latestPerformanceTake?.id || ''
   const performanceEngine = shot.performance_engine || ''
+  const performanceSkipIsOperator = shot.performance_skip?.decision_source === 'operator'
+    || shot.performance_skip?.reason === 'operator'
   const drivingVideoPath = shot.driving_video_path || ''
   const performanceVideoPath = latestPerformanceTake?.path || ''
   const performanceMetadata = latestPerformanceTake?.metadata || {}
+  const takeDrivingVideoPath = typeof performanceMetadata.driving_video_path === 'string'
+    ? performanceMetadata.driving_video_path
+    : ''
+  // Never pair an old generated take with newly selected input bytes. Once a
+  // take exists, its own persisted provenance is the only truthful driving
+  // preview; missing legacy provenance is shown as unknown, not guessed.
+  const previewDrivingVideoPath = latestPerformanceTake
+    ? takeDrivingVideoPath
+    : drivingVideoPath
+  const activeDrivingDiffersFromLatestTake = Boolean(
+    latestPerformanceTake
+    && drivingVideoPath
+    && takeDrivingVideoPath
+    && drivingVideoPath !== takeDrivingVideoPath,
+  )
+  const activeDrivingRevisionMissing = Boolean(
+    latestPerformanceTake && !drivingVideoPath,
+  )
+  const latestTakeDrivingRevisionUnknown = Boolean(
+    latestPerformanceTake && !takeDrivingVideoPath,
+  )
+  const performanceApprovalInputBlocked = Boolean(
+    activeDrivingRevisionMissing
+    || activeDrivingDiffersFromLatestTake
+    || latestTakeDrivingRevisionUnknown
+    || performanceMetadata.input_revision_stale === true,
+  )
   const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
   const performanceIdentity: number | null | undefined = performanceMetadata.identity_score
   const resolvedShotType = shot.shot_type
@@ -352,6 +397,10 @@ function ClipCard({
     if (deferredKeyframeJob) setShowRegenForm(false)
   }, [deferredKeyframeJob])
 
+  useEffect(() => {
+    if (activeStage !== 'KEYFRAME_REVIEW') setShowRegenForm(false)
+  }, [activeStage])
+
   const imageUrl = selectedKeyframe?.path || shotState?.generated_image || shot.generated_image
   const videoUrl = selectedFinal?.path || shotState?.generated_video || shot.generated_video
   const activeTakeId = selectedFinal?.id || selectedKeyframe?.id
@@ -360,6 +409,77 @@ function ClipCard({
     setLoadingAction(label)
     try {
       return await action()
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
+  const runPerformanceDecision = async (
+    action: 'generate-performance' | 'skip-performance',
+  ) => {
+    const normalizedSkipReason = performanceSkipReason.trim()
+    if (action === 'skip-performance') {
+      if (!normalizedSkipReason) {
+        setPerformanceFeedback({
+          kind: 'error',
+          message: 'Enter a reason before skipping performance capture.',
+        })
+        return
+      }
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(normalizedSkipReason)) {
+        setPerformanceFeedback({
+          kind: 'error',
+          message: 'The performance skip reason cannot contain control characters.',
+        })
+        return
+      }
+      const confirmed = confirm(
+        `Skip performance capture for this shot? Reason: ${normalizedSkipReason}\n\nMotion generation will continue without a performance-driving take.`,
+      )
+      if (!confirmed) return
+    }
+
+    setLoadingAction(action)
+    setPerformanceFeedback(null)
+    try {
+      const result = action === 'generate-performance'
+        ? await onGeneratePerformance(shot.id)
+        : await onSkipPerformance(shot.id, normalizedSkipReason)
+      if (!result || result.success !== true) {
+        setPerformanceFeedback({
+          kind: 'error',
+          message: String(result?.error || (
+            action === 'generate-performance'
+              ? 'Performance generation was not confirmed.'
+              : 'Performance skip was not confirmed.'
+          )),
+        })
+        return
+      }
+      try {
+        await onRefreshProject()
+      } catch (error) {
+        setPerformanceFeedback({
+          kind: 'error',
+          message: `The performance decision succeeded, but project refresh failed: ${
+            error instanceof Error && error.message ? error.message : 'Unknown error'
+          }`,
+        })
+        return
+      }
+      setPerformanceFeedback({
+        kind: 'status',
+        message: action === 'generate-performance'
+          ? 'Performance take generated. Review and approve the new take.'
+          : `Performance explicitly skipped. Reason recorded: ${normalizedSkipReason}. Downstream motion will run without a performance-driving take.`,
+      })
+    } catch (error) {
+      setPerformanceFeedback({
+        kind: 'error',
+        message: error instanceof Error && error.message
+          ? error.message
+          : 'Performance action failed before the server confirmed it.',
+      })
     } finally {
       setLoadingAction(null)
     }
@@ -561,14 +681,20 @@ function ClipCard({
           <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Keyframes</h3>
-              <button
-                onClick={handleGenerateKeyframeClick}
-                disabled={shot.plan_status !== 'approved' || Boolean(deferredKeyframeJob) || loadingAction === 'keyframe'}
-                aria-describedby={deferredKeyframeJob ? deferredKeyframeJobTitleId : undefined}
-                className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
-              >
-                Generate Keyframe
-              </button>
+              {activeStage === 'KEYFRAME_REVIEW' ? (
+                <button
+                  onClick={handleGenerateKeyframeClick}
+                  disabled={shot.plan_status !== 'approved' || Boolean(deferredKeyframeJob) || loadingAction === 'keyframe'}
+                  aria-describedby={deferredKeyframeJob ? deferredKeyframeJobTitleId : undefined}
+                  className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
+                >
+                  Generate Keyframe
+                </button>
+              ) : (
+                <span className="text-eyebrow-lg text-mut">
+                  Changes available in Keyframe Review
+                </span>
+              )}
             </div>
             {deferredKeyframeJob && (
               <div
@@ -654,7 +780,7 @@ function ClipCard({
               />
             )}
 
-            {showRegenForm ? (
+            {activeStage === 'KEYFRAME_REVIEW' && (showRegenForm ? (
               <div className="mt-3 space-y-2 rounded border border-acc/30 bg-panel px-3 py-3">
                 <textarea
                   value={positivePrompt}
@@ -693,12 +819,12 @@ function ClipCard({
               >
                 Adjust prompts and create another keyframe take
               </button>
-            )}
+            ))}
           </section>
 
-          {/* Performance Capture section — visible across all review stages so
-              operator can monitor + replace the driving reference at any point.
-              Highlighted with a brass accent when PERFORMANCE_REVIEW is active. */}
+          {/* Performance Capture remains visible for truthful provenance review,
+              but its mutating controls are exposed only at their backend-owned
+              PERFORMANCE_REVIEW gate. */}
           <section className={`rounded border px-3 py-3 ${
             activeStage === 'PERFORMANCE_REVIEW'
               ? 'border-acc/60 bg-acc/5'
@@ -714,46 +840,86 @@ function ClipCard({
                 )}
                 {performanceEngine === 'SKIP' && (
                   <span className="ml-2 rounded bg-panel px-1.5 py-0.5 text-eyebrow-lg text-mut">
-                    SKIP (wide / no characters)
+                    {performanceSkipIsOperator
+                      ? 'SKIP (operator decision)'
+                      : 'SKIP (routing: wide / no characters)'}
                   </span>
                 )}
               </h3>
-              <div className="flex gap-2">
-                <label className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 cursor-pointer">
-                  {drivingVideoPath ? '↻ Replace driving' : '+ Upload driving'}
-                  <input
-                    type="file"
-                    accept="video/*"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0]
-                      if (!f) return
-                      const fd = new FormData()
-                      fd.append('driving_video', f)
-                      await fetch(`${API}/projects/${projectId}/shots/${shot.id}/upload-driving-video`, {
-                        method: 'POST', body: fd,
-                      })
-                    }}
+              <div className="flex flex-wrap justify-end gap-2">
+                {activeStage === 'PERFORMANCE_REVIEW' ? (
+                  <DrivingVideoUploadControl
+                    projectId={projectId}
+                    shotId={shot.id}
+                    hasDrivingVideo={Boolean(drivingVideoPath)}
+                    onUploaded={onRefreshProject}
+                    disabled={loadingAction !== null}
+                    onBusyChange={setPerformanceUploadBusy}
                   />
-                </label>
-                {latestPerformanceTake && shot.approved_performance_take_id !== latestPerformanceTake.id && (
+                ) : (
+                  <span className="text-eyebrow-lg text-mut">
+                    Input changes available in Performance Review
+                  </span>
+                )}
+                {activeStage === 'PERFORMANCE_REVIEW' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void runPerformanceDecision('generate-performance')}
+                      disabled={
+                        !drivingVideoPath
+                        || performanceUploadBusy
+                        || loadingAction === 'generate-performance'
+                        || loadingAction === 'skip-performance'
+                      }
+                      aria-describedby={performanceHelpId}
+                      aria-busy={loadingAction === 'generate-performance'}
+                      className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {loadingAction === 'generate-performance'
+                        ? 'Generating…'
+                        : performanceTakes.length > 0
+                          ? 'Retry performance'
+                          : 'Generate performance'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runPerformanceDecision('skip-performance')}
+                      disabled={
+                        loadingAction === 'generate-performance'
+                        || loadingAction === 'skip-performance'
+                        || performanceUploadBusy
+                        || !performanceSkipReason.trim()
+                        || performanceSkipIsOperator
+                      }
+                      aria-describedby={performanceHelpId}
+                      aria-busy={loadingAction === 'skip-performance'}
+                      className="rounded border border-warn/50 px-2 py-1 text-eyebrow-lg text-warn hover:bg-warn/10 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {loadingAction === 'skip-performance'
+                        ? 'Skipping…'
+                        : performanceSkipIsOperator
+                          ? 'Performance skipped'
+                          : 'Skip performance'}
+                    </button>
+                  </>
+                )}
+                {activeStage === 'PERFORMANCE_REVIEW'
+                  && latestPerformanceTake
+                  && shot.approved_performance_take_id !== latestPerformanceTake.id && (
                   <button
+                    type="button"
                     onClick={() => runAction('approve-performance', () => onApprovePerformance(shot.id, latestPerformanceTake.id))}
-                    disabled={loadingAction === 'approve-performance'}
+                    disabled={
+                      loadingAction !== null
+                      || performanceUploadBusy
+                      || performanceApprovalInputBlocked
+                    }
+                    aria-describedby={performanceApprovalInputBlocked ? performanceInputWarningId : undefined}
+                    aria-busy={loadingAction === 'approve-performance'}
                     className="rounded border border-ok/50 px-2 py-1 text-eyebrow-lg text-ok hover:bg-ok/10 disabled:opacity-40"
                   >
                     {loadingAction === 'approve-performance' ? 'Approving…' : 'Approve'}
-                  </button>
-                )}
-                {approvedPerformanceTakeId && (
-                  <button
-                    onClick={async () => {
-                      if (!confirm('Clear performance take? Next run will regenerate.')) return
-                      await fetch(`${API}/projects/${projectId}/shots/${shot.id}/performance`, { method: 'DELETE' })
-                    }}
-                    className="rounded border border-fail/50 px-2 py-1 text-eyebrow-lg text-fail hover:bg-fail/10"
-                  >
-                    Re-record (clear)
                   </button>
                 )}
                 {/* S18: PERFORMANCE_REVIEW gate exposes Iterate when there's a take to iterate from.
@@ -775,10 +941,75 @@ function ClipCard({
               </div>
             </div>
 
+            {activeStage === 'PERFORMANCE_REVIEW' && (
+              <div className="mt-2 space-y-2">
+                <p id={performanceHelpId} className="text-[10px] leading-tight text-mut">
+                  Upload a driving video, then generate or retry a take. Uploads may be
+                  up to 30 seconds, but the backend processes only the scene&apos;s per-shot
+                  allocation capped at the first 8.0 seconds (200 frames at 25 fps).
+                  Replacing the input clears the prior approval but preserves historical
+                  takes. Skip is an explicit decision that sends downstream motion
+                  through its normal image/text-to-video path without a performance driver.
+                </p>
+                <label htmlFor={performanceSkipReasonId} className="block text-[10px] text-mut">
+                  Skip reason (required, up to 240 characters)
+                </label>
+                <input
+                  id={performanceSkipReasonId}
+                  type="text"
+                  maxLength={240}
+                  value={performanceSkipReason}
+                  disabled={loadingAction !== null || performanceUploadBusy}
+                  aria-describedby={performanceHelpId}
+                  onChange={(event) => setPerformanceSkipReason(event.target.value)}
+                  className="w-full rounded border border-line bg-panel px-2 py-1 text-xs text-tx focus:border-acc focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                />
+              </div>
+            )}
+            {performanceFeedback && (
+              <p
+                id={performanceFeedbackId}
+                role={performanceFeedback.kind === 'error' ? 'alert' : 'status'}
+                className={`mt-2 text-xs ${
+                  performanceFeedback.kind === 'error' ? 'text-fail' : 'text-ok'
+                }`}
+              >
+                {performanceFeedback.message}
+              </p>
+            )}
+            {activeDrivingRevisionMissing && (
+              <p id={performanceInputWarningId} role="note" className="mt-2 text-[10px] leading-tight text-warn">
+                This take cannot be approved because no driving video is currently
+                selected for the shot. Upload the intended input and generate a new take.
+              </p>
+            )}
+            {!activeDrivingRevisionMissing && activeDrivingDiffersFromLatestTake && (
+              <p id={performanceInputWarningId} role="note" className="mt-2 text-[10px] leading-tight text-warn">
+                The latest take preview is paired with its historical driving-video
+                revision and cannot be approved. The newly selected input will be
+                used only after Generate or Retry creates another take.
+              </p>
+            )}
+            {!activeDrivingRevisionMissing && latestTakeDrivingRevisionUnknown && (
+              <p id={performanceInputWarningId} role="note" className="mt-2 text-[10px] leading-tight text-warn">
+                This legacy performance take has no recorded driving-video revision,
+                so the UI will not guess an input pairing or allow approval.
+              </p>
+            )}
+            {performanceMetadata.input_revision_stale === true
+              && !activeDrivingDiffersFromLatestTake
+              && !activeDrivingRevisionMissing
+              && !latestTakeDrivingRevisionUnknown && (
+              <p id={performanceInputWarningId} role="note" className="mt-2 text-[10px] leading-tight text-warn">
+                This take completed after its driving input was replaced. It is
+                retained as history and cannot be approved.
+              </p>
+            )}
+
             {/* Side-by-side preview: driving reference on the left, captured performance on the right.
                 Delegated to TakeStrip — also consumed by Monitor (A3). */}
             <TakeStrip
-              drivingUrl={drivingVideoPath || null}
+              drivingUrl={previewDrivingVideoPath || null}
               performanceUrl={performanceVideoPath || null}
               projectId={projectId}
             />
@@ -834,8 +1065,10 @@ function ClipCard({
 
             {performanceEngine === 'SKIP' && !performanceVideoPath && (
               <p className="mt-3 text-xs text-mut italic">
-                Skipped: this shot doesn't benefit from performance capture (no characters or framing too wide).
-                Motion will use plain text-to-video.
+                {performanceSkipIsOperator
+                  ? `Operator skipped performance: ${shot.performance_skip?.operator_reason || (shot.performance_skip?.reason !== 'operator' ? shot.performance_skip?.reason : 'reason unavailable')}. `
+                  : "Skipped by routing: this shot doesn't benefit from performance capture (no characters or framing too wide). "}
+                Motion will use the normal image/text-to-video path.
               </p>
             )}
           </section>
@@ -843,7 +1076,11 @@ function ClipCard({
           <section className="rounded border border-line bg-app px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-mut">Motion and Final Takes</h3>
-              {deferredMotionJob && !deferredJobCanResume ? (
+              {activeStage !== 'REVIEW' ? (
+                <span className="text-eyebrow-lg text-mut">
+                  Available in Final Review
+                </span>
+              ) : deferredMotionJob && !deferredJobCanResume ? (
                 <span className="rounded border border-fail/40 px-2 py-1 text-eyebrow-lg text-fail">
                   Manual Recovery Required
                 </span>
@@ -1081,14 +1318,6 @@ function ClipCard({
                       </button>
                     </div>
                   )}
-                  {advisory.suggested_pulid_adjustment && (
-                    <div className="text-mut">
-                      <span className="text-warn">PuLID adjustment:</span>{' '}
-                      {typeof advisory.suggested_pulid_adjustment === 'number'
-                        ? `PuLID weight ${advisory.suggested_pulid_adjustment > 0 ? '+' : ''}${advisory.suggested_pulid_adjustment}`
-                        : String(advisory.suggested_pulid_adjustment)}
-                    </div>
-                  )}
                 </div>
               )
             })()}
@@ -1174,6 +1403,8 @@ export default function ReviewStage({
   onGenerateKeyframe,
   onApproveKeyframe,
   onApprovePerformance,
+  onGeneratePerformance,
+  onSkipPerformance,
   onGenerateMotion,
   onApproveFinal,
   onCorrect,
@@ -1231,6 +1462,8 @@ export default function ReviewStage({
               onGenerateKeyframe={onGenerateKeyframe}
               onApproveKeyframe={onApproveKeyframe}
               onApprovePerformance={onApprovePerformance}
+              onGeneratePerformance={onGeneratePerformance}
+              onSkipPerformance={onSkipPerformance}
               onGenerateMotion={onGenerateMotion}
               onApproveFinal={onApproveFinal}
               onCorrect={onCorrect}

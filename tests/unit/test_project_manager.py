@@ -64,9 +64,8 @@ class TestMakeCharacter:
         assert ch["description"] == "A brave hero"
         assert ch["reference_images"] == []
         assert ch["voice_id"] == ""
-        # ip_adapter_weight was removed end to end (9d removal follow-up): it
-        # had no production reader at any layer, and the PuLID node weight is
-        # resolved from the shot-type template / adaptive gate instead.
+        # ip_adapter_weight was removed end to end because it had no
+        # production reader at any layer.
         assert "ip_adapter_weight" not in ch
 
     def test_custom_fields(self):

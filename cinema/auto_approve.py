@@ -89,7 +89,7 @@ class AutoApproveConfig:
 
     # --- Image (keyframe) gate ---
     image_min_composite: float = 0.60         # production identity-score floor
-    image_min_composite_fallback: float = 0.78  # fair bar for non-PuLID fallback engines
+    image_min_composite_fallback: float = 0.78  # fair bar for fallback engines
     image_veto_on_fallback: bool = True       # veto if cascade fallback
     image_max_spent_multiplier: float = 1.5   # veto if spent > 1.5× budget
 
@@ -299,7 +299,7 @@ def _rules_for_image(config: AutoApproveConfig) -> list[VetoRule]:
             if _any_take_has_fallback(takes):
                 chosen = _thr_fallback
                 print(
-                    f"[AUTO-APPROVE] image_min_composite_kontext_fallback={chosen:.2f} applied"
+                    f"[AUTO-APPROVE] image_min_composite_fallback={chosen:.2f} applied"
                 )
             else:
                 chosen = _thr
@@ -311,7 +311,7 @@ def _rules_for_image(config: AutoApproveConfig) -> list[VetoRule]:
                 predicate=_image_composite_predicate,
                 reason_template=(
                     f"best keyframe composite below threshold "
-                    f"(< {min_composite:.2f} PuLID / {min_composite_fallback:.2f} fallback)"
+                    f"(< {min_composite:.2f} primary / {min_composite_fallback:.2f} fallback)"
                 ),
             )
         )
@@ -439,14 +439,10 @@ def _rules_for_final(config: AutoApproveConfig) -> list[VetoRule]:
 def _best_take_composite(takes: list[dict]) -> float:
     """Return the best keyframe quality score across all takes, or 0.0 if none.
 
-    Prefers ``metadata["composite"]`` but FALLS BACK to ``metadata["identity_score"]``
-    when composite is absent. Production-tier keyframe takes only ever write
-    ``identity_score`` (``composite`` was computed solely in the now-retired
-    max-tier ``quality_max.py``, deleted WS1 Task 4 with no production
-    replacement — so no live path writes ``composite`` today); without this
-    fallback the function returned 0.0 for every production take, so any
-    ``image_min_composite > 0`` (formerly 0.97) vetoed EVERY keyframe → headless
-    ``GateNotSatisfiedError`` regardless of actual quality.
+    Prefers ``metadata["composite"]`` but falls back to
+    ``metadata["identity_score"]`` when composite is absent. Current keyframe
+    providers may emit only the identity score; treating that as zero would
+    incorrectly veto an otherwise measured take.
     """
     best = 0.0
     for take in takes:

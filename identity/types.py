@@ -56,7 +56,6 @@ class CharacterIdentityResult:
     frame_results: List[FrameSample]
     matched: bool
     primary_failure_reason: FailureReason
-    suggested_pulid_adjustment: float    # -0.1 to +0.1 delta
 
 
 @dataclass

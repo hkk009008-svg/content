@@ -202,7 +202,7 @@ class TestRender:
             "mailbox_director2_cursor": "2026-05-28T11:52:29Z",
             "latest_adr": "ADR-017 — Storyboard B-integrate",
             "doc_integrity": "clean",
-            "pod_status": "DOWN",
+            "worker_status": "DOWN",
         }
         base.update(overrides)
         return base
@@ -238,7 +238,7 @@ class TestRender:
         out = render(self._make_data())
         assert "clean" in out
 
-    def test_contains_pod_down(self):
+    def test_contains_worker_down(self):
         out = render(self._make_data())
         assert "DOWN" in out
 
@@ -251,7 +251,7 @@ class TestRender:
         """(unavailable: ...) strings from collectors appear verbatim."""
         data = self._make_data(
             git_sha="(unavailable: timeout)",
-            pod_status="(unavailable: no COMFYUI_SERVER_URL)",
+            worker_status="(unavailable: no COMFYUI_SERVER_URL)",
         )
         out = render(data)
         assert "(unavailable: timeout)" in out
@@ -387,7 +387,7 @@ class TestRenderManifest:
             "mailbox_director2_cursor": "2026-05-29T00:00:00Z",
             "latest_adr": "ADR-017",
             "doc_integrity": "clean",
-            "pod_status": "DOWN",
+            "worker_status": "DOWN",
             "manifest_components": [
                 {
                     "id": "final_assembly",
@@ -415,7 +415,7 @@ class TestMailboxUnreadSubcommand:
     """`status.py mailbox-unread <seat>` prints just the LIVE unread count for
     one seat — the focused instrument Rule #20.1 live-recompute should call
     instead of hand-rolled `ls|awk`. It reuses the canonical count_unread (no
-    second copy of the logic) and skips the heavy dashboard (no ComfyUI pod
+    second copy of the logic) and skips the heavy dashboard (no ComfyUI worker
     probe / doc reads)."""
 
     def _seed(self, tmp_path, operator_cursor="2026-06-09T00:30:00Z"):
@@ -461,7 +461,7 @@ class TestMailboxUnreadSubcommand:
         assert printed == str(count_unread("2026-06-09T00:00:00Z", names, "director"))
 
     def test_skips_dashboard_path(self, tmp_path, monkeypatch, capsys):
-        """Must NOT call the heavy _collect_all (pod probe / doc reads): make it
+        """Must NOT call the heavy _collect_all (worker probe / doc reads): make it
         raise and confirm the subcommand still succeeds."""
         self._seed(tmp_path)
         monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)

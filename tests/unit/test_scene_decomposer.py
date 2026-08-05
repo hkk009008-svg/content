@@ -97,9 +97,8 @@ def test_gemini_omni_registry_row_projects_readmitted_live_truth():
 def test_registry_projection_isolated_and_retired_seed_stays_truthful():
     assert sd.API_REGISTRY["AUTO"]["status"] == "live"
     assert sd.API_REGISTRY["SORA_2"]["status"] == "retired"
-    # The compatibility seed is externally visible to legacy project readers,
-    # so its tombstone must not re-advertise a removed provider as live. The
-    # projection still proves isolation through deep-copied mutable fields.
+    # The projection must preserve typed lifecycle truth and isolate mutable
+    # compatibility fields from the source seed.
     assert sd.API_REGISTRY["GEMINI_OMNI"]["status"] == "live"
 
     assert sd._LEGACY_API_REGISTRY_SEED["SORA_2"]["status"] == "retired"
@@ -114,6 +113,18 @@ def test_registry_projection_isolated_and_retired_seed_stays_truthful():
                 sd.API_REGISTRY[key][field]
                 == sd._LEGACY_API_REGISTRY_SEED[key][field]
             )
+
+
+def test_retired_runpod_image_catalog_is_not_projected_or_billed():
+    removed = {"FLUX_DEV", "HIDREAM_I1", "SD3_5_LARGE", "SUPIR_V0Q", "CCSR"}
+
+    assert removed.isdisjoint(sd._LEGACY_API_REGISTRY_SEED)
+    assert removed.isdisjoint(sd.API_REGISTRY)
+    assert "RUNPOD_GPU" not in sd.BILLING_PROVIDERS
+    assert all(
+        removed.isdisjoint(keys)
+        for keys in sd.PURPOSE_API_RANKING.values()
+    )
 
 
 def test_gemini_omni_best_for_covers_ws2_shot_purposes():
@@ -268,7 +279,7 @@ def test_nonvideo_purpose_rows_preserve_legacy_membership_order_and_status():
         "narration": ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO"],
         "music_score": ["SUNO_V5"],
         "foley": ["STABLE_AUDIO_FOLEY"],
-        "upscale_image": ["SUPIR_V0Q"],
+        "upscale_image": [],
         "upscale_video": ["SEEDVR2"],
     }
     nonvideo_purposes = set(sd.PURPOSE_API_RANKING) - sd._VIDEO_AUTHORING_PURPOSES
@@ -332,11 +343,6 @@ def test_nonvideo_rankings_preserve_representative_legacy_fields():
             {"label": "Stable Audio (Foley)", "modality": "foley",
              "status": "live", "per_shot_cost": 0.03},
         ),
-        "upscale_image": (
-            "SUPIR_V0Q",
-            {"label": "SUPIR-v0Q (image)", "modality": "upscale",
-             "status": "live", "per_shot_cost": 0.02},
-        ),
         "upscale_video": (
             "SEEDVR2",
             {"label": "SeedVR2", "modality": "upscale",
@@ -356,7 +362,7 @@ def test_nonvideo_status_filter_uses_legacy_planned_rows():
         "narration": ["F5_TTS"],
         "music_score": ["ELEVENLABS_MUSIC", "STABLE_AUDIO_2"],
         "foley": ["ADOBE_AUDIO_AI"],
-        "upscale_image": ["CCSR"],
+        "upscale_image": [],
         "upscale_video": ["TOPAZ_ASTRA"],
     }
 

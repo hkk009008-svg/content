@@ -19,20 +19,29 @@ import type { Project } from './types/project'
  */
 
 vi.mock('./components/AppShell', () => ({
-  default: (props: any) => (
-    <div data-testid="mock-appshell">
+  default: (props: any) => {
+    const [refreshOutcome, setRefreshOutcome] = useState('idle')
+    return (
+      <div data-testid="mock-appshell">
       <div data-testid="project-id">{props.project.id}</div>
       <div data-testid="generating">{String(props.generating)}</div>
       <div data-testid="budget-halt">{props.budgetHalt ? props.budgetHalt.stage : 'none'}</div>
       <div data-testid="config-marker">{props.config?.test_marker ?? 'none'}</div>
+      <div data-testid="refresh-outcome">{refreshOutcome}</div>
       <button onClick={props.onGenerate}>do-generate</button>
       <button onClick={() => props.onGenerateMotion('shot-1')}>do-generate-motion</button>
       <button onClick={props.onResumeFromCheckpoint}>do-resume-checkpoint</button>
       <button onClick={props.onCancel}>do-cancel</button>
       <button onClick={props.onBackToProjects}>back-to-projects</button>
-      <button onClick={props.onRefreshProject}>do-refresh</button>
-    </div>
-  ),
+      <button onClick={() => {
+        void Promise.resolve(props.onRefreshProject()).then(
+          () => setRefreshOutcome('resolved'),
+          () => setRefreshOutcome('rejected'),
+        )
+      }}>do-refresh</button>
+      </div>
+    )
+  },
 }))
 
 vi.mock('./components/ProjectSelector', () => ({
@@ -419,6 +428,34 @@ describe('App -- same-project config refresh', () => {
     await waitFor(() => expect(screen.getByTestId('config-marker')).toHaveTextContent('none'))
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Configuration refresh failed: config probe unavailable',
+    )
+  })
+
+  it('rejects the refresh callback when the project reload fails', async () => {
+    let projectReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/pipeline-state')) return response(idlePipelineState())
+      if (url.endsWith('/api/projects/proj-A')) {
+        projectReads += 1
+        return projectReads === 1
+          ? response(makeProject('proj-A'))
+          : response({ error: 'project read unavailable' }, false, 503)
+      }
+      if (url.includes('/api/config')) {
+        return response({ camera_motions: [], visual_effects: [], video_engines: [], api_registry: {} })
+      }
+      return response({})
+    }))
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    fireEvent.click(screen.getByText('do-refresh'))
+
+    await waitFor(() => expect(screen.getByTestId('refresh-outcome')).toHaveTextContent('rejected'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Project refresh failed: project read unavailable',
     )
   })
 })

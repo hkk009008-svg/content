@@ -1,24 +1,10 @@
-"""Generation-promise types for per-shot identity conditioning (P1-1, spec §3d).
-
-The router (cinema/shots/controller.py::_resolve_identity_strategy) emits one
-IdentityStrategy per keyframe take BEFORE generation; the validator and the
-capability scorecard hold generation accountable to it. Tags whose mechanism
-is implemented: PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET (single
-production tier, WS1), and GEMINI_MULTIREF_PRIMARY_ONLY /
-GEMINI_MULTIREF_MULTI_CHAR (Nano Banana multi-reference identity, WS3). The
-MAX_TIER_* tags were retired with the max image-gen tier (WS1); the
-per-character LoRA fields below are kept dormant for a possible future
-FLUX.2 A/B — a separate, deferred track, NOT this WS3 (which binds identity
-via Gemini reference images, not LoRA).
-"""
+"""Provider-neutral generation promises for per-shot identity references."""
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
-PRIMARY_ONLY = "PRIMARY_ONLY"
-KONTEXT_MULTI_CHAR = "KONTEXT_MULTI_CHAR"
+REFERENCE_PRIMARY_ONLY = "REFERENCE_PRIMARY_ONLY"
+REFERENCE_MULTI_CHAR = "REFERENCE_MULTI_CHAR"
 NO_IDENTITY_ASSET = "NO_IDENTITY_ASSET"
-GEMINI_MULTIREF_PRIMARY_ONLY = "GEMINI_MULTIREF_PRIMARY_ONLY"
-GEMINI_MULTIREF_MULTI_CHAR = "GEMINI_MULTIREF_MULTI_CHAR"
 
 
 @dataclass(frozen=True)
@@ -26,39 +12,22 @@ class CharIdentitySpec:
     char_id: str
     reference: str
     identity_anchor: str = ""
-    fidelity: str = "reference"  # router emits "reference" only (max tier retired, WS1)
+    fidelity: str = "reference"
     # V-5: angle refs ride the spec through to_dict() -> generate_ai_broll ->
     # the slot allocator; a tuple (not list) keeps the frozen dataclass hashable.
     multi_angle_refs: tuple = ()
-    # P1-1 slice 2 (§3b): per-char LoRA assets — formerly populated on the max
-    # tier for registered-LoRA secondaries (retired WS1). The router now leaves
-    # them None on every spec (including the WS3 gemini_multiref branch, which
-    # binds identity via reference images, not LoRA); kept dormant for a
-    # possible future FLUX.2 A/B — deferred, tracked separately from WS3.
-    lora_path: Optional[str] = None
-    lora_strength: Optional[float] = None
-    # The PRIMARY's trigger rides IdentityStrategy.char_lora_trigger (the
-    # char_lora_* naming convention there); this field is the per-SECONDARY
-    # mirror.
-    trigger: Optional[str] = None
-
     def to_dict(self) -> dict:
         return {"char_id": self.char_id, "reference": self.reference,
                 "identity_anchor": self.identity_anchor, "fidelity": self.fidelity,
-                "multi_angle_refs": list(self.multi_angle_refs),
-                "lora_path": self.lora_path, "lora_strength": self.lora_strength,
-                "trigger": self.trigger}
+                "multi_angle_refs": list(self.multi_angle_refs)}
 
 
 @dataclass
 class IdentityStrategy:
     mechanism_tag: str
     primary_char_id: str = ""
-    char_lora_path: Optional[str] = None
-    char_lora_strength: Optional[float] = None
     conditioned_chars: List[CharIdentitySpec] = field(default_factory=list)
     unconditioned_chars: List[str] = field(default_factory=list)
-    char_lora_trigger: Optional[str] = None
 
     @property
     def secondary_specs(self) -> List[CharIdentitySpec]:

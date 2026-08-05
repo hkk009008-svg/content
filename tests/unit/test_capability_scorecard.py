@@ -32,7 +32,7 @@ def _make_project(**over):
 
 class TestScorecardBuilder:
     def test_summary_and_dimensions(self):
-        sc = build_capability_scorecard(_make_project(), project_dir="/tmp/nonexistent")
+        sc = build_capability_scorecard(_make_project())
         assert sc["project_id"] == "p1"
         assert sc["tier"] == "max"
         assert sc["summary"]["shots_total"] == 1
@@ -41,49 +41,20 @@ class TestScorecardBuilder:
         identity = next(d for d in sc["dimensions"] if d["key"] == "identity")
         assert identity["value"] == 0.74 and identity["bar"] is not None
 
-    def test_lora_availability_is_exact_and_historical_rows_remain(self):
-        from unittest.mock import patch
-
-        historical = {
-            "status": "done",
-            "quality_score": 0.72,
-            "best_strength": 0.55,
-            "rejected": False,
-            "quality_warning": True,
-        }
-        with patch(
-            "prep.lora_training.get_lora_status", return_value=historical
-        ):
-            sc = build_capability_scorecard(
-                _make_project(), project_dir="/tmp/nonexistent"
-            )
-        assert sc["lora_availability"] == {
-            "training_available": False,
-            "registration_available": False,
-            "consumer_available": False,
-            "policy": "dormant",
-        }
-        assert sc["lora"] == [{
-            "char_id": "char_alex",
-            "strength": 0.55,
-            "score": 0.72,
-            "verdict": "warning",
-        }]
-
     def test_coherence_falls_back_to_diagnostics(self):
-        sc = build_capability_scorecard(_make_project(), project_dir="/tmp/nonexistent")
+        sc = build_capability_scorecard(_make_project())
         coh = next(d for d in sc["dimensions"] if d["key"] == "coherence")
         assert coh["value"] == 0.64  # sourced from shot.diagnostics when not on take.metadata
         assert coh["n_measured"] == 1
 
     def test_empty_project_no_fake_zeros(self):
-        sc = build_capability_scorecard({"id": "e", "name": "empty", "characters": [], "scenes": [], "global_settings": {}}, project_dir="/tmp/x")
+        sc = build_capability_scorecard({"id": "e", "name": "empty", "characters": [], "scenes": [], "global_settings": {}})
         assert sc["summary"]["shots_total"] == 0
         for d in sc["dimensions"]:
             assert d["value"] is None and d["n_measured"] == 0  # never a fabricated 0
 
     def test_routing_counts_fallbacks(self):
-        sc = build_capability_scorecard(_make_project(), project_dir="/tmp/x")
+        sc = build_capability_scorecard(_make_project())
         assert sc["routing"]["first_try"] >= 1
 
     def test_unscored_shot_not_counted_as_clearing(self):
@@ -93,7 +64,7 @@ class TestScorecardBuilder:
         proj = {"id": "u", "name": "unscored", "characters": [],
                 "scenes": [{"shots": [{"id": "s1_01", "keyframe_takes": [], "motion_takes": []}]}],
                 "global_settings": {}}
-        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        sc = build_capability_scorecard(proj)
         assert sc["summary"]["shots_total"] == 1
         assert sc["summary"]["shots_clearing_all_bars"] == 0
 
@@ -107,7 +78,7 @@ class TestScorecardBuilder:
             "lipsync_validation_state": "UNKNOWN",
         })
 
-        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        sc = build_capability_scorecard(proj)
         lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
         assert lipsync["value"] is None
         assert lipsync["pass"] is False
@@ -146,7 +117,7 @@ class TestScorecardBuilder:
         }]
         shot["approved_final_take_id"] = "pp_lipsync"
 
-        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        sc = build_capability_scorecard(proj)
         lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
         motion = next(d for d in sc["dimensions"] if d["key"] == "motion")
 
@@ -166,7 +137,7 @@ class TestScorecardBuilder:
         shot = proj["scenes"][0]["shots"][0]
         shot["motion_takes"][0]["metadata"].pop("lipsync_score")
 
-        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        sc = build_capability_scorecard(proj)
         assert sc["per_shot"][0]["lipsync_state"] == "NOT_APPLICABLE"
         assert sc["per_shot"][0]["lipsync_applicable"] is False
         lipsync = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
@@ -179,7 +150,7 @@ class TestScorecardBuilder:
         shot["dialogue"] = "We need to leave now."
         shot["motion_takes"][0]["metadata"].pop("lipsync_score")
 
-        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        sc = build_capability_scorecard(proj)
         assert sc["per_shot"][0]["lipsync_state"] == "UNKNOWN"
         assert sc["per_shot"][0]["lipsync_applicable"] is True
         assert sc["summary"]["shots_clearing_all_bars"] == 0
@@ -199,7 +170,7 @@ class TestGateRollup:
     def _gates(shots):
         proj = {"id": "p", "name": "x", "characters": [],
                 "scenes": [{"shots": shots}], "global_settings": {}}
-        return build_capability_scorecard(proj, project_dir="/tmp/x")["gates"]
+        return build_capability_scorecard(proj)["gates"]
 
     def test_override_counts_as_latest_decision_only(self):
         # image auto-approved @ t0, then user-rejected @ t1 → current state is
@@ -281,7 +252,7 @@ class TestIdentityMulti:
                 "unconditioned_chars": ["char_c"],
             },
         })
-        card = build_capability_scorecard(proj, project_dir="/tmp/x")
+        card = build_capability_scorecard(proj)
         entry = card["per_shot"][0]
         assert entry["identity_multi"] == {
             "mechanism": "KONTEXT_MULTI_CHAR",
@@ -291,7 +262,7 @@ class TestIdentityMulti:
 
     def test_per_shot_identity_multi_absent_for_legacy_takes(self):
         proj = self._project_with_shot({"identity_score": 0.8})
-        card = build_capability_scorecard(proj, project_dir="/tmp/x")
+        card = build_capability_scorecard(proj)
         assert "identity_multi" not in card["per_shot"][0]
 
     def test_identity_multi_surfaces_unknown_mechanism_tag_generically(self):
@@ -299,14 +270,8 @@ class TestIdentityMulti:
         projection (scorecard.py:164-170) copies whatever mechanism_tag is
         present without special-casing any particular value.
 
-        Originally pinned MAX_TIER_MULTI_LORA (Task 8) — that per-secondary
-        LoRA mechanism was retired with quality_max.py (WS1 Task 4;
-        cinema/shots/controller.py's _resolve_identity_strategy now emits
-        only PRIMARY_ONLY / KONTEXT_MULTI_CHAR / NO_IDENTITY_ASSET /
-        GEMINI_MULTIREF_*), so asserting that retired tag here would itself
-        be a stale "max" claim (comprehensive-unification audit). Re-pinned
-        against a made-up forward-compat tag: the point under test is
-        generic passthrough, not any one mechanism's continued existence.
+        A made-up forward-compat tag keeps the test focused on generic
+        passthrough rather than coupling it to a currently known mechanism.
         """
         project = self._project_with_shot({
             "identity_score": 0.8,
@@ -315,13 +280,13 @@ class TestIdentityMulti:
                 "mechanism_tag": "SOME_FUTURE_MECHANISM",
                 "primary_char_id": "char_a",
                 "conditioned_chars": [
-                    {"char_id": "char_a", "fidelity": "pulid"},
+                    {"char_id": "char_a", "fidelity": "reference"},
                     {"char_id": "char_b", "fidelity": "reference"},
                 ],
                 "unconditioned_chars": [],
             },
         })
-        card = build_capability_scorecard(project, project_dir="/tmp/x")
+        card = build_capability_scorecard(project)
         multi = card["per_shot"][0]["identity_multi"]
         assert multi["mechanism"] == "SOME_FUTURE_MECHANISM"
         assert multi["per_char"] == {"char_a": 0.8, "char_b": 0.61}

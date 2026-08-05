@@ -321,6 +321,84 @@ describe('usePipelineState -- stale out-of-order responses', () => {
 })
 
 describe('usePipelineState -- truthful mutations (never paint optimistic success)', () => {
+  it('persists one cryptographic performance request ID across an ambiguous retry', async () => {
+    const randomUUID = vi.fn(() => '12345678-1234-1234-1234-1234567890ab')
+    vi.stubGlobal('crypto', { randomUUID })
+    window.sessionStorage.clear()
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response(pipelineStateBody()))
+      .mockImplementationOnce(async () => { throw new Error('connection dropped') })
+      .mockImplementationOnce(async () => response({ success: true, take: { id: 'performance-1' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => usePipelineState('proj-performance'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    let first: any
+    let second: any
+    await act(async () => {
+      first = await result.current.generatePerformance('shot-1')
+      second = await result.current.generatePerformance('shot-1')
+    })
+
+    expect(first.success).toBe(false)
+    expect(first.error).toBe('connection dropped')
+    expect(second.success).toBe(true)
+    expect(randomUUID).toHaveBeenCalledTimes(1)
+    const requestBodies = fetchMock.mock.calls.slice(1).map(([, init]) => (
+      JSON.parse(String((init as RequestInit).body))
+    ))
+    expect(requestBodies).toEqual([
+      { request_id: '123456781234123412341234567890ab' },
+      { request_id: '123456781234123412341234567890ab' },
+    ])
+    expect(window.sessionStorage.getItem(
+      'cinema:performance-request:proj-performance:shot-1',
+    )).toBeNull()
+  })
+
+  it('adopts and resumes the durable server request after browser storage loss', async () => {
+    const randomUUID = vi.fn(() => 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+    vi.stubGlobal('crypto', { randomUUID })
+    window.sessionStorage.clear()
+    const durableRequestId = 'b'.repeat(32)
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => response(pipelineStateBody()))
+      .mockImplementationOnce(async () => response({
+        success: false,
+        code: 'performance_request_active',
+        retryable: true,
+        request: {
+          request_id: durableRequestId,
+          status: 'deferred',
+        },
+      }, false, 409))
+      .mockImplementationOnce(async () => response({
+        success: true,
+        take: { id: 'performance-recovered' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { result } = renderHook(() => usePipelineState('proj-recovery'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    let outcome: any
+    await act(async () => {
+      outcome = await result.current.generatePerformance('shot-1')
+    })
+
+    expect(outcome.success).toBe(true)
+    expect(randomUUID).toHaveBeenCalledTimes(1)
+    const requestBodies = fetchMock.mock.calls.slice(1).map(([, init]) => (
+      JSON.parse(String((init as RequestInit).body))
+    ))
+    expect(requestBodies).toEqual([
+      { request_id: 'a'.repeat(32) },
+      { request_id: durableRequestId },
+    ])
+    expect(window.sessionStorage.getItem(
+      'cinema:performance-request:proj-recovery:shot-1',
+    )).toBeNull()
+  })
+
   it('pause() does not flip isPaused when the server rejects the request', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(async () => response(pipelineStateBody({ running: true, allowed_actions: ['cancel', 'pause'] }))) // initial hydrate
@@ -396,6 +474,17 @@ describe('usePipelineState -- truthful mutations (never paint optimistic success
 })
 
 describe('usePipelineState -- canonical stage vocabulary is exhaustive (Slice 11b)', () => {
+  it('classifies controller recovery and performance safety signals as informational', () => {
+    for (const stage of [
+      'KEYFRAME_RECOVERY',
+      'PERFORMANCE_BLOCKED',
+      'PERFORMANCE_DEFERRED',
+      'ARTIFACT_VERSION_RECOVERED',
+    ]) {
+      expect(resolveStageBucket(stage)).toEqual({ kind: 'info' })
+    }
+  })
+
   it('every stage declared in STAGE_RAIL_MAP resolves without throwing', () => {
     for (const stage of Object.keys(STAGE_RAIL_MAP)) {
       expect(() => resolveStageBucket(stage)).not.toThrow()

@@ -11,7 +11,7 @@ One LLM call produces a structured JSON spec covering:
   - image_prompt: five-section FLUX-shaped prompt with cinematography terms
   - video_prompt: motion/action description for i2v
   - purpose / shot_type: drives routing
-  - suggested_image_api / video_api / lipsync_engine: per-purpose recommendation
+  - suggested_video_api / lipsync_engine: per-purpose recommendation
   - negative_constraints + identity_anchor: quality safety nets
   - camera / lighting / color_palette: cinematography metadata
 
@@ -195,7 +195,6 @@ Schema:
   "video_prompt":           string,  // motion + dynamic action for image-to-video stage
   "purpose":                string,  // one of: dialogue_close_up | talking_head_full | action_motion | static_portrait | establishing_shot | macro_detail | style_locked_sequence | product_hero | product_in_scene | product_reveal_motion
   "shot_type":              string,  // one of: portrait | medium | wide | action | landscape
-  "suggested_image_api":    string,  // FLUX_DEV | HIDREAM_I1 | SD3_5_LARGE
   "suggested_video_api":    string,  // __VIDEO_API_ENUM__
   "suggested_lipsync":      string,  // SYNC_SO_V3 | MUSETALK | OMNIHUMAN_V1_5 | LATENTSYNC | null
   "negative_constraints":   string,  // what to avoid: "plastic skin, identity drift, oversaturated, deformed hands, off-brand product, mis-shaped logo"
@@ -569,14 +568,6 @@ def _fallback_optimize(
     if source_sections:
         image_prompt = user_input
 
-    # Image API: HiDream-I1 if planned + product shot; FLUX-Dev otherwise
-    img_api = "FLUX_DEV"
-    if is_product_shot:
-        # Only use HIDREAM_I1 if it's actually live; else fall to FLUX_DEV
-        hidream_status = API_REGISTRY.get("HIDREAM_I1", {}).get("status", "planned")
-        if hidream_status == "live":
-            img_api = "HIDREAM_I1"
-
     # Run the ranking pick through the same project-disabled/aspect-
     # incompatible coercion _coerce_to_valid_keys applies to the LLM path, so
     # a heuristic top-ranked engine that isn't actually usable for this
@@ -599,7 +590,6 @@ def _fallback_optimize(
         "video_prompt": video_prompt,
         "purpose": purpose,
         "shot_type": shot_type,
-        "suggested_image_api": img_api,
         "suggested_video_api": video_target_decision.target,
         "suggested_lipsync": (
             _top_live_api_for_purpose(
@@ -646,8 +636,6 @@ def _coerce_to_valid_keys(
         spec["purpose"] = _heuristic_purpose(
             spec.get("shot_type", "medium"), has_dialogue,
         )
-    if spec.get("suggested_image_api") not in API_REGISTRY:
-        spec["suggested_image_api"] = "FLUX_DEV"
     target_decision = evaluate_shot_target(
         spec.get("suggested_video_api"),
         snapshot=runtime_snapshot,

@@ -348,8 +348,8 @@ def test_fetch_trailing_comma_defaults_to_get_and_matches(tmp_path: Path) -> Non
 from flask import Flask
 app = Flask(__name__, static_folder=None)
 
-@app.route("/api/projects/<pid>/characters/<cid>/lora-status")
-def lora_status(pid, cid):
+@app.route("/api/projects/<pid>/characters/<cid>/status")
+def character_status(pid, cid):
     pass
 """,
     )
@@ -359,7 +359,7 @@ def lora_status(pid, cid):
         """
 export async function loadStatus(projectId: string, characterId: string) {
   const response = await fetch(
-    `/api/projects/${projectId}/characters/${characterId}/lora-status`,
+    `/api/projects/${projectId}/characters/${characterId}/status`,
 
   )
   if (response.status >= 400) throw new Error('bad')

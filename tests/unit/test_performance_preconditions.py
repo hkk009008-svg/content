@@ -12,13 +12,17 @@ from domain.performance import (
 class TestActOnePrecondition:
     def test_empty_audio_returns_error(self):
         assert precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="") is not None
-        assert "audio" in precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="").lower()
+        assert "driving" in precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="").lower()
 
     def test_none_audio_returns_error(self):
         assert precondition_error(ENGINE_ACT_ONE, audio_path=None, driving_video_path=None) is not None
 
-    def test_audio_present_returns_none(self):
-        assert precondition_error(ENGINE_ACT_ONE, audio_path="/tmp/a.wav", driving_video_path="") is None
+    def test_audio_only_does_not_replace_a_driving_video(self):
+        assert precondition_error(
+            ENGINE_ACT_ONE,
+            audio_path="/tmp/a.wav",
+            driving_video_path="",
+        ) is not None
 
     def test_audio_and_driving_present_returns_none(self):
         assert precondition_error(ENGINE_ACT_ONE, audio_path="/tmp/a.wav", driving_video_path="/tmp/d.mp4") is None
@@ -31,6 +35,13 @@ class TestLivePortraitPrecondition:
 
     def test_driving_video_present_returns_none(self):
         assert precondition_error(ENGINE_LIVE_PORTRAIT, audio_path="/tmp/a.wav", driving_video_path="/tmp/d.mp4") is None
+
+    def test_audio_only_does_not_replace_a_driving_video(self):
+        assert precondition_error(
+            ENGINE_LIVE_PORTRAIT,
+            audio_path="/tmp/a.wav",
+            driving_video_path="",
+        ) is not None
 
 
 class TestVigglePrecondition:

@@ -263,9 +263,9 @@ def render(data: dict) -> str:
     a("  source:  scripts/check_doc_claims.py (ARCHITECTURE.md)")
     a("")
 
-    # --- Pod ---
-    a("## Infra (GPU pod / ComfyUI)")
-    a(f"  pod: {data['pod_status']}")
+    # --- Local GPU worker ---
+    a("## Infra (local GPU worker / ComfyUI)")
+    a(f"  worker: {data['worker_status']}")
     a("  source:  .env COMFYUI_SERVER_URL → <url>/system_stats (timeout=3s)")
     a("")
 
@@ -443,13 +443,13 @@ def _probe_url(url: str, timeout: int = 3) -> str:
         return "DOWN"
 
 
-def collect_pod(repo_root: Path) -> dict:
-    """Probe the ComfyUI pod via COMFYUI_SERVER_URL from .env."""
+def collect_worker(repo_root: Path) -> dict:
+    """Probe the configured ComfyUI worker via COMFYUI_SERVER_URL."""
     url = _parse_env_key(repo_root, "COMFYUI_SERVER_URL")
     if not url:
-        return {"pod_status": "(unavailable: no COMFYUI_SERVER_URL)"}
+        return {"worker_status": "(unavailable: no COMFYUI_SERVER_URL)"}
     status = _probe_url(url, timeout=3)
-    return {"pod_status": status}
+    return {"worker_status": status}
 
 
 def collect_manifest(repo_root: Path) -> dict:
@@ -485,7 +485,7 @@ def _collect_all(repo_root: Path) -> dict:
     data.update(collect_mailbox(repo_root))
     data.update(collect_adr(repo_root))
     data.update(collect_doc_integrity(repo_root))
-    data.update(collect_pod(repo_root))
+    data.update(collect_worker(repo_root))
     data.update(collect_manifest(repo_root))
     return data
 
@@ -518,7 +518,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Focused subcommand: print just one seat's LIVE unread count and exit.
     # Reuses the canonical count_unread (via collect_mailbox) — one source of
     # truth, no second copy of the logic — and skips the heavy dashboard (no
-    # ComfyUI pod probe / doc reads). This is the instrument Rule #20.1
+    # ComfyUI worker probe / doc reads). This is the instrument Rule #20.1
     # live-recompute should call instead of a hand-rolled `ls|awk` (which has
     # two proven sharp edges: full-filename-vs-bare-prefix over-count, and
     # field-split capturing trailing text).

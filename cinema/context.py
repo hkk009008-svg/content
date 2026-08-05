@@ -104,17 +104,6 @@ class PipelineContext:
     # Pre-VAE-decode latent of the previous shot, cached for LatentBlend in the
     # (currently absent) max tier. Bytes (serialized torch tensor) or None.
     prev_shot_latent: Optional[bytes] = None
-    # Legacy/read-only per-character LoRA registry snapshot:
-    # character_id -> local path to .safetensors. There is no current writer or
-    # production consumer; quality_max was the retired consumer.
-    char_lora_paths: dict = field(default_factory=dict)
-    # Legacy/read-only validated-strength snapshot:
-    # character_id -> float (0.0–1.0). There is no current writer or consumer;
-    # quality_max._inject_identity was the retired consumer.
-    char_lora_strengths: dict = field(default_factory=dict)
-    # Style reference board for FLUX Redux (reserved: dormant max-tier field).
-    style_reference_paths: list = field(default_factory=list)
-
     # -----------------------------------------------------------------
     # dict-compat layer (so legacy `def f(ctx: dict)` keeps working)
     # -----------------------------------------------------------------

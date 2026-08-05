@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { expectNoAxeViolations } from '../../test/a11y-setup'
 import ProviderAnalytics from './ProviderAnalytics'
 
 function response(scope: 'project' | 'routing'): Response {
@@ -55,7 +56,7 @@ describe('ProviderAnalytics', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    render(<ProviderAnalytics projectId="project-1" isStreaming={false} />)
+    const { container } = render(<ProviderAnalytics projectId="project-1" isStreaming={false} />)
 
     expect(await screen.findByText('degraded · 72')).toBeInTheDocument()
     expect(screen.getByText('83%')).toBeInTheDocument()
@@ -72,5 +73,6 @@ describe('ProviderAnalytics', () => {
       '/api/projects/project-1/provider-analytics?scope=routing',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ))
+    await expectNoAxeViolations(container)
   })
 })

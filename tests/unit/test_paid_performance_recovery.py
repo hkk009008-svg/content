@@ -37,6 +37,9 @@ class _RecoverableComfy:
     def upload_image(self, path: str) -> str:
         return f"remote-{Path(path).name}"
 
+    def get_gateway_readiness(self):
+        return {"status": "ready"}
+
     def queue_prompt(self, _workflow: dict) -> str:
         self.queue_calls += 1
         if self.forbid_queue:
@@ -77,14 +80,21 @@ def test_live_portrait_resumes_prompt_after_restart_without_double_charge(
         live_portrait,
         "settings",
         SimpleNamespace(
-            comfyui_server_url="http://private-pod:8189",
-            comfyui_api_key="secret",
+            comfyui_server_url="https://image.example.test",
+            comfyui_api_key="i" * 32,
+            performance_comfyui_server_url="http://127.0.0.1:18189",
+            performance_comfyui_api_key="p" * 32,
         ),
     )
     monkeypatch.setattr(
         live_portrait,
-        "RunPodComfyUI",
+        "ComfyUIClient",
         lambda *_args, **_kwargs: clients.pop(0),
+    )
+    monkeypatch.setattr(
+        live_portrait,
+        "validate_performance_gateway_readiness",
+        lambda payload: payload,
     )
 
     def _download(_url: str, destination: str, **_kwargs) -> str:

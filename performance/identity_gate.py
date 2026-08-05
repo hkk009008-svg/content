@@ -17,9 +17,8 @@ import subprocess
 import tempfile
 from typing import Optional
 
-# Use the public IdentityValidator (not face_validator_gate._arcface_score —
-# that's a private symbol and could change). Lazy-loaded singleton so we
-# don't pay the ArcFace weight load per call.
+# Use the public IdentityValidator through a lazy-loaded singleton so we do
+# not pay the embedding-model load per call.
 try:
     from identity.validator import IdentityValidator
     _ID_VALIDATOR_AVAILABLE = True
@@ -35,7 +34,7 @@ def _get_validator() -> Optional["IdentityValidator"]:
     """Return the process-singleton IdentityValidator, or None on init failure.
 
     Delegates to identity.get_shared_validator so the performance gate
-    shares state with phase_c_vision and face_validator_gate. Behavior
+    shares its embedding cache with phase_c_vision. Behavior
     change vs the previous per-module singleton: the shared instance
     now has the LLM vision_fallback wired (it was None here before),
     so an ArcFace-ambiguous frame may trigger a small LLM call inside

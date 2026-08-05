@@ -734,7 +734,7 @@ class TestRecordAPICall:
         ("SORA_NATIVE", "openai"),   # genuine native OpenAI
         ("VEO", "fal"),
         ("VEO_NATIVE", "google"),    # genuine native Vertex/Gemini
-        ("FLUX_PULID", "fal"),
+        ("FLUX_KONTEXT", "fal"),
         ("RUNWAY_GEN4", "runway"),
         # KLING_3_0 is fal-billed (fal-ai/kling-video/v3/pro) — attributed to
         # "fal" since 2026-07-11 so the breakdown matches the fal invoice;
@@ -777,16 +777,9 @@ class TestRecordAPICall:
         ).fetchone()
         assert row["cost_usd"] == pytest.approx(0.04)
 
-    # --- Image-backend provenance (pod-PuLID vs FAL fallback) -------------
-    # The keyframe cost site used to hardcode FLUX_KONTEXT/QUALITY_MAX from
-    # quality_tier, so a generation that ran on the ComfyUI/PuLID pod was
-    # indistinguishable from a FAL fallback in cost_log (both provider='fal').
-    # The backend that actually ran is now threaded out of generate_ai_broll
-    # and recorded here; pod backends must log a provider distinct from 'fal'.
-    # QUALITY_MAX (the N=8 best-of pod row) was retired WS1 Task 4 along with
-    # quality_max.py — its cost-table entry and provider-map row are gone too.
+    # --- Image-backend provenance (local GPU vs hosted fallbacks) ----------
     @pytest.mark.parametrize("api_name,expected_provider", [
-        ("COMFYUI_PULID", "comfyui"),       # production pod PuLID
+        ("FLUX2_KLEIN_LOCAL", "local_gpu"), # dedicated Windows worker
         ("FLUX_KONTEXT",  "fal"),           # FAL identity-preserving fallback
         ("FLUX_PRO",      "fal"),           # FAL last-resort
         ("FLUX_SCHNELL",  "fal"),           # FAL fast fallback
@@ -804,9 +797,9 @@ class TestRecordAPICall:
     def test_new_image_backend_names_have_cost_entries(self):
         """Threaded backend names must exist in API_COST_USD so real
         generations don't warn + silently record $0.00."""
-        for name in ("COMFYUI_PULID", "FLUX_SCHNELL", "POLLINATIONS"):
+        for name in ("FLUX2_KLEIN_LOCAL", "FLUX_SCHNELL", "POLLINATIONS"):
             assert name in API_COST_USD, f"{name} missing from API_COST_USD"
-        assert API_COST_USD["COMFYUI_PULID"] > 0.0   # pod GPU time isn't free
+        assert API_COST_USD["FLUX2_KLEIN_LOCAL"] == 0.0  # no provider invoice
         assert API_COST_USD["POLLINATIONS"] == 0.0   # pollinations is free
 
     def test_gemini_image_priced_and_attributed_not_zero_or_unknown(self, cost_tracker):
@@ -1262,23 +1255,6 @@ class TestVerifiedPricePins:
         # OmniHuman v1.5: $0.16/s (fal model page) -> 5s. Old 0.10 was 8x low.
         assert API_COST_USD["LIPSYNC_OMNIHUMAN"] == 0.80
 
-    def test_driving_face_estimator_matches_table_row(self):
-        # The gate precheck and the write site both use the ESTIMATOR, not the
-        # table row (which has no runtime consumer) — pin them together so a
-        # revert of the driving_video.py rates can't silently under-gate
-        # while the row pin stays green.
-        #
-        # WS4 (2026-07-18): Hedra removed from Mode-B (client + cost rows
-        # deleted) — driving_video.py's cost dicts carry only a "sadtalker"
-        # entry, so the estimator falls back to the sadtalker rate for any
-        # unrecognized provider key (by design; see
-        # estimate_driving_face_cost's .get(..., sadtalker) fallback).
-        from cost_tracker import API_COST_USD
-        from performance.driving_video import estimate_driving_face_cost
-        assert estimate_driving_face_cost("sadtalker", 5.0) == pytest.approx(
-            API_COST_USD["PERFORMANCE_DRIVING_SADTALKER"]
-        )
-
     @pytest.mark.parametrize("registry_key,cost_key", [
         ("SYNC_SO_V3", "LIPSYNC_SYNCSOV3"),
         ("SYNC_V2", "LIPSYNC_SYNCV2"),
@@ -1334,17 +1310,6 @@ class TestApiCostUsdCompleteness:
     def test_performance_capture_engines_priced_in_api_cost_usd(self, engine):
         assert engine in API_COST_USD
         assert API_COST_USD[engine] > 0
-
-    @pytest.mark.parametrize(
-        "api_name, expected",
-        [
-            ("PERFORMANCE_DRIVING_SADTALKER", 0.045),
-        ],
-    )
-    def test_mode_b_driving_providers_priced_in_api_cost_usd(self, api_name, expected):
-        assert api_name in API_COST_USD
-        assert API_COST_USD[api_name] == pytest.approx(expected)
-
 
 class TestEstimatedCostBudgetGate:
     def test_would_exceed_cost_checks_multi_call_envelope(self):

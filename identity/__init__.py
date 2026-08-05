@@ -15,12 +15,9 @@ can import it without triggering the cinematography/vision stack. Callers
 who need the vision-LLM fallback should construct via `make_validator()`
 (fresh instance per call) or `get_shared_validator()` (process-singleton).
 
-Prefer `get_shared_validator()` for nearly all callers — sharing one
-IdentityValidator instance across phase_c_vision, face_validator_gate,
-and performance.identity_gate means: (a) GhostFaceNet weights load once per
-process instead of three times, and (b) the rolling-stats history that
-feeds `workflow_selector.get_adaptive_pulid_weight` collects signal from
-every identity check in the pipeline.
+Prefer `get_shared_validator()` for nearly all callers. Sharing one
+IdentityValidator instance across phase_c_vision and performance.identity_gate
+means GhostFaceNet weights load once per process.
 """
 
 import threading
@@ -43,7 +40,7 @@ def make_validator(**kwargs) -> IdentityValidator:
     Returns a FRESH IdentityValidator on every call. Use this only when
     you specifically need an isolated instance (tests, etc.). For normal
     runtime use, prefer get_shared_validator() so all consumers share
-    one cache + history.
+    one embedding cache.
 
     The import of `phase_c_vision.validate_identity_vision` is lazy so that
     `from identity import make_validator` does not pull the entire vision
@@ -62,15 +59,12 @@ _SHARED_VALIDATOR_LOCK = threading.Lock()
 def get_shared_validator() -> IdentityValidator:
     """Process-singleton IdentityValidator with canonical vision_fallback wired.
 
-    Replaces three previously-independent singletons in phase_c_vision,
-    face_validator_gate, and performance.identity_gate. Sharing one
+    Replaces previously-independent singletons in phase_c_vision and
+    performance.identity_gate. Sharing one
     instance means:
 
-      - GhostFaceNet weights load once per process (was 3x).
-      - Rolling-stats history accumulates signal from per-shot keyframe
-        validations + N=8 best-of grading + performance-gate scoring,
-        giving workflow_selector.get_adaptive_pulid_weight a much
-        richer sample to work from.
+      - GhostFaceNet weights load once per process.
+      - The embedding cache is reused across keyframe and performance checks.
 
     Thread-safe via _SHARED_VALIDATOR_LOCK. Raises whatever
     IdentityValidator's constructor raises (typically due to missing

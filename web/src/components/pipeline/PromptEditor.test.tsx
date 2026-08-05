@@ -77,6 +77,23 @@ afterEach(() => {
 })
 
 describe('PromptEditor -- truthful save (Slice 8b requirement 5)', () => {
+  it('does not expose retired PuLID tuning in the live prompt editor', async () => {
+    stubFetch({ ok: true })
+
+    render(
+      <PromptEditor
+        shot={makeShot()}
+        shotId="shot-1"
+        projectId="proj-1"
+        currentPrompt={makeShot().prompt}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.queryByText(/^PuLID\b/i)).toBeNull())
+  })
+
   it('a non-2xx save does NOT close the editor and surfaces the error', async () => {
     stubFetch({ ok: false, status: 404, body: { error: 'Shot not found' } })
     const onClose = vi.fn()

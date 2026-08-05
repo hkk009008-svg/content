@@ -46,7 +46,7 @@ def test_log_api_increments_spent_usd(tmp_path, request):
     assert tracker.spent_usd == 0.0
 
     tracker.log_api(
-        provider="comfyui", model="COMFYUI_PULID",
+        provider="fal", model="FLUX_PRO",
         operation="image_generation", cost_usd=0.04,
     )
     assert tracker.spent_usd == pytest.approx(0.04)
@@ -149,7 +149,7 @@ def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch, request):
 def test_perf_cost_log_uses_passed_tracker(tmp_path, request):
     """Each phase's _cost_log must log onto the passed shared tracker, not a throwaway."""
     from cost_tracker import CostTracker
-    from performance import live_portrait, viggle, act_two, driving_video
+    from performance import live_portrait, viggle, act_two
 
     # live_portrait._cost_log(duration_s, shot_id, video_id, cost_tracker=...)
     t1 = CostTracker(db_path=str(tmp_path / "c1.db"), budget_usd=100.0)
@@ -168,12 +168,6 @@ def test_perf_cost_log_uses_passed_tracker(tmp_path, request):
     request.addfinalizer(t3.close)
     act_two._cost_log("performance_capture", 5.0, "", "", cost_tracker=t3)
     assert t3.spent_usd > 0.0
-
-    # driving_video._cost_log(provider, duration_s, shot_id, video_id, cost_tracker=...)
-    t4 = CostTracker(db_path=str(tmp_path / "c4.db"), budget_usd=100.0)
-    request.addfinalizer(t4.close)
-    driving_video._cost_log("sadtalker", 5.0, "", "", cost_tracker=t4)
-    assert t4.spent_usd > 0.0
 
 
 def test_dispatch_without_cost_tracker_is_backward_compatible(tmp_path, monkeypatch):

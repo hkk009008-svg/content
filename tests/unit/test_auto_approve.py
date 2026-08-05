@@ -69,7 +69,7 @@ def _make_keyframe_take(composite: float = 0.98, fallback: bool = False) -> dict
         "kind": "keyframe",
         "path": "/tmp/kf.jpg",
         "metadata": {"composite": composite},
-        "cascade_metadata": {"fallback": fallback, "engine": "runpod"},
+        "cascade_metadata": {"fallback": fallback, "engine": "primary"},
     }
 
 
@@ -1250,7 +1250,7 @@ class TestConditionalCompositeThreshold:
         )
 
     def test_non_fallback_take_at_mid_composite_vetoed(self):
-        """composite=0.85 with fallback=False → vetoed (0.97 PuLID bar)."""
+        """composite=0.85 with fallback=False → vetoed by the primary bar."""
         config = AutoApproveConfig(
             image_min_composite=0.97,
             image_min_composite_fallback=0.78,
@@ -1270,9 +1270,9 @@ class TestConditionalCompositeThreshold:
             "project": _make_project(),
             "takes": [non_fallback_take],
         }
-        # 0.85 < 0.97 (PuLID threshold) → rule MUST fire
+        # 0.85 < 0.97 (primary threshold) → rule MUST fire
         assert composite_rule.predicate(ctx) is True, (
-            "composite=0.85 with non-fallback take must fail the 0.97 PuLID threshold"
+            "composite=0.85 with non-fallback take must fail the 0.97 primary threshold"
         )
 
     def test_fallback_take_below_fallback_threshold_vetoed(self):
@@ -1301,8 +1301,8 @@ class TestConditionalCompositeThreshold:
             "composite=0.70 with fallback take must fail the 0.78 fallback threshold"
         )
 
-    def test_non_fallback_take_above_pulid_threshold_passes(self):
-        """composite=0.98 with fallback=False → passes (above 0.97 PuLID bar)."""
+    def test_non_fallback_take_above_primary_threshold_passes(self):
+        """composite=0.98 with fallback=False passes the primary bar."""
         config = AutoApproveConfig(
             image_min_composite=0.97,
             image_min_composite_fallback=0.78,
@@ -1366,7 +1366,7 @@ class TestConditionalCompositeThreshold:
         }
         composite_rule.predicate(ctx)
         captured = capsys.readouterr()
-        assert "image_min_composite_kontext_fallback=0.78 applied" in captured.out, (
+        assert "image_min_composite_fallback=0.78 applied" in captured.out, (
             f"expected fallback marker in stdout; got: {captured.out!r}"
         )
 
@@ -1453,12 +1453,8 @@ class TestRecordDirectorReview:
 
 class TestBestTakeCompositeIdentityFallback:
     """Regression: the keyframe gate scores takes via metadata['composite'], but
-    production keyframe takes only write 'identity_score' (composite is written
-    ONLY in max-tier, quality_max.py). With no fallback, _best_take_composite
-    returns 0.0 for every production take, so image_min_composite > 0 vetoes every
-    keyframe → headless GateNotSatisfiedError regardless of actual quality (the
-    former image_min_composite=0.97 default made this fire on every unattended run).
-    It must fall back to identity_score, the score production DOES populate."""
+    some providers write only 'identity_score'. With no fallback,
+    _best_take_composite returns 0.0 and wrongly vetoes a measured take."""
 
     def test_falls_back_to_identity_when_composite_absent(self):
         # Mirrors a real production keyframe take: identity_score present, no composite.
@@ -1466,7 +1462,7 @@ class TestBestTakeCompositeIdentityFallback:
         assert _best_take_composite(takes) == pytest.approx(0.72)
 
     def test_prefers_composite_when_present(self):
-        # Max-tier writes composite; it must still take precedence over identity.
+        # A composite score, when present, still takes precedence over identity.
         takes = [{"metadata": {"composite": 0.95, "identity_score": 0.60}}]
         assert _best_take_composite(takes) == pytest.approx(0.95)
 

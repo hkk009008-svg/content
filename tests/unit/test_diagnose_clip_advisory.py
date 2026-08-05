@@ -3,7 +3,7 @@ a structured remediation_advisory and folds the suggested negative prompt
 into the regenerate recommendation when identity validation fails.
 Task 5 adds opt-in LLM deep diagnosis via diagnose_clip(deep=True).
 
-Offline — no GPU, no pod, no API calls.
+Offline — no GPU worker or API calls.
 """
 from __future__ import annotations
 
@@ -88,7 +88,6 @@ def _build_failed_id_result(char_id: str = "char_1"):
         frame_results=[],
         matched=False,
         primary_failure_reason=FailureReason.WRONG_PERSON,
-        suggested_pulid_adjustment=0.05,
     )
     return IdentityValidationResult(
         passed=False,
@@ -140,9 +139,9 @@ class TestDiagnoseClipAdvisory:
             f"Expected 'negative prompt' in reason, got: {regen_recs[0]['reason']!r}"
         )
 
-        # Existing pre-T6 recommendations still present (exactly once each)
+        # Provider-specific face-swap advice is retired; regeneration remains.
         face_swap_recs = [r for r in result["recommendations"] if r.get("tool") == "face_swap"]
-        assert len(face_swap_recs) == 1, "expected exactly one face_swap recommendation"
+        assert face_swap_recs == []
         assert len(regen_recs) == 1, "expected exactly one regenerate recommendation"
 
     def test_no_advisory_when_identity_passes(self, tmp_path):
@@ -164,7 +163,6 @@ class TestDiagnoseClipAdvisory:
             frame_results=[],
             matched=True,
             primary_failure_reason=FailureReason.PASSED,
-            suggested_pulid_adjustment=0.0,
         )
         passing_id_result = IdentityValidationResult(
             passed=True,
@@ -533,7 +531,6 @@ class TestDiagnoseClipDeepMultiChar:
             frame_results=[],
             matched=False,
             primary_failure_reason=FailureReason.WRONG_PERSON,
-            suggested_pulid_adjustment=0.05,
         )
         failed_id_result = IdentityValidationResult(
             passed=False,

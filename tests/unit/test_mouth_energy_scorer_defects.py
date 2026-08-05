@@ -34,7 +34,7 @@ UNPROVEN HYPOTHESIS (needs a calibration experiment, NOT a unit test):
      may sit well below that, so well-synced generation takes could be
      systematically REJECTED (the opposite pathology to the old neutral-1.0). This
      needs an empirical run of _score_mouth_energy on real synced vs desynced clips
-     before it can back any NO-GO (R-MEASURE). Pod / real-clip gated.
+     before it can back any NO-GO (R-MEASURE). Production-worker / real-clip gated.
 """
 import sys
 import types

@@ -21,6 +21,11 @@ vi.mock('../ObjectPanel', () => ({ default: () => <div data-testid="mock-object-
 vi.mock('../ScenePanel', () => ({ default: () => <div data-testid="mock-scene-panel" /> }))
 vi.mock('../GenerationPanel', () => ({ default: () => <div data-testid="mock-generation-panel" /> }))
 vi.mock('../PreviewPanel', () => ({ default: () => <div data-testid="mock-preview-panel" /> }))
+// The GPU worker panel's mount/refresh fetch is covered by its focused suite;
+// isolate this page-composition suite from that independent request.
+vi.mock('../setup/inspector/GpuWorkersSection', () => ({
+  GpuWorkersSection: () => <div data-testid="gpu-workers-section" />,
+}))
 
 const setPage = vi.fn()
 const setFocusScene = vi.fn()

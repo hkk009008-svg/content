@@ -301,7 +301,6 @@ class TestEvaluateGenerationQualityWithImages:
             frame_results=[],
             matched=False,
             primary_failure_reason=FailureReason.WRONG_PERSON,
-            suggested_pulid_adjustment=0.05,
         )
         return IdentityValidationResult(
             passed=False,
@@ -510,7 +509,6 @@ class TestEvaluateEncodeAtEvaluateCorruptTake:
             frame_results=[],
             matched=False,
             primary_failure_reason=FailureReason.WRONG_PERSON,
-            suggested_pulid_adjustment=0.05,
         )
         return IdentityValidationResult(
             passed=False,
@@ -732,7 +730,6 @@ class TestEvaluateGenerationQualityMultiRef:
             frame_results=[],
             matched=False,
             primary_failure_reason=FailureReason.WRONG_PERSON,
-            suggested_pulid_adjustment=0.05,
         )
         return IdentityValidationResult(
             passed=False,

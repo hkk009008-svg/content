@@ -10,6 +10,8 @@ import pytest
 
 from domain.performance import (
     ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE, ENGINE_SKIP,
+    has_current_performance_skip,
+    project_performance_review_can_skip,
     route_performance_engine,
     should_capture,
     shot_needs_driving_video,
@@ -40,6 +42,56 @@ class TestSkipRules:
 
     def test_wide_no_dialogue_returns_skip(self):
         assert route_performance_engine(_shot(shot_type="wide", dialogue=""), None) == ENGINE_SKIP
+
+
+class TestCurrentSkipAuthority:
+    @staticmethod
+    def _routing_decision(path: str = "") -> dict:
+        return {
+            "id": "skip-1",
+            "action": "skip",
+            "reason": "routing",
+            "decision_source": "routing",
+            "created_at": "2026-08-05T00:00:00+00:00",
+            "routed_engine": "SKIP",
+            "driving_video_path": path,
+        }
+
+    def test_bare_persisted_engine_is_not_skip_authority(self):
+        shot = _shot(
+            characters_in_frame=[],
+            performance_engine="SKIP",
+            approved_keyframe_take_id="kf-1",
+        )
+        assert has_current_performance_skip(shot) is False
+        assert project_performance_review_can_skip({
+            "scenes": [{"shots": [shot]}],
+        }) is False
+
+    def test_current_routing_decision_can_skip_pipeline_review(self):
+        shot = _shot(
+            characters_in_frame=[],
+            performance_engine="SKIP",
+            performance_skip=self._routing_decision(),
+            approved_keyframe_take_id="kf-1",
+        )
+        assert has_current_performance_skip(shot) is True
+        assert project_performance_review_can_skip({
+            "scenes": [{"shots": [shot]}],
+        }) is True
+
+    def test_changed_driving_revision_invalidates_skip_and_pipeline_bypass(self):
+        shot = _shot(
+            characters_in_frame=[],
+            performance_engine="SKIP",
+            performance_skip=self._routing_decision("old.mp4"),
+            driving_video_path="new.mp4",
+            approved_keyframe_take_id="kf-1",
+        )
+        assert has_current_performance_skip(shot) is False
+        assert project_performance_review_can_skip({
+            "scenes": [{"shots": [shot]}],
+        }) is False
 
 
 
@@ -114,8 +166,7 @@ class TestShotNeedsDrivingVideo:
     def test_act_one_needs_driving_video(self):
         # ACT_ONE now routes to Runway Act-Two (performance/act_two.py),
         # which has no audio-only generation mode — unlike the retired
-        # Act-One, it always needs an actual driving video (Mode-B synth or
-        # a direct upload) by dispatch time.
+        # Act-One, it always needs an operator-uploaded driving video.
         assert shot_needs_driving_video(_shot(shot_type="portrait")) is True
 
     def test_live_portrait_needs_driving_video(self):
@@ -125,8 +176,7 @@ class TestShotNeedsDrivingVideo:
     def test_viggle_route_needs_a_driving_video(self):
         # Uncontained 2026-08-01 (ADR-082). While contained this asserted
         # False, because SKIP needs no driving video. Now the route selects
-        # ENGINE_VIGGLE, which has always required one — so Mode-B synthesis
-        # (or an operator upload) must fire for action/no-dialogue shots.
+        # ENGINE_VIGGLE, which has always required an operator upload.
         shot = _shot(shot_type="action", dialogue="")
         assert shot_needs_driving_video(shot) is True
 
@@ -139,8 +189,8 @@ class TestDrivingVideoSource:
         shot = _shot(driving_video_path="/tmp/uploaded.mp4")
         assert driving_video_source(shot) == "upload"
 
-    def test_dialogue_no_upload_is_tts_auto(self):
-        assert driving_video_source(_shot()) == "tts_auto"
+    def test_dialogue_no_upload_is_none(self):
+        assert driving_video_source(_shot()) == "none"
 
     def test_no_dialogue_no_action_is_none(self):
         # No dialogue + non-action + non-landscape shot type → rule 5 fall-through
@@ -150,11 +200,7 @@ class TestDrivingVideoSource:
 
 class TestPreconditionErrorActOne:
     """ACT_ONE now routes to Runway Act-Two (performance/act_two.py), which
-    has no audio-only mode. precondition_error runs BEFORE controller.py's
-    Mode-B synth step (cinema/shots/controller.py), so audio_path alone
-    must still satisfy the pre-check — it is what lets Mode-B produce a
-    driving video before the actual engine call. Only "neither present" is
-    a real, unrecoverable precondition failure."""
+    has no audio-only mode. Dialogue audio never replaces a driving video."""
 
     def test_neither_audio_nor_driving_video_fails_and_names_driving_video(self):
         err = precondition_error(ENGINE_ACT_ONE, audio_path="", driving_video_path="")
@@ -164,10 +210,12 @@ class TestPreconditionErrorActOne:
     def test_none_inputs_also_fail(self):
         assert precondition_error(ENGINE_ACT_ONE, audio_path=None, driving_video_path=None) is not None
 
-    def test_audio_only_passes_because_mode_b_can_still_synthesize(self):
-        # Audio alone is not a valid Act-Two dispatch input, but it IS
-        # sufficient for this pre-check, since Mode-B hasn't run yet.
-        assert precondition_error(ENGINE_ACT_ONE, audio_path="/tmp/a.wav", driving_video_path="") is None
+    def test_audio_only_fails(self):
+        assert precondition_error(
+            ENGINE_ACT_ONE,
+            audio_path="/tmp/a.wav",
+            driving_video_path="",
+        ) is not None
 
     def test_driving_video_only_passes(self):
         # Fixes the old Act-One-shaped bug: a shot with an uploaded driving

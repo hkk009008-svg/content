@@ -29,7 +29,7 @@ Read-only — it never stages or commits. **Rule #8:** if it reports unread > 0,
 
 ## First question: is this CROSS-CUTTING? (answer before reaching for the lock)
 
-Locks exist for exactly **four** collision-prone modules: **`auto_approve.py` · `cinema/context.py` · `core.py` · `web_server.py`**. If your fix does **not** touch one of these, it is **lane-only → claim NO lock**; go straight to the brief. Size, severity, and "this feels important/risky" are irrelevant — `quality_max.py`, `phase_c_*`, `coherence_analyzer.py`, `face_validator_gate.py` are all lane-only and take no lock. (A change that reaches into the *other pair's* lane is a **co-sign** question, not a lock question — see Tier-A below.)
+Locks exist for exactly **four** collision-prone modules: **`auto_approve.py` · `cinema/context.py` · `core.py` · `web_server.py`**. If your fix does **not** touch one of these, it is **lane-only → claim NO lock**; go straight to the brief. Size, severity, and "this feels important/risky" are irrelevant — `phase_c_*`, `performance/flux2_klein.py`, `performance/live_portrait_workflow.py`, and `coherence_analyzer.py` are all lane-only and take no lock. (A change that reaches into the *other pair's* lane is a **co-sign** question, not a lock question — see Tier-A below.)
 
 ## The lifecycle is an ordered chain — do not stop at the lock (§6c)
 
@@ -147,12 +147,12 @@ The loser **abandons** — `claim-lock` exit 1 means you never had a valid claim
 | "I'll commit, the brief can follow." | The R-BRIEF precedes implementation — it is what the co-signer reads. |
 | "I verified the fix myself, it's fine." | impl≠verifier — your operator verifies, not you. |
 | "Lock-claim sequence is the whole corrected protocol." | §6b is the primitive; the full §6c chain (brief, co-sign, verify) still applies. |
-| "This fix is big/important/risky — I'll lock it to be safe." | Locks are ONLY for the four cross-cutting modules. A lane-only file (`quality_max.py`, `phase_c_*`, `coherence_analyzer.py`) takes NO lock — size/severity is irrelevant. |
+| "This fix is big/important/risky — I'll lock it to be safe." | Locks are ONLY for the four cross-cutting modules. A lane-only file (`phase_c_*`, `performance/flux2_klein.py`, `coherence_analyzer.py`) takes NO lock — size/severity is irrelevant. |
 
 ## Red flags (self-check)
 
 - Editing a cross-cutting module without a held lock → §6b.
-- Claiming a lock for a lane-only module (`quality_max.py`, `phase_c_*`, etc.) → over-lock; locks are only for the four cross-cutting modules.
+- Claiming a lock for a lane-only module (`phase_c_*`, `performance/flux2_klein.py`, etc.) → over-lock; locks are only for the four cross-cutting modules.
 - About to dispatch/commit a CRITICAL cross-cutting fix with no Tier-A report in the mailbox → §6c.
 - Brief names a write-target with no grep output under it → Rule #12 hole.
 - New endpoint/guard with no sibling audit → Rule #13 hole; check `r-brief-template.md`.

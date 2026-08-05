@@ -4185,11 +4185,14 @@ in Python with an assertion on the anchor. A mutation test that does not
 mutate proves nothing.
 
 Consequence — action shots without dialogue now route to a real engine and
-therefore need a driving video (Mode-B synthesis or an operator upload), where
+therefore need a driving video (at this decision point, Mode-B synthesis or an operator upload), where
 they previously produced nothing. The first production render is also the
 first live verification of the adapter; if the contract is wrong after all,
 the per-failure-mode classification added in the repair slice is what will say
 so, rather than a blanket catch-all.
+
+Superseded in part by ADR-086: every real performance engine now requires the
+operator upload; Mode-B synthesis is no longer a supported input path.
 
 Cross-ref: ADR-077 (skill-twin parity); `performance/viggle.py`;
 `performance/_router.py:78-83`; `domain/performance.py` rule 3.
@@ -4359,3 +4362,75 @@ Cross-ref: `pipeline_jobs.py`; `paid_provider.py`; `cost_tracker.py`;
 `domain/provider_health.py`; `cinema/artifact_versions.py`;
 `cinema/artifact_indexing.py`; `cinema/trace_store.py`; `web_observability.py`;
 `web_artifacts.py`; `docs/LIVE_CONTRACT_CANARY.md`; ARCHITECTURE §2A.
+
+## ADR-085 — Bind the LivePortrait canary to the local Windows worker and fence PuLID prompt IDs
+
+Date: 2026-08-05
+
+Status: Accepted. Supersedes ADR-084 item 8 only.
+
+Context. The former `runpod-liveportrait-performance` target described a
+separate hosted RunPod image, but the shipping performance contract is now the
+native Windows worker reached from the Mac through a loopback SSH tunnel. A
+generic LivePortrait/VHS node probe could not prove the worker's tracked role,
+models, source revisions, workflow, or one-frame execution. Separately, the
+production PuLID smoke used the normal image path without supplying its durable
+paid-attempt tracker, so a runner crash could lose the accepted ComfyUI prompt
+ID and make a later paid resubmission possible.
+
+Decision. Preserve `runway-act-two` and `runpod-pulid-production`. Replace the
+contradictory performance target with `windows-liveportrait-performance`, run
+only on the labeled self-hosted Mac runner, and accept only the fixed
+`http://127.0.0.1:18189` tunnel origin plus the exact
+`performance-liveportrait` role/manifests/contract/execution proof. Give the
+local target a `$0.00` paid-API cap. For the PuLID target, bind one immutable
+graph/fixture logical attempt to a GitHub Deployment preclaim, checkpoint the
+returned ComfyUI prompt UUID there before local polling, persist the SQLite
+attempt ledger, and resume only the recorded prompt from the same checked-out
+source commit. A preclaim without a UUID or a Deployment from another commit
+blocks replacement submission pending manual reconciliation.
+
+Consequences. PuLID readiness remains distinct from LivePortrait readiness;
+the local canary no longer implies a hosted performance pod or paid API charge.
+The Windows gateway and Mac tunnel must already be online, and the protected
+workflow requires its custom runner label. GitHub Deployments are trusted-
+writer crash fencing, not tamper-resistant storage.
+
+Cross-ref: `.github/workflows/live-contract-canary.yml`;
+`scripts/live_contract_canary.py`; `performance/worker_readiness.py`;
+`docs/LIVE_CONTRACT_CANARY.md`.
+
+## ADR-086 — Retire SadTalker Mode-B and require explicit driving performances
+
+Date: 2026-08-05
+
+Status: Accepted. Supersedes the Mode-B options described by ADR-082 and older
+performance-capture plans.
+
+Context. The only identifiable ComfyUI SadTalker wrapper did not match the
+application graph: its inputs and outputs differed, it returned file-path
+strings where the graph expected image frames, and its Python/PyTorch/OpenCV
+dependency contract could not coexist with the supported Python 3.12 Blackwell
+worker. Treating a missing driving video as permission to synthesize one also
+hid a second paid operation and allowed local-worker failure to degrade into a
+successful SKIP or another generation route.
+
+Decision. Delete the SadTalker provider and content-hash cache. ACT_ONE (the
+Runway Act-Two adapter), LIVE_PORTRAIT, and VIGGLE all require an
+operator-uploaded driving MP4. Validate that upload before publication with a
+256 MiB/30-second/geometry boundary plus full ffmpeg decode, and never replace
+an existing good input on rejection. Block before paid dialogue audio when the
+input is absent. An explicitly selected local LivePortrait route must prove the
+role-bound worker contract and fail with `local_performance_failed` on execution
+failure; it may not mutate the shot to SKIP or fall through to another engine.
+
+Consequences. The UI exposes one truthful local LivePortrait selector and says
+that a Ready dedicated worker plus uploaded driving video are required. The
+Windows RTX worker is single-queue, unloads models when idle, and is reproducibly
+benchmarked with cache disabled. Audio-to-driving synthesis can return only as a
+separate maintained service with its own API, dependency, license, cost, and
+recovery contract.
+
+Cross-ref: `performance/live_portrait.py`; `performance/worker_readiness.py`;
+`cinema/shots/controller.py`; `web_server.py`;
+`deploy/windows-liveportrait-worker/`.

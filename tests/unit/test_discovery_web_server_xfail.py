@@ -26,9 +26,9 @@ CATALOG:
   confirmed[16] W2:MEDIUM:http-null-json-body
     web_server.py:1966,2610,2656 — request.json None -> None.get() AttributeError
     500 when caller sends Content-Type: application/json with body null.
-  confirmed[17] W2:MEDIUM:http-styleboard-false201
-    web_server.py:984-1024 — returns 201 uploaded=0 when all file parts have
-    empty filenames (outer guard only catches a completely absent field).
+  confirmed[17] W2:MEDIUM:http-styleboard-false201 — CLOSED BY REMOVAL
+    The dormant style-board upload/storage route was retired with its
+    unconsumed FLUX Redux threading. A route-absence regression remains below.
 
 TEST-INFEASIBLE entries: none — every defect had a viable seam (direct domain
 function for [14], Flask test_client for the rest).
@@ -367,26 +367,16 @@ def test_cleanup_all_endpoint_is_retired(client):
 
 
 # ---------------------------------------------------------------------------
-# confirmed[17] — W2:MEDIUM:http-styleboard-false201
+# confirmed[17] — W2:MEDIUM:http-styleboard-false201 — CLOSED BY REMOVAL
 # ---------------------------------------------------------------------------
 
-def test_upload_style_board_empty_filenames_returns_400(client, tmp_path, monkeypatch):
-    """Uploading a 'references' part with an empty filename must yield 400, not 201."""
-    from domain import project_manager
-    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    pid, _ = _make_project_dir(tmp_path, monkeypatch)
+def test_style_board_endpoint_is_retired(client):
+    """Dormant uploads must not persist unused style-reference assets."""
+    import web_server
 
-    # Send a multipart body with a 'references' field but no filename —
-    # Flask will produce a FileStorage with filename='' which passes the
-    # outer `if not images` guard but fails the inner `if f.filename` guard.
-    resp = client.post(
-        f"/api/projects/{pid}/style-board",
-        data={"references": (io.BytesIO(b"data"), "")},
-        content_type="multipart/form-data",
+    assert all(
+        rule.rule != "/api/projects/<pid>/style-board"
+        for rule in web_server.app.url_map.iter_rules()
     )
-    # CURRENT behaviour (bug): 201 {"uploaded": 0, "total_refs": N}
-    # FIXED behaviour: 400 (nothing was actually stored)
-    assert resp.status_code == 400, (
-        f"Expected 400 when all file parts have empty filenames, "
-        f"got {resp.status_code}: {resp.data!r}"
-    )
+    # The SPA's GET-only catch-all makes an otherwise unknown POST a 405.
+    assert client.post("/api/projects/proj_test/style-board").status_code == 405

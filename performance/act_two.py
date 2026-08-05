@@ -120,6 +120,7 @@ def generate_act_two_performance(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    request_id: str = "",
     poll_timeout_s: int = 300,
     cost_tracker=None,
     task_submission_callback: Optional[Callable[[], object]] = None,
@@ -178,6 +179,7 @@ def generate_act_two_performance(
     except Exception:
         CostTracker = None  # type: ignore[assignment,misc]
     if CostTracker is not None and isinstance(cost_tracker, CostTracker):
+        from paid_provider import file_fingerprint
         from performance.runway_tasks import build_attempt_id
 
         attempt_id, request_fingerprint = build_attempt_id(
@@ -187,11 +189,12 @@ def generate_act_two_performance(
             video_id=video_id,
             shot_id=shot_id,
             request={
-                "keyframe_path": os.path.abspath(keyframe_path),
-                "driving_video_path": os.path.abspath(driving_video_path),
+                "keyframe_file": file_fingerprint(keyframe_path),
+                "driving_video_file": file_fingerprint(driving_video_path),
                 "duration_s": float(duration_s),
                 "model": _MODEL,
                 "ratio": "1280:720",
+                "request_id": request_id,
             },
         )
         _paid_attempt = cost_tracker.reserve_paid_attempt(

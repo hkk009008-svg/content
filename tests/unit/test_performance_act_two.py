@@ -27,6 +27,7 @@ import httpx
 import pytest
 
 import performance.act_two as act_two
+from cost_tracker import CostTracker
 
 
 # ---------------------------------------------------------------------------
@@ -80,10 +81,12 @@ class _FakeCharacterPerformance:
     """Records the exact kwargs passed to .create(), for contract assertions."""
     def __init__(self, create_result=None, create_error: Optional[BaseException] = None):
         self.received_kwargs: Optional[dict] = None
+        self.create_calls = 0
         self._create_result = create_result or _FakeTask()
         self._create_error = create_error
 
     def create(self, **kwargs):
+        self.create_calls += 1
         self.received_kwargs = kwargs
         if self._create_error is not None:
             raise self._create_error
@@ -248,6 +251,58 @@ class TestSdkRequestContract:
         assert sent["character"]["uri"] == "runway://character-asset"
         assert sent["reference"]["type"] == "video"
         assert sent["reference"]["uri"] == "runway://reference-asset"
+
+    def test_paid_attempt_identity_uses_file_bytes_not_absolute_paths(
+        self, monkeypatch, tmp_path
+    ):
+        first_root = tmp_path / "first-location"
+        second_root = tmp_path / "relocated"
+        first_root.mkdir()
+        second_root.mkdir()
+        first_kf = first_root / "keyframe.jpg"
+        first_driving = first_root / "driving.mp4"
+        first_kf.write_bytes(b"same-keyframe-bytes")
+        first_driving.write_bytes(b"same-driving-bytes")
+        second_kf = second_root / first_kf.name
+        second_driving = second_root / first_driving.name
+        second_kf.write_bytes(first_kf.read_bytes())
+        second_driving.write_bytes(first_driving.read_bytes())
+        cp = _install_fake_runwayml(monkeypatch)
+        _ok_safe_download(monkeypatch)
+        tracker = CostTracker(
+            db_path=str(tmp_path / "costs.db"),
+            budget_usd=5.0,
+        )
+        try:
+            first_output = str(tmp_path / "first.mp4")
+            second_output = str(tmp_path / "second.mp4")
+            first = act_two.generate_act_two_performance(
+                str(first_kf), "", first_output,
+                driving_video_path=str(first_driving),
+                duration_s=4.0,
+                shot_id="shot-1",
+                video_id="project-1",
+                request_id="a" * 32,
+                cost_tracker=tracker,
+            )
+            second = act_two.generate_act_two_performance(
+                str(second_kf), "", second_output,
+                driving_video_path=str(second_driving),
+                duration_s=4.0,
+                shot_id="shot-1",
+                video_id="project-1",
+                request_id="a" * 32,
+                cost_tracker=tracker,
+            )
+
+            attempts = tracker.get_paid_attempts_snapshot("project-1")["attempts"]
+            assert first == first_output
+            assert second == second_output
+            assert len(attempts) == 1
+            assert cp.create_calls == 1
+            assert cp.uploads.calls == [first_kf, first_driving]
+        finally:
+            tracker.close()
 
     def test_upload_failure_is_pre_submission_and_never_calls_create(
         self, monkeypatch, tmp_path, capsys

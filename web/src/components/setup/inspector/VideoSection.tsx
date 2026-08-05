@@ -1,7 +1,6 @@
 import { Section, Badge, Toggle } from '../../ui'
 import type { AppConfig } from '../../../types/project'
 import { cascadeEngineOptions, humanizeEngineReason } from '../../../lib/engines'
-import { isPodGated } from '../../../lib/podGating'
 import { RangeRow, ToggleRow, SelectRow } from './controls'
 
 interface Props {
@@ -33,9 +32,8 @@ const COLOR_GRADE_PRESETS = [
  * disabling a not-yet-in-use engine delete its row — and therefore its
  * toggle — with no way to re-enable it. `AUTO` is excluded (a routing
  * directive, not a dispatchable engine you toggle on/off). The primary badge
- * follows the server-provided workflow templates. Each row's cloud-vs-pod badge is derived from
- * `isPodGated` — provider-keyed, so a future pod-billed video engine
- * surfaces ⚙ Pod without a code change here. Enable state writes the whole
+ * follows the server-provided workflow templates. All supported video engines
+ * are hosted providers. Enable state writes the whole
  * nested `api_engines` object (settings write contract), with the touched
  * engine's entry narrowed to the only live automatic-cascade field:
  * `enabled`.
@@ -67,7 +65,6 @@ export function VideoSection({ s, config, update }: Props) {
             <p className="text-[11px] italic text-mut">No video engines available.</p>
           )}
           {engines.map((e) => {
-            const pod = isPodGated(e.key, config)
             const localCfg = engineState[e.key]
             const enabled = localCfg ? localCfg.enabled !== false : e.configuredEnabled
             return (
@@ -79,7 +76,7 @@ export function VideoSection({ s, config, update }: Props) {
               >
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="truncate text-[11px] text-tx">{e.label}</span>
-                  <Badge variant={pod ? 'pod' : 'cloud'}>{pod ? 'Pod' : 'Cloud'}</Badge>
+                  <Badge variant="cloud">Cloud</Badge>
                   {e.primary && <Badge variant="pri">Primary</Badge>}
                   {!e.selectable && e.reason && (
                     <Badge variant="warn" className="normal-case">

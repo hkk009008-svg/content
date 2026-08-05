@@ -86,6 +86,7 @@ def generate_viggle_performance(
     bg_color: Optional[str] = None,      # "R,G,B" — only sent when background_mode == "solid"
     shot_id: str = "",
     video_id: str = "",
+    request_id: str = "",
     poll_timeout_s: int = 300,
     cost_tracker=None,
 ) -> Optional[str]:
@@ -166,6 +167,7 @@ def generate_viggle_performance(
                 file_fingerprint(driving_video_path),
                 background_mode,
                 bg_color if background_mode == "solid" else None,
+                request_id,
             )
             attempt_id = paid_attempt_id(
                 "viggle-render",

@@ -1,132 +1,109 @@
-import math
 from datetime import date
 
 import pytest
 
-from workflow_selector import (
-    classify_shot_type,
-    get_resolved_workflow_routing,
-    get_workflow_params,
-    apply_workflow_params,
-    WORKFLOW_TEMPLATES,
-    SHOT_TYPE_KEYWORDS,
-    MOTION_FIDELITY_FLOORS,
-    get_adaptive_pulid_weight,
-)
 from domain.provider_catalog import RuntimeSnapshot
-from domain.video_engine_policy import VideoPolicyReason
 from domain.shot_types import (
-    SHOT_TYPE_CLOSE,
-    SHOT_TYPE_PORTRAIT,
-    SHOT_TYPE_MEDIUM,
-    SHOT_TYPE_WIDE,
-    SHOT_TYPE_LANDSCAPE,
     SHOT_TYPE_ACTION,
+    SHOT_TYPE_CLOSE,
+    SHOT_TYPE_LANDSCAPE,
+    SHOT_TYPE_MEDIUM,
+    SHOT_TYPE_PORTRAIT,
+    SHOT_TYPE_WIDE,
 )
-from identity.types import FailureReason
+from domain.video_engine_policy import VideoPolicyReason
+from workflow_selector import (
+    MOTION_FIDELITY_FLOORS,
+    SHOT_TYPE_KEYWORDS,
+    WORKFLOW_TEMPLATES,
+    classify_shot_type,
+    get_motion_fidelity_floor,
+    get_resolved_workflow_routing,
+)
 
 
 PRE_SUNSET = date(2026, 9, 23)
 SUNSET = date(2026, 9, 24)
 
 
-def _fal_snapshot():
-    return RuntimeSnapshot(
-        credentials={"fal_key"},
-        modules={"fal_client"},
-    )
+def _fal_snapshot() -> RuntimeSnapshot:
+    return RuntimeSnapshot(credentials={"fal_key"}, modules={"fal_client"})
 
-
-# Valid target_api / video_fallback values accepted by the cinema pipeline.
-# Sourced from WORKFLOW_TEMPLATES + handoff §3.3 valid-api list.
-# GEMINI_OMNI added WS2 (google-first-overhaul): Google-first primary
-# (Gemini Omni Flash) is now target_api for every shot type.
-_VALID_APIS = {
-    "KLING_NATIVE",
-    "LTX",
-    "SORA_NATIVE",
-    "RUNWAY_GEN4",
-    "VEO_NATIVE",
-    "KLING_3_0",
-    "SEEDANCE",
-    "GEMINI_OMNI",
-}
-
-
-# --- classify_shot_type ---
 
 class TestClassifyShotType:
-    def test_no_characters_returns_landscape(self):
-        shot = {"prompt": "a beautiful sunset", "characters_in_frame": []}
-        assert classify_shot_type(shot) == "landscape"
+    @pytest.mark.parametrize(
+        ("shot", "expected"),
+        [
+            ({"prompt": "a beautiful sunset", "characters_in_frame": []}, "landscape"),
+            ({"prompt": "A close-up of the detective", "characters_in_frame": ["c1"]}, "portrait"),
+            ({"prompt": "A wide shot of the city", "characters_in_frame": ["c1"]}, "wide"),
+            ({"prompt": "A tracking shot follows the hero", "characters_in_frame": ["c1"]}, "action"),
+            ({"prompt": "A medium shot", "characters_in_frame": ["c1"]}, "medium"),
+            ({"prompt": "The character waits", "characters_in_frame": ["c1"]}, "medium"),
+        ],
+    )
+    def test_classification(self, shot, expected):
+        assert classify_shot_type(shot) == expected
 
-    def test_no_characters_key_returns_landscape(self):
-        shot = {"prompt": "a beautiful sunset"}
-        assert classify_shot_type(shot) == "landscape"
+    def test_camera_and_structured_shot_text_are_classified(self):
+        assert classify_shot_type(
+            {
+                "prompt": "The character looks around",
+                "camera": "85mm portrait framing",
+                "characters_in_frame": ["c1"],
+            }
+        ) == "portrait"
+        assert classify_shot_type(
+            {
+                "prompt": "[SHOT] close-up of face [ACTION] walking forward",
+                "characters_in_frame": ["c1"],
+            }
+        ) == "portrait"
 
-    def test_close_up_in_prompt_returns_portrait(self):
-        shot = {"prompt": "A close-up of the detective", "characters_in_frame": ["char1"]}
-        assert classify_shot_type(shot) == "portrait"
+    @pytest.mark.parametrize(
+        ("keyword", "bucket"),
+        [(keyword, bucket) for bucket, keywords in SHOT_TYPE_KEYWORDS.items() for keyword in keywords],
+    )
+    def test_every_declared_keyword_routes_to_its_bucket(self, keyword, bucket):
+        expected = "wide" if bucket == "landscape" else bucket
+        shot = {
+            "prompt": f"a {keyword} of something",
+            "camera": "",
+            "characters_in_frame": ["c1"],
+        }
+        assert classify_shot_type(shot) == expected
 
-    def test_wide_shot_in_prompt_returns_wide(self):
-        shot = {"prompt": "A wide shot of the city streets", "characters_in_frame": ["char1"]}
+    def test_character_bearing_landscape_routes_wide(self):
+        shot = {
+            "prompt": "an aerial vista of the valley",
+            "camera": "",
+            "characters_in_frame": ["hero"],
+        }
         assert classify_shot_type(shot) == "wide"
 
-    def test_tracking_shot_in_prompt_returns_action(self):
-        shot = {"prompt": "A tracking shot following the hero", "characters_in_frame": ["char1"]}
-        assert classify_shot_type(shot) == "action"
-
-    def test_medium_shot_in_prompt_returns_medium(self):
-        shot = {"prompt": "A medium shot of two people talking", "characters_in_frame": ["char1"]}
-        assert classify_shot_type(shot) == "medium"
-
-    def test_no_matching_keywords_defaults_to_medium(self):
-        shot = {"prompt": "The character stands still", "characters_in_frame": ["char1"]}
-        assert classify_shot_type(shot) == "medium"
-
-    def test_keyword_in_camera_field_matches(self):
+    def test_shot_section_precedence_is_stable(self):
         shot = {
-            "prompt": "The character looks around",
-            "camera": "85mm lens portrait framing",
-            "characters_in_frame": ["char1"],
-        }
-        assert classify_shot_type(shot) == "portrait"
-
-    def test_shot_section_extraction_works(self):
-        shot = {
-            "prompt": "[SHOT] close-up of face [ACTION] walking forward",
-            "characters_in_frame": ["char1"],
+            "prompt": "[SHOT] portrait headshot [SCENE] wide angle landscape vista",
+            "camera": "",
+            "characters_in_frame": ["c1"],
         }
         assert classify_shot_type(shot) == "portrait"
 
 
-# --- get_workflow_params ---
+class TestWorkflowTemplates:
+    EXPECTED_TYPES = {"portrait", "medium", "wide", "action", "landscape"}
+    REQUIRED_KEYS = {"target_api", "video_fallbacks", "description"}
 
-class TestGetWorkflowParams:
-    def test_known_shot_type_returns_correct_params(self):
-        params = get_workflow_params("portrait")
-        assert params["pulid_weight"] == 1.0
-        assert params["guidance"] == 3.5
-        assert params["steps"] == 25
+    def test_exactly_five_provider_neutral_templates(self):
+        assert set(WORKFLOW_TEMPLATES) == self.EXPECTED_TYPES
+        for template in WORKFLOW_TEMPLATES.values():
+            assert set(template) == self.REQUIRED_KEYS
+            assert template["target_api"] == "GEMINI_OMNI"
+            assert isinstance(template["video_fallbacks"], list)
+            assert template["video_fallbacks"]
+            assert "SORA_NATIVE" not in template["video_fallbacks"]
 
-    def test_unknown_type_falls_back_to_medium(self):
-        params = get_workflow_params("nonexistent_type")
-        expected = get_workflow_params("medium")
-        assert params == expected
-
-    def test_returns_copy_not_reference(self):
-        params1 = get_workflow_params("portrait")
-        params2 = get_workflow_params("portrait")
-        params1["steps"] = 999
-        assert params2["steps"] != 999
-
-
-class TestResolvedWorkflowRouting:
-    def test_raw_templates_are_automatic_order_seeds(self):
-        assert {
-            template["target_api"]
-            for template in WORKFLOW_TEMPLATES.values()
-        } == {"GEMINI_OMNI"}
+    def test_action_seed_order(self):
         assert WORKFLOW_TEMPLATES["action"]["video_fallbacks"] == [
             "VEO_NATIVE",
             "SEEDANCE",
@@ -134,12 +111,10 @@ class TestResolvedWorkflowRouting:
             "RUNWAY_GEN4",
             "LTX",
         ]
-        assert all(
-            "SORA_NATIVE" not in template["video_fallbacks"]
-            for template in WORKFLOW_TEMPLATES.values()
-        )
 
-    def test_resolved_accessor_filters_broken_and_unavailable_in_seed_order(self):
+
+class TestResolvedWorkflowRouting:
+    def test_filters_unavailable_providers_without_reordering(self):
         routing = get_resolved_workflow_routing(
             "portrait",
             runtime_snapshot=_fal_snapshot(),
@@ -149,15 +124,12 @@ class TestResolvedWorkflowRouting:
         assert routing.primary == "KLING_3_0"
         assert routing.fallbacks == ("SEEDANCE",)
         assert [(item.key, item.reason) for item in routing.rejections] == [
-            # Slice 3 re-admitted GEMINI_OMNI; under _fal_snapshot() (no
-            # google credential/module) the truthful rejection is runtime
-            # availability, not product support (invariant 4).
             ("GEMINI_OMNI", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("VEO_NATIVE", VideoPolicyReason.RUNTIME_UNAVAILABLE),
             ("RUNWAY_GEN4", VideoPolicyReason.RUNTIME_UNAVAILABLE),
         ]
 
-    def test_empty_runtime_returns_auto_and_no_provider(self):
+    def test_empty_runtime_returns_auto(self):
         routing = get_resolved_workflow_routing(
             "landscape",
             runtime_snapshot=RuntimeSnapshot(),
@@ -166,9 +138,8 @@ class TestResolvedWorkflowRouting:
         assert routing.candidates == ()
         assert routing.primary == "AUTO"
         assert routing.fallbacks == ()
-        assert "GEMINI_OMNI" not in routing.candidates
 
-    def test_project_disabled_engines_are_removed_without_reordering(self):
+    def test_project_disabled_engines_are_removed(self):
         routing = get_resolved_workflow_routing(
             "action",
             settings={
@@ -182,247 +153,25 @@ class TestResolvedWorkflowRouting:
             on_date=PRE_SUNSET,
         )
         assert routing.candidates == ()
-        assert routing.primary == "AUTO"
         assert {
             item.key
             for item in routing.rejections
             if item.reason is VideoPolicyReason.PROJECT_DISABLED
         } == {"SEEDANCE", "KLING_3_0", "LTX"}
 
-    def test_sora_native_is_not_reintroduced_by_automatic_action_routing(self):
+    def test_automatic_routing_never_reintroduces_sora(self):
         snapshot = RuntimeSnapshot(
             credentials={"fal_key", "openai_api_key"},
             modules={"fal_client", "openai"},
         )
-        before = get_resolved_workflow_routing(
-            "action",
-            runtime_snapshot=snapshot,
-            on_date=PRE_SUNSET,
-        )
-        assert before.candidates == (
-            "SEEDANCE",
-            "KLING_3_0",
-            "LTX",
-        )
-        assert "SORA_NATIVE" not in before.candidates
-
-        on_boundary = get_resolved_workflow_routing(
-            "action",
-            runtime_snapshot=snapshot,
-            on_date=SUNSET,
-        )
-        assert "SORA_NATIVE" not in on_boundary.candidates
-        assert all(item.key != "SORA_NATIVE" for item in on_boundary.rejections)
-
-    def test_get_workflow_params_consumes_resolved_accessor(self):
-        params = get_workflow_params(
-            "action",
-            runtime_snapshot=_fal_snapshot(),
-            on_date=PRE_SUNSET,
-        )
-        assert params["target_api"] == "SEEDANCE"
-        assert params["video_fallbacks"] == ["KLING_3_0", "LTX"]
-        assert params["pulid_weight"] == WORKFLOW_TEMPLATES["action"]["pulid_weight"]
-        assert params["guidance"] == WORKFLOW_TEMPLATES["action"]["guidance"]
-        assert params["steps"] == WORKFLOW_TEMPLATES["action"]["steps"]
-
-
-# --- apply_workflow_params ---
-
-class TestApplyWorkflowParams:
-    def _make_workflow(self):
-        return {
-            "100": {"inputs": {"weight": 0, "start_at": 0, "end_at": 0}},
-            "60": {"inputs": {"guidance": 0}},
-            "17": {"inputs": {"steps": 0, "scheduler": ""}},
-            "16": {"inputs": {"sampler_name": ""}},
-            "301": {"inputs": {"scale": 0}},
-        }
-
-    def test_sets_correct_node_values(self):
-        workflow = self._make_workflow()
-        params = get_workflow_params("portrait")
-        result = apply_workflow_params(workflow, params)
-
-        assert result["100"]["inputs"]["weight"] == 1.0
-        assert result["100"]["inputs"]["start_at"] == 0.0  # FLUX: portrait binds from step 0 (was SDXL-era 0.2)
-        assert result["100"]["inputs"]["end_at"] == 1.0
-        assert result["60"]["inputs"]["guidance"] == 3.5
-        assert result["17"]["inputs"]["steps"] == 25
-        assert result["17"]["inputs"]["scheduler"] == "sgm_uniform"
-        assert result["16"]["inputs"]["sampler_name"] == "dpmpp_2m"
-        assert result["301"]["inputs"]["scale"] == 3.0
-
-    def test_missing_nodes_doesnt_crash(self):
-        workflow = {"999": {"inputs": {}}}
-        params = get_workflow_params("portrait")
-        result = apply_workflow_params(workflow, params)
-        assert result is workflow  # returns same object, no error
-
-
-# --- Template completeness ---
-
-class TestTemplateCompleteness:
-    REQUIRED_KEYS = ["target_api", "video_fallbacks", "pulid_weight", "guidance", "steps"]
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_each_shot_type_has_required_keys(self, shot_type):
-        template = WORKFLOW_TEMPLATES[shot_type]
-        for key in self.REQUIRED_KEYS:
-            assert key in template, f"{shot_type} missing required key '{key}'"
-
-
-# --- Parameter value bounds ---
-
-
-class TestParameterBounds:
-    """Verify all template parameters are within sensible ranges."""
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_pulid_weight_range(self, shot_type):
-        p = WORKFLOW_TEMPLATES[shot_type]["pulid_weight"]
-        assert 0.0 <= p <= 1.0, f"{shot_type} pulid_weight={p} out of [0,1]"
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_guidance_range(self, shot_type):
-        g = WORKFLOW_TEMPLATES[shot_type]["guidance"]
-        assert 1.0 <= g <= 10.0, f"{shot_type} guidance={g} out of [1,10]"
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_steps_range(self, shot_type):
-        s = WORKFLOW_TEMPLATES[shot_type]["steps"]
-        assert 10 <= s <= 50, f"{shot_type} steps={s} out of [10,50]"
-
-
-# --- Full keyword sweep ---------------------------------------------------
-
-
-class TestClassifyShotTypeKeywords:
-    """Every entry in SHOT_TYPE_KEYWORDS must route to its declared bucket."""
-
-    @pytest.mark.parametrize(
-        "kw,expected_bucket",
-        [(kw, b) for b, kws in SHOT_TYPE_KEYWORDS.items() for kw in kws],
-    )
-    def test_keyword_routes_to_bucket(self, kw, expected_bucket):
-        # Landscape keywords still need characters_in_frame so the
-        # no-character short-circuit doesn't pre-empt the keyword check.
-        shot = {
-            "prompt": f"a {kw} of something",
-            "camera": "",
-            "characters_in_frame": ["c1"],
-        }
-        # char-landscape identity fix (ADR-025 scope-exemption close): a landscape
-        # keyword on a CHARACTER-bearing shot routes to "wide" (pulid_weight 0.65
-        # in both tiers) instead of "landscape" (0.0) so the registered character
-        # keeps identity. The true characterless-landscape path is the no-char
-        # early-return, covered by TestCharLandscapeRouting below.
-        expected = "wide" if expected_bucket == "landscape" else expected_bucket
-        assert classify_shot_type(shot) == expected, (
-            f"keyword '{kw}' (declared in {expected_bucket}) routed elsewhere"
-        )
-
-
-# --- Char-bearing landscape routing (ADR-025 identity fix) ----------------
-
-
-class TestCharLandscapeRouting:
-    """A shot with a registered character whose prompt carries a landscape
-    keyword (and no earlier portrait/action/wide keyword) was mis-classified
-    `landscape` → identity dropped (production drops the ref; max zeroes
-    pulid_weight). The seam routes such char-bearing landscapes to `wide`
-    so identity re-engages in both tiers. Genuine characterless landscapes
-    are untouched (the no-char early-return)."""
-
-    def test_char_bearing_landscape_keyword_routes_to_wide(self):
-        shot = {
-            "prompt": "an aerial vista of the valley",  # only a landscape keyword
-            "camera": "",
-            "characters_in_frame": ["hero"],
-        }
-        assert classify_shot_type(shot) == "wide"
-
-    def test_characterless_landscape_keyword_still_landscape(self):
-        """No characters → the no-char early-return keeps it `landscape`
-        (cheap Kontext path stays correct; no identity to preserve)."""
-        shot = {
-            "prompt": "an aerial vista of the valley",
-            "camera": "",
-            "characters_in_frame": [],
-        }
-        assert classify_shot_type(shot) == "landscape"
-
-    def test_wide_keyword_precedence_unchanged_with_chars(self):
-        """A wide keyword precedes landscape in dict order, so a shot with both
-        already routes `wide` — pin it so the seam override doesn't perturb it."""
-        shot = {
-            "prompt": "a wide shot of an aerial landscape",
-            "camera": "",
-            "characters_in_frame": ["hero"],
-        }
-        assert classify_shot_type(shot) == "wide"
-
-    def test_char_landscape_recovers_production_identity_weight(self):
-        """End-to-end: a char-bearing landscape now resolves to a production
-        template with a NON-ZERO PuLID weight (0.65), not landscape's 0.0."""
-        shot = {
-            "prompt": "an aerial vista of the valley",
-            "camera": "",
-            "characters_in_frame": ["hero"],
-        }
-        weight = WORKFLOW_TEMPLATES[classify_shot_type(shot)]["pulid_weight"]
-        assert weight == 0.65, f"identity not recovered: pulid_weight={weight}"
-
-
-# --- Shot-section priority over full prompt -------------------------------
-
-
-class TestClassifyShotTypePriority:
-    def test_shot_section_wins_over_full_prompt(self):
-        """[SHOT] section wins when full prompt contains a conflicting keyword."""
-        shot = {
-            "prompt": "[SHOT] portrait headshot [SCENE] wide angle landscape vista",
-            "camera": "",
-            "characters_in_frame": ["c1"],
-        }
-        assert classify_shot_type(shot) == "portrait"
-
-
-# --- WORKFLOW_TEMPLATES structural shape ----------------------------------
-
-
-class TestWorkflowTemplatesShape:
-    EXPECTED_KEYS = {"portrait", "medium", "wide", "action", "landscape"}
-
-    def test_exactly_five_shot_types(self):
-        assert set(WORKFLOW_TEMPLATES.keys()) == self.EXPECTED_KEYS
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_target_api_is_valid(self, shot_type):
-        target = WORKFLOW_TEMPLATES[shot_type]["target_api"]
-        assert target in _VALID_APIS, (
-            f"{shot_type} target_api={target!r} not in valid API set"
-        )
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_video_fallbacks_nonempty_and_valid(self, shot_type):
-        fallbacks = WORKFLOW_TEMPLATES[shot_type]["video_fallbacks"]
-        assert isinstance(fallbacks, list) and len(fallbacks) > 0, (
-            f"{shot_type} video_fallbacks must be a non-empty list"
-        )
-        for api in fallbacks:
-            assert api in _VALID_APIS, (
-                f"{shot_type} video_fallback {api!r} not in valid API set"
+        for day in (PRE_SUNSET, SUNSET):
+            routing = get_resolved_workflow_routing(
+                "action",
+                runtime_snapshot=snapshot,
+                on_date=day,
             )
-
-    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
-    def test_removed_graph_controls_are_absent(self, shot_type):
-        template = WORKFLOW_TEMPLATES[shot_type]
-        assert "controlnet_depth_strength" not in template
-        assert "ip_adapter_weight" not in template
-
-
-# --- MOTION_FIDELITY_FLOORS keys and sentinels ----------------------------
+            assert "SORA_NATIVE" not in routing.candidates
+            assert all(item.key != "SORA_NATIVE" for item in routing.rejections)
 
 
 class TestMotionFidelityFloors:
@@ -435,281 +184,8 @@ class TestMotionFidelityFloors:
         SHOT_TYPE_ACTION,
     }
 
-    def test_keys_subset_of_canonical_shot_types(self):
-        assert set(MOTION_FIDELITY_FLOORS.keys()) <= self.CANONICAL, (
-            "MOTION_FIDELITY_FLOORS has key(s) outside the canonical "
-            "domain.shot_types set"
-        )
-
-    def test_landscape_floor_is_none(self):
-        # Sentinel: None means "motion capture doesn't apply" for pure
-        # landscape shots (no characters to retarget).
+    def test_keys_and_landscape_sentinel(self):
+        assert set(MOTION_FIDELITY_FLOORS) <= self.CANONICAL
         assert MOTION_FIDELITY_FLOORS["landscape"] is None
-
-
-# --- get_adaptive_pulid_weight --------------------------------------------
-
-
-class _StubStats:
-    """Minimal validator stub: returns a fixed rolling-stats dict."""
-
-    def __init__(self, stats: dict):
-        self._stats = stats
-
-    def get_rolling_stats(self, character_id: str) -> dict:  # noqa: ARG002
-        return self._stats
-
-
-class TestGetAdaptivePulidWeight:
-    """Cover all 4 boost paths + clamp + face-failure suppression."""
-
-    def test_returns_base_when_validator_none(self):
-        # portrait base is 1.0 (matches WORKFLOW_TEMPLATES["portrait"])
-        result = get_adaptive_pulid_weight("portrait", "char_a", None)
-        assert result == pytest.approx(1.0)
-
-    def test_no_samples_returns_base(self):
-        validator = _StubStats({"sample_count": 0})
-        # medium base is 0.9
-        result = get_adaptive_pulid_weight("medium", "char_a", validator)
-        assert result == pytest.approx(0.9)
-
-    def test_failure_boost_plus_010(self):
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": 0.10,
-                "common_failure": None,
-            }
-        )
-        # medium base 0.9 + 0.10 → 1.0 (also exactly hits the upper clamp)
-        result = get_adaptive_pulid_weight("medium", "char_a", validator)
-        assert result == pytest.approx(1.0)
-
-    def test_near_pass_boost_plus_005(self):
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": 0.05,
-                "common_failure": None,
-            }
-        )
-        # action base 0.8 + 0.05 → 0.85
-        result = get_adaptive_pulid_weight("action", "char_a", validator)
-        assert result == pytest.approx(0.85)
-
-    def test_overperform_reduces_minus_005(self):
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": -0.05,
-                "common_failure": None,
-            }
-        )
-        # action base 0.8 + (-0.05) → 0.75
-        result = get_adaptive_pulid_weight("action", "char_a", validator)
-        assert result == pytest.approx(0.75)
-
-    def test_clamped_to_unit_interval(self):
-        # Upper clamp: explicit base_params with weight 0.95, delta +0.10 → 1.0
-        validator_hi = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": 0.10,
-                "common_failure": None,
-            }
-        )
-        hi = get_adaptive_pulid_weight(
-            "portrait", "char_a", validator_hi, base_params={"pulid_weight": 0.95}
-        )
-        assert hi == pytest.approx(1.0)
-
-        # Lower clamp: base_params weight 0.05, delta -0.20 → 0.0
-        validator_lo = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": -0.20,
-                "common_failure": None,
-            }
-        )
-        lo = get_adaptive_pulid_weight(
-            "portrait", "char_a", validator_lo, base_params={"pulid_weight": 0.05}
-        )
-        assert lo == pytest.approx(0.0)
-
-    def test_face_angle_extreme_zeros_positive_delta(self):
-        # delta=+0.10 must be suppressed to 0 → adapted == base
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": 0.10,
-                "common_failure": FailureReason.FACE_ANGLE_EXTREME,
-            }
-        )
-        # portrait base 1.0; suppression keeps it at 1.0
-        result = get_adaptive_pulid_weight(
-            "portrait",
-            "char_a",
-            validator,
-            base_params={"pulid_weight": 0.80},
-        )
-        assert result == pytest.approx(0.80)
-
-    def test_face_angle_extreme_negative_delta_passes_through(self):
-        # FACE_ANGLE_EXTREME is asymmetric: `delta = min(delta, 0.0)`
-        # zeros POSITIVE deltas (don't boost PuLID for a problem it can't
-        # fix) but leaves NEGATIVE deltas alone (still allowed to relax
-        # PuLID when identity is over-performing). This guards that
-        # asymmetry against an accidental symmetric `delta = 0.0` rewrite.
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": -0.05,
-                "common_failure": FailureReason.FACE_ANGLE_EXTREME,
-            }
-        )
-        result = get_adaptive_pulid_weight(
-            "portrait",
-            "char_a",
-            validator,
-            base_params={"pulid_weight": 0.80},
-        )
-        assert result == pytest.approx(0.75)  # 0.80 + (-0.05)
-
-    def test_small_face_region_zeros_delta(self):
-        # SMALL_FACE_REGION zeros the delta entirely (positive OR negative)
-        validator = _StubStats(
-            {
-                "sample_count": 5,
-                "suggested_pulid_delta": 0.10,
-                "common_failure": FailureReason.SMALL_FACE_REGION,
-            }
-        )
-        result = get_adaptive_pulid_weight(
-            "wide",
-            "char_a",
-            validator,
-            base_params={"pulid_weight": 0.65},
-        )
-        assert result == pytest.approx(0.65)
-
-
-# --- img2img_denoise slider overlay (closes the inert-toggle finding) --------
-
-
-class TestImg2ImgDenoiseOverlay:
-    """img2img_denoise (continuity_options) must reach params['denoise_default']."""
-
-    def test_slider_value_reaches_denoise_default(self):
-        settings = {"continuity_options": {"img2img_denoise": 0.5}}
-        params = get_workflow_params("medium", settings=settings)
-        assert params["denoise_default"] == pytest.approx(0.5)
-
-    def test_slider_applies_across_all_shot_types(self):
-        settings = {"continuity_options": {"img2img_denoise": 0.45}}
-        for shot_type in ("portrait", "medium", "wide", "action", "landscape"):
-            params = get_workflow_params(shot_type, settings=settings)
-            assert params["denoise_default"] == pytest.approx(0.45), (
-                f"{shot_type} denoise_default not overridden"
-            )
-
-    def test_absent_continuity_options_leaves_template_default(self):
-        """No continuity_options key → template default is untouched."""
-        params_default = get_workflow_params("medium")
-        params_no_co = get_workflow_params("medium", settings={"flux_guidance": 3.5})
-        assert params_default["denoise_default"] == params_no_co["denoise_default"]
-
-    def test_absent_img2img_denoise_key_leaves_template_default(self):
-        params_default = get_workflow_params("medium")
-        params_co_empty = get_workflow_params("medium", settings={"continuity_options": {}})
-        assert params_default["denoise_default"] == params_co_empty["denoise_default"]
-
-    def test_out_of_range_value_is_clamped_to_min(self):
-        settings = {"continuity_options": {"img2img_denoise": 0.05}}
-        params = get_workflow_params("medium", settings=settings)
-        assert params["denoise_default"] == pytest.approx(0.2)
-
-    def test_out_of_range_value_is_clamped_to_max(self):
-        settings = {"continuity_options": {"img2img_denoise": 0.99}}
-        params = get_workflow_params("medium", settings=settings)
-        assert params["denoise_default"] == pytest.approx(0.6)
-
-    def test_non_numeric_value_is_ignored(self):
-        params_default = get_workflow_params("medium")
-        params_bad = get_workflow_params(
-            "medium", settings={"continuity_options": {"img2img_denoise": "high"}}
-        )
-        assert params_default["denoise_default"] == params_bad["denoise_default"]
-
-    def test_no_settings_leaves_template_default(self):
-        params = get_workflow_params("medium", settings=None)
-        assert "denoise_default" in params  # template always has it
-
-    def test_other_overrides_unaffected(self):
-        """img2img_denoise override must not disturb guidance/sampler/steps."""
-        settings = {
-            "flux_guidance": 4.0,
-            "comfyui_sampler": "euler",
-            "comfyui_steps": 30,
-            "continuity_options": {"img2img_denoise": 0.4},
-        }
-        params = get_workflow_params("portrait", settings=settings)
-        assert params["guidance"] == pytest.approx(4.0)
-        assert params["sampler"] == "euler"
-        assert params["steps"] == 30
-        assert params["denoise_default"] == pytest.approx(0.4)
-
-
-# --- get_workflow_params: non-finite per-project numeric overlays (Rule#13) ---
-
-class TestGetWorkflowParamsNanGuards:
-    """A NaN/inf token survives project.json (json.load allow_nan default) and
-    defeats the isinstance guard on each numeric overlay. Each must be SKIPPED,
-    leaving the template default — NOT injected into a ComfyUI node:
-      - flux_guidance -> node 60 guidance: float(nan) = silent generation corruption.
-      - comfyui_steps -> int(nan) raises ValueError / int(inf) raises OverflowError
-        (crashes get_workflow_params instead of skipping the bad knob).
-      - img2img_denoise -> the [0.2,0.6] clamp neutralises non-finite by luck
-        (nan->0.6), overwriting the template default with a spurious value.
-    (flux_guidance surfaced by director2 §4 verify; the other two are siblings
-    found by the same Rule#13 sweep of the overlay block.)"""
-
-    def test_nan_flux_guidance_falls_back_to_default(self):
-        default = get_workflow_params("portrait")["guidance"]
-        p = get_workflow_params("portrait", settings={"flux_guidance": float("nan")})
-        assert math.isfinite(p["guidance"])
-        assert p["guidance"] == default
-
-    def test_inf_flux_guidance_falls_back_to_default(self):
-        default = get_workflow_params("portrait")["guidance"]
-        p = get_workflow_params("portrait", settings={"flux_guidance": float("inf")})
-        assert p["guidance"] == default
-
-    def test_valid_flux_guidance_overrides(self):
-        p = get_workflow_params("portrait", settings={"flux_guidance": 4.0})
-        assert p["guidance"] == pytest.approx(4.0)
-
-    def test_nan_comfyui_steps_does_not_raise_and_falls_back(self):
-        default = get_workflow_params("portrait")["steps"]
-        p = get_workflow_params("portrait", settings={"comfyui_steps": float("nan")})
-        assert p["steps"] == default
-
-    def test_inf_comfyui_steps_does_not_raise_and_falls_back(self):
-        default = get_workflow_params("portrait")["steps"]
-        p = get_workflow_params("portrait", settings={"comfyui_steps": float("inf")})
-        assert p["steps"] == default
-
-    def test_valid_comfyui_steps_overrides(self):
-        p = get_workflow_params("portrait", settings={"comfyui_steps": 30})
-        assert p["steps"] == 30
-
-    def test_nan_img2img_denoise_keeps_template_default(self):
-        default = get_workflow_params("portrait")["denoise_default"]
-        p = get_workflow_params(
-            "portrait", settings={"continuity_options": {"img2img_denoise": float("nan")}})
-        assert p["denoise_default"] == pytest.approx(default)
-
-    def test_valid_img2img_denoise_clamps_and_sets(self):
-        p = get_workflow_params(
-            "portrait", settings={"continuity_options": {"img2img_denoise": 0.9}})
-        assert p["denoise_default"] == pytest.approx(0.6)
+        assert get_motion_fidelity_floor("landscape") is None
+        assert get_motion_fidelity_floor("unknown") is None

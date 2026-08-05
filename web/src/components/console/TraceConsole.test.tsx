@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { expectNoAxeViolations } from '../../test/a11y-setup'
 import TraceConsole from './TraceConsole'
 
 function jsonResponse(payload: unknown): Response {
@@ -55,7 +56,7 @@ describe('TraceConsole', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    render(<TraceConsole projectId="project-1" isStreaming={false} />)
+    const { container } = render(<TraceConsole projectId="project-1" isStreaming={false} />)
 
     expect(await screen.findByText('Provider latency warning')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Search trace messages and fields'), 'recovery')
@@ -75,5 +76,6 @@ describe('TraceConsole', () => {
       expect.stringContaining('before=40'),
       expect.objectContaining({ signal: undefined }),
     )
+    await expectNoAxeViolations(container)
   })
 })

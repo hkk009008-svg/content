@@ -355,23 +355,9 @@ class TestCoStarFalsePositiveClosed:
 class TestCalibrationAgainstJson:
     """
     Verify that the binding decision logic (pure Python, no DeepFace)
-    reproduces expected binding_ok verdicts for s2_dual_n1-4 and pass_a
-    using FIGURE-READ-ONLY scores from the probe report 2026-06-12.
-
-    Source: scripts/_probe_halves_faces.py firsthand probe (committed artifact
-    logs/halves_faces_probe_20260612.json); FIGURE reads = largest OK detection
-    per half crop (area >= 1% of image, not a whole-image fallback box).
-
-    Updated from the polluted halves_rescore_20260612.json fixture by operator
-    reconciliation (2026-06-12T21:16:46Z); this re-emission supersedes that
-    table.  See also: logs/halves_rescore_20260612_filtered.{json,txt}.
-
-    S2 prompt (scripts/_max_s2_dual_pulid.py, lines 30-33):
-        "a woman with short dark wavy hair on the left and a middle-aged
-         man with a grey beard on the right, standing together in a sunlit
-         meadow, medium two-shot, both faces clearly visible,
-         photorealistic, cinematic"
-    → intended slots: aria=left, man=right
+    reproduces expected binding_ok verdicts for captured two-character
+    regression vectors. FIGURE reads use the largest OK detection per half
+    crop (area >= 1% of image, not a whole-image fallback box).
 
     FILTERED binding verdicts (figure reads only):
       n1:  man-right=0.466 vs man-left=0.728 → man binding FALSE
@@ -1010,7 +996,7 @@ class TestRepresentDeterminism:
                           ("represent", "GhostFaceNet"), ("set", 10)]
 
     def test_tbb_no_fallback_then_restores(self):
-        """TBB/pthreads backend (Linux pod): setNumThreads(1) yields 1, so the
+        """TBB/pthreads backend (Linux worker): setNumThreads(1) yields 1, so the
         fallback is NOT taken; the prior count is restored after represent."""
         from identity import validator
 

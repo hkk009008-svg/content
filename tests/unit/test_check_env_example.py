@@ -57,9 +57,15 @@ def test_read_settings_env_keys_extracts_typed_reader_calls(tmp_path):
     settings = _write_settings(
         tmp_path,
         'a = _optional_env("OPTIONAL_KEY")\n'
-        'b = _parse_int("COUNT_KEY", 8, minimum=1)\n',
+        'b = _parse_int("COUNT_KEY", 8, minimum=1)\n'
+        'c = _secret_env("TOKEN_KEY")\n',
     )
-    assert read_settings_env_keys(settings) == {"OPTIONAL_KEY", "COUNT_KEY"}
+    assert read_settings_env_keys(settings) == {
+        "OPTIONAL_KEY",
+        "COUNT_KEY",
+        "TOKEN_KEY",
+        "TOKEN_KEY_FILE",
+    }
 
 
 def test_read_example_row_keys_only_matches_line_start_assignments(tmp_path):

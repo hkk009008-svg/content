@@ -1,0 +1,19 @@
+{
+  "UNETLoader": {"input": {"required": {"unet_name": [["flux-2-klein-4b-fp8.safetensors"]], "weight_dtype": [["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"]]}}, "output": ["MODEL"]},
+  "CLIPLoader": {"input": {"required": {"clip_name": [["qwen_3_4b.safetensors"]], "type": [["stable_diffusion", "flux2"]]}, "optional": {"device": [["default", "cpu"]]}}, "output": ["CLIP"]},
+  "VAELoader": {"input": {"required": {"vae_name": [["flux2-klein-vae-bf16.safetensors"]]}}, "output": ["VAE"]},
+  "CLIPTextEncode": {"input": {"required": {"text": ["STRING"], "clip": ["CLIP"]}}, "output": ["CONDITIONING"]},
+  "ConditioningZeroOut": {"input": {"required": {"conditioning": ["CONDITIONING"]}}, "output": ["CONDITIONING"]},
+  "LoadImage": {"input": {"required": {"image": [["reference-1.png", "reference-2.png", "reference-3.png", "reference-4.png", "reference-5.png", "reference-6.png", "reference-7.png", "reference-8.png", "reference-9.png", "reference-10.png"]]}}, "output": ["IMAGE", "MASK"]},
+  "ImageScaleToTotalPixels": {"input": {"required": {"image": ["IMAGE"], "upscale_method": [["nearest-exact", "bilinear", "area", "bicubic", "lanczos"]], "megapixels": ["FLOAT"], "resolution_steps": ["INT"]}}, "output": ["IMAGE"]},
+  "VAEEncode": {"input": {"required": {"pixels": ["IMAGE"], "vae": ["VAE"]}}, "output": ["LATENT"]},
+  "ReferenceLatent": {"input": {"required": {"conditioning": ["CONDITIONING"]}, "optional": {"latent": ["LATENT"]}}, "output": ["CONDITIONING"]},
+  "CFGGuider": {"input": {"required": {"model": ["MODEL"], "positive": ["CONDITIONING"], "negative": ["CONDITIONING"], "cfg": ["FLOAT"]}}, "output": ["GUIDER"]},
+  "RandomNoise": {"input": {"required": {"noise_seed": ["INT"]}}, "output": ["NOISE"]},
+  "KSamplerSelect": {"input": {"required": {"sampler_name": [["euler"]]}}, "output": ["SAMPLER"]},
+  "Flux2Scheduler": {"input": {"required": {"steps": ["INT"], "width": ["INT"], "height": ["INT"]}}, "output": ["SIGMAS"]},
+  "EmptyFlux2LatentImage": {"input": {"required": {"width": ["INT"], "height": ["INT"], "batch_size": ["INT"]}}, "output": ["LATENT"]},
+  "SamplerCustomAdvanced": {"input": {"required": {"noise": ["NOISE"], "guider": ["GUIDER"], "sampler": ["SAMPLER"], "sigmas": ["SIGMAS"], "latent_image": ["LATENT"]}}, "output": ["LATENT", "LATENT"]},
+  "VAEDecode": {"input": {"required": {"samples": ["LATENT"], "vae": ["VAE"]}}, "output": ["IMAGE"]},
+  "SaveImage": {"input": {"required": {"images": ["IMAGE"], "filename_prefix": ["STRING"]}}, "output": ["IMAGE"]}
+}

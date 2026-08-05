@@ -28,7 +28,8 @@ Each frame produces:
 ### Validation Result
 - **Pass**: `mean_similarity >= threshold` for the shot type
 - **Fail**: Triggers face swap pipeline or shot re-generation
-- **Rolling stats**: Fed back to PuLID weight adjustment system
+- **Evidence**: Stored with the artifact version; failure drives a new version,
+  explicit correction, or manual review rather than a hidden graph adjustment
 
 ---
 
@@ -135,7 +136,7 @@ Two operational modes for audio-visual synchronization.
 
 ## 5. Video Upscaling
 
-**Source**: `lip_sync.py` (SeedVR2); Real-ESRGAN is in the ComfyUI workflow (`pulid.json`)
+**Source**: `lip_sync.py` (SeedVR2)
 
 ### SeedVR2 (Preferred)
 - **Temporally consistent** upscaling — no inter-frame flicker
@@ -143,18 +144,10 @@ Two operational modes for audio-visual synchronization.
 - Cloud-based via FAL
 - Best for: All final exports
 
-### Real-ESRGAN 4x (Fallback)
-- Per-frame upscaling
-- Can introduce temporal inconsistency (shimmer between frames)
-- Available in ComfyUI workflow (`pulid.json` nodes 500-502)
-- Upscales to 2688x1536 (2.7K cinema resolution)
-- Uses Lanczos resampling
-
 ### When to Use Which
 | Scenario | Method | Rationale |
 |----------|--------|-----------|
 | Final export | SeedVR2 | Temporal consistency |
-| ComfyUI pipeline | Real-ESRGAN | Built into workflow |
 | Quick preview | Neither | Save compute |
 | 4K source (LTX) | Neither | Already at target resolution |
 

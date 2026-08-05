@@ -26,14 +26,10 @@ LEDGER: list[Claim] = [
           "SHOT_TYPE_THRESHOLDS strict/std/lenient per shot type"),
     Claim("ID-02", "identity", "manual §4 Stage2 / identity/types.py:101", "offline", "asserted",
           "get_threshold_for_shot degrades standard->lenient linearly across attempts"),
-    Claim("ID-03", "identity", "manual §4 Stage2 / face_validator_gate.py:213", "offline", "cross-linked",
-          "composite = 0.6*arc + 0.4*aesthetic; missing component -> 0.5"),
-    Claim("ID-04", "identity", "manual §4 Stage2 / face_validator_gate.py:228", "offline", "cross-linked",
-          "should_halt: composite-only at 0.92 once n>=halt_min_n (or n>=halt_max_n)"),
-    Claim("ID-05", "identity", "manual §3.10 / identity/validator.py:266", "offline", "asserted",
-          "get_rolling_stats suggested_pulid_delta from success_rate windows"),
-    Claim("ID-06", "identity", "manual §3.10 / identity/validator.py:684", "offline", "asserted",
-          "_compute_pulid_delta from per-frame similarity + matched flag"),
+    Claim("ID-05", "identity", "manual §3.10 / identity/validator.py", "offline", "asserted",
+          "character aggregation preserves the specific identity failure reason"),
+    Claim("ID-06", "identity", "manual §3.10 / identity/types.py", "offline", "asserted",
+          "identity diagnostics contain no provider-specific generation controls"),
     Claim("ID-07", "identity", "manual §3.10 / identity/validator.py:365", "offline", "asserted",
           "_compute_sample_positions: density-by-shot-type, clamp [3,10], anchors 10/50/90%"),
     Claim("ID-LIVE-01", "identity", "manual §5.4 / spec §4 Identity", "live", "asserted",
@@ -85,10 +81,6 @@ LEDGER: list[Claim] = [
           "_strip_json_fences strips ```json/``` fences; passthrough when no fence"),
     Claim("CD-06", "gates_orchestration", "spec §4 Gates / llm/chief_director.py:653", "offline", "asserted",
           "get_diagnostic_summary empty sentinel + per-entry [stage] decision (score=) line"),
-    # INTENDED_NOT_WIRED stub (spec §6) — already pinned; documented in the ledger as a gap
-    Claim("GATE-NW-01", "gates_orchestration", "spec §6 / face_validator_gate.py:303", "offline", "INTENDED_NOT_WIRED",
-          "should_halt budget_only falls back to composite_only (never-early-halt deferred); "
-          "pinned by tests/unit/test_should_halt_conjunctive.py::TestBudgetOnlyModeDeferred"),
     # cross-links — already covered in tests/unit; mapped here so the ledger is a complete picture
     Claim("GATE-XL-01", "gates_orchestration", "spec §4 Headless / cinema/review/controller.py:558", "offline", "cross-linked",
           "headless _wait_for_gate raises GateNotSatisfiedError when gate unsatisfied "

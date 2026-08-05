@@ -64,7 +64,7 @@ def _controller():
     return controller, project, shot
 
 
-def test_unknown_comfyui_state_reenters_exact_take_for_provider_id_recovery():
+def test_unknown_local_state_reenters_exact_take_for_provider_id_recovery():
     controller, _project, shot = _controller()
     provider_calls = []
     controller._take_output_path = MagicMock(
@@ -74,10 +74,10 @@ def test_unknown_comfyui_state_reenters_exact_take_for_provider_id_recovery():
     def _unknown_provider(*args, **kwargs):
         provider_calls.append((args, kwargs))
         recovery = {
-            "engine": "COMFYUI_PULID",
+            "engine": "FLUX2_KLEIN_LOCAL",
             "status": "recovery_required",
             "provider_status": "job_state_unknown",
-            "reason": "Reconcile ComfyUI before retrying.",
+            "reason": "Reconcile the local worker before retrying.",
             "job_id": "prompt-123",
         }
         if len(provider_calls) == 1:
@@ -94,7 +94,7 @@ def test_unknown_comfyui_state_reenters_exact_take_for_provider_id_recovery():
     assert first["deferred_job"]["job_id"] == "prompt-123"
     assert "attempt_id" not in first["deferred_job"]
     assert second["error_kind"] == "deferred"
-    # The controller re-enters the adapter so ComfyUI/FAL can poll the saved
+    # The controller re-enters the adapter so the worker can poll the saved
     # provider ID, but it reuses the exact logical output/take identity. The
     # durable paid wrapper therefore resumes instead of submitting again.
     assert len(provider_calls) == 2
@@ -113,7 +113,7 @@ def test_unknown_comfyui_state_reenters_exact_take_for_provider_id_recovery():
 def test_operator_resolution_clears_marker_and_appends_audit_diagnostic():
     controller, _project, shot = _controller()
     shot["deferred_keyframe_job"] = {
-        "engine": "COMFYUI_PULID",
+        "engine": "FLUX2_KLEIN_LOCAL",
         "status": "recovery_required",
         "provider_status": "job_state_unknown",
         "job_id": "prompt-123",
@@ -166,7 +166,7 @@ def test_late_completion_cannot_clear_or_publish_over_a_newer_attempt(tmp_path):
         }
         assert controller._claim_deferred_keyframe_job("shot_1", newer)["claimed"] is True
         output.write_bytes(b"image")
-        return ImageGenResult(str(output), "COMFYUI_PULID")
+        return ImageGenResult(str(output), "FLUX2_KLEIN_LOCAL")
 
     with patch("cinema.shots.controller.generate_ai_broll", _late_provider):
         result = controller.generate_keyframe_take("scene_1", "shot_1")
@@ -223,7 +223,7 @@ def test_terminal_generation_failure_records_billed_reject_without_deferring():
 def test_idle_state_routes_persisted_recovery_back_to_keyframe_review(monkeypatch):
     _controller_instance, project, shot = _controller()
     shot["deferred_keyframe_job"] = {
-        "engine": "COMFYUI_PULID",
+        "engine": "FLUX2_KLEIN_LOCAL",
         "status": "recovery_required",
         "provider_status": "job_state_unknown",
     }

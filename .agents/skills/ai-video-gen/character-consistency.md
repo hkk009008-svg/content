@@ -117,14 +117,17 @@ This prevents infinite retry loops while keeping early attempts strict.
 |--------|-------------|-------------|
 | `NO_FACE_DETECTED` | No face found in frame | Check framing, increase subject size |
 | `LOW_CONFIDENCE_DETECTION` | Face detected but low confidence | Improve lighting, reduce occlusion |
-| `FACE_ANGLE_EXTREME` | Profile/back view, can't compare | Accept — PuLID boost won't help |
+| `FACE_ANGLE_EXTREME` | Profile/back view, can't compare | Preserve the diagnostic; request a reviewable angle if identity must be proven |
 | `OCCLUSION` | Face partially hidden | Adjust composition, remove obstructions |
 | `WRONG_PERSON` | Face matches a different character | Check subject binding references |
 | `MULTIPLE_FACES_AMBIGUOUS` | Multiple faces, can't determine target | Specify primary character, crop |
-| `SMALL_FACE_REGION` | Face too small in frame | Accept for wide shots — PuLID boost won't help |
+| `SMALL_FACE_REGION` | Face too small in frame | Preserve the diagnostic; use framing or manual review rather than a hidden generator adjustment |
 | `POOR_LIGHTING` | Lighting prevents reliable comparison | Improve scene lighting constraints |
 
-**Critical**: `FACE_ANGLE_EXTREME` and `SMALL_FACE_REGION` should NOT trigger PuLID weight increases — they are inherent to the shot type, not identity failures.
+**Critical**: `FACE_ANGLE_EXTREME` and `SMALL_FACE_REGION` do not authorize a
+generator adjustment. They describe why the evidence is weak. Preserve the
+truthful outcome and use framing, an approved reference, regeneration, or
+manual review as appropriate.
 
 ---
 
@@ -151,25 +154,20 @@ Without anchors, GPT-4o's scene decomposition subtly rephrases character descrip
 
 ---
 
-## Rolling Statistics for PuLID Feedback
+## Evidence and remediation
 
-From `identity/validator.py:get_rolling_stats()`:
+Identity results are immutable evidence for the generated artifact, not a
+feedback parameter for a mutable graph. Keep the approved reference hashes,
+artifact/provider/model/seed provenance, sampled-frame diagnostics, threshold,
+and failure reason together.
 
-```python
-stats = get_rolling_stats(character_id)  # window=10 is the default
-# Returns:
-#   mean_similarity: float     # average across last 10 validations
-#   success_rate: float        # % of validations that passed
-#   common_failure: FailureReason  # most frequent failure type
-#   suggested_pulid_delta: float   # recommended weight adjustment
-```
+On failure:
 
-This feeds into `workflow_selector.py:get_adaptive_pulid_weight()`:
-- `success_rate < 0.5` → delta = +0.10 (boost PuLID hard)
-- `success_rate < 0.8` → delta = +0.05 (moderate boost)
-- `success_rate == 1.0 AND mean_similarity > 0.80` → delta = −0.05 (relax PuLID)
-- else → delta = 0.0
-- `common_failure` is FACE_ANGLE_EXTREME or SMALL_FACE_REGION → delta = 0.0
+- verify that the intended approved references were bound to the provider;
+- check whether framing, occlusion, lighting, or multiple subjects made the
+  comparison unsuitable;
+- create a new artifact version for any regeneration or face correction; and
+- return `IDENTITY_UNVERIFIED` or manual review when usable evidence is absent.
 
 ---
 

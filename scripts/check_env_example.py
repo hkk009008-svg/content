@@ -52,13 +52,18 @@ EXAMPLE_PATH = ROOT / ".env.example"
 _ENV_CALL_RE = re.compile(
     r'_(?:env|optional_env|parse_int)\(\s*"([A-Z0-9_]+)"'
 )
+_SECRET_ENV_CALL_RE = re.compile(r'_secret_env\(\s*"([A-Z0-9_]+)"')
 _ROW_KEY_RE = re.compile(r'^([A-Z][A-Z0-9_]*)=', re.MULTILINE)
 
 
 def read_settings_env_keys(settings_path: Path = SETTINGS_PATH) -> set[str]:
     """Return every literal KEY passed to a supported env-reader helper."""
     src = settings_path.read_text()
-    return set(_ENV_CALL_RE.findall(src))
+    keys = set(_ENV_CALL_RE.findall(src))
+    for key in _SECRET_ENV_CALL_RE.findall(src):
+        keys.add(key)
+        keys.add(f"{key}_FILE")
+    return keys
 
 
 def read_example_text(example_path: Path = EXAMPLE_PATH) -> str:

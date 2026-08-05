@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-08-05T00:00:00Z",
+  "platform": {
+    "operating_system": "Windows 11",
+    "architecture": "AMD64",
+    "python": "3.12"
+  },
+  "python_packages": {
+    "torch": "2.11.0+cu130",
+    "torchvision": "0.26.0+cu130",
+    "torchaudio": "2.11.0+cu130",
+    "numpy": "1.26.4",
+    "mediapipe": "0.10.14",
+    "onnxruntime": "1.19.2",
+    "opencv-contrib-python": "4.11.0.86"
+  },
+  "wheels": [
+    {
+      "package": "torch",
+      "url": "https://download-r2.pytorch.org/whl/cu130/torch-2.11.0%2Bcu130-cp312-cp312-win_amd64.whl",
+      "sha256": "ef8beae16d781c3244ef28dc7bee6d8871c26bbde65d5bf66e902cb61972c4ab"
+    },
+    {
+      "package": "torchvision",
+      "url": "https://download-r2.pytorch.org/whl/cu130/torchvision-0.26.0%2Bcu130-cp312-cp312-win_amd64.whl",
+      "sha256": "a3578f7c8e8a2724306c68c56873a1675fa7ce45471e18235c720a2ed242fe44"
+    },
+    {
+      "package": "torchaudio",
+      "url": "https://download-r2.pytorch.org/whl/cu130/torchaudio-2.11.0%2Bcu130-cp312-cp312-win_amd64.whl",
+      "sha256": "f74949f9ace1e4a6cf9468bdb3211b9cfa0af6ea348125471ac71c8621d6c77d"
+    }
+  ],
+  "components": [
+    {
+      "id": "comfyui",
+      "repository": "https://github.com/Comfy-Org/ComfyUI.git",
+      "commit": "b1693ecba9f5b65f8c80ab36b195ab963ec92413",
+      "version": "0.30.0",
+      "path": "sources/ComfyUI",
+      "license": "GPL-3.0"
+    },
+    {
+      "id": "liveportrait-kj",
+      "repository": "https://github.com/kijai/ComfyUI-LivePortraitKJ.git",
+      "commit": "4d9dc6205b793ffd0fb319816136d9b8c0dbfdff",
+      "path": "sources/ComfyUI/custom_nodes/ComfyUI-LivePortraitKJ",
+      "license": "MIT"
+    },
+    {
+      "id": "video-helper-suite",
+      "repository": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+      "commit": "4ee72c065db22c9d96c2427954dc69e7b908444b",
+      "path": "sources/ComfyUI/custom_nodes/ComfyUI-VideoHelperSuite",
+      "license": "GPL-3.0"
+    }
+  ]
+}

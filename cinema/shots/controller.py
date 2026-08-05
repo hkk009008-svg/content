@@ -84,6 +84,7 @@ import os
 import stat
 import tempfile
 import time
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
@@ -91,6 +92,7 @@ from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
 from character_manager import get_reference_image
 from cinema.context import PipelineContext, _finite_or
+from config.settings import settings as env_settings
 from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video, stitch_modules, _probe_duration
 from phase_c_vision import face_swap_video_frames
@@ -418,6 +420,147 @@ def _inherit_audio_flags_from_base(base_take: Optional[dict], variant: dict) -> 
 _VEO_SUPPORTED_DURATIONS = ("4s", "6s", "8s")
 _VEO_DURATION_SECONDS = {d: float(d[:-1]) for d in _VEO_SUPPORTED_DURATIONS}
 
+# The production LivePortrait graph runs at 25 fps.  Eight seconds is the
+# reviewed per-shot envelope for the local worker: at most 200 frames enter
+# the GPU batch even when a scene allocation or uploaded reference is longer.
+# Keep the UI's displayed cap synchronized with this backend authority.
+MAX_PERFORMANCE_TAKE_DURATION_S = 8.0
+DEFAULT_PERFORMANCE_TAKE_DURATION_S = 5.0
+
+
+def performance_take_duration_details(
+    scene: Mapping[str, Any],
+) -> tuple[float, float, int]:
+    """Return ``(bounded, scene duration, shot count)`` after one validation.
+
+    Scene duration is an aggregate.  The edit UI presents a per-shot
+    allocation, so dispatch must divide by the real shot count before applying
+    the production cap.  Invalid persisted values fail before provider access
+    instead of expanding into an unbounded frame request.
+    """
+
+    raw_duration = scene.get("duration_seconds", DEFAULT_PERFORMANCE_TAKE_DURATION_S)
+    try:
+        scene_duration = float(raw_duration)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Scene duration is invalid for performance capture") from exc
+    if not math.isfinite(scene_duration) or scene_duration <= 0:
+        raise ValueError(
+            "Scene duration must be finite and greater than zero for performance capture"
+        )
+
+    shots = scene.get("shots")
+    if isinstance(shots, list) and shots:
+        shot_count = len(shots)
+    else:
+        raw_count = scene.get("num_shots", 1)
+        if isinstance(raw_count, bool):
+            raise ValueError("Scene shot count is invalid for performance capture")
+        try:
+            shot_count = int(raw_count)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Scene shot count is invalid for performance capture") from exc
+        if shot_count <= 0:
+            raise ValueError("Scene shot count must be greater than zero")
+
+    return (
+        min(scene_duration / shot_count, MAX_PERFORMANCE_TAKE_DURATION_S),
+        scene_duration,
+        shot_count,
+    )
+
+
+def performance_take_duration_s(scene: Mapping[str, Any]) -> float:
+    """Return the authoritative bounded duration for one performance take."""
+
+    return performance_take_duration_details(scene)[0]
+
+
+_PERFORMANCE_REQUEST_ACTIVE_STATES = frozenset({
+    "preparing",
+    "dispatching",
+    "deferred",
+})
+
+
+class PerformancePaidAttemptAuthorityError(RuntimeError):
+    """The production all-provider paid-attempt snapshot is unavailable."""
+
+
+def _performance_paid_attempts(
+    cost_tracker: Any,
+    *,
+    video_id: str,
+    shot_id: str,
+) -> Optional[list[dict[str, Any]]]:
+    """Return every durable performance attempt for a shot, or ``None``.
+
+    Skip and admission authority must not be scoped to the currently routed
+    provider: a route change cannot make an older accepted job disappear.
+    """
+
+    snapshot = getattr(cost_tracker, "get_paid_attempts_snapshot", None)
+    if not callable(snapshot):
+        return None
+    declared_authority = callable(
+        getattr(type(cost_tracker), "get_paid_attempts_snapshot", None)
+    )
+    try:
+        value = snapshot(video_id)
+    except Exception as exc:
+        logger.warning(
+            "Performance paid-attempt snapshot failed",
+            exc_info=True,
+            extra={"video_id": video_id, "shot_id": shot_id},
+        )
+        if declared_authority:
+            raise PerformancePaidAttemptAuthorityError(
+                "Performance paid-work authority could not be read"
+            ) from exc
+        # Narrow compatibility for legacy fake trackers that do not declare
+        # snapshot authority on their type. Production CostTracker does.
+        return None
+    if not isinstance(value, Mapping) or not isinstance(value.get("attempts"), list):
+        if declared_authority:
+            raise PerformancePaidAttemptAuthorityError(
+                "Performance paid-work authority returned an invalid snapshot"
+            )
+        return None
+    return [
+        dict(attempt)
+        for attempt in value["attempts"]
+        if isinstance(attempt, Mapping)
+        and str(attempt.get("video_id") or "") == video_id
+        and str(attempt.get("shot_id") or "") == shot_id
+        and str(attempt.get("operation") or "") == "performance_capture"
+    ]
+
+
+def _take_reconciles_paid_attempt(shot: Mapping[str, Any], attempt: Mapping[str, Any]) -> bool:
+    """Return whether a stored take is bound to this exact paid job."""
+
+    attempt_id = str(attempt.get("attempt_id") or "")
+    provider_job_id = str(attempt.get("provider_job_id") or "")
+    attempt_engine = str(attempt.get("engine") or "").upper()
+    for take in shot.get("performance_takes") or []:
+        if not isinstance(take, Mapping):
+            continue
+        metadata = take.get("metadata")
+        if not isinstance(metadata, Mapping):
+            continue
+        if attempt_id and str(metadata.get("paid_attempt_id") or "") == attempt_id:
+            return True
+        if (
+            provider_job_id
+            and str(metadata.get("provider_job_id") or "") == provider_job_id
+            and (
+                not attempt_engine
+                or str(metadata.get("engine") or "").upper() == attempt_engine
+            )
+        ):
+            return True
+    return False
+
 
 def _clamp_veo_duration(speech_seconds: float) -> str:
     """Return the shortest Veo-supported duration string >= speech_seconds.
@@ -523,26 +666,19 @@ def _resolve_f1b_audio(
     return host._ensure_scene_audio(scene, _scene_characters(all_characters, scene))
 
 
-def _resolve_identity_strategy(shot, quality_tier, settings, cc):
+def _resolve_identity_strategy(shot, settings, cc):
     """Resolve the per-shot identity-conditioning promise (P1-1 spec §3d).
 
     Pure decision function: replaces the primary-only asset derivation
     (formerly inline at the MAX-TIER WIRE-UP block) and names which characters
-    are promised identity conditioning under which mechanism. quality_tier and
-    style_reference remain the caller's concern — inputs, not outputs.
+    are promised identity conditioning through approved reference assets.
     """
     from cinema.shots.strategy import (
         IdentityStrategy, CharIdentitySpec,
-        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, NO_IDENTITY_ASSET,
-        GEMINI_MULTIREF_PRIMARY_ONLY, GEMINI_MULTIREF_MULTI_CHAR,
+        REFERENCE_PRIMARY_ONLY, REFERENCE_MULTI_CHAR, NO_IDENTITY_ASSET,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
-    char_lora_paths = settings.get("char_lora_paths", {}) or {}
-    char_lora_path = char_lora_paths.get(primary_char_id) or None
-    char_lora_strength = (settings.get("char_lora_strengths", {}) or {}).get(primary_char_id)
-    char_lora_triggers = settings.get("char_lora_triggers", {}) or {}
-    char_lora_trigger = char_lora_triggers.get(primary_char_id) or None
     primary_ref = cc.get("primary_reference")
     secondary = cc.get("secondary_chars") or []
 
@@ -550,45 +686,21 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
         return IdentityStrategy(
             mechanism_tag=NO_IDENTITY_ASSET,
             primary_char_id=primary_char_id,
-            char_lora_path=char_lora_path,
-            char_lora_strength=char_lora_strength,
-            char_lora_trigger=char_lora_trigger,
             unconditioned_chars=list(in_frame),
         )
 
-    # WS3: identity_backend='gemini_multiref' is now the DEFAULT — Nano
-    # Banana is the image PRIMARY for all projects (user-confirmed: "Nano
-    # Banana as image PRIMARY, pod demoted to first fallback"), consistent
-    # with the PRIORITY-0 gate default in phase_c_assembly.py's
-    # generate_ai_broll. It routes the primary through Nano Banana's
-    # multi-reference binding (identity from reference images, not a PuLID
-    # graph) — tag the spec's fidelity accordingly so downstream
-    # validation/telemetry can distinguish it from the production
-    # 'reference' (PuLID) mechanism. A project sets identity_backend='pod'
-    # to opt OUT and keep the production PuLID behavior byte-for-byte.
-    # `or "gemini_multiref"` (not a bare `.get(k, default)`) matches this
-    # function's existing None-safety idiom (see char_lora_path just above)
-    # so a key present-but-None/empty-string also falls to the new default,
-    # not silently to pod.
+    # Both supported image routes condition on approved references; actual
+    # provider provenance is recorded separately after generation.
     is_gemini_multiref = (settings.get("identity_backend") or "gemini_multiref") == "gemini_multiref"
-    primary_fidelity = "gemini_multiref" if is_gemini_multiref else "reference"
 
     conditioned = [CharIdentitySpec(
         char_id=primary_char_id, reference=primary_ref,
         identity_anchor=cc.get("identity_anchor", ""),
         multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
-        # WS1: the max tier is retired — every shot conditions the primary via
-        # the production PuLID graph (ApplyPulidFlux) and is tagged "reference"
-        # — UNLESS the WS3 gemini_multiref backend is selected (see above).
-        fidelity=primary_fidelity,
+        fidelity="reference",
     )]
     conditioned_ids = {primary_char_id}
 
-    # WS1: single identity-derivation path for every tier — the max-tier
-    # per-secondary LoRA fork (fidelity="lora" + MAX_TIER_* tags) was retired
-    # with quality_max.py. WS3 grafts a gemini_multiref branch onto this clean
-    # single-branch shape (plan Rule #13 note) — NOT the deferred, separate
-    # FLUX.2 A/B track.
     if secondary:
         if is_gemini_multiref:
             # Nano Banana budgets REFERENCE IMAGES, not characters — cap the
@@ -599,8 +711,9 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
             secondary_cap = max(0, GEMINI_MULTIREF_MAX_REFS - 1)
         else:
-            # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
-            secondary_cap = 2
+            # Local FLUX.2 accepts at most ten total reference images; reserve
+            # one primary-character slot before its flat reference truncation.
+            secondary_cap = 9
         for entry in secondary[:secondary_cap]:
             conditioned.append(CharIdentitySpec(
                 char_id=entry["char_id"], reference=entry["reference"],
@@ -609,22 +722,16 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
                 # entry.get("multi_angle_refs") is ALWAYS empty via this path
                 # and secondaries can never fill their slots.
                 multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity=primary_fidelity,
+                fidelity="reference",
             ))
             conditioned_ids.add(entry["char_id"])
-        if is_gemini_multiref:
-            tag = GEMINI_MULTIREF_MULTI_CHAR if len(conditioned) > 1 else GEMINI_MULTIREF_PRIMARY_ONLY
-        else:
-            tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
+        tag = REFERENCE_MULTI_CHAR if len(conditioned) > 1 else REFERENCE_PRIMARY_ONLY
     else:
-        tag = GEMINI_MULTIREF_PRIMARY_ONLY if is_gemini_multiref else PRIMARY_ONLY
+        tag = REFERENCE_PRIMARY_ONLY
 
     return IdentityStrategy(
         mechanism_tag=tag,
         primary_char_id=primary_char_id,
-        char_lora_path=char_lora_path,
-        char_lora_strength=char_lora_strength,
-        char_lora_trigger=char_lora_trigger,
         conditioned_chars=conditioned,
         unconditioned_chars=[c for c in in_frame if c not in conditioned_ids],
     )
@@ -1355,7 +1462,7 @@ class ShotController:
             scene,
             prev_shot,
             shot_index,
-            approved_anchor_image=approved_anchor,
+            continuity_reference_path=approved_anchor,
         )
         full_prompt = positive_prompt or enhanced["prompt"]
         if style_suffix:
@@ -1364,17 +1471,22 @@ class ShotController:
         cc = enhanced.get("continuity_config", {})
         primary_ref = cc.get("primary_reference")
 
-        # Pre-spend budget gate (mirrors the motion/performance pattern at
-        # controller.py's generate_motion_take / generate_performance_take):
-        # generate_ai_broll's backend cascade is PRIORITY-0 Gemini
-        # (GEMINI_IMAGE) whenever character_image (== primary_ref) is
-        # truthy (phase_c_assembly.py PRIORITY-0 block); otherwise the
-        # cascade's next entry point is the ComfyUI PuLID path
-        # (COMFYUI_PULID). Checked here — before make_take's progress event
-        # and the prompt-optimizer's own LLM spend below — so a refusal
-        # doesn't burn optimizer cost or emit a misleading progress event
-        # first.
-        _image_engine_estimate = "GEMINI_IMAGE" if primary_ref else "COMFYUI_PULID"
+        # Pre-spend budget gate. Price the first route this exact project can
+        # actually enter; do not reserve a retired backend or a credential-
+        # absent provider. Local FLUX.2 has no marginal API charge, while its
+        # durable job still appears in provider analytics as ``local_gpu``.
+        _identity_backend = settings.get("identity_backend", "gemini_multiref")
+        if _identity_backend == "local_flux2_klein":
+            _image_engine_estimate = "FLUX2_KLEIN_LOCAL"
+        elif (
+            primary_ref
+            and (env_settings.google_api_key or env_settings.gemini_api_key)
+        ):
+            _image_engine_estimate = "GEMINI_IMAGE"
+        elif env_settings.fal_key:
+            _image_engine_estimate = "FLUX_KONTEXT" if primary_ref else "FLUX_PRO"
+        else:
+            _image_engine_estimate = "POLLINATIONS"
         if self.cost_tracker.would_exceed(_image_engine_estimate):
             self.progress(
                 "BUDGET_EXCEEDED",
@@ -1423,20 +1535,9 @@ class ShotController:
             take_id=take["id"],
         )
 
-        # --- MAX-TIER WIRE-UP ---
-        # Forward the project's quality_tier setting + per-character LoRA + style ref
-        # into generate_ai_broll. Backward-compatible: when quality_tier is unset or
-        # 'production', the kwargs default to None/'production' and behavior is
-        # identical to before.
-        quality_tier = settings.get("quality_tier", "production")
-        strategy = _resolve_identity_strategy(shot, quality_tier, settings, cc)
+        strategy = _resolve_identity_strategy(shot, settings, cc)
         primary_char_id = strategy.primary_char_id
-        char_lora_path = strategy.char_lora_path
-        char_lora_strength = strategy.char_lora_strength
         take["metadata"]["identity_strategy"] = strategy.to_metadata_dict()
-        style_refs = settings.get("style_reference_paths", []) or []
-        style_reference = style_refs[0] if style_refs else None
-
         # --- PROMPT OPTIMIZER (highest quality lever) ---
         # When enabled, run the shot prompt through the LLM-based optimizer which
         # produces a cinematography-precise prompt + per-shot API recommendations +
@@ -1521,26 +1622,9 @@ class ShotController:
             identity_anchor_override = cc.get("identity_anchor", "")
             negative_override = negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", "")
 
-        # Image-engine routing — mirror the video-routing AUTO guard above
-        # (shot["target_api"]): a user-pinned shot["image_api"] wins; otherwise
-        # forward the optimizer's suggestion. Guards a future image_api user-pin
-        # from being silently overridden by the optimizer (Lane V #20 M-2).
-        _pinned_image_api = shot.get("image_api", "AUTO")
-        if _pinned_image_api and _pinned_image_api != "AUTO":
-            _image_api_hint = _pinned_image_api
-        elif opt_spec:
-            _image_api_hint = opt_spec.get("suggested_image_api")
-        else:
-            _image_api_hint = None
-
-        # Build a lightweight PipelineContext so max-tier UI knobs
-        # (MaxTierComfyControls + halt overrides) could flow through to a
-        # max-tier dispatch — WS1 already retired that dispatch from
-        # phase_c_assembly.generate_ai_broll (independent of Task 4, which
-        # additionally deleted quality_max.py, the dispatch's only
-        # implementation) — so ctx is currently unconsumed on this path.
-        # settings is a plain dict; wrapping it in PipelineContext lets
-        # get_project_setting() read it correctly if a consumer returns.
+        # Keep settings in the shared context shape used by downstream helpers.
+        # The keyframe provider path currently consumes the plain settings
+        # directly, so this context is retained only for compatible callers.
         ctx = PipelineContext(global_settings=settings)
 
         attempt_id = take["id"]
@@ -1582,21 +1666,13 @@ class ShotController:
             img_path,
             seed=cc.get("scene_seed"),
             character_image=primary_ref,
-            init_image=cc.get("init_image") if cc.get("use_img2img") else None,
-            denoise_strength=cc.get("denoise_strength", 1.0),
+            continuity_reference=cc.get("continuity_reference"),
             multi_angle_refs=cc.get("multi_angle_refs", []),
             identity_anchor=identity_anchor_override,
-            pulid_weight_override=cc.get("pulid_weight_override"),
             negative_prompt=negative_override,
-            quality_tier=quality_tier,
-            char_lora_path=char_lora_path,
-            char_lora_strength=char_lora_strength,
-            char_lora_trigger=strategy.char_lora_trigger,
-            style_reference=style_reference,
             secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
-                       "camera": shot.get("camera", ""),
-                       "image_api": _image_api_hint},
+                       "camera": shot.get("camera", "")},
             ctx=ctx,
             _recovery_out=recovery,
             cost_tracker=self.cost_tracker,
@@ -1758,30 +1834,19 @@ class ShotController:
             )
             identity_score = id_result.overall_score  # None on skip = not scored
             take["metadata"]["identity_score"] = identity_score
-            # Surface rich diagnostics from the singleton — the deprecated
-            # validate_identity_image wrapper discarded these. Retry logic +
-            # operator-facing review can read failure cause and a suggested
-            # PuLID weight delta from the take metadata.
+            # Surface provider-neutral failure diagnostics for retry logic and
+            # operator-facing review.
             char_diag = id_result.character_results.get(primary_char_id)
-            # A PuLID-weight suggestion is meaningless for a Nano-Banana take —
-            # there is no PuLID node in that generation path to adjust.
-            # result.api_name is the RAW backend name from ImageGenResult
-            # ("GEMINI_IMAGE"); the "_MULTI_CHAR" suffix only ever appears on
-            # the derived `actual` local above, never on result.api_name itself.
-            if char_diag and not id_result.passed and result.api_name not in ("GEMINI_IMAGE",):
+            if char_diag and not id_result.passed:
                 take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
-                take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
-                # T6: deterministic remediation advisory (pure; advisory-only).
-                # Best-effort: advisory must NEVER break keyframe generation, so any
-                # failure here (import, config read, builder) is swallowed — the take
-                # still carries identity_failure_reason + suggested_pulid_adjustment.
+                # Deterministic remediation advisory (pure; advisory-only).
+                # Best-effort: advisory must never break keyframe generation.
                 try:
                     from cinema.auto_approve import AdvisoryConfig
                     from llm.negative_prompts import build_remediation_advisory
                     if AdvisoryConfig.from_project(project).enabled:
                         _adv = build_remediation_advisory(
                             char_diag.primary_failure_reason.value,
-                            char_diag.suggested_pulid_adjustment,
                         )
                         if _adv:
                             take["metadata"]["remediation_advisory"] = _adv
@@ -1885,6 +1950,8 @@ class ShotController:
         intent_override: Optional[DirectorialIntent] = None,
         parent_take_id: str = "",
         revised_prompt: str = "",
+        operator_requested: bool = False,
+        operator_request_id: str = "",
     ) -> dict:
         """Per-shot performance capture (handoff §7).
 
@@ -1895,7 +1962,8 @@ class ShotController:
 
         Effect on the shot:
           performance_takes:          appended-to (one take per call)
-          approved_performance_take_id: set on first success (operator can re-approve via gate)
+          approved_performance_take_id: set on an automatic first success;
+                                        explicit review retries remain unapproved
           performance_engine:         the engine string actually used (or "SKIP")
         """
         project = self._host._refresh_project_snapshot() or self.project
@@ -1913,17 +1981,251 @@ class ShotController:
         if not keyframe_take_id:
             return {"success": False, "error": "Approved keyframe required before performance capture"}
 
+        if operator_requested and (
+            len(operator_request_id) != 32
+            or any(char not in "0123456789abcdef" for char in operator_request_id)
+        ):
+            return {
+                "success": False,
+                "error": "A 32-character lowercase request_id is required",
+                "error_kind": "operator_input",
+                "code": "invalid_performance_request_id",
+            }
+
         # --- 1. Routing ---
         from domain.performance import (
-            route_performance_engine, ENGINE_SKIP, driving_video_source,
+            driving_video_source,
+            ENGINE_SKIP,
+            has_current_performance_skip,
+            route_performance_engine,
         )
         engine = route_performance_engine(shot, scene)
+
+        video_id = str(project.get("id", ""))
+        try:
+            paid_attempts = _performance_paid_attempts(
+                self.cost_tracker,
+                video_id=video_id,
+                shot_id=shot_id,
+            )
+        except PerformancePaidAttemptAuthorityError as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_kind": "authority",
+                "code": "performance_authority_unavailable",
+            }
+        existing_performance_attempt = None
+        if paid_attempts is not None:
+            matching_attempts = [
+                attempt
+                for attempt in paid_attempts
+                if str(attempt.get("engine") or "").upper() == engine
+            ]
+            if matching_attempts:
+                existing_performance_attempt = matching_attempts[-1]
+        else:
+            get_latest_performance_attempt = getattr(
+                self.cost_tracker, "get_latest_paid_attempt", None
+            )
+            if callable(get_latest_performance_attempt) and engine != ENGINE_SKIP:
+                try:
+                    existing_performance_attempt = get_latest_performance_attempt(
+                        video_id=video_id,
+                        shot_id=shot_id,
+                        engine=engine,
+                        operation="performance_capture",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Performance paid-attempt admission lookup failed",
+                        exc_info=True,
+                        extra={"shot_id": shot_id, "engine": engine},
+                    )
+
+        captured_driving_revision = str(shot.get("driving_video_path") or "")
+        resolved_driving_for_binding = self._resolve_stored_media_path(
+            captured_driving_revision.strip()
+        )
+        driving_video_fingerprint = ""
+        if resolved_driving_for_binding:
+            try:
+                from paid_provider import file_fingerprint
+
+                driving_video_fingerprint = file_fingerprint(
+                    resolved_driving_for_binding
+                )
+            except (OSError, ValueError):
+                # Input validation below reports the concrete provenance error.
+                # An unverifiable file can never inherit an existing request.
+                driving_video_fingerprint = ""
+
+        current_request = shot.get("performance_generation_request")
+        if not isinstance(current_request, Mapping):
+            current_request = {}
+        current_request_id = str(current_request.get("request_id") or "")
+        current_request_state = str(current_request.get("status") or "")
+        same_operator_request = bool(
+            operator_requested
+            and operator_request_id
+            and current_request_id == operator_request_id
+        )
+        same_request_input_binding = bool(
+            same_operator_request
+            and captured_driving_revision
+            and driving_video_fingerprint
+            and str(
+                current_request.get("driving_video_revision")
+                or current_request.get("driving_video_path")
+                or ""
+            )
+            == captured_driving_revision
+            and str(current_request.get("driving_video_fingerprint") or "")
+            == driving_video_fingerprint
+        )
+
+        if same_operator_request:
+            completed_take_id = str(current_request.get("take_id") or "")
+            _collection, completed_take = self._find_take(shot, completed_take_id)
+            if completed_take:
+                take_driving_revision = str(
+                    (completed_take.get("metadata") or {}).get(
+                        "driving_video_path"
+                    )
+                    or ""
+                )
+                input_revision_stale = bool(
+                    (completed_take.get("metadata") or {}).get(
+                        "input_revision_stale"
+                    )
+                    or not take_driving_revision
+                    or self._resolve_stored_media_path(take_driving_revision)
+                    != self._resolve_stored_media_path(captured_driving_revision)
+                )
+                return {
+                    "success": True,
+                    "take": completed_take,
+                    "video": self._resolve_stored_media_path(
+                        str(completed_take.get("path") or "")
+                    ),
+                    "engine": str(
+                        (completed_take.get("metadata") or {}).get("engine") or engine
+                    ),
+                    "request_id": operator_request_id,
+                    "replayed": True,
+                    "input_revision_stale": input_revision_stale,
+                }
+            if (
+                current_request_state == "succeeded"
+                and str(current_request.get("engine") or "").upper() == "SKIP"
+                and has_current_performance_skip(shot, scene)
+            ):
+                return {
+                    "success": True,
+                    "skipped": True,
+                    "engine": "SKIP",
+                    "request_id": operator_request_id,
+                    "replayed": True,
+                }
+
+        if (
+            current_request_state in _PERFORMANCE_REQUEST_ACTIVE_STATES
+            and not same_request_input_binding
+        ):
+            input_mismatch = same_operator_request and not same_request_input_binding
+            return {
+                "success": False,
+                "error": (
+                    "The saved performance request belongs to a different "
+                    "driving-video revision"
+                    if input_mismatch
+                    else "Another performance generation request requires recovery"
+                ),
+                "error_kind": "deferred",
+                "code": (
+                    "performance_request_input_mismatch"
+                    if input_mismatch
+                    else "performance_request_active"
+                ),
+                "request": dict(current_request),
+            }
+
+        if paid_attempts is not None:
+            from cost_tracker import PAID_ATTEMPT_ACTIVE_STATES
+
+            bound_attempt_id = str(current_request.get("paid_attempt_id") or "")
+
+            def _owned_by_same_request(attempt: Mapping[str, Any]) -> bool:
+                if not same_request_input_binding:
+                    return False
+                attempt_id = str(attempt.get("attempt_id") or "")
+                if bound_attempt_id:
+                    return attempt_id == bound_attempt_id
+                return (
+                    isinstance(existing_performance_attempt, Mapping)
+                    and attempt_id
+                    == str(existing_performance_attempt.get("attempt_id") or "")
+                    and str(attempt.get("engine") or "").upper() == engine
+                )
+
+            blocking_attempt = next(
+                (
+                    attempt
+                    for attempt in paid_attempts
+                    if (
+                        str(attempt.get("state") or "")
+                        in PAID_ATTEMPT_ACTIVE_STATES
+                        or (
+                            str(attempt.get("state") or "") == "succeeded"
+                            and not _take_reconciles_paid_attempt(shot, attempt)
+                        )
+                    )
+                    and not _owned_by_same_request(attempt)
+                ),
+                None,
+            )
+            if blocking_attempt is not None:
+                return {
+                    "success": False,
+                    "error": (
+                        "Existing performance provider work must be reconciled "
+                        "before another request"
+                    ),
+                    "error_kind": "deferred",
+                    "code": "provider_job_deferred",
+                    "engine": str(blocking_attempt.get("engine") or engine),
+                    "paid_attempt": blocking_attempt,
+                }
 
         if engine == ENGINE_SKIP:
             # Happy-path no-op — record the skip on the shot so motion_render
             # knows to fall through to text-to-video without a driving ref.
+            decision = {
+                "id": f"performance_skip_{uuid.uuid4().hex}",
+                "action": "skip",
+                "reason": "routing",
+                "decision_source": "routing",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "routed_engine": "SKIP",
+                "driving_video_path": captured_driving_revision,
+            }
+            if operator_requested:
+                decision["request_id"] = operator_request_id
+
             def _mut_skip(_scene: dict, project_shot: dict):
+                project_shot["approved_performance_take_id"] = ""
                 project_shot["performance_engine"] = "SKIP"
+                project_shot["performance_skip"] = decision
+                project_shot.setdefault("performance_skip_history", []).append(decision)
+                if operator_requested:
+                    project_shot["performance_generation_request"] = {
+                        "request_id": operator_request_id,
+                        "status": "succeeded",
+                        "engine": "SKIP",
+                        "take_id": "",
+                        "created_at": decision["created_at"],
+                        "updated_at": decision["created_at"],
+                    }
                 return MutationResult(True, save=True)
             self._mutate_shot(shot_id, _mut_skip)
             self.progress(
@@ -1933,79 +2235,138 @@ class ShotController:
             )
             return {"success": True, "skipped": True, "engine": "SKIP"}
 
+        # An explicit local route is a promise to use the configured worker,
+        # not permission to silently fall back to a cloud/text-to-video path.
+        # Prove the exact role/artifact/execution
+        # contract before resolving or generating any paid dialogue audio.
+        if engine == "LIVE_PORTRAIT" and not isinstance(
+            existing_performance_attempt, dict
+        ):
+            from performance.worker_readiness import (
+                PerformanceWorkerUnavailable,
+                require_liveportrait_worker_ready,
+            )
+
+            try:
+                require_liveportrait_worker_ready()
+            except PerformanceWorkerUnavailable as exc:
+                self.progress(
+                    "PERFORMANCE_BLOCKED",
+                    f"Shot {shot_id}: local LivePortrait worker is not ready",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    performance_engine=engine,
+                    error_kind="worker_readiness",
+                )
+                return {
+                    "success": False,
+                    "error": str(exc),
+                    "error_kind": "worker_readiness",
+                    "code": "performance_worker_not_ready",
+                    "engine": engine,
+                }
+
         # --- 2. Resolve assets ---
         source_image = self._resolve_stored_media_path(self._host._resolve_take_path(shot, keyframe_take_id))
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
-        # Audio comes from the scene-level dialogue track (ensured upstream).
-        # _ensure_scene_audio(scene, characters) — pass the full scene dict
-        # AND the filtered character list, mirroring the caller at line 1491.
-        characters = _scene_characters(project.get("characters") or [], scene)
-        audio_path = ""
-        try:
-            audio_path = self._host._ensure_scene_audio(scene, characters) or ""
-        except Exception:
-            # Scene audio is advisory for several performance engines;
-            # downstream code handles missing audio gracefully.
-            logger.warning(
-                "scene audio unavailable",
-                exc_info=True,
-                extra={"scene_id": scene["id"], "engine": engine},
-            )
-
-        # Hard precondition check — refuse to allocate a take when we know it'll
-        # fail in the adapter. Audio-less ACT_ONE silently mis-syncs; LIVE_PORTRAIT
-        # and VIGGLE fail to start at all.
-        from domain.performance import precondition_error
-        pre_err = precondition_error(engine, audio_path, shot.get("driving_video_path") or "")
-        if pre_err:
-            def _mut_pre_fail(_scene: dict, project_shot: dict):
-                project_shot["performance_engine"] = "SKIP"
-                return MutationResult(True, save=True)
-            self._mutate_shot(shot_id, _mut_pre_fail)
-            self.progress(
-                "PERFORMANCE_SKIPPED",
-                f"Shot {shot_id}: {engine} precondition failed: {pre_err}",
-                -1, scene_id=scene_id, shot_id=shot_id, performance_engine="SKIP",
-            )
-            return {"success": True, "skipped": True, "engine": engine, "error": pre_err}
-
-        duration_s = float(scene.get("duration_seconds", 5.0))
-        # driving_video_path is an operator-uploaded reference (web_server.py's
-        # upload endpoint persists it as an absolute path -- outside this
-        # slice's owned write-site surface), not a take output. Read-side
-        # wrapping still applies the same safe suffix migration so it keeps
-        # resolving after a repo move, mirroring the take-path sites above.
-        driving = self._resolve_stored_media_path((shot.get("driving_video_path") or "").strip())
+        # driving_video_path is an operator-uploaded reference. The upload
+        # endpoint now persists a project-relative, content-addressed path;
+        # read-side wrapping resolves it under the current project root so it
+        # remains usable after relocation (and still migrates legacy absolute
+        # values safely), mirroring take-path handling above.
+        driving = resolved_driving_for_binding
+        if driving:
+            try:
+                project_root = os.path.realpath(self.project_dir)
+                resolved_driving = os.path.realpath(driving)
+                driving_is_project_owned = (
+                    os.path.commonpath([project_root, resolved_driving])
+                    == project_root
+                    and resolved_driving != project_root
+                )
+            except ValueError:
+                driving_is_project_owned = False
+            if not driving_is_project_owned:
+                self.progress(
+                    "PERFORMANCE_BLOCKED",
+                    f"Shot {shot_id}: driving-video path is outside the project",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    performance_engine=engine,
+                    error_kind="input_provenance",
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        "Performance driving input must resolve inside the "
+                        "current project"
+                    ),
+                    "error_kind": "input_provenance",
+                    "code": "driving_video_outside_project",
+                    "engine": engine,
+                }
         source_mode = driving_video_source(shot)
-        needs_mode_b_driving = not driving and source_mode == "tts_auto" and bool(audio_path)
 
-        # Pre-spend budget gate: performance capture dispatch and Mode-B
-        # driving synth are paid writes to the shared CostTracker. Refuse before
-        # either can launch.
-        if needs_mode_b_driving:
-            from cost_tracker import API_COST_USD
-            from performance.driving_video import estimate_driving_face_cost
+        # Block before scene audio generation: that path can itself be paid,
+        # and audio is not a substitute for a visual driving performance.
+        from domain.performance import precondition_error
+        pre_err = precondition_error(engine, None, driving)
+        if pre_err:
+            self.progress(
+                "PERFORMANCE_BLOCKED",
+                f"Shot {shot_id}: {pre_err}",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                performance_engine=engine,
+                error_kind="input_required",
+            )
+            return {
+                "success": False,
+                "error": pre_err,
+                "error_kind": "input_required",
+                "code": "driving_video_required",
+                "engine": engine,
+            }
 
-            driving_cost = estimate_driving_face_cost("sadtalker", duration_s)
-            estimated_cost = API_COST_USD.get(engine.upper(), 0.0) + driving_cost
-            would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
-            if would_exceed_budget:
-                budget_detail = (
-                    f"Estimated {engine} performance plus Mode-B driving cost "
-                    f"${estimated_cost:.3f} would push spend ${self.cost_tracker.spent_usd:.2f} "
-                    f"past budget cap ${self.cost_tracker.budget_usd:.2f}. "
-                    "Pausing before performance capture."
-                )
-        else:
-            would_exceed_budget = self.cost_tracker.would_exceed(engine)
-            if would_exceed_budget:
-                budget_detail = (
-                    f"Estimated {engine} performance cost would push spend "
-                    f"${self.cost_tracker.spent_usd:.2f} past budget cap "
-                    f"${self.cost_tracker.budget_usd:.2f}. Pausing before performance capture."
-                )
+        try:
+            (
+                duration_s,
+                raw_scene_duration,
+                scene_shot_count,
+            ) = performance_take_duration_details(scene)
+        except ValueError as exc:
+            self.progress(
+                "PERFORMANCE_BLOCKED",
+                f"Shot {shot_id}: {exc}",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                performance_engine=engine,
+                error_kind="duration",
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_kind": "duration",
+                "code": "performance_duration_invalid",
+                "engine": engine,
+            }
+
+        uncapped_duration_s = raw_scene_duration / scene_shot_count
+
+        # Pre-spend budget gate for the chosen performance provider.
+        would_exceed_budget = self.cost_tracker.would_exceed(engine)
+        if would_exceed_budget:
+            budget_detail = (
+                f"Estimated {engine} performance cost would push spend "
+                f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                f"${self.cost_tracker.budget_usd:.2f}. Pausing before performance capture."
+            )
 
         if would_exceed_budget:
             self.progress(
@@ -2017,7 +2378,6 @@ class ShotController:
                 spent=self.cost_tracker.spent_usd,
                 budget=self.cost_tracker.budget_usd,
                 performance_engine=engine,
-                mode_b_driving=needs_mode_b_driving,
             )
             self._lifecycle.pause()
             return {
@@ -2027,130 +2387,11 @@ class ShotController:
                 "engine": engine,
             }
 
-        # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
-        # Initialize BEFORE the branch so Mode A (operator upload) doesn't NameError.
-        # Mode A reuses the operator's video → no synth → provider stays None.
-        driving_provider: Optional[str] = None
-        if not driving and source_mode == "tts_auto" and audio_path:
-            try:
-                from performance.driving_video import synth_driving_face_from_audio
-                temp_driving = self._take_output_path(shot_id, f"driving_{keyframe_take_id}", ".mp4")
-                synth_result = synth_driving_face_from_audio(
-                    audio_path=audio_path,
-                    keyframe_path=source_image,
-                    output_mp4=temp_driving,
-                    duration_s=duration_s,
-                    shot_id=shot_id, video_id=str(project.get("id", "")),
-                    cost_tracker=self.cost_tracker,
-                )
-                if synth_result:
-                    driving, driving_provider = synth_result
-            except Exception:
-                logger.exception(
-                    "driving-video synth failed; engine may degrade",
-                    extra={"shot_id": shot_id, "engine": engine},
-                )
+        # --- 3. Materialize the exact provider input before any paid work. ---
 
-            if not driving:
-                mode_b_attempt = None
-                get_latest_attempt = getattr(
-                    self.cost_tracker, "get_latest_paid_attempt", None
-                )
-                if callable(get_latest_attempt):
-                    try:
-                        mode_b_attempt = get_latest_attempt(
-                            video_id=str(project.get("id", "")),
-                            shot_id=shot_id,
-                            engine="PERFORMANCE_DRIVING_SADTALKER",
-                            operation="performance_capture_driving",
-                        )
-                    except Exception:
-                        logger.warning(
-                            "Mode-B durable state lookup failed",
-                            exc_info=True,
-                            extra={"shot_id": shot_id},
-                        )
-                if isinstance(mode_b_attempt, dict) and mode_b_attempt.get("state") == "blocked_budget":
-                    self.progress(
-                        "BUDGET_EXCEEDED",
-                        f"Shot {shot_id}: atomic budget reservation refused Mode-B driving synthesis",
-                        -1,
-                        scene_id=scene_id,
-                        shot_id=shot_id,
-                        performance_engine="PERFORMANCE_DRIVING_SADTALKER",
-                        paid_attempt_id=mode_b_attempt.get("attempt_id"),
-                        paid_attempt_state="blocked_budget",
-                        spent=self.cost_tracker.spent_usd,
-                        budget=self.cost_tracker.budget_usd,
-                    )
-                    self._lifecycle.pause()
-                    return {
-                        "success": False,
-                        "error": "Budget cap reached — Mode-B driving synthesis not started",
-                        "error_kind": "budget",
-                        "engine": "PERFORMANCE_DRIVING_SADTALKER",
-                        "paid_attempt": mode_b_attempt,
-                    }
-                if isinstance(mode_b_attempt, dict) and mode_b_attempt.get("state") in {
-                    "reserved",
-                    "submitting",
-                    "accepted_unknown",
-                    "running",
-                    "cancel_requested",
-                    "succeeded",
-                    "failed_billed",
-                }:
-                    return {
-                        "success": False,
-                        "error": "Mode-B paid prompt requires recovery or operator review",
-                        "error_kind": "deferred",
-                        "code": "provider_job_deferred",
-                        "engine": "PERFORMANCE_DRIVING_SADTALKER",
-                        "paid_attempt": mode_b_attempt,
-                    }
-
-        if driving and needs_mode_b_driving:
-            try:
-                from cinema.artifact_indexing import record_auxiliary_version
-
-                record_auxiliary_version(
-                    str(project.get("id") or ""),
-                    "driving_video",
-                    shot_id,
-                    driving,
-                    provider=("sadtalker" if driving_provider == "sadtalker" else None),
-                    model=("sadtalker" if driving_provider == "sadtalker" else None),
-                    parameters={
-                        "duration": duration_s,
-                        "source_mode": source_mode,
-                    },
-                    source_paths={
-                        "dialogue_audio": audio_path,
-                        "keyframe": source_image,
-                    },
-                    project_snapshot=project,
-                    project_root=self.project_dir,
-                )
-            except Exception:
-                logger.exception(
-                    "Generated driving video awaits artifact version recovery",
-                    extra={"shot_id": shot_id},
-                )
-                return {
-                    "success": False,
-                    "error": (
-                        "The generated driving video is retained, but immutable "
-                        "indexing is pending. Retry resumes the same paid task."
-                    ),
-                    "error_kind": "artifact_versioning",
-                    "code": "artifact_version_pending",
-                    "retryable": True,
-                }
-
-        # Bind the exact resolved driving input to the take recipe before the
-        # paid performance dispatch.  Accepted takes persist a portable,
-        # project-relative path; artifact versioning hashes these exact bytes
-        # as an input dependency.  This is provenance, not provider identity.
+        # Keep both paths: the active upload revision is the review/approval
+        # authority, while every provider receives the same physically bounded
+        # derivative.  Act-Two and Viggle do not honor a duration argument.
         driving_video_path = self._to_project_relative(driving) if driving else ""
         if driving and os.path.isabs(driving_video_path):
             return {
@@ -2163,6 +2404,239 @@ class ShotController:
                 "engine": engine,
             }
 
+        from performance.driving_clip import (
+            DrivingClipError,
+            prepare_bounded_driving_clip,
+        )
+
+        try:
+            dispatched_driving = prepare_bounded_driving_clip(
+                driving,
+                project_root=self.project_dir,
+                duration_s=duration_s,
+            )
+        except (DrivingClipError, OSError) as exc:
+            self.progress(
+                "PERFORMANCE_BLOCKED",
+                f"Shot {shot_id}: bounded driving input could not be prepared",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                performance_engine=engine,
+                error_kind="input_preparation",
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_kind": "input_preparation",
+                "code": "driving_video_preparation_failed",
+                "engine": engine,
+            }
+        dispatched_driving_video_path = self._to_project_relative(
+            dispatched_driving
+        )
+        if os.path.isabs(dispatched_driving_video_path):
+            return {
+                "success": False,
+                "error": "Bounded driving input escaped the project root",
+                "error_kind": "input_provenance",
+                "code": "driving_video_outside_project",
+                "engine": engine,
+            }
+        from paid_provider import file_fingerprint
+
+        driving_video_fingerprint = file_fingerprint(driving)
+        dispatched_driving_fingerprint = file_fingerprint(dispatched_driving)
+
+        request_started_at = datetime.now(timezone.utc).isoformat()
+
+        def _set_performance_request(status: str, **fields: Any) -> None:
+            if not operator_requested:
+                return
+
+            def _mut_request(_scene: dict, project_shot: dict):
+                current = project_shot.get("performance_generation_request")
+                if (
+                    not isinstance(current, dict)
+                    or current.get("request_id") != operator_request_id
+                ):
+                    return MutationResult(False, save=False)
+                current["status"] = status
+                current["updated_at"] = datetime.now(timezone.utc).isoformat()
+                current.update(fields)
+                return MutationResult(True, save=True)
+
+            self._mutate_shot(shot_id, _mut_request)
+
+        if operator_requested:
+            review_event = {
+                "id": f"performance_review_{uuid.uuid4().hex}",
+                "action": "generate",
+                "request_id": operator_request_id,
+                "created_at": request_started_at,
+                "previous_approved_performance_take_id": str(
+                    shot.get("approved_performance_take_id") or ""
+                ),
+                "driving_video_revision": captured_driving_revision,
+                "driving_video_path": driving_video_path,
+                "dispatched_driving_video_path": dispatched_driving_video_path,
+            }
+
+            def _mut_begin_request(_scene: dict, project_shot: dict):
+                if str(project_shot.get("driving_video_path") or "") != str(
+                    captured_driving_revision
+                ):
+                    return MutationResult(
+                        {"accepted": False, "code": "driving_video_changed"},
+                        save=False,
+                    )
+                current = project_shot.get("performance_generation_request")
+                if isinstance(current, dict):
+                    current_id = str(current.get("request_id") or "")
+                    current_status = str(current.get("status") or "")
+                    if current_id == operator_request_id:
+                        current_input_matches = bool(
+                            str(
+                                current.get("driving_video_revision")
+                                or current.get("driving_video_path")
+                                or ""
+                            )
+                            == captured_driving_revision
+                            and str(current.get("driving_video_fingerprint") or "")
+                            == driving_video_fingerprint
+                        )
+                        if not current_input_matches:
+                            return MutationResult(
+                                {
+                                    "accepted": False,
+                                    "code": "performance_request_input_mismatch",
+                                },
+                                save=False,
+                            )
+                        return MutationResult(
+                            {
+                                "accepted": True,
+                                "existing": True,
+                                "status": current_status,
+                                "take_id": str(current.get("take_id") or ""),
+                            },
+                            save=False,
+                        )
+                    if current_status in _PERFORMANCE_REQUEST_ACTIVE_STATES:
+                        return MutationResult(
+                            {
+                                "accepted": False,
+                                "code": "performance_request_active",
+                                "request": dict(current),
+                            },
+                            save=False,
+                        )
+                project_shot["approved_performance_take_id"] = ""
+                if (project_shot.get("performance_engine") or "").upper() == "SKIP":
+                    project_shot["performance_engine"] = ""
+                project_shot["performance_skip"] = None
+                project_shot["performance_generation_request"] = {
+                    "request_id": operator_request_id,
+                    "status": "dispatching",
+                    "engine": engine,
+                    "take_id": "",
+                    "paid_attempt_id": "",
+                    "provider_job_id": "",
+                    "driving_video_revision": captured_driving_revision,
+                    "driving_video_path": driving_video_path,
+                    "driving_video_fingerprint": driving_video_fingerprint,
+                    "dispatched_driving_video_path": dispatched_driving_video_path,
+                    "dispatched_driving_fingerprint": dispatched_driving_fingerprint,
+                    "created_at": request_started_at,
+                    "updated_at": request_started_at,
+                }
+                project_shot.setdefault("performance_review_history", []).append(
+                    review_event
+                )
+                return MutationResult({"accepted": True, "existing": False}, save=True)
+
+            request_admission = self._mutate_shot(shot_id, _mut_begin_request)
+            if not isinstance(request_admission, Mapping) or not request_admission.get(
+                "accepted"
+            ):
+                code = (
+                    str(request_admission.get("code") or "performance_request_active")
+                    if isinstance(request_admission, Mapping)
+                    else "performance_request_active"
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        "Driving video changed before performance dispatch"
+                        if code == "driving_video_changed"
+                        else (
+                            "The request_id is already bound to a different "
+                            "driving-video revision"
+                            if code == "performance_request_input_mismatch"
+                            else "Another performance generation request requires recovery"
+                        )
+                    ),
+                    "error_kind": "deferred",
+                    "code": code,
+                }
+            if request_admission.get("status") == "succeeded":
+                refreshed = self._host._refresh_project_snapshot() or self.project
+                _scene, refreshed_shot, _index = self._find_shot(
+                    shot_id, refreshed, scene_id
+                )
+                completed_take_id = str(request_admission.get("take_id") or "")
+                _collection, completed_take = self._find_take(
+                    refreshed_shot or {}, completed_take_id
+                )
+                if completed_take:
+                    return {
+                        "success": True,
+                        "take": completed_take,
+                        "video": self._resolve_stored_media_path(
+                            str(completed_take.get("path") or "")
+                        ),
+                        "engine": engine,
+                        "request_id": operator_request_id,
+                        "replayed": True,
+                    }
+
+        # Audio comes from the scene-level dialogue track. It is resolved only
+        # after the durable operator action exists, because audio generation can
+        # itself cross a paid boundary.
+        characters = _scene_characters(project.get("characters") or [], scene)
+        audio_path = ""
+        try:
+            audio_path = self._host._ensure_scene_audio(scene, characters) or ""
+        except Exception:
+            logger.warning(
+                "scene audio unavailable",
+                exc_info=True,
+                extra={"scene_id": scene["id"], "engine": engine},
+            )
+
+        # A second read closes the automatic-pipeline race: an upload selected
+        # after input capture never becomes the provenance for this paid call.
+        latest_project = self._host._refresh_project_snapshot() or self.project
+        _latest_scene, latest_shot, _latest_index = self._find_shot(
+            shot_id, latest_project, scene_id
+        )
+        if (
+            not latest_shot
+            or str(latest_shot.get("driving_video_path") or "")
+            != captured_driving_revision
+        ):
+            _set_performance_request(
+                "stale_input",
+                error_code="driving_video_changed",
+            )
+            return {
+                "success": False,
+                "error": "Driving video changed before performance dispatch",
+                "error_kind": "input_revision",
+                "code": "driving_video_changed",
+                "engine": engine,
+            }
+
         # --- 4. Dispatch to the chosen engine ---
         take = make_take(
             "performance",
@@ -2171,13 +2645,18 @@ class ShotController:
                 "scene_id": scene_id,
                 "shot_id": shot_id,
                 "engine": engine,
-                "driving_source": "upload" if shot.get("driving_video_path") else (
-                    "tts_auto" if driving else "none"
-                ),
+                "driving_source": source_mode,
                 "driving_video_path": driving_video_path,
+                "driving_video_fingerprint": driving_video_fingerprint,
+                "dispatched_driving_video_path": dispatched_driving_video_path,
+                "dispatched_driving_fingerprint": dispatched_driving_fingerprint,
                 "audio_path": audio_path,
                 "duration_s": duration_s,
-                "driving_provider": driving_provider,  # "sadtalker" | "cache" | None
+                "scene_duration_s": raw_scene_duration,
+                "scene_shot_count": scene_shot_count,
+                "duration_cap_s": MAX_PERFORMANCE_TAKE_DURATION_S,
+                "duration_capped": uncapped_duration_s > MAX_PERFORMANCE_TAKE_DURATION_S,
+                "operator_request_id": operator_request_id if operator_requested else "",
             },
         )
         perf_path = self._take_output_path(shot_id, take["id"], ".mp4")
@@ -2191,42 +2670,67 @@ class ShotController:
             performance_engine=engine,
         )
 
+        dispatch_error: Optional[Exception] = None
         try:
             from performance._router import dispatch
             result_path = dispatch(
                 engine,
                 keyframe_path=source_image,
                 audio_path=audio_path or None,
-                driving_video_path=driving or None,
+                driving_video_path=dispatched_driving or None,
                 output_mp4=perf_path,
                 duration_s=duration_s,
                 shot_id=shot_id,
-                video_id=str(project.get("id", "")),
+                video_id=video_id,
+                request_id=operator_request_id if operator_requested else "",
                 cost_tracker=self.cost_tracker,
             )
-        except Exception as e:
-            return {"success": False, "error": f"Performance dispatch raised: {e}"}
+        except Exception as exc:
+            # Keep provider recovery authoritative below: an adapter can raise
+            # after recording a durable remote job, and that state must win
+            # over either a local failure or a successful SKIP mutation.
+            dispatch_error = exc
+            result_path = None
+            logger.warning(
+                "Performance dispatch raised",
+                exc_info=True,
+                extra={"shot_id": shot_id, "engine": engine},
+            )
+
+        paid_attempt = None
+        get_latest_attempt = getattr(
+            self.cost_tracker, "get_latest_paid_attempt", None
+        )
+        if (
+            engine in {"ACT_ONE", "LIVE_PORTRAIT", "VIGGLE"}
+            and callable(get_latest_attempt)
+        ):
+            try:
+                candidate_attempt = get_latest_attempt(
+                    video_id=video_id,
+                    shot_id=shot_id,
+                    engine=engine,
+                    operation="performance_capture",
+                )
+                if isinstance(candidate_attempt, dict):
+                    paid_attempt = candidate_attempt
+            except Exception:
+                logger.warning(
+                    "Performance provider durable state lookup failed",
+                    exc_info=True,
+                    extra={"shot_id": shot_id, "engine": engine},
+                )
 
         if not result_path or not os.path.exists(perf_path):
-            paid_attempt = None
-            get_latest_attempt = getattr(
-                self.cost_tracker, "get_latest_paid_attempt", None
-            )
-            if engine in {"ACT_ONE", "LIVE_PORTRAIT", "VIGGLE"} and callable(get_latest_attempt):
-                try:
-                    paid_attempt = get_latest_attempt(
-                        video_id=str(project.get("id", "")),
-                        shot_id=shot_id,
-                        engine=engine,
-                        operation="performance_capture",
-                    )
-                except Exception:
-                    logger.warning(
-                        "Performance provider durable state lookup failed",
-                        exc_info=True,
-                        extra={"shot_id": shot_id, "engine": engine},
-                    )
+            if paid_attempt is None and isinstance(existing_performance_attempt, dict):
+                paid_attempt = existing_performance_attempt
             if isinstance(paid_attempt, dict) and paid_attempt.get("state") == "blocked_budget":
+                _set_performance_request(
+                    "blocked_budget",
+                    paid_attempt_id=str(paid_attempt.get("attempt_id") or ""),
+                    provider_job_id=str(paid_attempt.get("provider_job_id") or ""),
+                    paid_attempt_state="blocked_budget",
+                )
                 self.progress(
                     "BUDGET_EXCEEDED",
                     f"Shot {shot_id}: atomic budget reservation refused {engine}",
@@ -2257,6 +2761,12 @@ class ShotController:
                 "failed_billed",
             }:
                 state = str(paid_attempt.get("state") or "accepted_unknown")
+                _set_performance_request(
+                    "deferred",
+                    paid_attempt_id=str(paid_attempt.get("attempt_id") or ""),
+                    provider_job_id=str(paid_attempt.get("provider_job_id") or ""),
+                    paid_attempt_state=state,
+                )
                 self.progress(
                     "PERFORMANCE_DEFERRED",
                     f"Shot {shot_id}: {engine} task is {state}; no successful skip was recorded",
@@ -2275,22 +2785,79 @@ class ShotController:
                     "engine": engine,
                     "paid_attempt": paid_attempt,
                 }
-            # Engine failed gracefully (returned None). Mark as SKIP so motion_render
-            # uses plain text-to-video — pipeline keeps moving.
-            def _mut_fail(_scene: dict, project_shot: dict):
-                project_shot["performance_engine"] = "SKIP"
-                return MutationResult(True, save=True)
-            self._mutate_shot(shot_id, _mut_fail)
+            if engine == "LIVE_PORTRAIT":
+                detail = (
+                    "Local LivePortrait execution failed"
+                    if dispatch_error is not None
+                    else "Local LivePortrait produced no valid output"
+                )
+                self.progress(
+                    "PERFORMANCE_BLOCKED",
+                    f"Shot {shot_id}: {detail.lower()}",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    performance_engine=engine,
+                    error_kind="worker_execution",
+                )
+                _set_performance_request(
+                    "failed",
+                    error_code="local_performance_failed",
+                )
+                return {
+                    "success": False,
+                    "error": detail,
+                    "error_kind": "worker_execution",
+                    "code": "local_performance_failed",
+                    "engine": engine,
+                }
+            if dispatch_error is not None:
+                _set_performance_request(
+                    "failed",
+                    error_code="performance_capture_failed",
+                )
+                return {
+                    "success": False,
+                    "error": f"Performance dispatch raised: {dispatch_error}",
+                    "error_kind": "provider_execution",
+                    "code": "performance_capture_failed",
+                    "engine": engine,
+                }
+            # A provider returning no output is a failed performance attempt,
+            # never an implicit operator decision.  Keep the review gate
+            # closed; the operator can retry or choose the explicit skip route.
             self.progress(
-                "PERFORMANCE_SKIPPED",
-                f"Shot {shot_id}: {engine} produced no output; falling through to text-to-video",
-                -1, scene_id=scene_id, shot_id=shot_id, performance_engine="SKIP",
+                "PERFORMANCE_BLOCKED",
+                f"Shot {shot_id}: {engine} produced no valid output",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                performance_engine=engine,
+                error_kind="provider_execution",
             )
-            return {"success": True, "skipped": True, "engine": engine,
-                    "error": "engine returned no output"}
+            _set_performance_request(
+                "failed",
+                error_code="performance_capture_failed",
+            )
+            return {
+                "success": False,
+                "error": f"{engine} produced no valid performance output",
+                "error_kind": "provider_execution",
+                "code": "performance_capture_failed",
+                "engine": engine,
+            }
 
         # --- 5. Persist the take + identity-gate the auto-approve ---
         take["path"] = self._to_project_relative(perf_path)
+        if isinstance(paid_attempt, dict):
+            take.setdefault("metadata", {}).update({
+                "paid_attempt_id": str(paid_attempt.get("attempt_id") or ""),
+                "provider_job_id": str(paid_attempt.get("provider_job_id") or ""),
+                "request_fingerprint": str(
+                    paid_attempt.get("request_fingerprint") or ""
+                ),
+                "paid_attempt_state": str(paid_attempt.get("state") or ""),
+            })
 
         # S16: populate directorial iteration provenance when supplied.
         if parent_take_id:
@@ -2331,17 +2898,52 @@ class ShotController:
             if face_anchor
             else None
         )
-        gate_passed = (arc_score is None) or (arc_score >= DEFAULT_PERFORMANCE_FLOOR)
+        gate_passed = (
+            isinstance(arc_score, (int, float))
+            and not isinstance(arc_score, bool)
+            and math.isfinite(float(arc_score))
+            and float(arc_score) >= DEFAULT_PERFORMANCE_FLOOR
+        )
+        take.setdefault("metadata", {})["identity_score"] = arc_score
+        expected_driving_revision = captured_driving_revision
 
         def _mut_success(_scene: dict, project_shot: dict):
+            input_revision_stale = (
+                str(project_shot.get("driving_video_path") or "")
+                != expected_driving_revision
+            )
+            take.setdefault("metadata", {})["input_revision_stale"] = (
+                input_revision_stale
+            )
             project_shot.setdefault("performance_takes", []).append(take)
-            # Auto-approve ONLY when the identity gate passed (or was inconclusive).
-            # A score below floor leaves approval to the operator via PERFORMANCE_REVIEW.
-            if gate_passed and not project_shot.get("approved_performance_take_id"):
+            # Auto-approve only when measured identity evidence passed. A low
+            # or unknown score leaves approval to the operator at review.
+            if (
+                not input_revision_stale
+                and gate_passed
+                and not operator_requested
+                and not project_shot.get("approved_performance_take_id")
+            ):
                 project_shot["approved_performance_take_id"] = take["id"]
-            project_shot["performance_engine"] = engine
-            # Stash the score for the review UI to surface.
-            take.setdefault("metadata", {})["identity_score"] = arc_score
+            if not input_revision_stale:
+                project_shot["performance_engine"] = engine
+            if operator_requested:
+                current_request = project_shot.get("performance_generation_request")
+                if (
+                    isinstance(current_request, dict)
+                    and current_request.get("request_id") == operator_request_id
+                ):
+                    current_request.update({
+                        "status": "stale_input" if input_revision_stale else "succeeded",
+                        "take_id": take["id"],
+                        "paid_attempt_id": str(
+                            (paid_attempt or {}).get("attempt_id") or ""
+                        ),
+                        "provider_job_id": str(
+                            (paid_attempt or {}).get("provider_job_id") or ""
+                        ),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
             return MutationResult(take, save=True)
 
         self._mark_artifact_version_pending(take)
@@ -2352,11 +2954,33 @@ class ShotController:
         if artifact_error is not None:
             return artifact_error
         self._host._save_checkpoint()
-        if not gate_passed:
+        input_revision_stale = bool(
+            (stored_take.get("metadata") or {}).get("input_revision_stale")
+        )
+        if input_revision_stale:
             self.progress(
                 "PERFORMANCE_REVIEW_REQUIRED",
-                f"Shot {shot_id}: identity score {arc_score:.3f} below floor "
-                f"{DEFAULT_PERFORMANCE_FLOOR}; awaiting operator review",
+                (
+                    f"Shot {shot_id}: driving input changed after dispatch; "
+                    "take retained as history and cannot be approved"
+                ),
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                take_id=take["id"],
+                error_kind="input_revision",
+            )
+        elif not gate_passed:
+            score_detail = (
+                f"{float(arc_score):.3f} below floor {DEFAULT_PERFORMANCE_FLOOR}"
+                if isinstance(arc_score, (int, float))
+                and not isinstance(arc_score, bool)
+                and math.isfinite(float(arc_score))
+                else "UNKNOWN; measured identity evidence is required"
+            )
+            self.progress(
+                "PERFORMANCE_REVIEW_REQUIRED",
+                f"Shot {shot_id}: identity score {score_detail}; awaiting operator review",
                 -1, scene_id=scene_id, shot_id=shot_id, take_id=take["id"],
                 identity_score=arc_score,
             )
@@ -2372,6 +2996,210 @@ class ShotController:
             "take": stored_take,
             "video": perf_path,
             "engine": engine,
+            "request_id": operator_request_id if operator_requested else "",
+            "input_revision_stale": input_revision_stale,
+        }
+
+    def skip_performance_take(
+        self,
+        scene_id: str,
+        shot_id: str,
+        *,
+        reason: str,
+    ) -> dict:
+        """Record an explicit operator decision to bypass performance capture.
+
+        This is the only failure-recovery path that may turn a shot requiring
+        performance into ``SKIP``.  Natural wide/no-character routing remains a
+        separate ``reason=routing`` record.  Active or ambiguous provider work
+        blocks the decision so a skip cannot hide an accepted paid task.
+        """
+
+        from domain.performance import (
+            has_current_performance_skip,
+            normalize_performance_skip_reason,
+        )
+
+        try:
+            operator_reason = normalize_performance_skip_reason(reason)
+        except ValueError as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_kind": "operator_input",
+                "code": "invalid_performance_skip_reason",
+            }
+
+        project = self._host._refresh_project_snapshot() or self.project
+        scene, shot, _shot_index = self._find_shot(shot_id, project, scene_id)
+        if not scene or not shot:
+            return {"success": False, "error": "Shot not found"}
+        if shot.get("plan_status") != "approved":
+            return {
+                "success": False,
+                "error": "Shot plan must be approved before skipping performance capture",
+            }
+        if not shot.get("approved_keyframe_take_id"):
+            return {
+                "success": False,
+                "error": "Approved keyframe required before skipping performance capture",
+            }
+
+        current_skip = shot.get("performance_skip")
+        if (
+            has_current_performance_skip(shot, scene)
+            and isinstance(current_skip, dict)
+            and (
+                current_skip.get("decision_source") == "operator"
+                or current_skip.get("reason") == "operator"
+            )
+            and current_skip.get("operator_reason") == operator_reason
+        ):
+            return {
+                "success": True,
+                "skipped": True,
+                "engine": "SKIP",
+                "decision": current_skip,
+            }
+
+        from cost_tracker import PAID_ATTEMPT_ACTIVE_STATES
+        from domain.performance import ENGINE_SKIP, route_performance_engine
+
+        routed_engine = route_performance_engine(shot, scene)
+        video_id = str(project.get("id", ""))
+        try:
+            attempts = _performance_paid_attempts(
+                self.cost_tracker,
+                video_id=video_id,
+                shot_id=shot_id,
+            )
+        except PerformancePaidAttemptAuthorityError as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "error_kind": "authority",
+                "code": "performance_authority_unavailable",
+            }
+        if attempts is None:
+            lookup = getattr(self.cost_tracker, "get_latest_paid_attempt", None)
+            if not callable(lookup) and routed_engine != ENGINE_SKIP:
+                return {
+                    "success": False,
+                    "error": "Performance provider authority is unavailable; skip blocked",
+                    "error_kind": "authority",
+                    "code": "performance_authority_unavailable",
+                }
+            if routed_engine == ENGINE_SKIP:
+                attempts = []
+            else:
+                try:
+                    latest_attempt = lookup(
+                        video_id=video_id,
+                        shot_id=shot_id,
+                        engine=routed_engine,
+                        operation="performance_capture",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Performance skip authority lookup failed",
+                        exc_info=True,
+                        extra={"shot_id": shot_id, "engine": routed_engine},
+                    )
+                    return {
+                        "success": False,
+                        "error": "Performance provider authority could not be verified; skip blocked",
+                        "error_kind": "authority",
+                        "code": "performance_authority_unavailable",
+                    }
+                attempts = [latest_attempt] if isinstance(latest_attempt, dict) else []
+
+        active_request = shot.get("performance_generation_request")
+        if (
+            isinstance(active_request, Mapping)
+            and str(active_request.get("status") or "")
+            in _PERFORMANCE_REQUEST_ACTIVE_STATES
+        ):
+            return {
+                "success": False,
+                "error": "Performance generation requires recovery before skipping",
+                "error_kind": "deferred",
+                "code": "performance_request_active",
+                "request": dict(active_request),
+            }
+
+        paid_attempt = next(
+            (
+                attempt
+                for attempt in attempts
+                if str(attempt.get("state") or "") in PAID_ATTEMPT_ACTIVE_STATES
+                or (
+                    str(attempt.get("state") or "") == "succeeded"
+                    and not _take_reconciles_paid_attempt(shot, attempt)
+                )
+            ),
+            None,
+        )
+        attempt_state = str((paid_attempt or {}).get("state") or "")
+        if paid_attempt is not None:
+            return {
+                "success": False,
+                "error": (
+                    f"{paid_attempt.get('engine') or routed_engine} provider work is "
+                    f"{attempt_state}; reconcile it "
+                    "before skipping performance"
+                ),
+                "error_kind": "deferred",
+                "code": "provider_job_deferred",
+                "engine": str(paid_attempt.get("engine") or routed_engine),
+                "paid_attempt": paid_attempt,
+            }
+
+        decision = {
+            "id": f"performance_skip_{uuid.uuid4().hex}",
+            "action": "skip",
+            "reason": operator_reason,
+            "decision_source": "operator",
+            "operator_reason": operator_reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "routed_engine": routed_engine,
+            "previous_engine": str(shot.get("performance_engine") or ""),
+            "previous_approved_performance_take_id": str(
+                shot.get("approved_performance_take_id") or ""
+            ),
+            "driving_video_path": str(shot.get("driving_video_path") or ""),
+        }
+        if isinstance(paid_attempt, dict):
+            decision["paid_attempt_id"] = str(paid_attempt.get("attempt_id") or "")
+            decision["paid_attempt_state"] = attempt_state
+            decision["provider_job_id"] = str(paid_attempt.get("provider_job_id") or "")
+
+        def _mut_skip(_scene: dict, project_shot: dict):
+            project_shot["approved_performance_take_id"] = ""
+            project_shot["performance_engine"] = "SKIP"
+            project_shot["performance_skip"] = decision
+            project_shot.setdefault("performance_skip_history", []).append(decision)
+            project_shot.setdefault("performance_review_history", []).append(decision)
+            return MutationResult(decision, save=True)
+
+        stored_decision = self._mutate_shot(shot_id, _mut_skip)
+        if not stored_decision:
+            return {"success": False, "error": "Shot not found"}
+        self._host._save_checkpoint()
+        self.progress(
+            "PERFORMANCE_SKIPPED",
+            f"Shot {shot_id}: operator explicitly skipped performance capture",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            performance_engine="SKIP",
+            skip_reason="operator",
+            skip_decision_id=decision["id"],
+        )
+        return {
+            "success": True,
+            "skipped": True,
+            "engine": "SKIP",
+            "decision": stored_decision,
         }
 
     def _validate_take_identity(
@@ -3142,7 +3970,7 @@ class ShotController:
             scene,
             prev_shot,
             shot_index,
-            approved_anchor_image=approved_anchor,
+            continuity_reference_path=approved_anchor,
         )
         cc = enhanced.get("continuity_config", {})
 
@@ -3156,8 +3984,7 @@ class ShotController:
         # times the admitted estimate. The motion phase loop aborts on the
         # structured "budget" refusal below. Dialogue overlay shots also require
         # the F1b lip-sync pass after video generation, so precheck that required
-        # second call with the same multi-call envelope pattern used by the
-        # performance Mode-B gate.
+        # second call with the same multi-call budget-envelope pattern.
         #
         # Duration-aware pricing for the two genuinely per-second-billed
         # video engines (money-gate finding 2026-07-30/31): _pre_spend_duration_s
@@ -4165,23 +4992,19 @@ class ShotController:
                 )
                 result["scores"]["identity"] = id_result.overall_score  # None on skip = not scored
                 if not id_result.passed:
-                    # Specific failure mode + recommended PuLID delta replace
-                    # the previous generic "Low identity score" string.
+                    # Preserve the specific failure mode and recommend
+                    # provider-neutral reference conditioning.
                     char_diag = id_result.character_results.get(chars[0])
                     failure_label = char_diag.primary_failure_reason.value if char_diag else "low_identity"
-                    delta = char_diag.suggested_pulid_adjustment if char_diag else 0.0
-                    # T6: structured advisory + negative-prompt-enriched regen reason.
+                    # Structured advisory + negative-prompt-enriched regen reason.
                     from llm.negative_prompts import build_remediation_advisory, get_negative_prompt_for_failure
-                    _adv = build_remediation_advisory(failure_label, delta)
+                    _adv = build_remediation_advisory(failure_label)
                     if _adv:
                         result["remediation_advisory"] = _adv
                     _neg = get_negative_prompt_for_failure(failure_label)
-                    _regen_reason = f"Regenerate with PuLID weight +{delta:.2f}"
+                    _regen_reason = "Regenerate with clearer approved reference conditioning"
                     if _neg:
                         _regen_reason += f"; add negative prompt: {_neg}"
-                    result["recommendations"].append(
-                        {"tool": "face_swap", "reason": f"Identity gate failed ({failure_label})"}
-                    )
                     result["recommendations"].append(
                         {"tool": "regenerate", "reason": _regen_reason}
                     )

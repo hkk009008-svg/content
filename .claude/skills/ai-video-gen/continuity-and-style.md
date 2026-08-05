@@ -24,10 +24,12 @@ Wearing: [wardrobe from last appearance OR character default]
 Position: [spatial hint from previous shot]
 ```
 
-### PuLID Character Selection
+### Character reference selection
 - **Primary character**: First character in `characters_in_frame` list
-- Primary character's canonical reference → PuLID face input
-- Multi-angle references → Kling subject binding input
+- Primary canonical and approved multi-angle references feed the selected
+  provider's supported reference contract.
+- Additional-character and continuity references remain explicitly ordered,
+  deduplicated, provenance-bound, and capped by that provider's envelope.
 
 ---
 
@@ -92,39 +94,17 @@ Validates that character actions flow logically:
 
 ---
 
-## 4. TemporalConsistencyManager
+## 4. Approved reference continuity
 
-**Source**: `domain/continuity_engine.py`
+Continuity is explicit and provider-neutral. A caller may attach an approved
+previous keyframe as a continuity reference, alongside character/location
+references and a stable seed. The selected provider decides how its supported
+reference contract represents those inputs.
 
-Manages img2img chaining between consecutive shots within a scene.
-
-### How img2img Chaining Works
-Instead of generating each shot from noise (txt2img), consecutive shots within a scene use the **previous shot's output** as the input image with controlled denoise:
-
-```
-Shot 0: txt2img (from noise) — denoise 0.55 (shot_index == 0)
-Shot 1: img2img (from Shot 0 output) — denoise 0.40 (shot_index <= 1, same location)
-Shot 2+: img2img (from prior output) — denoise 0.30 (shot_index > 1, same location)
-[location change within scene]
-Next shot: img2img — denoise 0.50 (location_change)
-[new scene / no prior image]
-Next shot: txt2img — denoise 0.55 (chain reset)
-```
-
-### Context-Aware Denoise Values (shot-index-based, no time-skip detection)
-
-| Context | Denoise | Rationale |
-|---------|---------|-----------|
-| First shot (shot_index == 0) or no prior image | 0.55 | Maximum creative freedom — no prior context |
-| Same location, shot_index <= 1 | 0.40 | Early shots get slight creative room |
-| Same location, shot_index > 1 | 0.30 | Tightest consistency — environment must match |
-| Location change within scene | 0.50 | New environment but maintain style/color grade |
-
-### Scene Boundary Reset
-When a new location begins, the img2img chain **resets**:
-- Previous shot output is NOT used as input
-- Denoise returns to 0.55 (fresh generation)
-- Location seed takes over for environment consistency
+A preceding artifact is not automatically chained into the next generation.
+Each reused reference must remain approved, hash/provenance-bound, and visible
+in the new artifact version. A new location or scene normally selects new
+location references while retaining the project style rules.
 
 ---
 
@@ -140,17 +120,22 @@ Input: raw shot prompt + shot metadata + project state
 1. CharacterContinuityTracker → identity fragments + wardrobe + spatial hints
 2. LocationPersistence → location fragment + deterministic seed
 3. PhysicsPromptEngineer → physics constraints
-4. TemporalConsistencyManager → img2img config (prev_image + denoise)
+4. Approved-reference continuity → optional prior keyframe + provenance
 
 Output:
   enhanced_prompt = original + location_fragment + character_fragments + physics_constraints
   continuity_config = {
-    prev_image: path | None,
-    denoise: float,
-    seed: int,
-    primary_character_ref: path,
-    subject_binding_refs: [paths],
-    adaptive_pulid_weight: float
+    continuity_reference: path | None,
+    location_seed: int | None,
+    scene_seed: int,
+    primary_character: id | None,
+    primary_reference: path | None,
+    multi_angle_refs: [paths],
+    identity_anchor: str,
+    identity_threshold: float,
+    shot_type: str,
+    negative_constraints: str,
+    secondary_chars: [records]
   }
 ```
 

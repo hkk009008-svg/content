@@ -3,6 +3,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import SettingsInspector from './SettingsInspector'
 import type { AppConfig, Project } from '../../types/project'
 
+// GPU worker readiness owns its asynchronous request contract in
+// GpuWorkersSection.test.tsx. Keep these settings-mutation tests isolated so
+// their one-shot fetch fixtures continue to describe only the PATCH/POST
+// under test; the placeholder still proves SettingsInspector mounts the new
+// section in its composition.
+vi.mock('./inspector/GpuWorkersSection', () => ({
+  GpuWorkersSection: () => <div data-testid="gpu-workers-section" />,
+}))
+
 /**
  * Rule #13 symmetric-endpoint follow-up to the ShotInspector truthfulness fix.
  * Two mutation sites here mishandled failure on endpoints ShotInspector also
@@ -100,6 +109,12 @@ afterEach(() => {
 })
 
 describe('SettingsInspector -- truthful update()', () => {
+  it('mounts GPU worker readiness in the inspector', () => {
+    render(<SettingsInspector project={makeProject()} config={CONFIG} onRefresh={vi.fn()} />)
+
+    expect(screen.getByTestId('gpu-workers-section')).toBeInTheDocument()
+  })
+
   it('surfaces a non-2xx settings PATCH instead of silently no-op-ing', async () => {
     stubFetch({ ok: false, status: 409, body: REVISION_CONFLICT_BODY })
     const onRefresh = vi.fn()
@@ -153,6 +168,29 @@ describe('SettingsInspector -- truthful update()', () => {
     expect(init!.method).toBe('PATCH')
     expect(JSON.parse(init!.body as string)).toEqual({
       global_settings: { revision: 7, aspect_ratio: '9:16' },
+    })
+  })
+
+  it('exposes location research as an accessible, revision-bound Setup control', async () => {
+    const fetchMock = stubFetch({ ok: true })
+    const onRefresh = vi.fn()
+
+    render(
+      <SettingsInspector
+        project={makeProject({ revision: 5 })}
+        config={CONFIG}
+        onRefresh={onRefresh}
+      />,
+    )
+
+    const control = screen.getByRole('switch', { name: 'Research location references' })
+    expect(control).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/Requires Tavily; off by default/)).toBeInTheDocument()
+    fireEvent.click(control)
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).toEqual({
+      global_settings: { revision: 5, location_research: true },
     })
   })
 

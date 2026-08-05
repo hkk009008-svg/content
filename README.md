@@ -1,100 +1,106 @@
-# Content — Interactive AI Cinema Pipeline
+# Content — interactive AI cinema pipeline
 
-A topic-to-cinematic-short pipeline. Operator drives via a web UI; the system
-generates per-shot keyframes, performance capture, motion video, dialogue
-audio, foley/BGM, and stitches a 1–2 minute final cut. Four operator review
-gates (PLAN / KEYFRAME / PERFORMANCE / REVIEW) ensure identity, continuity,
-and motion quality before the assembly stage.
+Content turns a concept into a reviewed cinematic short. The web application
+manages story planning, reference-conditioned keyframes, performance capture,
+motion video, dialogue and sound, review gates, final assembly, immutable
+artifact history, and client delivery packages.
 
-This is a single-operator, single-machine tool. Not a multi-tenant SaaS.
+This is a local, single-operator production tool. It is not a multi-tenant
+service, and the Flask application must remain loopback-only.
 
----
+## Start here
 
-## What's where
+| Goal | Document |
+| --- | --- |
+| Run, configure, verify, or troubleshoot the application | [OPERATIONS.md](OPERATIONS.md) |
+| Understand the production architecture and safety boundaries | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Learn the UI and the complete operator workflow | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
+| Review settled architectural decisions | [DECISIONS.md](DECISIONS.md) |
+| Run an explicitly authorized live contract check | [docs/LIVE_CONTRACT_CANARY.md](docs/LIVE_CONTRACT_CANARY.md) |
+| Work in the repository as Codex or another agent | [AGENTS.md](AGENTS.md) |
+| Work in the repository as Claude Code | [CLAUDE.md](CLAUDE.md) |
 
-| Need to | Read |
-|---|---|
-| Understand the codebase (entry, orchestrator, phases, gates, all subsystems) | [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Learn the whole program end-to-end + drive it to max capability (macro + micro + user manual) | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
-| Run it locally / set up env / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
-| See WHY the architecture is shaped this way (settled decisions) | [DECISIONS.md](DECISIONS.md) |
-| Strategic direction + open critique from current leadership | [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md) |
-| Execute a session from the roadmap (operator manual) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
-| Work in this repo as Claude Code | [CLAUDE.md](CLAUDE.md) |
-| Work in this repo as another AI agent (Cursor, Aider, Copilot, Codex, …) | [AGENTS.md](AGENTS.md) |
-| See what was true at past handoff dates | [docs/archive/](docs/archive/) |
+Historical plans, handoffs, and investigations are evidence of earlier states;
+they do not override these active documents or current source and tests.
 
----
-
-## 30-second quick start
+## Quick start
 
 ```bash
-# Python 3.13 venv + deps
 /opt/homebrew/bin/python3.13 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 
-# Frontend
-cd web && npm install && cd ..
+cd web
+npm install
+cd ..
 
-# API keys (fill in)
 cp .env.example .env
-
-# Smoke test
-.venv/bin/python -c "import cinema_pipeline; print('OK')"
-
-# Run (Flask backend on :8080 + Vite dev on :3000 with /api proxy)
-.venv/bin/python web_server.py &
-cd web && npm run dev
+.venv/bin/python web_server.py
 ```
 
-Open `http://localhost:3000`.
+In a second terminal:
 
-For pod setup (ComfyUI workflows, models), see [OPERATIONS.md](OPERATIONS.md).
+```bash
+cd web
+npm run dev
+```
 
----
+Open `http://localhost:3000`. The frontend proxies `/api` to the loopback Flask
+server.
 
-## Stack at a glance
+Before a production session, run:
 
-- **Backend:** Python 3.13, Flask + SSE (per-subscriber broadcast bus with replay), ~17 cloud API providers
-- **Frontend:** React 19 + Vite 6 + Tailwind 3, no router (4-mode `useState`: Setup / Edit / Run / Capability)
-- **Image generation:** Gemini 3.1 Flash Image ("Nano Banana 2") is the default primary; ComfyUI + PuLID is the reference-conditioned fallback. Single production tier — the old max tier (N=8 adaptive best-of) was retired.
-- **Video generation:** Gemini Omni Flash (native audio) is the default primary; a typed 9-engine fallback cascade follows (Kling / Veo / LTX / Runway / SEEDANCE / …). Sora is a dated pre-sunset fallback only (retires 2026-09-24).
-- **Identity:** GhostFaceNet via DeepFace, process-singleton, 4-way access converge
-- **LLMs:** Anthropic + OpenAI parallel quorum + judge (Gemini opt-in)
-- **Audio:** ElevenLabs (TTS) + FAL Stable Audio (BGM) + Pedalboard (DSP)
-- **Lipsync:** 4-engine overlay cascade + 2-engine generation cascade, all FAL
+```bash
+.venv/bin/python scripts/ci_smoke.py
+cd web && npm test -- --run && npm run build
+```
 
----
+## Current production routes
 
-## Project conventions in 60 seconds
+- Image generation defaults to Gemini multi-reference. A local FLUX.2 Klein
+  4B route appears in Setup only when the authenticated Windows worker proves
+  its exact package, model, workflow, fixed execution canary, license review,
+  and 1/2/10-reference benchmark. Guarded FAL and Pollinations routes remain
+  the supported cloud fallbacks.
+- Local performance capture uses the same Windows RTX worker through the
+  role-bound LivePortrait capability. Cloud performance adapters remain
+  explicit alternatives where configured.
+- Motion generation uses the typed video-provider catalog and project policy.
+  AUTO routing can avoid providers whose reconciled recent outcomes score
+  unhealthy; an operator-pinned provider is never silently overridden.
+- Identity validation uses the shared GhostFaceNet validator and approved
+  project reference images. Removed image-training and provider-tuning
+  controls are not stored, rendered, or dispatched.
 
-1. **One entry point** — `web_server.py` → `cinema_pipeline.py:CinemaPipeline`. No CLI.
-2. **Truth lives in `ARCHITECTURE.md`** — every claim there is cross-referenced to file:line and verified against source.
-3. **Per-project settings via `get_project_setting(ctx, ...)`** — never `getattr(settings, ...)`. The frozen `Settings` dataclass is env-derived API keys ONLY.
-4. **Identity is a singleton** — always reach for `identity.get_shared_validator()`. Four backward-compat aliases exist; all converge.
-5. **Gates use predicate-poll** — operator approvals via REST mutate `project.json`; the worker thread polls disk state every 500ms. State survives crashes and SSE disconnects.
-6. **One commit per logical slice** — run the §15 smoke block in ARCHITECTURE.md before declaring done.
+## Durable production controls
 
----
+The application includes the seven production controls exposed in the UI:
 
-## Status
+1. Crash-resumable full-project jobs with idempotent queue admission and
+   durable checkpoints.
+2. Provider success, latency, unresolved-job, reservation, and reconciled-cost
+   analytics.
+3. A bounded durable queue for safely running multiple projects.
+4. Immutable artifact versions with hashes, recipes, dependencies, and source
+   provenance.
+5. Automatic provider health scoring for AUTO video routing.
+6. One-click deterministic ZIP packaging of verified client deliverables.
+7. Project-scoped searchable structured traces with secret-safe fields.
 
-The post-pivot codebase is stable and shipping. A comprehensive product-
-unification pass is in progress (provider-contract repair, project-scoped
-state authority, portable media, documentation truth) — see
-`docs/superpowers/plans/2026-07-30-comprehensive-product-unification.md` for
-the live task board. Prior strategic direction is tracked in
-[docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md).
+Run shows queue state, provider health, costs, and traces. Preview exposes
+artifact versions and client packaging. Setup exposes GPU readiness and only
+enables the local image route after live proof.
 
-**CI:** Three jobs run on every push to `main` and every pull request —
-`ARCHITECTURE.md §15` singleton/ctx smoke, `pytest tests/unit/`, and
-`tsc --noEmit`. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
-**CI status:** the pytest job collects and passes — the collection-time
-sys.path gap was closed in `0326f24a` (NF-1 of the 2026-06-10 strategic
-review) by adding `[tool.pytest.ini_options] pythonpath = ["."]` to
-`pyproject.toml`. See [.github/workflows/ci.yml](.github/workflows/ci.yml)
-for the live suite and its current pass count.
+## Stack
 
-Last architecture verification: see the `*Last verified: ...*` footer in
-[ARCHITECTURE.md](ARCHITECTURE.md).
+- Python 3.13, Flask, SQLite, SSE, and a phase-oriented cinema orchestrator.
+- React 19, Vite, Tailwind, Vitest, Testing Library, and automated accessibility
+  checks.
+- Immutable JSON/project state plus SQLite ledgers for jobs, provider attempts,
+  costs, and traces.
+- Local Windows 11 RTX execution behind an authenticated loopback/LAN tunnel;
+  API keys and worker endpoints stay server-side.
+
+Source, tests, live readiness records, immutable evidence, and current Git state
+are authoritative. A static config value, reachable port, successful schema
+probe, or old benchmark never implies production readiness by itself.

@@ -165,16 +165,18 @@ Details: docs/protocol/claude/director-operator.md (Rule #13).
 
 ## R-SKILL — project-skill load triggers
 Scope: both
-Trigger: about to author, modify, review, or debug ComfyUI graph code/JSON
-(`pulid*.json`, node wiring, samplers, PuLID/IP-Adapter/LoRA chains,
-graph-injection helpers in `quality_max.py`) — or pipeline-level
-video-generation design work (shot routing, video-API selection,
-identity/continuity systems, lip-sync).
+Trigger: about to author, modify, review, or debug either guarded local
+ComfyUI graph: the hash-bound FLUX.2 Klein candidate
+(`deploy/windows-flux2-klein/workflow.py`, reference-latent wiring, candidate
+bindings/readiness) or the pinned LivePortrait performance worker
+(`performance/live_portrait_workflow.py`, worker probe/capability wiring) — or
+pipeline-level video-generation design work (shot routing, video-API
+selection, identity/continuity systems, performance capture, lip-sync).
 Action: invoke the matching project skill BEFORE writing or judging the code —
 `comfyui-mastery` for ComfyUI-graph work, `ai-video-gen` for pipeline-level
-work. When a skill prior shapes a verdict, name it in the work product (the
-2026-06-11 S2 dual-PuLID verdicts leaned on comfyui-mastery's single-face
-prior + `ApplyPulidAdvanced.attn_mask` escape hatch).
+work. When a skill prior shapes a verdict, name it in the work product and
+bind the claim to the active workflow, capability contract, and readiness
+evidence rather than to a historical graph.
 Details: .claude/skills/comfyui-mastery/SKILL.md; .claude/skills/ai-video-gen/SKILL.md.
 
 ## Rule #12 — grep-the-writes

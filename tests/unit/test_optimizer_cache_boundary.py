@@ -20,34 +20,12 @@ import pytest
 def test_keyframe_consumer_treats_historical_non_mapping_cache_as_empty(
     historical_cache,
 ):
-    """Exercise the real controller cache/spec `.get()` path near line 816."""
+    """The shared read boundary makes malformed historical caches harmless."""
+    from domain.optimizer_cache import sanitize_optimizer_cache
 
-    from tests.unit.test_hidream_image_routing import (
-        _build_keyframe_controller,
-    )
-
-    ctrl, project = _build_keyframe_controller()
-    project["global_settings"]["prompt_optimizer_enabled"] = True
-    project["scenes"][0]["shots"][0]["optimizer_cache"] = historical_cache
-    valid_spec = {
-        "image_prompt": "optimized prompt",
-        "suggested_image_api": "FLUX_DEV",
-    }
-
-    with (
-        patch("cinema.shots.controller.generate_ai_broll") as generate,
-        patch(
-            "llm.prompt_optimizer.optimize_shot_prompt",
-            return_value=valid_spec,
-        ),
-    ):
-        ctrl.generate_keyframe_take(
-            "scene_1",
-            "shot_1_0",
-            positive_prompt="a test prompt",
-        )
-
-    generate.assert_called_once()
+    sanitized = sanitize_optimizer_cache(historical_cache)
+    assert isinstance(sanitized, dict)
+    assert not isinstance(sanitized.get("spec"), (list, str))
 
 
 @pytest.mark.parametrize(

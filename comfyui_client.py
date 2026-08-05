@@ -1,7 +1,6 @@
-"""Bounded ComfyUI HTTP/WebSocket client used by image generation.
+"""Bounded, host-agnostic ComfyUI HTTP/WebSocket client.
 
-The historical ``RunPodComfyUI`` name is retained because callers and project
-documentation use it, but the transport is host-agnostic.  The client keeps
+The client keeps
 all network calls bounded, reuses urllib3 connection pools, validates a graph
 against the live ComfyUI contract before submission, and never automatically
 retries ``POST /prompt`` (an acknowledgement may have been lost after ComfyUI
@@ -64,9 +63,13 @@ class ComfyUIError(RuntimeError):
 class ComfyUITransportError(ComfyUIError):
     """The server could not be reached or returned an invalid transport response."""
 
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class ComfyUIReadinessError(ComfyUIError):
-    """The live pod contract cannot execute the requested workflow."""
+    """The live worker contract cannot execute the requested workflow."""
 
 
 class ComfyUIPromptRejected(ComfyUIError):
@@ -196,7 +199,7 @@ def _queue_item_prompt_id(item: Any) -> Optional[str]:
     return None
 
 
-class RunPodComfyUI:
+class ComfyUIClient:
     """Production-safe client for the standard ComfyUI server API."""
 
     def __init__(
@@ -254,9 +257,52 @@ class RunPodComfyUI:
             payload = _response_payload(response)
             if response.status_code >= 400:
                 raise ComfyUITransportError(
-                    f"GET {path} returned HTTP {response.status_code}: {_short_json(payload)}"
+                    f"GET {path} returned HTTP {response.status_code}: {_short_json(payload)}",
+                    status_code=response.status_code,
                 )
             return payload
+
+    def get_gateway_readiness(self) -> dict[str, Any]:
+        """Return the guarded gateway readiness record when one is installed.
+
+        Raw ComfyUI installations normally return HTTP 404 here. Callers must
+        not reinterpret successful API introspection as equivalent to the
+        gateway's full model/startup contract.
+        """
+
+        payload = self._get_json("/health/ready")
+        if not isinstance(payload, dict) or payload.get("status") != "ready":
+            raise ComfyUIReadinessError(
+                "/health/ready must return a ready JSON object"
+            )
+        return payload
+
+    def get_gateway_capabilities_readiness(self) -> dict[str, Any]:
+        """Return the bearer-protected capability readiness contract.
+
+        Unlike the intentionally public liveness/readiness endpoints, this
+        route proves that a gateway accepted the configured credential before
+        callers consider sharing one physical worker across capability roles.
+        The exact capability schema remains the caller's responsibility.
+        """
+
+        payload = self._get_json("/api/capabilities/ready")
+        if not isinstance(payload, dict):
+            raise ComfyUIReadinessError(
+                "/api/capabilities/ready must return a JSON object"
+            )
+        return payload
+
+    def get_system_stats(self) -> dict[str, Any]:
+        payload = self._get_json("/system_stats")
+        if not isinstance(payload, dict) or not isinstance(payload.get("system"), dict):
+            raise ComfyUIReadinessError(
+                "/system_stats must return an object with system metadata"
+            )
+        devices = payload.get("devices", [])
+        if devices is not None and not isinstance(devices, list):
+            raise ComfyUIReadinessError("/system_stats devices must be a list")
+        return payload
 
     def get_object_info(self) -> dict[str, Any]:
         payload = self._get_json("/object_info")
@@ -389,8 +435,14 @@ class RunPodComfyUI:
                 raise ComfyUITransportError("ComfyUI image upload response has no filename")
             return payload["name"]
 
-    def queue_prompt(self, prompt_workflow: Mapping[str, Any]) -> str:
-        self.preflight(prompt_workflow)
+    def queue_prompt_preflighted(self, prompt_workflow: Mapping[str, Any]) -> str:
+        """Submit exactly once after the caller completed ``preflight``.
+
+        Durable paid-job authority uses this split so node/model/transport
+        failures are proven before reserving a billable-attempt fence. Direct
+        callers should keep using :meth:`queue_prompt`.
+        """
+
         payload = {"prompt": prompt_workflow, "client_id": self.client_id}
         try:
             # Intentionally one attempt.  A timeout/reset after sending the body
@@ -434,6 +486,10 @@ class RunPodComfyUI:
                     "ComfyUI prompt response has no prompt_id; submission state is UNKNOWN"
                 )
             return body["prompt_id"]
+
+    def queue_prompt(self, prompt_workflow: Mapping[str, Any]) -> str:
+        self.preflight(prompt_workflow)
+        return self.queue_prompt_preflighted(prompt_workflow)
 
     def get_history(self, prompt_id: str) -> dict[str, Any]:
         payload = self._get_json(f"/history/{quote(prompt_id, safe='')}")
@@ -635,7 +691,7 @@ class RunPodComfyUI:
                     f"{scoped_response.status_code}"
                 )
 
-        # Compatibility for older pods. The queue snapshot can race with a
+        # Compatibility for older gateways. The queue snapshot can race with a
         # transition from running to completed, so new ComfyUI versions should
         # always use the ID-scoped route above.
         queue = self.get_queue()

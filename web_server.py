@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import tempfile
+import uuid
 import warnings
 from collections import Counter, deque
 from collections.abc import Callable, Mapping
@@ -64,6 +65,11 @@ from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS
 from domain.models import DirectorialIntent, Project, Shot
 from domain.character_manager import _to_project_relative
 from domain.optimizer_cache import optimizer_cache_is_valid
+from domain.flux2_candidate import flux2_candidate_status
+from performance.worker_readiness import (
+    PerformanceWorkerUnavailable,
+    require_flux2_worker_ready,
+)
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -82,9 +88,10 @@ from domain.video_engine_policy import (
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
 from config.settings import settings as env_settings
-from prep import lora_policy
 from paid_provider import PaidCallBudgetBlocked, PaidCallDeferred, PaidCallUnbilled
+from performance._net import validate_video_artifact
 from cinema.artifact_versions import ArtifactVersionError
+from cinema.artifact_indexing import record_auxiliary_version
 from pipeline_jobs import (
     JobExecutionContext,
     PipelineJob,
@@ -94,6 +101,7 @@ from pipeline_jobs import (
 )
 from web_observability import observability_api
 from web_artifacts import artifact_api
+from web_gpu_workers import gpu_workers_api
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # CORS allowlist comes from settings.web_cors_origins. Default is
 # localhost-only ("http://localhost:8080" + "http://localhost:5173" for
@@ -103,6 +111,7 @@ app = Flask(__name__, static_folder="web/dist", static_url_path="")
 CORS(app, origins=list(env_settings.web_cors_origins))
 app.register_blueprint(observability_api)
 app.register_blueprint(artifact_api)
+app.register_blueprint(gpu_workers_api)
 
 # ---------------------------------------------------------------------------
 # Broadcast-safe SSE event fan-out with replay (Slice 11a)
@@ -467,6 +476,17 @@ _GATE_STAGES = frozenset({
 _running_cores: dict[str, PipelineCore] = {}
 _cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
+_DRIVING_VIDEO_MAX_BYTES = 256 * 1024 * 1024
+_DRIVING_VIDEO_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+_DRIVING_VIDEO_UPLOAD_CHUNK_BYTES = 1024 * 1024
+# Operators may retain a longer reusable acting reference, but each local
+# LivePortrait take admits only its authoritative per-shot window capped at
+# the first 8 seconds / 200 frames. Upload validation and GPU ingestion are
+# intentionally distinct limits; the review UI states both.
+_DRIVING_VIDEO_MAX_DURATION_S = 30.0
+_DRIVING_VIDEO_MIN_DIMENSIONS = (64, 64)
+_DRIVING_VIDEO_MAX_DIMENSIONS = (4096, 4096)
+_DRIVING_VIDEO_MAX_PIXELS = 4096 * 2160
 _PROJECT_CREATE_NAME_MAX_CHARS = 200
 _COST_ESTIMATE_MAX_SHOTS = 120
 _COST_ESTIMATE_MAX_CANDIDATES = 16
@@ -671,11 +691,30 @@ def _reserve_project_stage(pid: str) -> bool:
         ):
             return False
         _project_stage_in_flight.add(pid)
+        if local_pipeline is not None:
+            # The review predicate polls independently of HTTP operation
+            # locks.  Publish the lease onto the live pipeline before the
+            # endpoint can validate or mutate so a gate cannot advance on the
+            # approval snapshot that the in-flight action is replacing.
+            try:
+                local_pipeline._direct_stage_in_flight = True
+            except AttributeError:
+                # A few compatibility/test callers use an opaque sentinel to
+                # mean "a gate waiter exists". It has no review predicate to
+                # coordinate with, so the process-wide lease remains the only
+                # applicable guard.
+                pass
         return True
 
 
 def _release_project_stage(pid: str) -> None:
     with _pipelines_lock:
+        local_pipeline = _running_pipelines.get(pid)
+        if local_pipeline is not None and local_pipeline is not _PIPELINE_PENDING:
+            try:
+                local_pipeline._direct_stage_in_flight = False
+            except AttributeError:
+                pass
         _project_stage_in_flight.discard(pid)
 
 
@@ -831,6 +870,64 @@ def _pipeline_at_gate_stage(pid: str) -> bool:
         return pipeline.current_stage in _GATE_STAGES
     except AttributeError:
         return False
+
+
+def _require_exact_pipeline_stage(pid: str, expected_stage: str):
+    """Return a deterministic 409 unless the live run owns ``expected_stage``.
+
+    A direct-stage lease only prevents concurrent mutations; it does not prove
+    which review gate the pipeline worker is parked at. Gate-specific actions
+    must bind to the live run's exact stage so a hidden/stale client cannot
+    invoke them during plan, keyframe, final review, or ordinary execution.
+    """
+
+    pipeline = _get_running_pipeline(pid)
+    actual_stage = str(getattr(pipeline, "current_stage", "") or "")
+    if actual_stage == expected_stage:
+        return None
+    return jsonify({
+        "code": "wrong_pipeline_stage",
+        "retryable": False,
+        "error": (
+            f"Action requires {expected_stage}; current pipeline stage is "
+            f"{actual_stage or 'IDLE'}"
+        ),
+        "required_stage": expected_stage,
+        "current_stage": actual_stage,
+    }), 409
+
+
+def _require_iteration_pipeline_stage(pid: str, target_stage: str):
+    """Bind directorial iteration to its live review authority.
+
+    Screening is the deliberate cross-stage remediation surface: it may send
+    any supported take kind back through its matching generator and marks the
+    shot dirty for reassembly.  Ordinary review gates may invoke only their
+    own generator.
+    """
+
+    required_stage = {
+        "keyframe": "KEYFRAME_REVIEW",
+        "performance": "PERFORMANCE_REVIEW",
+        "motion": "REVIEW",
+    }[target_stage]
+    pipeline = _get_running_pipeline(pid)
+    actual_stage = str(getattr(pipeline, "current_stage", "") or "")
+    allowed_stages = (required_stage, "SCREENING")
+    if actual_stage in allowed_stages:
+        return None
+    return jsonify({
+        "code": "wrong_pipeline_stage",
+        "retryable": False,
+        "error": (
+            f"Iteration target {target_stage} requires {required_stage} "
+            f"or SCREENING; current pipeline stage is {actual_stage or 'IDLE'}"
+        ),
+        "required_stage": required_stage,
+        "allowed_stages": list(allowed_stages),
+        "current_stage": actual_stage,
+        "target_stage": target_stage,
+    }), 409
 
 
 def _reject_if_project_busy_outside_gate(pid: str):
@@ -1255,18 +1352,6 @@ def get_config():
             "frame_interpolation": {"available": True, "description": "RIFE 4x interpolation (8fps → 24fps)"},
             "upscaling": {"available": True, "description": "Real-ESRGAN 2x upscale for 4K output"},
         },
-        # Only knobs with a real production reader belong here — advertising a
-        # range the pipeline never consults is the same defect class as an
-        # inert UI control (audit 2026-07-30, slice 9d follow-up).
-        # img2img_denoise is read at workflow_selector.py:343-353.
-        # Removed with the ip_adapter_weight deletion: `identity_threshold`
-        # (the pipeline reads the per-shot value from continuity config, and
-        # the wired project-level override is `identity_strictness`) and
-        # `ip_adapter_weight` (generation uses the shot-type PuLID template
-        # plus the adaptive face-lock gate).
-        "continuity_options": {
-            "img2img_denoise": {"min": 0.2, "max": 0.6, "default": 0.35, "description": "Lower = more similar to previous shot"},
-        },
         "color_grade_presets": [
             "warm_cinema", "cool_noir", "vibrant", "desaturated",
             "golden_hour", "moonlight", "high_contrast", "pastel",
@@ -1291,6 +1376,7 @@ def get_config():
         "purpose_api_ranking": PURPOSE_API_RANKING,
         # Billing attribution for cost estimator
         "billing_providers": BILLING_PROVIDERS,
+        "flux2_candidate": flux2_candidate_status(env_settings).public_dict(),
     }
     if project is not None:
         config["video_engines"] = _project_video_engine_rows(
@@ -1541,7 +1627,7 @@ def api_capability_scorecard(pid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
     from cinema.capability_scorecard import build_capability_scorecard
-    scorecard = build_capability_scorecard(project, project_dir=get_project_dir(pid))
+    scorecard = build_capability_scorecard(project)
     return jsonify(scorecard)
 
 
@@ -1634,6 +1720,38 @@ class _SettingsValidationError(ValueError):
         super().__init__("invalid project settings patch")
 
 
+class _ImageBackendBlockedError(RuntimeError):
+    """A locked mutation tried to activate an unavailable image backend."""
+
+    def __init__(self, payload: dict):
+        self.payload = payload
+        super().__init__(payload["error"])
+
+
+def _guard_image_backend_selection(project: dict, incoming_settings: dict) -> None:
+    """Require a live exact proof before a project selects local FLUX.2."""
+
+    current_settings = project.get("global_settings")
+    current_backend = (
+        current_settings.get("identity_backend", "gemini_multiref")
+        if isinstance(current_settings, dict)
+        else "gemini_multiref"
+    )
+    requested_backend = incoming_settings.get("identity_backend", current_backend)
+    if requested_backend == current_backend:
+        return
+    if requested_backend != "local_flux2_klein":
+        return
+    try:
+        require_flux2_worker_ready(env_settings)
+    except PerformanceWorkerUnavailable as exc:
+        raise _ImageBackendBlockedError({
+            "error": str(exc),
+            "code": "local_flux2_not_ready",
+            "retryable": True,
+        }) from exc
+
+
 def _validate_bool_setting(value):
     if not isinstance(value, bool):
         raise ValueError("must be a boolean")
@@ -1684,6 +1802,14 @@ def _validate_aspect_ratio_setting(value):
     return value
 
 
+def _validate_identity_backend_setting(value):
+    if not isinstance(value, str) or value not in {
+        "gemini_multiref", "local_flux2_klein",
+    }:
+        raise ValueError("must be one of: gemini_multiref, local_flux2_klein")
+    return value
+
+
 # Per-key validators for the strict partial-write path (PATCH). Deliberately
 # narrower than every key the legacy whole-object PUT tolerates today —
 # web/src/components/setup/inspector/*.tsx and ShotInspector.tsx already
@@ -1697,22 +1823,9 @@ def _validate_aspect_ratio_setting(value):
 # the Setup page before this table caught up, so the new strict PATCH 400ed
 # on every key either section writes (a 9a<->9c integration gap).
 #
-# Slice 9d closed the same gap one pathspec over: IdentitySection.tsx
-# (identity_retry_max, flux_guidance, coherence_threshold) and
-# ImageSection.tsx (identity_backend, comfyui_sampler, comfyui_steps) are
-# now covered below too. Each of those six has a live runtime consumer —
-# controller.py (identity_retry_max, coherence_threshold, identity_backend),
-# capability_scorecard.py (coherence_threshold), workflow_selector.py
-# (flux_guidance, comfyui_sampler, comfyui_steps), phase_c_assembly.py
-# (identity_backend) — so that was a registry omission, not the
-# decorative-setting case the first paragraph describes.
-#
-# The three char_lora_* registry fields (prep.lora_policy.PROTECTED_LORA_FIELDS,
-# ADR-065 dormant-LoRA containment) are deliberately absent: PATCH simply
-# does not offer them (any attempt 400s as an unknown key), so the
-# dormant-activation guard stays enforced on its one existing checked path
-# (the PUT route's changed_protected_lora_fields call) instead of needing a
-# second copy of the same policy.
+# IdentitySection and ImageSection settings are included only when the runtime
+# has a real consumer. Retired ComfyUI sampler, step, guidance, and denoise
+# controls are deliberately absent from this strict write contract.
 _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     "aspect_ratio": _validate_aspect_ratio_setting,
     "music_mood": _validate_string_setting,
@@ -1725,7 +1838,7 @@ _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     "creative_llm": _validate_string_setting,
     "quality_judge_llm": _validate_string_setting,
     "competitive_generation": _validate_bool_setting,
-    "adaptive_pulid": _validate_bool_setting,
+    "location_research": _validate_bool_setting,
     "coherence_check_enabled": _validate_bool_setting,
     "color_drift_sensitivity": _validate_unit_interval_setting,
     "prompt_optimizer_enabled": _validate_bool_setting,
@@ -1756,23 +1869,14 @@ _SETTINGS_KEY_VALIDATORS: dict[str, Callable[[object], object]] = {
     "scene_transitions": _validate_bool_setting,
     "transition_duration": _validate_nonneg_number_setting,
     "face_swap_enabled": _validate_bool_setting,
-    # IdentitySection.tsx — retry budget, FLUX guidance, coherence floor.
+    # IdentitySection.tsx — retry budget and coherence floor.
     # The validators enforce the type/domain invariant each consumer needs,
     # not the narrower slider bounds (retry 1-5, guidance 2.0-5.0, coherence
     # 0.3-1.0) — same latitude cascade_retry_limit above already takes.
     "identity_retry_max": _validate_int_setting,
-    "flux_guidance": _validate_nonneg_number_setting,
     "coherence_threshold": _validate_unit_interval_setting,
-    # ImageSection.tsx — identity backend + its pod-only sampler controls.
-    # identity_backend is an enum ('gemini_multiref' | 'pod') checked as a
-    # plain string, matching this table's other enums (lip_sync_mode,
-    # dialogue_voice_mode): both consumers compare against the literals
-    # (controller.py `== "gemini_multiref"`, phase_c_assembly.py `!= "pod"`),
-    # so an unrecognized string falls to the cloud default rather than
-    # silently activating the pod.
-    "identity_backend": _validate_string_setting,
-    "comfyui_sampler": _validate_string_setting,
-    "comfyui_steps": _validate_int_setting,
+    # ImageSection.tsx — exact image backend selection.
+    "identity_backend": _validate_identity_backend_setting,
 }
 
 
@@ -1829,11 +1933,9 @@ def api_update_project(pid):
     conflict = None
 
     def _mutate_project(project: dict):
-        # Inner validation and protected-field comparison use the locked latest state.
+        # Inner validation and the revision comparison use the locked latest state.
         nonlocal conflict
         Project.model_validate(project)
-        if has_incoming_gs and (changed_lora_fields := lora_policy.changed_protected_lora_fields(project.get("global_settings"), incoming_gs)):
-            raise lora_policy.LoraActivationDormantError(changed_lora_fields)
         if has_incoming_gs:
             # Fail-closed optimistic-concurrency guard (slice 9a; hardened
             # post-9a-review — see the module comment above this route and
@@ -1861,6 +1963,7 @@ def api_update_project(pid):
                     current_revision, project.get("global_settings", {})
                 )
                 return MutationResult(None, save=False)
+            _guard_image_backend_selection(project, incoming_gs)
         if "name" in data:
             project["name"] = data["name"]
         if has_incoming_gs:
@@ -1878,7 +1981,7 @@ def api_update_project(pid):
     try:
         try:
             project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
-        except lora_policy.LoraActivationDormantError as exc:
+        except _ImageBackendBlockedError as exc:
             return jsonify(exc.payload), 409
         if conflict is not None:
             return jsonify(conflict), 409
@@ -1970,6 +2073,7 @@ def api_patch_project_settings(pid):
                 current_revision, project.get("global_settings", {})
             )
             return MutationResult(None, save=False)
+        _guard_image_backend_selection(project, validated)
         settings = project.setdefault("global_settings", {})
         settings.update(validated)
         settings[_SETTINGS_REVISION_KEY] = current_revision + 1
@@ -1978,7 +2082,10 @@ def api_patch_project_settings(pid):
     if not _reserve_project_admin(pid):
         return _project_busy_response(pid)
     try:
-        project = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+        try:
+            project = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+        except _ImageBackendBlockedError as exc:
+            return jsonify(exc.payload), 409
         if conflict is not None:
             return jsonify(conflict), 409
         if not project:
@@ -3095,39 +3202,192 @@ def api_remove_character(pid, cid):
     return jsonify({"error": "Character not found"}), 404
 
 
-# ---------------------------------------------------------------------------
-# Objects (products / props for commercials)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Dormant per-character LoRA compatibility surface.
-# ---------------------------------------------------------------------------
-@app.route("/api/projects/<pid>/characters/<cid>/train-lora", methods=["POST"])
-def api_train_lora(pid, cid):
-    """Compatibility tombstone; never inspect or mutate project state."""
-    return jsonify(lora_policy.lora_training_dormant_error()), 409
+class _DrivingVideoTooLarge(ValueError):
+    pass
 
 
-@app.route("/api/projects/<pid>/characters/<cid>/lora-status", methods=["GET"])
-def api_lora_status(pid, cid):
-    """Poll training status. Returns idle when no training has ever run for this character."""
+class _DrivingVideoEmpty(ValueError):
+    pass
+
+
+def _driving_video_destination(pid: str, scene_id: str, sid: str) -> tuple[str, str] | None:
+    """Resolve one shot-owned destination without trusting persisted IDs as paths."""
+
+    for component in (scene_id, sid):
+        if (
+            not isinstance(component, str)
+            or not component
+            or len(component) > 200
+            or component in {".", ".."}
+            or "\x00" in component
+            or os.path.basename(component) != component
+        ):
+            return None
+
+    project_dir = os.path.realpath(get_project_dir(pid))
+    performance_root_path = os.path.join(project_dir, "performance_inputs")
+    os.makedirs(performance_root_path, exist_ok=True)
+    performance_root = os.path.realpath(performance_root_path)
+    dest_dir = os.path.realpath(os.path.join(performance_root, scene_id, sid))
     try:
-        from prep.lora_training import get_lora_status
-    except Exception as e:
-        return jsonify({"error": f"prep.lora_training unavailable: {e}"}), 500
-    project_dir = get_project_dir(pid)
-    return jsonify({**get_lora_status(project_dir, cid), **lora_policy.lora_dormant_status_fields()})
+        if (
+            os.path.commonpath([project_dir, performance_root]) != project_dir
+            or os.path.commonpath([performance_root, dest_dir]) != performance_root
+            or dest_dir == performance_root
+        ):
+            return None
+    except ValueError:
+        return None
+    os.makedirs(dest_dir, exist_ok=True)
+    return dest_dir, os.path.join(dest_dir, "driving.mp4")
+
+
+def _stage_driving_video_upload(file_obj, dest_dir: str) -> tuple[str, int]:
+    """Copy an untrusted upload into a bounded, fsynced destination sibling."""
+
+    fd, staged_path = tempfile.mkstemp(
+        prefix=".driving-upload-",
+        suffix=".mp4",
+        dir=dest_dir,
+    )
+    keep_stage = False
+    try:
+        written = 0
+        with os.fdopen(fd, "wb") as staged:
+            while True:
+                chunk = file_obj.stream.read(_DRIVING_VIDEO_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > _DRIVING_VIDEO_MAX_BYTES:
+                    raise _DrivingVideoTooLarge
+                staged.write(chunk)
+            if written == 0:
+                raise _DrivingVideoEmpty
+            staged.flush()
+            os.fsync(staged.fileno())
+        keep_stage = True
+        return staged_path, written
+    finally:
+        if not keep_stage:
+            try:
+                os.remove(staged_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.warning(
+                    "Could not remove rejected driving-video stage %s",
+                    staged_path,
+                    exc_info=True,
+                )
+
+
+def _performance_upload_paid_work_fence(
+    pid: str,
+    video_id: str,
+    shot: Mapping[str, object],
+):
+    """Return a 409 response while changing input could orphan paid work."""
+
+    from cinema.shots.controller import (
+        _PERFORMANCE_REQUEST_ACTIVE_STATES,
+        _performance_paid_attempts,
+        _take_reconciles_paid_attempt,
+    )
+    from cost_tracker import PAID_ATTEMPT_ACTIVE_STATES
+
+    current_request = shot.get("performance_generation_request")
+    if (
+        isinstance(current_request, Mapping)
+        and str(current_request.get("status") or "")
+        in _PERFORMANCE_REQUEST_ACTIVE_STATES
+    ):
+        return jsonify({
+            "code": "performance_request_active",
+            "retryable": True,
+            "error": (
+                "The driving video cannot be replaced while the saved "
+                "performance request requires recovery"
+            ),
+            "request": dict(current_request),
+        }), 409
+
+    try:
+        tracker = _get_or_build_core(pid).cost_tracker
+        attempts = _performance_paid_attempts(
+            tracker,
+            video_id=video_id,
+            shot_id=str(shot.get("id") or ""),
+        )
+    except Exception:
+        # Keep this boundary deterministic even when the cached core or its
+        # database cannot be opened. Input replacement is never worth losing
+        # all-provider paid-job authority.
+        logger.warning(
+            "Driving-video upload could not verify paid performance work",
+            exc_info=True,
+            extra={"pid": pid, "shot_id": shot.get("id")},
+        )
+        return jsonify({
+            "code": "performance_authority_unavailable",
+            "retryable": True,
+            "error": (
+                "Performance paid-work authority is unavailable; driving "
+                "video replacement is blocked"
+            ),
+        }), 409
+
+    if attempts is None:
+        return jsonify({
+            "code": "performance_authority_unavailable",
+            "retryable": True,
+            "error": (
+                "Performance paid-work authority is unavailable; driving "
+                "video replacement is blocked"
+            ),
+        }), 409
+
+    blocking_attempt = next(
+        (
+            attempt
+            for attempt in attempts
+            if str(attempt.get("state") or "") in PAID_ATTEMPT_ACTIVE_STATES
+            or (
+                str(attempt.get("state") or "") == "succeeded"
+                and not _take_reconciles_paid_attempt(shot, attempt)
+            )
+        ),
+        None,
+    )
+    if blocking_attempt is not None:
+        return jsonify({
+            "code": "provider_job_deferred",
+            "retryable": True,
+            "error": (
+                "The driving video cannot be replaced until existing "
+                "performance provider work is reconciled"
+            ),
+            "engine": str(blocking_attempt.get("engine") or ""),
+            "paid_attempt": blocking_attempt,
+        }), 409
+    return None
 
 
 @app.route("/api/projects/<pid>/shots/<sid>/upload-driving-video", methods=["POST"])
 @_project_lock_guard
+@_project_stage_guard
 def api_upload_driving_video(pid, sid):
-    """Operator upload of a driving video for a specific shot (Mode A).
+    """Operator upload of a driving video for a specific shot.
 
-    Saves to <project>/performance_inputs/<scene_id>/<shot_id>/driving.mp4
-    and sets shot.driving_video_path. PerformanceCapturePhase will pick it
-    up automatically on the next run.
+    Validated bytes are retained under a content-addressed, project-relative
+    path. Replacements move only the active pointer: historical input bytes,
+    performance takes, and artifact-ledger provenance remain immutable.
     """
+    pipeline = _get_running_pipeline(pid)
+    active_stage = str(getattr(pipeline, "current_stage", "") or "")
+    if pipeline is not None and active_stage != "PERFORMANCE_REVIEW":
+        return _require_exact_pipeline_stage(pid, "PERFORMANCE_REVIEW")
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -3141,52 +3401,305 @@ def api_upload_driving_video(pid, sid):
     # `latest` dict snapshot via mutate_project() — only the outer lookup
     # was migrated. See docs/MIGRATION-PATTERN-pydantic-caller.md.
     project_typed = Project.model_validate(project)
-    scene_id = next(
-        (s.id for s in project_typed.scenes if any(sh.id == sid for sh in s.shots)),
+    located = next(
+        (
+            (scene.id, shot)
+            for scene in project_typed.scenes
+            for shot in scene.shots
+            if shot.id == sid
+        ),
         None,
     )
-    if not scene_id:
+    if located is None:
         return jsonify({"error": "Shot not found in project"}), 404
+    scene_id, initial_shot = located
+
+    paid_work_fence = _performance_upload_paid_work_fence(
+        pid,
+        str(project.get("id") or pid),
+        initial_shot.model_dump(),
+    )
+    if paid_work_fence is not None:
+        return paid_work_fence
+
+    content_length = request.content_length
+    if (
+        content_length is not None
+        and content_length
+        > _DRIVING_VIDEO_MAX_BYTES + _DRIVING_VIDEO_MULTIPART_OVERHEAD_BYTES
+    ):
+        return jsonify({
+            "error": "Driving video exceeds the upload size limit",
+            "max_bytes": _DRIVING_VIDEO_MAX_BYTES,
+        }), 413
 
     file_obj = request.files.get("driving_video")
     if not file_obj or not file_obj.filename:
         return jsonify({"error": "No file uploaded under field 'driving_video'"}), 400
 
-    project_dir = get_project_dir(pid)
-    dest_dir = os.path.join(project_dir, "performance_inputs", scene_id, sid)
-    os.makedirs(dest_dir, exist_ok=True)
-    dest_path = os.path.join(dest_dir, "driving.mp4")
-    file_obj.save(dest_path)
+    destination = _driving_video_destination(pid, scene_id, sid)
+    if destination is None:
+        return jsonify({"error": "Shot media path is unsafe"}), 400
+    dest_dir, _legacy_dest_path = destination
+    project_dir = os.path.realpath(get_project_dir(pid))
 
-    def _mutate(latest):
-        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
-        # for-find.  Project.model_validate(latest) validates the latest
-        # snapshot the mutator sees; race protection requires this
-        # deterministic raise on shape mismatch (NOT gated by
-        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
-        # MUTATE under the lock.  Index parity between
-        # latest_typed.scenes[i].shots[j] and latest["scenes"][i]["shots"][j]
-        # is preserved by pydantic list-order invariant (see pattern doc
-        # §"Caveat: pydantic list-order preservation").
-        latest_typed = Project.model_validate(latest)
-        for i, scn in enumerate(latest_typed.scenes):
-            for j, shot in enumerate(scn.shots):
-                if shot.id == sid:
-                    latest["scenes"][i]["shots"][j]["driving_video_path"] = dest_path
-                    # Clear any prior auto-skip so the next run actually generates
-                    if (latest["scenes"][i]["shots"][j].get("performance_engine", "") or "").upper() == "SKIP":
-                        latest["scenes"][i]["shots"][j]["performance_engine"] = ""
-                    return MutationResult(dest_path, save=True)
-        return MutationResult(None, save=False)
-
-    saved_path = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
-    if not saved_path:
+    staged_path = None
+    published_path = None
+    published_new = False
+    try:
         try:
-            os.remove(dest_path)
-        except OSError:
-            pass
-        return jsonify({"error": "Shot not found"}), 404
-    return jsonify({"uploaded": True, "path": saved_path}), 201
+            staged_path, byte_size = _stage_driving_video_upload(file_obj, dest_dir)
+        except _DrivingVideoTooLarge:
+            return jsonify({
+                "error": "Driving video exceeds the upload size limit",
+                "max_bytes": _DRIVING_VIDEO_MAX_BYTES,
+            }), 413
+        except _DrivingVideoEmpty:
+            return jsonify({"error": "Driving video is empty"}), 400
+
+        validation_error = validate_video_artifact(
+            staged_path,
+            min_dimensions=_DRIVING_VIDEO_MIN_DIMENSIONS,
+            max_dimensions=_DRIVING_VIDEO_MAX_DIMENSIONS,
+            max_pixels=_DRIVING_VIDEO_MAX_PIXELS,
+            max_duration_s=_DRIVING_VIDEO_MAX_DURATION_S,
+        )
+        if validation_error is not None:
+            return jsonify({
+                "error": "Driving video failed validation",
+                "details": validation_error,
+            }), 400
+
+        with open(staged_path, "rb") as staged_handle:
+            digest = hashlib.file_digest(staged_handle, "sha256").hexdigest()
+        published_path = os.path.join(dest_dir, f"driving-{digest}.mp4")
+        if os.path.exists(published_path):
+            with open(published_path, "rb") as retained_handle:
+                retained_digest = hashlib.file_digest(
+                    retained_handle, "sha256"
+                ).hexdigest()
+            if retained_digest != digest:
+                return jsonify({"error": "Driving video history is corrupted"}), 500
+            os.remove(staged_path)
+            staged_path = None
+        else:
+            os.replace(staged_path, published_path)
+            staged_path = None
+            published_new = True
+
+        relative_path = os.path.relpath(published_path, project_dir)
+        if relative_path == os.pardir or relative_path.startswith(os.pardir + os.sep):
+            raise OSError("Driving video publication escaped the project root")
+
+        def _selection_matches(current_path: object) -> bool:
+            if not isinstance(current_path, str) or not current_path:
+                return False
+            if current_path == relative_path:
+                return True
+            candidate = (
+                current_path
+                if os.path.isabs(current_path)
+                else os.path.join(project_dir, current_path)
+            )
+            return os.path.realpath(candidate) == os.path.realpath(published_path)
+
+        # Exact-byte retries are selection-idempotent. Do not mint a duplicate
+        # artifact version, invalidate an approval, or append review/history
+        # events when these bytes are already the active revision.
+        if _selection_matches(initial_shot.driving_video_path):
+            matching_history = next(
+                (
+                    entry
+                    for entry in reversed(initial_shot.driving_video_history or [])
+                    if isinstance(entry, dict)
+                    and entry.get("sha256") == digest
+                    and _selection_matches(entry.get("path"))
+                ),
+                {},
+            )
+            return jsonify({
+                "uploaded": True,
+                "unchanged": True,
+                "path": relative_path,
+                "sha256": digest,
+                "artifact_id": str(matching_history.get("artifact_id") or ""),
+                "invalidated_performance_take_id": "",
+                "requires_performance_regeneration": False,
+            }), 200
+
+        try:
+            artifact = record_auxiliary_version(
+                pid,
+                "driving_video",
+                sid,
+                published_path,
+                parameters={
+                    "scene_id": scene_id,
+                    "shot_id": sid,
+                    "sha256": digest,
+                    "size_bytes": byte_size,
+                },
+                project_snapshot=project,
+                project_root=project_dir,
+            )
+        except ArtifactVersionError as exc:
+            if published_new:
+                try:
+                    os.remove(published_path)
+                    published_new = False
+                except OSError:
+                    logger.warning(
+                        "Could not remove unindexed driving-video revision %s",
+                        published_path,
+                        exc_info=True,
+                    )
+            logger.warning(
+                "Driving-video provenance indexing failed for project=%s shot=%s: %s",
+                pid,
+                sid,
+                exc,
+            )
+            return jsonify({"error": "Driving video provenance could not be recorded"}), 500
+
+        upload_record = {
+            "path": relative_path,
+            "sha256": digest,
+            "size_bytes": byte_size,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "artifact_id": artifact["artifact_id"],
+        }
+        invalidated_take_id = ""
+
+        def _mutate(latest):
+            nonlocal invalidated_take_id
+            # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+            # for-find.  Project.model_validate(latest) validates the latest
+            # snapshot the mutator sees; race protection requires this
+            # deterministic raise on shape mismatch (NOT gated by
+            # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+            # MUTATE under the lock.  Index parity between
+            # latest_typed.scenes[i].shots[j] and latest["scenes"][i]["shots"][j]
+            # is preserved by pydantic list-order invariant (see pattern doc
+            # §"Caveat: pydantic list-order preservation").
+            latest_typed = Project.model_validate(latest)
+            for i, scn in enumerate(latest_typed.scenes):
+                for j, shot in enumerate(scn.shots):
+                    if shot.id == sid:
+                        project_shot = latest["scenes"][i]["shots"][j]
+                        if _selection_matches(project_shot.get("driving_video_path")):
+                            return MutationResult(
+                                {"path": relative_path, "unchanged": True},
+                                save=False,
+                            )
+                        invalidated_take_id = str(
+                            project_shot.get("approved_performance_take_id") or ""
+                        )
+                        project_shot["driving_video_path"] = relative_path
+                        project_shot.setdefault("driving_video_history", []).append(
+                            upload_record
+                        )
+                        # New input bytes invalidate only the active decision.
+                        # Historical takes and their old input revisions remain.
+                        project_shot["approved_performance_take_id"] = ""
+                        project_shot["performance_engine"] = ""
+                        project_shot["performance_skip"] = None
+                        current_request = project_shot.get(
+                            "performance_generation_request"
+                        )
+                        if isinstance(current_request, dict):
+                            superseded_request = dict(current_request)
+                            superseded_request.update({
+                                "status": "superseded_input",
+                                "superseded_at": upload_record["uploaded_at"],
+                                "superseded_by_driving_video_path": relative_path,
+                                "superseded_by_driving_video_sha256": digest,
+                                "updated_at": upload_record["uploaded_at"],
+                            })
+                            project_shot.setdefault(
+                                "performance_generation_request_history", []
+                            ).append(superseded_request)
+                            project_shot["performance_generation_request"] = (
+                                superseded_request
+                            )
+                        project_shot.setdefault("performance_review_history", []).append({
+                            "id": f"performance_review_{uuid.uuid4().hex}",
+                            "action": "upload",
+                            "created_at": upload_record["uploaded_at"],
+                            "driving_video_path": relative_path,
+                            "driving_video_sha256": digest,
+                            "previous_approved_performance_take_id": invalidated_take_id,
+                        })
+                        return MutationResult(
+                            {"path": relative_path, "unchanged": False},
+                            save=True,
+                        )
+            return MutationResult(None, save=False)
+
+        try:
+            saved_path = mutate_project(
+                pid,
+                _mutate,
+                timeout=HTTP_PROJECT_TIMEOUT,
+                snapshot=project,
+            )
+        except BaseException:
+            # Provenance was durably indexed before the active pointer. Keep
+            # its exact bytes even when project selection fails; deleting them
+            # here would leave the artifact ledger pointing at missing data.
+            logger.warning(
+                "Driving-video revision was indexed but not selected for "
+                "project=%s shot=%s; retaining immutable bytes",
+                pid,
+                sid,
+            )
+            raise
+        if not isinstance(saved_path, dict) or not saved_path.get("path"):
+            logger.warning(
+                "Driving-video revision was indexed but its active selection "
+                "missed project=%s shot=%s; retaining immutable bytes",
+                pid,
+                sid,
+            )
+            return jsonify({"error": "Shot not found"}), 404
+        if saved_path.get("unchanged") is True:
+            return jsonify({
+                "uploaded": True,
+                "unchanged": True,
+                "path": relative_path,
+                "sha256": digest,
+                "artifact_id": artifact["artifact_id"],
+                "invalidated_performance_take_id": "",
+                "requires_performance_regeneration": False,
+            }), 200
+        return jsonify({
+            "uploaded": True,
+            "unchanged": False,
+            "path": saved_path["path"],
+            "sha256": digest,
+            "artifact_id": artifact["artifact_id"],
+            "invalidated_performance_take_id": invalidated_take_id,
+            "requires_performance_regeneration": True,
+        }), 201
+    except OSError as exc:
+        logger.warning(
+            "Driving-video upload storage failed for project=%s shot=%s: %s",
+            pid,
+            sid,
+            exc,
+        )
+        return jsonify({"error": "Driving video could not be stored"}), 500
+    finally:
+        if staged_path is not None:
+            try:
+                os.remove(staged_path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.warning(
+                    "Could not remove driving-video stage %s",
+                    staged_path,
+                    exc_info=True,
+                )
 
 
 @app.route("/api/projects/<pid>/shots/<sid>/performance", methods=["DELETE"])
@@ -3229,59 +3742,6 @@ def api_clear_performance(pid, sid):
     if not cleared:
         return jsonify({"error": "Shot not found"}), 404
     return jsonify({"cleared": True})
-
-
-@app.route("/api/projects/<pid>/style-board", methods=["POST"])
-@_project_lock_guard
-def api_upload_style_board(pid):
-    """Multi-image upload for the project style board. Drives FLUX Redux conditioning."""
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-
-    images = request.files.getlist("references")
-    if not images:
-        return jsonify({"error": "No images uploaded under field 'references'"}), 400
-
-    project_dir = get_project_dir(pid)
-    style_dir = os.path.join(project_dir, "style_board")
-    os.makedirs(style_dir, exist_ok=True)
-
-    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
-    # fast on malformed project before lock acquisition.
-    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
-    # on shape mismatch (race protection requires deterministic raise; NOT
-    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
-    # caller.md §"Variant 1".
-    Project.model_validate(project)  # outer boundary validate
-
-    saved = []
-    for f in images:
-        if f.filename:
-            safe_name = secure_filename(f.filename) or "file"
-            path = os.path.join(style_dir, safe_name)
-            f.save(path)
-            saved.append(path)
-    if not saved:
-        return jsonify({"error": "No valid image filenames uploaded"}), 400
-
-    def _mutate(latest):
-        # P1-3 part 12 (Variant 1 simplified): inner validate for race
-        # protection — Project.model_validate(...) raises ValidationError
-        # UNCONDITIONALLY on shape mismatch (race protection requires
-        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
-        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
-        # caller.md §"Variant 1".
-        Project.model_validate(latest)
-        settings = latest.setdefault("global_settings", {})
-        refs = settings.setdefault("style_reference_paths", [])
-        for p in saved:
-            if p not in refs:
-                refs.append(p)
-        return refs
-
-    refs = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
-    return jsonify({"uploaded": len(saved), "total_refs": len(refs or [])}), 201
 
 
 @app.route("/api/projects/<pid>/objects", methods=["POST"])
@@ -3482,8 +3942,8 @@ def api_add_location(pid):
     # Read project-level location_research toggle (default OFF).
     # Stored at project["global_settings"]["location_research"]; written via
     # PUT /api/projects/<pid> → global_settings.update(data["global_settings"]).
-    auto_research = bool(
-        project.get("global_settings", {}).get("location_research", False)
+    auto_research = (
+        project.get("global_settings", {}).get("location_research", False) is True
     )
 
     location = create_location_with_images(
@@ -4617,6 +5077,9 @@ def api_generate_keyframe(pid, shot_id):
     scene, _shot = _locate_shot(project, shot_id)
     if not scene:
         return jsonify({"error": "Shot not found"}), 404
+    stage_error = _require_exact_pipeline_stage(pid, "KEYFRAME_REVIEW")
+    if stage_error is not None:
+        return stage_error
 
     data = request.json if request.is_json else {}
     try:
@@ -4691,11 +5154,107 @@ def api_approve_performance_take(pid, shot_id, take_id):
     _gate_satisfied("PERFORMANCE_REVIEW", ...) every 500ms; this endpoint
     persists the approval onto project.json so the predicate flips to True.
     """
+    stage_error = _require_exact_pipeline_stage(pid, "PERFORMANCE_REVIEW")
+    if stage_error is not None:
+        return stage_error
     try:
         result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "performance")
     except ValueError:
         return jsonify({"error": "Project not found"}), 404
     status = 200 if not result.get("error") else 409
+    return jsonify(result), status
+
+
+@app.route(
+    "/api/projects/<pid>/shots/<shot_id>/performance/generate",
+    methods=["POST"],
+)
+@_project_lock_guard
+@_project_stage_guard
+def api_generate_performance(pid, shot_id):
+    """Generate or retry one review-stage performance candidate."""
+
+    data = request.get_json(silent=True)
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"request_id"}
+        or not isinstance(data.get("request_id"), str)
+        or not re.fullmatch(r"[0-9a-f]{32}", data["request_id"])
+    ):
+        return jsonify({
+            "code": "invalid_performance_request_id",
+            "error": "request_id must be 32 lowercase hexadecimal characters",
+        }), 400
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    scene, _shot = _locate_shot(project, shot_id)
+    if not scene:
+        return jsonify({"error": "Shot not found"}), 404
+    stage_error = _require_exact_pipeline_stage(pid, "PERFORMANCE_REVIEW")
+    if stage_error is not None:
+        return stage_error
+    try:
+        result = _get_stage_pipeline(pid).generate_performance_take(
+            scene["id"],
+            shot_id,
+            operator_requested=True,
+            operator_request_id=data["request_id"],
+        )
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
+
+
+@app.route(
+    "/api/projects/<pid>/shots/<shot_id>/performance/skip",
+    methods=["POST"],
+)
+@_project_lock_guard
+@_project_stage_guard
+def api_skip_performance(pid, shot_id):
+    """Persist an explicit skip; never infer it from provider failure."""
+
+    data = request.get_json(silent=True)
+    if (
+        not isinstance(data, dict)
+        or set(data) != {"confirmed", "reason"}
+        or data.get("confirmed") is not True
+    ):
+        return jsonify({
+            "error": (
+                "Explicit confirmation and a bounded operator reason are "
+                "required to skip performance capture"
+            )
+        }), 400
+    from domain.performance import normalize_performance_skip_reason
+
+    try:
+        operator_reason = normalize_performance_skip_reason(data.get("reason"))
+    except ValueError as exc:
+        return jsonify({
+            "code": "invalid_performance_skip_reason",
+            "error": str(exc),
+        }), 400
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    scene, _shot = _locate_shot(project, shot_id)
+    if not scene:
+        return jsonify({"error": "Shot not found"}), 404
+    stage_error = _require_exact_pipeline_stage(pid, "PERFORMANCE_REVIEW")
+    if stage_error is not None:
+        return stage_error
+    try:
+        result = _get_stage_pipeline(pid).skip_performance_take(
+            scene["id"], shot_id, reason=operator_reason
+        )
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if result.get("success") else 409
     return jsonify(result), status
 
 
@@ -4709,6 +5268,9 @@ def api_generate_motion(pid, shot_id):
     scene, _shot = _locate_shot(project, shot_id)
     if not scene:
         return jsonify({"error": "Shot not found"}), 404
+    stage_error = _require_exact_pipeline_stage(pid, "REVIEW")
+    if stage_error is not None:
+        return stage_error
 
     try:
         result = _get_stage_pipeline(pid).generate_motion_take(scene["id"], shot_id)
@@ -4801,6 +5363,10 @@ def api_iterate_take(pid, shot_id, take_id):
         intent = DirectorialIntent.model_validate(payload)
     except Exception as exc:
         return jsonify({"error": f"Invalid intent body: {exc}"}), 400
+
+    stage_error = _require_iteration_pipeline_stage(pid, intent.target_stage)
+    if stage_error is not None:
+        return stage_error
 
     project = load_project(pid)
     if not project:
@@ -4963,6 +5529,7 @@ def api_update_shot(pid, shot_id):
         "negative_constraints",
         "continuity_constraints",
         "intent_notes",
+        "performance_budget_mode",
     }
     updates = {k: v for k, v in data.items() if k in allowed_fields}
 
@@ -4971,6 +5538,13 @@ def api_update_shot(pid, shot_id):
         and not isinstance(updates["target_api"], str)
     ):
         return jsonify({"error": "target_api must be a string"}), 400
+
+    if "performance_budget_mode" in updates:
+        performance_mode = updates["performance_budget_mode"]
+        if not isinstance(performance_mode, str) or performance_mode not in {"", "budget"}:
+            return jsonify({
+                "error": "performance_budget_mode must be '' or 'budget'"
+            }), 400
 
     target_is_updated = "target_api" in updates
     def _mutate_project(project: dict):
@@ -4992,6 +5566,23 @@ def api_update_shot(pid, shot_id):
         ]
         if matches:
             scene_index, shot_index, shot = matches[0]
+            if "performance_budget_mode" in updates:
+                current_mode = (
+                    "budget"
+                    if shot.performance_budget_mode.lower() in {"budget", "cheap"}
+                    else ""
+                )
+                requested_mode = updates["performance_budget_mode"]
+                if shot.approved_performance_take_id and requested_mode != current_mode:
+                    return MutationResult({
+                        "error": (
+                            "Cannot change dialogue performance routing while an "
+                            "approved performance take exists"
+                        ),
+                        "error_kind": "approved_performance_route_conflict",
+                        "code": "approved_performance_route_conflict",
+                        "shot_id": shot_id,
+                    }, save=False)
             if target_is_updated:
                 policy_snapshot = _video_policy_runtime_snapshot()
                 policy_date = _video_policy_current_date()
@@ -5032,6 +5623,8 @@ def api_update_shot(pid, shot_id):
         return _shot_target_policy_response(exc)
     if result is None:
         return jsonify({"error": "Project not found"}), 404
+    if isinstance(result, Mapping) and result.get("code") == "approved_performance_route_conflict":
+        return jsonify(dict(result)), 409
     if result:
         return jsonify({"updated": True, "shot_id": shot_id, "fields": list(updates.keys())})
     return jsonify({"error": "Shot not found"}), 404
@@ -5147,16 +5740,19 @@ def api_restart_shot(pid, shot_id):
     if scene_id is False:
         return jsonify({"error": "Shot not found"}), 404
 
-    if pipeline:
-        result = pipeline.restart_shot(scene_id, shot_id, positive_prompt, negative_prompt)
-        return jsonify(result)
+    stage_error = _require_exact_pipeline_stage(pid, "KEYFRAME_REVIEW")
+    if stage_error is not None:
+        return stage_error
 
-    try:
-        temp_pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
-        result = temp_pipeline.restart_shot(scene_id, shot_id, positive_prompt, negative_prompt)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    # The exact-stage guard above proves a live pipeline exists.  Idle restart
+    # is deliberately unavailable, so the former temporary-pipeline branch is
+    # dead and would be unsafe if a lifecycle race ever made it reachable.
+    if pipeline is None:
+        return _require_exact_pipeline_stage(pid, "KEYFRAME_REVIEW")
+    result = pipeline.restart_shot(
+        scene_id, shot_id, positive_prompt, negative_prompt,
+    )
+    return jsonify(result)
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])

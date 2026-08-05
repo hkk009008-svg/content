@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { expectNoAxeViolations } from '../test/a11y-setup'
 import DeliverablesPanel from './DeliverablesPanel'
 
 function response(payload: unknown, status = 200): Response {
@@ -58,7 +59,7 @@ describe('DeliverablesPanel', () => {
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const user = userEvent.setup()
 
-    render(<DeliverablesPanel projectId="project-1" />)
+    const { container } = render(<DeliverablesPanel projectId="project-1" />)
 
     expect(await screen.findByText('final/master')).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'v2 · current' })).toBeInTheDocument()
@@ -77,6 +78,7 @@ describe('DeliverablesPanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Verified package ready')
     expect(screen.getByText(/project-1-deliverables.zip/)).toBeInTheDocument()
     expect(click).toHaveBeenCalledTimes(1)
+    await expectNoAxeViolations(container)
   })
 
   it('keeps packaging failure truthful and does not start a download', async () => {

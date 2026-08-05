@@ -7,7 +7,7 @@ Subsystems:
 1. CharacterContinuityTracker — multi-character identity + wardrobe persistence
 2. LocationPersistence — per-location seeds + verbatim prompt fragments
 3. PhysicsPromptEngineer — spatial, lighting, gravity consistency between shots
-4. TemporalConsistencyManager — img2img chaining for consecutive shots
+4. Approved continuity references — explicit prior-keyframe conditioning
 """
 
 import os
@@ -102,13 +102,13 @@ class CharacterContinuityTracker:
         }
 
     def get_primary_character(self, characters_in_frame: List[str]) -> Optional[str]:
-        """Determine which character gets PuLID face-locking (first in list)."""
+        """Determine which character owns the primary identity reference."""
         if characters_in_frame:
             return characters_in_frame[0]
         return None
 
-    def get_reference_for_pulid(self, char_id: str) -> Optional[str]:
-        """Get the canonical reference image path for PuLID injection."""
+    def get_reference_image(self, char_id: str) -> Optional[str]:
+        """Get the canonical approved identity-reference image path."""
         return get_reference_image(self.project, char_id)
 
     def get_multi_angle_refs(self, char_id: str) -> List[str]:
@@ -334,107 +334,6 @@ class PhysicsPromptEngineer:
         return ". ".join(constraints) if constraints else ""
 
 
-# ---------------------------------------------------------------------------
-# 4. Temporal Consistency Manager
-# ---------------------------------------------------------------------------
-
-class TemporalConsistencyManager:
-    """
-    Manages img2img chaining between consecutive shots within a scene.
-    Uses the previous shot's output as init image with reduced denoising
-    to naturally preserve colors, composition, and spatial arrangement.
-    """
-
-    def __init__(self):
-        self.last_generated_image: Optional[str] = None
-        self.current_scene_id: Optional[str] = None
-
-    def should_use_img2img(self, scene_id: str, shot_index: int) -> bool:
-        """
-        Returns True if this shot should use img2img from the previous shot.
-        First shot of each scene uses text-to-image, subsequent shots chain.
-        """
-        if scene_id != self.current_scene_id:
-            # New scene — reset chain
-            self.current_scene_id = scene_id
-            self.last_generated_image = None
-            return False
-        return self.last_generated_image is not None and shot_index > 0
-
-    def get_init_image(self) -> Optional[str]:
-        """Get the previous shot's generated image for img2img chaining."""
-        if self.last_generated_image and os.path.exists(self.last_generated_image):
-            return self.last_generated_image
-        return None
-
-    def get_denoise_strength(
-        self,
-        shot_index: int,
-        previous_shot: dict = None,
-        current_shot: dict = None,
-        previous_scene: dict = None,
-        current_scene: dict = None,
-        has_explicit_anchor: bool = False,
-    ) -> float:
-        """
-        Context-aware denoising strength based on transition type.
-
-        Transition types (from tightest to loosest):
-        - Same location, consecutive shots: 0.30
-        - Same location, after time skip: 0.40
-        - Location change within scene: 0.50
-        - First shot of new scene, no explicit anchor: 0.55
-        - Fallback (shot_index based): 0.40 / 0.30
-
-        ``has_explicit_anchor`` reflects the REAL init-image condition the
-        caller already resolved (an approved, on-disk anchor/keyframe image —
-        see ContinuityEngine.enhance_shot_prompt's ``anchor_image``), not this
-        manager's own mutable ``last_generated_image`` chaining history. A
-        shot with an explicit anchor IS chaining from a real image even when
-        it is shot_index 0 or this manager instance never recorded a prior
-        generation, so it must fall through to the same transition-type
-        ladder below rather than short-circuiting to first-shot strength.
-        """
-        # First shot of a scene with NO explicit anchor to chain from —
-        # maximum creative freedom. An explicit anchor overrides this: it IS
-        # a real init image, so the denoise strength must reflect actual
-        # continuity, not the absence of prior mutable chaining state.
-        if not has_explicit_anchor and (shot_index == 0 or self.last_generated_image is None):
-            return 0.55
-
-        # Check location continuity
-        prev_loc = None
-        curr_loc = None
-        if previous_scene and current_scene:
-            prev_loc = previous_scene.get("location_id")
-            curr_loc = current_scene.get("location_id")
-        elif previous_shot and current_shot:
-            prev_loc = previous_shot.get("location_id")
-            curr_loc = current_shot.get("location_id")
-
-        if prev_loc and curr_loc and prev_loc != curr_loc:
-            return 0.50  # Location change — keep character, new environment
-
-        # Same location — tighter consistency
-        if shot_index <= 1:
-            return 0.40  # Early shots get slight creative room
-        return 0.30  # Later shots are tightest
-
-    def record_generated(self, image_path: str, scene_id: str):
-        """Record the generated image for the next shot's img2img reference."""
-        self.last_generated_image = image_path
-        self.current_scene_id = scene_id
-
-    def reset(self):
-        """Reset for a new scene or fresh generation."""
-        self.last_generated_image = None
-        self.current_scene_id = None
-
-
-# ---------------------------------------------------------------------------
-# Main Continuity Engine — Orchestrates all subsystems
-# ---------------------------------------------------------------------------
-
 class ContinuityEngine:
     """
     Central continuity orchestrator that combines all subsystems to produce
@@ -446,10 +345,8 @@ class ContinuityEngine:
         self.character_tracker = CharacterContinuityTracker(project)
         self.location_persistence = LocationPersistence(project)
         self.physics_engineer = PhysicsPromptEngineer()
-        self.temporal_manager = TemporalConsistencyManager()
-
-        # Shared identity validator with rolling history for adaptive PuLID
-        # Pass cache_dir so embeddings persist to disk across pipeline runs
+        # Shared provider-neutral identity validator. Pass cache_dir so
+        # embeddings persist to disk across pipeline runs.
         from identity import make_validator
         from domain.project_manager import get_project_dir
         cache_dir = os.path.join(get_project_dir(project["id"]), "characters")
@@ -464,14 +361,14 @@ class ContinuityEngine:
         scene: dict,
         previous_shot: Optional[dict] = None,
         shot_index: int = 0,
-        approved_anchor_image: Optional[str] = None,
+        continuity_reference_path: Optional[str] = None,
     ) -> dict:
         """
         Takes a raw shot prompt from the scene decomposer and enhances it with:
         - Character identity fragments
         - Location prompt fragment
         - Physics consistency constraints
-        - Temporal img2img configuration
+        - Approved continuity-reference configuration
 
         Returns the shot dict with enhanced 'prompt' and added 'continuity_config'.
         """
@@ -523,10 +420,14 @@ class ContinuityEngine:
         if continuity_notes:
             prompt_parts.append(f"Continuity note: {continuity_notes}")
 
-        # 5. Temporal consistency config
+        # 5. Approved continuity reference. Only a project-owned, on-disk
+        # approved keyframe may enter the hash-bound local reference workflow.
         scene_id = scene.get("id", "")
-        anchor_image = approved_anchor_image if approved_anchor_image and os.path.exists(approved_anchor_image) else None
-        use_img2img = bool(anchor_image) or self.temporal_manager.should_use_img2img(scene_id, shot_index)
+        anchor_image = (
+            continuity_reference_path
+            if continuity_reference_path and os.path.exists(continuity_reference_path)
+            else None
+        )
 
         primary_char = self.character_tracker.get_primary_character(chars_in_frame)
 
@@ -534,39 +435,14 @@ class ContinuityEngine:
         loc_seed = self.location_persistence.get_seed(loc_id) if loc_id else None
         scene_seed = loc_seed if loc_seed is not None else _stable_scene_seed(scene_id)
 
-        # Classify shot type for adaptive thresholds and PuLID weights
-        from workflow_selector import classify_shot_type, get_adaptive_pulid_weight
+        # Classify shot type for provider-neutral identity thresholds.
+        from workflow_selector import classify_shot_type
         from identity.types import get_threshold_for_shot
         shot_type = classify_shot_type(shot)
         identity_threshold = get_threshold_for_shot(shot_type, mode="standard")
 
-        # Adaptive PuLID weight from rolling identity performance.
-        # Gated by the ``adaptive_pulid`` per-project setting (default True).
-        # Setting adaptive_pulid: false disables the rolling-stats override;
-        # pulid_weight_override stays None and the static template weight from
-        # workflow_selector applies instead.
-        _settings = self.project.get("global_settings", {})
-        pulid_weight_override = None
-        if primary_char and _settings.get("adaptive_pulid", True):
-            pulid_weight_override = get_adaptive_pulid_weight(
-                shot_type, primary_char, self.identity_validator
-            )
-
-        # Context-aware denoise — has_explicit_anchor reflects the REAL,
-        # verified-on-disk anchor condition (anchor_image, computed above)
-        # rather than the temporal manager's own mutable chaining history.
-        denoise = self.temporal_manager.get_denoise_strength(
-            shot_index,
-            previous_shot=previous_shot,
-            current_shot=shot,
-            current_scene=scene,
-            has_explicit_anchor=bool(anchor_image),
-        ) if use_img2img else 1.0
-
         continuity_config = {
-            "use_img2img": use_img2img,
-            "init_image": anchor_image or (self.temporal_manager.get_init_image() if use_img2img else None),
-            "denoise_strength": denoise,
+            "continuity_reference": anchor_image,
             "location_seed": loc_seed,
             "scene_seed": scene_seed,
             "primary_character": primary_char,
@@ -575,16 +451,14 @@ class ContinuityEngine:
             "identity_anchor": "",
             "identity_threshold": identity_threshold,
             "shot_type": shot_type,
-            "pulid_weight_override": pulid_weight_override,
             "negative_constraints": shot.get("negative_constraints", ""),
-            "approved_anchor_image": anchor_image,
             "secondary_chars": [],
         }
 
-        # Get PuLID reference + multi-angle refs + identity anchor for primary character
+        # Get the approved primary and multi-angle reference set.
         if primary_char:
             continuity_config["primary_reference"] = (
-                self.character_tracker.get_reference_for_pulid(primary_char)
+                self.character_tracker.get_reference_image(primary_char)
             )
             continuity_config["multi_angle_refs"] = (
                 self.character_tracker.get_multi_angle_refs(primary_char)
@@ -597,7 +471,7 @@ class ContinuityEngine:
         # Same existence guard as validation (validate_shot's `if ref:` skip of
         # unregistered chars) — generation mirrors the skip, never fails on it.
         for cid in chars_in_frame[1:]:
-            ref = self.character_tracker.get_reference_for_pulid(cid)
+            ref = self.character_tracker.get_reference_image(cid)
             if not ref:
                 continue
             continuity_config["secondary_chars"].append({

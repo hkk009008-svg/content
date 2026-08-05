@@ -105,6 +105,8 @@ export interface Props {
   onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
   onApprovePerformance: (shotId: string, takeId: string) => Promise<any>
+  onGeneratePerformance: (shotId: string) => Promise<any>
+  onSkipPerformance: (shotId: string, reason: string) => Promise<any>
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onRegenerateShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
@@ -133,7 +135,8 @@ export default function RunPage({
   allowedActions, checkpoint, queue,
   onBack, onCancel, onAbandonQueueJob, onPause, onResume, onResumeFromCheckpoint, onGenerate,
   onApproveShotPlan, onRejectShotPlan,
-  onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
+  onGenerateKeyframe, onApproveKeyframe, onApprovePerformance,
+  onGeneratePerformance, onSkipPerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
   onRefreshProject, onIterate, onApproveFinalCut, onReassemble,
   pipelineError, pipelineLoadingLabel,
@@ -217,6 +220,8 @@ export default function RunPage({
       onGenerateKeyframe={onGenerateKeyframe}
       onApproveKeyframe={onApproveKeyframe}
       onApprovePerformance={onApprovePerformance}
+      onGeneratePerformance={onGeneratePerformance}
+      onSkipPerformance={onSkipPerformance}
       onGenerateMotion={onGenerateMotion}
       onApproveFinal={onApproveFinal}
       onCorrect={onCorrectShot}

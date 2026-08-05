@@ -12,7 +12,7 @@ Pins the two known sharp edges from the P5 research row
   1. Input convention is 112x112 **BGR** mean=0.5/std=0.5 — opposite channel
      order from the DeepFace stack. A silent RGB feed would produce valid-
      looking but degraded embeddings (no crash, wrong scores).
-  2. AdaFace is UNCALIBRATED until the pod paired-measurement pass (P5 item
+  2. AdaFace is UNCALIBRATED until the production-host paired-measurement pass (P5 item
      2): selecting it must still fire the structural warning, and a missing
      checkpoint must fail LOUDLY at resolve time — never degrade to the
      silent skip path (_get_embedding swallows per-call exceptions and
@@ -233,7 +233,7 @@ class TestResolveEmbedModel:
 
     def test_adaface_ready_still_warns_uncalibrated(self, monkeypatch):
         """The brief's hard requirement: the structural warning must keep
-        firing for AdaFace until the pod calibration pass lands."""
+        firing for AdaFace until the production-host calibration pass lands."""
         import identity.validator as v
         import identity.adaface as af
 

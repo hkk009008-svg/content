@@ -10,6 +10,7 @@ the live job repeats the checks with secrets immediately before pytest.
 from __future__ import annotations
 
 import argparse
+import copy
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import ipaddress
@@ -21,18 +22,36 @@ import sqlite3
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 from typing import Mapping
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
+from urllib.request import Request, urlopen
+
+# GitHub Actions and the documented operator commands execute this file by
+# path (``python scripts/live_contract_canary.py ...``).  In that mode Python
+# puts ``scripts/`` rather than the repository root on ``sys.path``.  Establish
+# the root explicitly before importing application modules so authorization
+# cannot fail before its own input checks run.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from performance.live_portrait_workflow import (
+    LIVE_PORTRAIT_REQUIRED_NODE_CLASSES,
+    build_live_portrait_workflow,
+)
 
 
 APPROVAL_PHRASE = "I APPROVE ONE LIVE CONTRACT CANARY"
 TARGET_ENV = "LIVE_CONTRACT_CANARY_TARGET"
 APPROVAL_ENV = "LIVE_CONTRACT_CANARY_APPROVAL"
 MAX_COST_ENV = "LIVE_CONTRACT_CANARY_MAX_COST_USD"
-MAX_PROBE_JSON_BYTES = 32 * 1024 * 1024
+WINDOWS_RUNNER_AUTHORIZATION_ENV = (
+    "LIVE_CONTRACT_CANARY_WINDOWS_RUNNER_AUTHORIZATION"
+)
+WINDOWS_RUNNER_AUTHORIZATION_PHRASE = "I CONFIRM EPHEMERAL JIT RUNNER"
 RUNWAY_LEDGER_ENV = "LIVE_CONTRACT_CANARY_LEDGER_PATH"
 RUNWAY_FIXTURE_DIR_ENV = "LIVE_CONTRACT_CANARY_FIXTURE_DIR"
 RUNWAY_AUTHORITY_TOKEN_ENV = "CANARY_AUTHORITY_GITHUB_TOKEN"
@@ -44,6 +63,7 @@ RUNWAY_AUTHORITY_TASK = (
     f"{RUNWAY_FIXTURE_SHA256[:8]}"
 )
 RUNWAY_AUTHORITY_ENVIRONMENT = "live-contract-canary"
+WINDOWS_LIVEPORTRAIT_ORIGIN = "http://127.0.0.1:18189"
 
 
 class CanaryPreflightError(ValueError):
@@ -56,9 +76,10 @@ class CanaryTarget:
     estimated_cost_usd: Decimal
     hard_ceiling_usd: Decimal
     required_secrets: tuple[str, ...]
-    runpod_url_env: str | None = None
-    runpod_token_env: str | None = None
-    runpod_contract: str | None = None
+    worker_url_env: str | None = None
+    worker_token_env: str | None = None
+    worker_contract: str | None = None
+    worker_kind: str | None = None
 
 
 TARGETS = {
@@ -71,32 +92,18 @@ TARGETS = {
         hard_ceiling_usd=Decimal("0.20"),
         required_secrets=("RUNWAYML_API_SECRET",),
     ),
-    "runpod-pulid-production": CanaryTarget(
-        test_selector=(
-            "tests/integration/test_pulid_smoke.py::"
-            "test_production_pulid_round_trip"
-        ),
-        estimated_cost_usd=Decimal("0.04"),
-        hard_ceiling_usd=Decimal("0.05"),
-        required_secrets=("COMFYUI_SERVER_URL", "COMFYUI_API_KEY"),
-        runpod_url_env="COMFYUI_SERVER_URL",
-        runpod_token_env="COMFYUI_API_KEY",
-        runpod_contract="production PuLID",
-    ),
-    "runpod-liveportrait-performance": CanaryTarget(
+    "windows-liveportrait-performance": CanaryTarget(
         test_selector=(
             "tests/integration/test_live_portrait_smoke.py::"
-            "test_live_portrait_pod_round_trip"
+            "test_live_portrait_windows_round_trip"
         ),
-        estimated_cost_usd=Decimal("0.03"),
-        hard_ceiling_usd=Decimal("0.05"),
-        required_secrets=(
-            "PERFORMANCE_COMFYUI_SERVER_URL",
-            "PERFORMANCE_COMFYUI_API_KEY",
-        ),
-        runpod_url_env="PERFORMANCE_COMFYUI_SERVER_URL",
-        runpod_token_env="PERFORMANCE_COMFYUI_API_KEY",
-        runpod_contract="LivePortrait performance",
+        estimated_cost_usd=Decimal("0.00"),
+        hard_ceiling_usd=Decimal("0.00"),
+        required_secrets=("PERFORMANCE_COMFYUI_API_KEY",),
+        worker_url_env="PERFORMANCE_COMFYUI_SERVER_URL",
+        worker_token_env="PERFORMANCE_COMFYUI_API_KEY",
+        worker_contract="Windows LivePortrait performance",
+        worker_kind="windows-liveportrait",
     ),
 }
 
@@ -106,8 +113,8 @@ def _parse_budget(raw: str) -> Decimal:
         value = Decimal(raw.strip())
     except (InvalidOperation, AttributeError) as exc:
         raise CanaryPreflightError(f"{MAX_COST_ENV} must be a finite USD number") from exc
-    if not value.is_finite() or value <= 0:
-        raise CanaryPreflightError(f"{MAX_COST_ENV} must be finite and greater than zero")
+    if not value.is_finite() or value < 0:
+        raise CanaryPreflightError(f"{MAX_COST_ENV} must be finite and non-negative")
     if value.as_tuple().exponent < -2:
         raise CanaryPreflightError(f"{MAX_COST_ENV} must use no more than two decimal places")
     return value
@@ -123,6 +130,17 @@ def validate_inputs(environ: Mapping[str, str]) -> tuple[str, CanaryTarget, Deci
     if environ.get(APPROVAL_ENV, "") != APPROVAL_PHRASE:
         raise CanaryPreflightError(
             f"{APPROVAL_ENV} must exactly match the documented approval phrase"
+        )
+    runner_authorization = environ.get(WINDOWS_RUNNER_AUTHORIZATION_ENV, "")
+    if target_name == "windows-liveportrait-performance":
+        if runner_authorization != WINDOWS_RUNNER_AUTHORIZATION_PHRASE:
+            raise CanaryPreflightError(
+                f"{WINDOWS_RUNNER_AUTHORIZATION_ENV} must exactly confirm the "
+                "documented ephemeral JIT runner procedure"
+            )
+    elif runner_authorization:
+        raise CanaryPreflightError(
+            f"{WINDOWS_RUNNER_AUTHORIZATION_ENV} is only valid for the Windows target"
         )
     budget = _parse_budget(environ.get(MAX_COST_ENV, ""))
     if budget < target.estimated_cost_usd:
@@ -146,7 +164,7 @@ def _looks_placeholder(value: str) -> bool:
     )
 
 
-def _validate_runpod_url(raw: str, variable_name: str) -> None:
+def _validate_remote_worker_url(raw: str, variable_name: str) -> None:
     parsed = urlsplit(raw.strip())
     if (
         parsed.scheme != "https"
@@ -175,6 +193,14 @@ def _validate_runpod_url(raw: str, variable_name: str) -> None:
         )
 
 
+def _validate_windows_tunnel_url(raw: str, variable_name: str) -> None:
+    if raw.strip() != WINDOWS_LIVEPORTRAIT_ORIGIN:
+        raise CanaryPreflightError(
+            f"{variable_name} must be the fixed Mac loopback tunnel origin "
+            f"{WINDOWS_LIVEPORTRAIT_ORIGIN}"
+        )
+
+
 def validate_secrets(
     target_name: str,
     target: CanaryTarget,
@@ -186,11 +212,15 @@ def validate_secrets(
             raise CanaryPreflightError(f"required protected-environment secret {name} is absent")
     if target_name == "runway-act-two" and len(environ["RUNWAYML_API_SECRET"].strip()) < 16:
         raise CanaryPreflightError("RUNWAYML_API_SECRET does not satisfy the canary key contract")
-    if target.runpod_url_env and target.runpod_token_env:
-        _validate_runpod_url(environ[target.runpod_url_env], target.runpod_url_env)
-        if len(environ[target.runpod_token_env].strip()) < 32:
+    if target.worker_url_env and target.worker_token_env:
+        worker_url = environ.get(target.worker_url_env, "")
+        if target.worker_kind == "windows-liveportrait":
+            _validate_windows_tunnel_url(worker_url, target.worker_url_env)
+        else:
+            _validate_remote_worker_url(worker_url, target.worker_url_env)
+        if len(environ[target.worker_token_env].strip()) < 32:
             raise CanaryPreflightError(
-                f"{target.runpod_token_env} does not satisfy the gateway token contract"
+                f"{target.worker_token_env} does not satisfy the gateway token contract"
             )
 
 
@@ -257,7 +287,7 @@ def _github_api_json(
         ) from exc
 
 
-def _runway_authority_payload(payload: object) -> dict:
+def _runway_authority_payload(payload: object, expected_sha: str) -> dict:
     if isinstance(payload, str):
         try:
             payload = json.loads(payload)
@@ -270,6 +300,7 @@ def _runway_authority_payload(payload: object) -> dict:
         "target": "runway-act-two",
         "logical_attempt": f"v3-{RUNWAY_FIXTURE_SHA256[:8]}",
         "fixture_sha256": RUNWAY_FIXTURE_SHA256,
+        "source_sha": expected_sha,
     }
     if any(payload.get(key) != value for key, value in expected.items()):
         raise CanaryPreflightError("Runway deployment payload is incompatible")
@@ -331,8 +362,18 @@ def _deployment_recovery(
     repository: str,
     token: str,
     deployment: dict,
+    expected_sha: str,
 ) -> tuple[int, str, dict]:
-    payload = _runway_authority_payload(deployment.get("payload"))
+    deployment_sha = deployment.get("sha")
+    if (
+        not isinstance(deployment_sha, str)
+        or not re.fullmatch(r"[0-9a-fA-F]{40}", deployment_sha)
+        or deployment_sha.lower() != expected_sha
+    ):
+        raise CanaryPreflightError(
+            "Runway Deployment source SHA drifted from the current canary code"
+        )
+    payload = _runway_authority_payload(deployment.get("payload"), expected_sha)
     deployment_id = deployment.get("id")
     if not isinstance(deployment_id, int) or deployment_id <= 0:
         raise CanaryPreflightError("Runway deployment authority ID is invalid")
@@ -362,7 +403,7 @@ def _github_run_identity(
     if not run_id.isdecimal() or not run_attempt.isdecimal():
         raise CanaryPreflightError("GitHub run identity is invalid")
     if environ.get("GITHUB_REF", "") != "refs/heads/main":
-        raise CanaryPreflightError("live Runway authority is restricted to main")
+        raise CanaryPreflightError("live canary authority is restricted to main")
     return repository, token, head_sha.lower(), run_id, run_attempt
 
 
@@ -388,7 +429,7 @@ def claim_runway_submission(environ: Mapping[str, str]) -> int:
     deployments = _list_runway_deployments(repository, token)
     if deployments:
         deployment_id, task_id, payload = _deployment_recovery(
-            repository, token, deployments[0]
+            repository, token, deployments[0], head_sha
         )
         if task_id:
             raise CanaryPreflightError(
@@ -406,6 +447,7 @@ def claim_runway_submission(environ: Mapping[str, str]) -> int:
         "target": "runway-act-two",
         "logical_attempt": f"v3-{RUNWAY_FIXTURE_SHA256[:8]}",
         "fixture_sha256": RUNWAY_FIXTURE_SHA256,
+        "source_sha": head_sha,
         "owner_run_id": run_id,
         "owner_run_attempt": run_attempt,
     }
@@ -434,7 +476,7 @@ def claim_runway_submission(environ: Mapping[str, str]) -> int:
     if len(deployments) != 1 or deployments[0].get("id") != created["id"]:
         raise CanaryPreflightError("Runway deployment preclaim is not unique")
     deployment_id, task_id, payload = _deployment_recovery(
-        repository, token, deployments[0]
+        repository, token, deployments[0], head_sha
     )
     if task_id or not _deployment_owner_matches(payload, run_id, run_attempt):
         raise CanaryPreflightError("created Runway preclaim is not exclusive")
@@ -445,12 +487,12 @@ def claim_runway_submission(environ: Mapping[str, str]) -> int:
 def checkpoint_runway_task(environ: Mapping[str, str], task_id: str) -> None:
     """Append a Runway task UUID to its durable Deployment status history."""
     task_id = _canonical_runway_task_id(task_id)
-    repository, token, _head_sha, run_id, run_attempt = _github_run_identity(environ)
+    repository, token, head_sha, run_id, run_attempt = _github_run_identity(environ)
     deployments = _list_runway_deployments(repository, token)
     if len(deployments) != 1:
         raise CanaryPreflightError("Runway preclaim is unavailable at task acceptance")
     deployment_id, known_id, payload = _deployment_recovery(
-        repository, token, deployments[0]
+        repository, token, deployments[0], head_sha
     )
     if not _deployment_owner_matches(payload, run_id, run_attempt):
         raise CanaryPreflightError("Runway preclaim owner changed before task acceptance")
@@ -515,12 +557,12 @@ def finalize_runway_deployment(
     }.get(attempt_state)
     if github_state is None:
         raise CanaryPreflightError("Runway attempt is not terminal")
-    repository, token, _head_sha, _run_id, _run_attempt = _github_run_identity(environ)
+    repository, token, head_sha, _run_id, _run_attempt = _github_run_identity(environ)
     deployments = _list_runway_deployments(repository, token)
     if len(deployments) != 1:
         raise CanaryPreflightError("Runway authority Deployment is unavailable")
     deployment_id, known_id, _payload = _deployment_recovery(
-        repository, token, deployments[0]
+        repository, token, deployments[0], head_sha
     )
     if known_id != task_id:
         raise CanaryPreflightError("Runway terminal result does not match authority")
@@ -582,13 +624,13 @@ def verify_runway_fence(environ: Mapping[str, str]) -> None:
     if target_name != "runway-act-two":
         print("Runway submission-fence verification not selected")
         return
-    repository, token, _head_sha, run_id, run_attempt = _github_run_identity(environ)
+    repository, token, head_sha, run_id, run_attempt = _github_run_identity(environ)
     deployments = _list_runway_deployments(repository, token)
     if not deployments:
         print("no Runway preclaim exists; boundary callback may claim first submission")
         return
     _deployment_id, remote_task_id, payload = _deployment_recovery(
-        repository, token, deployments[0]
+        repository, token, deployments[0], head_sha
     )
     ledger_path = Path(environ.get(RUNWAY_LEDGER_ENV, ""))
     if remote_task_id:
@@ -673,103 +715,90 @@ def verify_runway_fence(environ: Mapping[str, str]) -> None:
     print("existing Runway fence matched a durable task ID; retrieval-only resume permitted")
 
 
-def _request_runpod_json(origin: str, path: str, *, token: str | None) -> object:
-    headers = {"Accept": "application/json"}
-    if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
-    request = Request(origin.rstrip("/") + path, headers=headers)
-
-    class NoRedirect(HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, response_headers, newurl):
-            return None
-
-    try:
-        with build_opener(NoRedirect).open(request, timeout=30) as response:
-            if response.status != 200:
-                raise CanaryPreflightError(f"RunPod probe {path} returned HTTP {response.status}")
-            if response.headers.get_content_type() != "application/json":
-                raise CanaryPreflightError(f"RunPod probe {path} did not return JSON")
-            if token is not None and response.headers.get("X-Content-Gateway") != "authenticated":
-                raise CanaryPreflightError(
-                    f"RunPod probe {path} did not traverse the authenticated gateway"
-                )
-            payload = response.read(MAX_PROBE_JSON_BYTES + 1)
-    except HTTPError as exc:
-        raise CanaryPreflightError(f"RunPod probe {path} returned HTTP {exc.code}") from exc
-    except (URLError, OSError) as exc:
-        raise CanaryPreflightError(f"RunPod probe {path} was unavailable") from exc
-    if len(payload) > MAX_PROBE_JSON_BYTES:
-        raise CanaryPreflightError(f"RunPod probe {path} exceeded its response limit")
-    try:
-        return json.loads(payload)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise CanaryPreflightError(f"RunPod probe {path} returned invalid JSON") from exc
-
-
-def probe_runpod(environ: Mapping[str, str]) -> None:
+def probe_worker(environ: Mapping[str, str]) -> None:
     target_name, target, _budget = validate_inputs(environ)
     validate_secrets(target_name, target, environ)
-    if not target.runpod_url_env or not target.runpod_token_env:
-        print("zero-cost RunPod probe not selected")
+    if not target.worker_url_env or not target.worker_token_env:
+        print("zero-cost worker probe not selected")
         return
 
-    origin = environ[target.runpod_url_env].strip()
-    token = environ[target.runpod_token_env].strip()
-    ready = _request_runpod_json(origin, "/health/ready", token=None)
-    if not isinstance(ready, dict) or ready.get("status") != "ready":
-        raise CanaryPreflightError("RunPod gateway readiness schema is not ready")
-    stats = _request_runpod_json(origin, "/system_stats", token=token)
-    if not isinstance(stats, dict) or not isinstance(stats.get("system"), dict):
-        raise CanaryPreflightError("RunPod system_stats contract is invalid")
-    object_info = _request_runpod_json(origin, "/object_info", token=token)
-    if target_name == "runpod-pulid-production":
-        workflow_path = Path(__file__).resolve().parent.parent / "pulid.json"
-        try:
-            workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise CanaryPreflightError(
-                "production PuLID workflow is unavailable or invalid"
-            ) from exc
-        if not isinstance(workflow, dict):
-            raise CanaryPreflightError("production PuLID workflow is not an object")
-        required_nodes = {
-            node.get("class_type")
-            for node in workflow.values()
-            if isinstance(node, dict) and isinstance(node.get("class_type"), str)
-        }
-        if not required_nodes:
-            raise CanaryPreflightError("production PuLID workflow declares no nodes")
-    else:
-        required_nodes = {
-            "LoadImage",
-            "VHS_LoadVideoPath",
-            "LivePortraitProcess",
-            "VHS_VideoCombine",
-        }
-    if not isinstance(object_info, dict):
-        raise CanaryPreflightError("RunPod object_info contract is not an object")
-    missing = sorted(required_nodes.difference(object_info))
-    if missing:
-        raise CanaryPreflightError(
-            f"RunPod {target.runpod_contract} node contract is incomplete: "
-            + ", ".join(missing)
+    origin = environ[target.worker_url_env].strip()
+    token = environ[target.worker_token_env].strip()
+    if target.worker_kind == "windows-liveportrait":
+        from comfyui_client import ComfyUIError, ComfyUIClient
+        from performance.worker_readiness import (
+            PerformanceWorkerUnavailable,
+            require_liveportrait_worker_ready,
         )
-    print(
-        "authenticated zero-cost RunPod readiness contract passed: "
-        f"{target.runpod_contract}"
-    )
+
+        try:
+            require_liveportrait_worker_ready(
+                SimpleNamespace(
+                    comfyui_server_url="",
+                    performance_comfyui_server_url=origin,
+                    performance_comfyui_api_key=token,
+                )
+            )
+            client = ComfyUIClient(
+                origin,
+                auth_token=token,
+                connect_timeout=2.0,
+                read_timeout=5.0,
+            )
+            stats = client.get_system_stats()
+            object_info = client.get_object_info()
+            if not isinstance(stats.get("system"), dict):
+                raise CanaryPreflightError(
+                    "Windows LivePortrait system_stats contract is invalid"
+                )
+            missing = sorted(
+                set(LIVE_PORTRAIT_REQUIRED_NODE_CLASSES).difference(object_info)
+            )
+            if missing:
+                raise CanaryPreflightError(
+                    "Windows LivePortrait node contract is incomplete: "
+                    + ", ".join(missing)
+                )
+            contract = copy.deepcopy(object_info)
+            placeholders = {
+                ("LoadImage", "image"): "contract-keyframe.png",
+                ("VHS_LoadVideo", "video"): "contract-driving.mp4",
+            }
+            for (node_class, input_name), placeholder in placeholders.items():
+                spec = contract[node_class]["input"]["required"][input_name]
+                choices = spec[0]
+                if isinstance(choices, list) and placeholder not in choices:
+                    choices.append(placeholder)
+            ComfyUIClient._validate_workflow_contract(
+                build_live_portrait_workflow(
+                    "contract-keyframe.png", "contract-driving.mp4", 2.0
+                ),
+                contract,
+            )
+        except CanaryPreflightError:
+            raise
+        except (
+            PerformanceWorkerUnavailable,
+            ComfyUIError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as exc:
+            raise CanaryPreflightError(
+                "Windows LivePortrait worker failed its exact role-bound readiness contract"
+            ) from exc
+        print(
+            "authenticated Windows LivePortrait role, manifest, execution, and "
+            "workflow contract passed through the Mac loopback tunnel"
+        )
+        return
+
+    raise CanaryPreflightError("selected worker kind has no active probe contract")
 
 
 def run_canary(environ: Mapping[str, str]) -> int:
     target = preflight(environ, require_secrets=True)
     child_environment = dict(environ)
-    if target.runpod_url_env and target.runpod_token_env:
-        # Application adapters intentionally consume one canonical ComfyUI
-        # configuration. Map the selected, contract-specific endpoint only in
-        # the isolated pytest process so performance cannot silently run on the
-        # pinned production PuLID endpoint.
-        child_environment["COMFYUI_SERVER_URL"] = environ[target.runpod_url_env]
-        child_environment["COMFYUI_API_KEY"] = environ[target.runpod_token_env]
     command = [
         sys.executable,
         "-m",
@@ -802,12 +831,12 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] | None = N
             "check-inputs",
             "check-ready",
             "verify-runway-fence",
-            "probe-runpod",
+            "probe-worker",
             "run",
         ),
         help=(
-            "input check, protected-secret check, Runway submission fencing, "
-            "RunPod probe, or one fixed live test"
+            "input check, protected-secret check, provider submission fencing, "
+            "worker probe, or one fixed live test"
         ),
     )
     args = parser.parse_args(argv)
@@ -822,8 +851,8 @@ def main(argv: list[str] | None = None, *, environ: Mapping[str, str] | None = N
         if args.mode == "verify-runway-fence":
             verify_runway_fence(values)
             return 0
-        if args.mode == "probe-runpod":
-            probe_runpod(values)
+        if args.mode == "probe-worker":
+            probe_worker(values)
             return 0
         return run_canary(values)
     except CanaryPreflightError as exc:

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AppConfig, Project, Scene, Shot, ShotState } from '../../types/project'
-import { Badge, LiveRegion, MICRO_LABEL, Section, SelectPill, Toggle } from '../ui'
-import { classifyShotType, getShotTemplate } from '../../lib/guidance'
+import { LiveRegion, MICRO_LABEL, Section, SelectPill } from '../ui'
+import { classifyShotType } from '../../lib/guidance'
 import { videoEngines, humanizeEngineReason } from '../../lib/engines'
 import { PROMPT_SECTION_TAGS, parsePromptSections, assemblePromptSections } from '../../lib/promptSections'
 import { apiPut, type ApiResult } from '../../lib/api'
@@ -24,6 +24,7 @@ interface ShotForm {
   targetApi: string
   camera: string
   visualEffect: string
+  performanceBudgetMode: '' | 'budget'
 }
 
 function buildForm(shot: Shot | null): ShotForm {
@@ -35,12 +36,20 @@ function buildForm(shot: Shot | null): ShotForm {
     targetApi: shot?.target_api || 'AUTO',
     camera: shot?.camera || '',
     visualEffect: shot?.visual_effect || '',
+    performanceBudgetMode:
+      shot?.performance_budget_mode === 'budget' || shot?.performance_budget_mode === 'cheap'
+        ? 'budget'
+        : '',
   }
 }
 
 const FIELD_CLS =
   'w-full resize-none rounded border border-line bg-panel px-2 py-1.5 text-[11px] text-tx ' +
   'focus:border-acc focus:outline-none'
+
+// Mirrors cinema/shots/controller.py's backend authority. LivePortrait runs
+// at 25 fps, so one performance take admits at most 200 frames.
+const MAX_PERFORMANCE_TAKE_DURATION_SECONDS = 8
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -65,13 +74,13 @@ function ReadOnlyRow({ label, value }: { label: string; value: ReactNode }) {
  *   Prompt (positive/negative, shared `promptSections` parse/assemble)
  *   Dialogue (scene line + primary character's voice + pace wpm)
  *   Shot (type, primary API, duration)
- *   Identity (PuLID weight/threshold display + the pod-keyframe toggle)
+ *   Identity (read-only threshold)
  *
  * Prompt/Shot fields save through the PromptEditor PUT contract
  * (`PUT /api/projects/{pid}/shots/{sid}` — verbatim field names). Voice
- * saves through the character PUT (partial update). Pace + the identity
- * backend toggle are project-level `global_settings` and save through the
- * same `PUT /api/projects/{pid}` merge contract SettingsInspector uses.
+ * saves through the character PUT (partial update). Pace is a project-level
+ * `global_settings` value and saves through the same `PUT /api/projects/{pid}`
+ * merge contract SettingsInspector uses.
  *
  * Every write above goes through `apiPut` + the shared `runMutation` helper
  * below: a non-2xx/network failure surfaces the inline error banner and
@@ -135,6 +144,7 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
         negative_constraints: next.negativeConstraints,
         continuity_constraints: next.continuityConstraints,
         intent_notes: next.intentNotes,
+        performance_budget_mode: next.performanceBudgetMode,
       }),
     )
 
@@ -181,7 +191,6 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
   }
 
   const shotType = classifyShotType(shot)
-  const template = getShotTemplate(shot, config)
 
   const engineOptions = videoEngines(config).map((e) => ({
     value: e.key,
@@ -199,15 +208,18 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
 
   const voiceOptions = (config?.voice_pool ?? []).map((v) => ({ value: v.id, label: `${v.name} — ${v.style}` }))
 
-  const identityBackend: string = gs.identity_backend ?? 'gemini_multiref'
-  const isPod = identityBackend === 'pod'
   const identityStrictness: number = gs.identity_strictness ?? 0.6
   const dialogueWpm: number = gs.dialogue_target_wpm ?? 145
 
-  const perShotDuration =
+  const rawPerShotDuration =
     scene && scene.duration_seconds && (scene.shots?.length || scene.num_shots)
       ? scene.duration_seconds / (scene.shots?.length || scene.num_shots)
       : null
+  const perShotDuration = rawPerShotDuration == null
+    ? null
+    : Math.min(rawPerShotDuration, MAX_PERFORMANCE_TAKE_DURATION_SECONDS)
+  const performanceDurationCapped = rawPerShotDuration != null
+    && rawPerShotDuration > MAX_PERFORMANCE_TAKE_DURATION_SECONDS
 
   return (
     <aside className="w-[300px] flex-none overflow-y-auto border-l border-line bg-gutter">
@@ -283,34 +295,39 @@ export default function ShotInspector({ project, config, scene, shot, shotState,
           <Field label="Primary API">
             <SelectPill aria-label="Primary API" value={form.targetApi} options={engineOptions} onChange={(v) => updateField({ targetApi: v })} />
           </Field>
+          <Field label="Dialogue performance">
+            <SelectPill
+              aria-label="Dialogue performance"
+              aria-describedby="dialogue-performance-help"
+              value={form.performanceBudgetMode}
+              options={[
+                { value: '', label: 'Auto (cloud performance)' },
+                { value: 'budget', label: 'Local LivePortrait' },
+              ]}
+              onChange={(value) => updateField({
+                performanceBudgetMode: value === 'budget' ? 'budget' : '',
+              })}
+            />
+            <p id="dialogue-performance-help" className="mt-1 text-[10px] leading-tight text-mut">
+              Local LivePortrait applies to portrait and medium dialogue shots. Dispatch is blocked unless its dedicated GPU worker is Ready and this shot has an uploaded driving video.
+            </p>
+          </Field>
           <ReadOnlyRow
-            label="Duration"
+            label="Performance duration"
             value={perShotDuration != null ? `~${perShotDuration.toFixed(1)}s` : '—'}
           />
+          {performanceDurationCapped && rawPerShotDuration != null && (
+            <p role="note" className="text-[10px] leading-tight text-warn">
+              Capped at 8.0s (200 frames) from the scene&apos;s ~{rawPerShotDuration.toFixed(1)}s
+              per-shot allocation. The backend enforces this before dispatch.
+            </p>
+          )}
         </div>
       </Section>
 
       <Section title="Identity">
         <div className="space-y-3">
-          <ReadOnlyRow label="PuLID weight" value={template ? template.pulid_weight.toFixed(2) : '—'} />
           <ReadOnlyRow label="Threshold" value={identityStrictness.toFixed(2)} />
-          <div className="flex items-start justify-between gap-3 border-t border-line pt-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-[11px] text-tx">
-                <span>ComfyUI keyframe</span>
-                <Badge variant="pod">Pod</Badge>
-              </div>
-              <p className="mt-1 text-[10px] leading-tight text-mut">
-                Off = Nano Banana (cloud, Google-first default). On = this shot&apos;s keyframe renders through the pod
-                FLUX + PuLID identity backend.
-              </p>
-            </div>
-            <Toggle
-              checked={isPod}
-              onChange={(v) => updateGlobalSetting('identity_backend', v ? 'pod' : 'gemini_multiref')}
-              aria-label="ComfyUI keyframe (pod)"
-            />
-          </div>
         </div>
       </Section>
 

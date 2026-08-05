@@ -112,23 +112,13 @@ COLOR GRADING:
 - All shots in a scene should have consistent lighting to avoid jarring cuts.
 
 ═══════════════════════════════════════════════════════════════
-4. IDENTITY SYSTEM — PuLID face-locking
+4. IDENTITY SYSTEM — reference-bound, provider-neutral
 ═══════════════════════════════════════════════════════════════
 
-PuLID WEIGHTS BY SHOT TYPE:
-| Shot Type | PuLID Weight | start_at | end_at | Denoise |
-|-----------|-------------|----------|--------|---------|
-| Portrait  | 1.0         | 0.0      | 1.0    | 0.25    |
-| Medium    | 0.9         | 0.0      | 1.0    | 0.35    |
-| Wide      | 0.65        | 0.0      | 0.9    | 0.45    |
-| Action    | 0.8         | 0.0      | 1.0    | 0.40    |
-| Landscape | 0.0 (skip)  | 0.0      | 0.0    | 0.55    |
-
-start_at = 0.0 across every shot type — the FLUX coarse-identity window (bind
-from step 0). The old SDXL-era values (portrait 0.20 / medium 0.25 / wide 0.35
-/ action 0.30) were a structural no-op on the current FLUX-native graph and
-are retired; do not reintroduce them (ADR-025; workflow_selector.py
-WORKFLOW_TEMPLATES is the source of truth).
+Approved character reference images and identity anchors are the appearance
+authority. The current default image route uses Gemini multi-reference. A local
+image backend may run only after its exact model, workflow, execution, and
+benchmark contract is ready; never assume one from a project setting alone.
 
 IDENTITY VALIDATION THRESHOLDS (DeepFace similarity):
 | Shot Type | Standard | Lenient |
@@ -138,31 +128,21 @@ IDENTITY VALIDATION THRESHOLDS (DeepFace similarity):
 | Wide      | 0.55     | 0.45    |
 | Action    | 0.60     | 0.50    |
 
-CRITICAL RULE: NEVER describe character faces/hair/eyes/skin in prompts.
-PuLID handles identity via face embeddings. Text face descriptions CONFLICT
-with PuLID and produce a DIFFERENT PERSON.
+CRITICAL RULE: do not invent or redefine a registered character's face, hair,
+eyes, skin tone, body identity, or other immutable appearance in generation
+prompts. Use the character ID/reference authority and describe only the shot's
+expression, pose, action, wardrobe, framing, and lighting. Conflicting identity
+prose can cause any reference-conditioned backend to produce a different person.
 
 ═══════════════════════════════════════════════════════════════
-5. COMFYUI IMAGE GENERATION PARAMETERS
+5. IMAGE BACKEND PARAMETERS
 ═══════════════════════════════════════════════════════════════
 
-ALWAYS USE:
-- Sampler: dpmpp_2m (higher-order solver, sharper results)
-- Scheduler: sgm_uniform (optimized sigma for FLUX flow-matching)
-- Guidance: 3.0–4.0 (3.5 is the FLUX sweet spot for character scenes)
-- PAG scale: 3.0 for portraits, 2.0 for action, 3.5 for landscape
-
-TEMPORAL DENOISE (img2img chaining between consecutive shots):
-| Context                          | Denoise | Why |
-|-----------------------------------|---------|-----|
-| First shot of scene, no anchor    | 0.55    | Maximum creative freedom |
-| Location change within scene      | 0.50    | New environment, keep style |
-| Same location, shot index 0–1     | 0.40    | Early shots get slight creative room |
-| Same location, shot index 2+      | 0.30    | Tightest consistency |
-
-Driven by shot POSITION within the scene, not elapsed story time — there is no
-time-skip detection (domain/continuity_engine.py TemporalConsistencyManager
-.get_denoise_strength).
+Sampler, scheduler, guidance, steps, reference encoding, and model-specific
+identity strength belong to the selected backend's validated workflow. Do not
+emit or recommend mutable graph or provider-specific controls in shot prompts.
+Character identity and inter-shot continuity use only approved reference
+images selected by the project.
 
 ═══════════════════════════════════════════════════════════════
 6. PROMPT STRUCTURE — every generation prompt uses this format

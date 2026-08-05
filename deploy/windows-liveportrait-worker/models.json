@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-08-05T00:00:00Z",
+  "artifacts": [
+    {
+      "id": "appearance-feature-extractor",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/appearance_feature_extractor.safetensors?download=true"
+      },
+      "expected_bytes": 3361936,
+      "sha256": "38bef5de50a92bf1fc66e8c511051a19dfacdf80c37f8713425ec15dc9ca7d34",
+      "destination": "liveportrait/appearance_feature_extractor.safetensors",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    },
+    {
+      "id": "motion-extractor",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/motion_extractor.safetensors?download=true"
+      },
+      "expected_bytes": 112496256,
+      "sha256": "3568cd410e29d046771acb55ecfdfe4c7c197d345bd8b7f95942ef63130b6c9e",
+      "destination": "liveportrait/motion_extractor.safetensors",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    },
+    {
+      "id": "spade-generator",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/spade_generator.safetensors?download=true"
+      },
+      "expected_bytes": 221771768,
+      "sha256": "ca04fbec765745e9eae836d2d7522c274647b277ce5f25104fa1705b75222212",
+      "destination": "liveportrait/spade_generator.safetensors",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    },
+    {
+      "id": "stitching-retargeting-module",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/stitching_retargeting_module.safetensors?download=true"
+      },
+      "expected_bytes": 911836,
+      "sha256": "60725cf3523ae413880da28ed583c9e84c5c25695a0cef1b77210ea31cc424ea",
+      "destination": "liveportrait/stitching_retargeting_module.safetensors",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    },
+    {
+      "id": "warping-module",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/warping_module.safetensors?download=true"
+      },
+      "expected_bytes": 182158564,
+      "sha256": "f7b7834bd6039b4088f72e5161e60ad366f68a3763df8a3eac0bc0f9d46fdbbf",
+      "destination": "liveportrait/warping_module.safetensors",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    },
+    {
+      "id": "landmark-onnx",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/Kijai/LivePortrait_safetensors",
+        "revision": "59f30f36d7b791929c25437df7461d5b0e0010b1",
+        "url": "https://huggingface.co/Kijai/LivePortrait_safetensors/resolve/59f30f36d7b791929c25437df7461d5b0e0010b1/landmark.onnx?download=true"
+      },
+      "expected_bytes": 114666491,
+      "sha256": "31d22a5041326c31f19b78886939a634a5aedcaa5ab8b9b951a1167595d147db",
+      "destination": "liveportrait/landmark.onnx",
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_provenance": "LivePortrait and ComfyUI-LivePortraitKJ are MIT-licensed",
+        "review_note": "Human review of model terms is required before commercial use."
+      }
+    }
+  ]
+}

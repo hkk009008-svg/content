@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Project, AppConfig } from '../../types/project'
+import type { Project, AppConfig, GpuWorkerStatus } from '../../types/project'
 import { Section, BusyState, ErrorState, LiveRegion } from '../ui'
-import { SelectRow, TextRow } from './inspector/controls'
+import { SelectRow, TextRow, ToggleRow } from './inspector/controls'
 import { VideoSection } from './inspector/VideoSection'
 import { ImageSection } from './inspector/ImageSection'
+import { GpuWorkersSection } from './inspector/GpuWorkersSection'
 import { IdentitySection } from './inspector/IdentitySection'
 import { VoiceSection } from './inspector/VoiceSection'
 import { AutoApproveSection } from './inspector/AutoApproveSection'
@@ -55,6 +56,7 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [savedNotice, setSavedNotice] = useState('')
+  const [imageWorker, setImageWorker] = useState<GpuWorkerStatus | null>(null)
   const currentProjectIdRef = useRef(project.id)
   const revisionByProjectRef = useRef(new Map<string, number>())
   // Last server-confirmed snapshot. Functional nested-setting updates are
@@ -235,7 +237,8 @@ export default function SettingsInspector({ project, config, onRefresh }: Props)
       <LiveRegion message={savedNotice} />
       <ProjectSection s={s} config={config} project={project} update={update} runMutation={runMutation} />
       <VideoSection s={s} config={config} update={update} />
-      <ImageSection s={s} config={config} update={update} />
+      <ImageSection s={s} config={config} imageWorker={imageWorker} update={update} />
+      <GpuWorkersSection onImageWorker={setImageWorker} />
       <IdentitySection s={s} update={update} />
       <VoiceSection s={s} config={config} update={update} projectId={project.id} onRefresh={onRefresh} />
       <AutoApproveSection s={s} update={update} />
@@ -331,6 +334,13 @@ function ProjectSection({ s, config, project, update, runMutation }: ProjectSect
           value={s.color_palette ?? ''}
           onChange={(v) => update('color_palette', v)}
           placeholder="e.g. warm amber vs cold blue"
+        />
+
+        <ToggleRow
+          label="Research location references"
+          checked={s.location_research === true}
+          onChange={(v) => update('location_research', v)}
+          hint="When you add a location, search for visual references to supplement your uploads. Requires Tavily; off by default."
         />
 
         {/* AI style rules */}

@@ -973,7 +973,7 @@ def test_pinned_session_closes_when_request_raises(tmp_path, monkeypatch):
 
 def test_allow_http_permits_trusted_private_host(tmp_path, monkeypatch):
     destination = tmp_path / "artifact.mp4"
-    response = _FakeResponse([b"pod-bytes"])
+    response = _FakeResponse([b"worker-bytes"])
 
     def fake_get(url, *, stream, timeout, allow_redirects=True, headers=None):
         assert url == "http://10.0.0.8:8188/view"
@@ -990,4 +990,4 @@ def test_allow_http_permits_trusted_private_host(tmp_path, monkeypatch):
     )
 
     assert result == str(destination)
-    assert destination.read_bytes() == b"pod-bytes"
+    assert destination.read_bytes() == b"worker-bytes"

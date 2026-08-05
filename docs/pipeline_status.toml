@@ -15,9 +15,8 @@
 #   wired   — reachable/works when its flag/condition is on (opt-in)
 #   stubbed — code exists but is never effectively reached (dead toggle, no-op
 #             return, zero callers) — a candidate to wire
-#   parked  — implemented but blocked on external state (e.g. GPU pod / node install)
-#   inactive — deliberately unavailable by policy; code/data may remain only
-#              for historical and read-only compatibility
+#   parked  — implemented but blocked on external state (e.g. worker/node install)
+#   inactive — deliberately unavailable by policy
 #   dead    — confirmed dead; removal candidate
 #
 # Adding an entry: pick a stable `def`/`class`/module-const SYMBOL as the anchor
@@ -38,7 +37,7 @@
 # independent truths":
 #   exposure    — how an operator reaches this: "ui" | "api" | "internal"
 #   spend_kind  — cost profile if invoked: "none" | "compute_local" |
-#                 "paid_api" | "pod_gpu"
+#                 "paid_api" | "local_gpu"
 # `runtime_credential` (optional) names a comma-separated env var (or vars)
 # whose PRESENCE (never value) gates RUNTIME availability independently of
 # `engaged_static` — see cinema/capability_manifest.py:_runtime_state.
@@ -76,15 +75,6 @@ exposure = "api"
 spend_kind = "paid_api"
 runtime_credential = "KLING_ACCESS_KEY,KLING_SECRET_KEY"
 note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyboard_scene (:100) -> KlingNativeAPI.generate_storyboard. Covered by tests/unit/test_f2b_storyboard_mode.py. Settable only via global_settings.api_engines.KLING_NATIVE.storyboard_mode (no dedicated UI control)."
-
-[[component]]
-id = "lora_validation"
-title = "Historical LoRA validation records"
-status = "inactive"
-anchor = "prep/lora_policy.py:LORA_POLICY"
-exposure = "internal"
-spend_kind = "none"
-note = "Dormant policy boundary. Trainer/validator code, prior status sidecars, and legacy registry snapshots are retained only for historical/read-only compatibility; current product paths cannot start work, mutate the registry, or consume the artifacts."
 
 [[component]]
 id = "batch_scene_optimize"

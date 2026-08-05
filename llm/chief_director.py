@@ -438,7 +438,7 @@ HC1: You MUST output valid JSON. No markdown, no explanation, no conversational 
 HC2: You MUST evaluate every input against the IDENTITY FIREWALL — if any prompt describes
      a character's face, hair color, hair style, glasses, skin tone, eye color, facial structure,
      age appearance, or body shape, you MUST flag it as REJECTED and rewrite it WITHOUT those descriptions.
-     The face-locking system (PuLID/Kontext) handles identity from reference photos.
+     The selected image provider handles identity from approved reference photos.
      If the prompt describes the face, it CONFLICTS with face-lock and produces a DIFFERENT PERSON.
 HC3: You MUST verify structural compliance — every shot prompt must contain
      [SHOT][SCENE][ACTION][OUTFIT][QUALITY] sections in that order.
@@ -496,7 +496,7 @@ Before outputting, verify:
 <CHIEF_DIRECTOR_MUTATION_STRATEGY>
 When suggesting prompt_mutation for failures:
 - identity_only (face mismatch): Add "facing camera directly" to [ACTION], remove any face descriptors,
-  suggest increasing PuLID weight. Do NOT change [SCENE] or [QUALITY].
+  and recommend checking the approved reference set for conflicts. Do NOT change [SCENE] or [QUALITY].
 - style_only (color/lighting drift): Tighten [SCENE] lighting description, add specific color temp (e.g., "4500K"),
   add "match previous shot's color grade" to [QUALITY]. Do NOT change [ACTION] or [OUTFIT].
 - aggressive (both failing): Simplify entire prompt — shorter prompts give models more room.
@@ -806,7 +806,6 @@ When suggesting prompt_mutation for failures:
                     "best_similarity": round(cr.best_similarity, 3),
                     "mean_similarity": round(cr.mean_similarity, 3),
                     "failure_reason": reason_value,
-                    "suggested_pulid_delta": cr.suggested_pulid_adjustment,
                     "frames_with_face": sum(1 for f in cr.frame_results if f.face_detected),
                     "total_frames_sampled": len(cr.frame_results),
                 }
@@ -848,24 +847,23 @@ When suggesting prompt_mutation for failures:
             "The user message contains all diagnostic context (scores, thresholds, mutation_context). "
             "Respond with valid JSON only — no prose, no markdown fences.\n\n"
             "PIPELINE KNOWLEDGE:\n"
-            "- PuLID handles face-lock from reference photos (weight 0.0-1.0)\n"
+            "- Image providers condition identity from approved reference photos\n"
             "- Identity validation uses DeepFace GhostFaceNet embeddings (cosine similarity)\n"
             "- Common false negatives: FACE_ANGLE_EXTREME (profile view), SMALL_FACE_REGION (wide shot)\n"
             "  → These are NOT identity failures — do NOT suggest face-related mutations for them\n"
             "- Coherence scoring: 40% color consistency + 30% lighting + 30% composition\n"
-            "- img2img chaining uses denoise 0.30 for consecutive shots — lower = more consistent\n"
             "- If failure_reason is WRONG_PERSON, the reference images may be conflicting\n\n"
             "MUTATION RULES:\n"
             'If mutation_context is "identity_only":\n'
             '  → Add "facing camera directly" to [ACTION]\n'
             "  → Remove any accidental face/hair descriptions\n"
-            "  → Suggest PuLID weight increase (+0.10)\n"
+            "  → Check the approved reference set for conflicts or low-quality views\n"
             "  → SHORTEN prompt to reduce model confusion\n"
             "  → Do NOT touch [SCENE] or [QUALITY]\n\n"
             'If mutation_context is "style_only":\n'
             "  → Tighten [SCENE] with specific color temperature and fill ratio\n"
             '  → Add "match previous shot palette" to [QUALITY]\n'
-            "  → Suggest tightening denoise (img2img) to 0.25\n"
+            "  → Preserve the approved continuity reference and tighten palette language\n"
             "  → Do NOT touch [ACTION] or [OUTFIT]\n\n"
             'If mutation_context is "aggressive":\n'
             "  → Simplify ENTIRE prompt to under 80 words\n"

@@ -3,7 +3,7 @@ scorecard media block, and the _apply_final_loudnorm persist hook.
 
 TDD: tests written before implementation.
 
-Offline — subprocess and mutate_project are mocked; no GPU, no pod, no ffmpeg.
+Offline — subprocess and mutate_project are mocked; no GPU worker, no API, no ffmpeg.
 """
 from __future__ import annotations
 
@@ -361,7 +361,7 @@ class TestScorecardMediaBlock:
         proj = {"id": "p1", "name": "test", "characters": [],
                 "scenes": [], "global_settings": {}}
         proj.update(proj_overrides)
-        return build_capability_scorecard(proj, project_dir="/tmp/x")
+        return build_capability_scorecard(proj)
 
     def test_no_media_report_gives_none(self):
         """No media_report key → media: None."""

@@ -286,7 +286,7 @@ def test_performance_version_hashes_the_exact_resolved_driving_input(
 ) -> None:
     root, _ = _store(monkeypatch, tmp_path)
     keyframe_path = _write(root, "shots/shot_a/keyframe.jpg", b"keyframe")
-    driving_path = _write(root, "shots/shot_a/driving.mp4", b"mode-b-driving")
+    driving_path = _write(root, "shots/shot_a/driving.mp4", b"operator-driving")
     output_path = _write(root, "shots/shot_a/performance.mp4", b"performance")
     snapshot = _snapshot(
         "project_a",
@@ -305,8 +305,7 @@ def test_performance_version_hashes_the_exact_resolved_driving_input(
         "source_take_id": "take_keyframe",
         "metadata": {
             "engine": "ACT_ONE",
-            "driving_source": "tts_auto",
-            "driving_provider": "sadtalker",
+            "driving_source": "upload",
             "driving_video_path": driving_path,
         },
     }
@@ -322,7 +321,7 @@ def test_performance_version_hashes_the_exact_resolved_driving_input(
     assert record["provider"] == "ACT_ONE"
     assert record["source_hashes"]["source_take"] == _sha(b"keyframe")
     assert record["source_hashes"]["performance_driving_input"] == _sha(
-        b"mode-b-driving"
+        b"operator-driving"
     )
     assert driving_path not in json.dumps(record["parameters"])
 

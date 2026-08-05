@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 /* Labeled progress bar. Tone name maps directly to the fill token. */
 
-export type MeterTone = 'acc' | 'pri' | 'pod' | 'ok' | 'warn' | 'fail'
+export type MeterTone = 'acc' | 'pri' | 'local' | 'ok' | 'warn' | 'fail'
 
 interface Props {
   value: number
@@ -15,7 +15,7 @@ interface Props {
 const TONE: Record<MeterTone, string> = {
   acc: 'bg-acc',
   pri: 'bg-pri',
-  pod: 'bg-pod',
+  local: 'bg-local',
   ok: 'bg-ok',
   warn: 'bg-warn',
   fail: 'bg-fail',

@@ -1,10 +1,7 @@
 import os
-import json
 import logging
-import math
 import shutil
 import tempfile
-import time
 
 from typing import Mapping, NamedTuple
 
@@ -12,13 +9,6 @@ from config.settings import settings
 from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from cinema.context import get_project_setting
-from comfyui_client import (
-    ComfyUIJobError,
-    ComfyUIJobStateUnknown,
-    ComfyUISubmitUnknown,
-    ComfyUITimeout,
-    RunPodComfyUI,
-)
 from performance._net import safe_download, validate_image_artifact
 from paid_provider import has_paid_attempt_authority
 
@@ -35,10 +25,10 @@ class ImageGenResult(NamedTuple):
 
     ``path`` is the saved image (equals ``output_filename`` on success);
     ``api_name`` is the cost_tracker API key for the backend that ACTUALLY ran
-    (``GEMINI_IMAGE`` | ``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` |
-    ``FLUX_SCHNELL`` | ``POLLINATIONS``; ``QUALITY_MAX`` was retired WS1 Task 4
-    along with quality_max.py). Callers record ``api_name`` so cost_log reflects where the
-    image was really generated (pod vs FAL), not a tier-based guess. Backends
+    (``GEMINI_IMAGE`` | ``FLUX2_KLEIN_LOCAL`` | ``FLUX_KONTEXT`` |
+    ``FLUX_PRO`` | ``FLUX_SCHNELL`` | ``POLLINATIONS``). Callers record
+    ``api_name`` so cost_log reflects where the
+    image was really generated, not a tier-based guess. Backends
     return ``None`` (not this type) on failure, so the caller's ``if not
     result`` success guard is preserved (a populated NamedTuple is always
     truthy regardless of field count).
@@ -73,50 +63,12 @@ def _download_generated_jpeg(url: str, output_filename: str):
     )
 
 
-def _resolve_ui_denoise(ctx):
-    """Resolve a standard-tier img2img_denoise override from continuity_options,
-    finite-guarded and clamped to [0.2, 0.6]. Returns None — "keep the caller's
-    denoise default" — for an absent / non-dict / non-numeric / non-finite value.
-
-    A bare NaN survives project.json (json.load allow_nan=True); a raw
-    max(0.2, min(0.6, nan)) clamp-lucks to 0.6, silently overriding the caller. The
-    math.isfinite guard skips it instead. Mirrors bf1034a's same-knob guard in
-    workflow_selector (formerly also quality_max._clamp_img2img_denoise's
-    reject-non-finite policy + its isinstance(continuity_options, dict) check,
-    before that module was retired WS1 Task 4). Extracted (vs inline)
-    so the gate is unit-testable — drop math.isfinite and the nan test goes red."""
-    if ctx is None:
-        return None
-    gs = ctx.global_settings or {}
-    co = gs.get("continuity_options") if isinstance(gs, dict) else None
-    raw = co.get("img2img_denoise") if isinstance(co, dict) else None
-    if not isinstance(raw, (int, float)) or not math.isfinite(raw):
-        return None
-    return max(0.2, min(0.6, float(raw)))
-
-
 def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
-                       init_image=None, denoise_strength=1.0, characters=None,
+                       continuity_reference=None,
                        multi_angle_refs=None, identity_anchor="",
-                       pulid_weight_override=None, negative_prompt="",
-                       quality_tier="production",
-                       # char_lora_path/strength/trigger, style_reference, shot_hint:
-                       # reserved — dormant, kept for a possible future FLUX.2 A/B (a
-                       # separate, deferred track — NOT WS3, which shipped Nano Banana 2
-                       # / gemini_multiref instead and binds identity via reference
-                       # images, not LoRA). Threaded from the controller
-                       # (cinema/shots/controller.py) but unconsumed now that the
-                       # max-tier dispatch below is gone — WS1 retired
-                       # quality_tier=="max" (ADR-024: the max graph over-cooks
-                       # structurally; production/pulid.json is the validated survivor).
-                       # Kept, not dead code. (secondary_char_refs stays LIVE below — it
-                       # still feeds the FAL Kontext multi-char fallback, unrelated to
-                       # the deleted max dispatch.)
-                       char_lora_path=None,
-                       char_lora_strength=None,
-                       char_lora_trigger=None,
+                       negative_prompt="",
                        secondary_char_refs=None,
-                       style_reference=None, shot_hint=None, ctx=None,
+                       shot_hint=None, ctx=None,
                        _recovery_out=None, cost_tracker=None,
                        shot_id="", video_id="", take_id="",
                        project_snapshot=None, project_root=None,
@@ -124,51 +76,34 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     """
     Generates a cinematic image with face-identity preservation.
 
-    Priority chain (production — the only tier since WS1's max-tier retirement):
-    0. Gemini 3.1 Flash Image (Nano Banana 2) — PRIMARY for all projects (WS3,
-       user-confirmed); set identity_backend='pod' to opt OUT.
-    1. ComfyUI + PuLID (pod) — arc-gate fallback
-    2. FLUX Kontext
-    3. FLUX-Pro
-    4. FLUX-Schnell
-    5. Pollinations
+    Current production routing starts with the explicitly selected image
+    backend, then uses supported fallbacks only when the project did not pin a
+    local route. Unsupported stored backend values fail closed and can only be
+    migrated through the setup UI.
 
     Args:
         prompt: Image generation prompt (enhanced by continuity engine)
         output_filename: Output path for generated image
         seed: Deterministic seed for consistency
         character_image: Primary character reference for face identity
-        init_image: Previous shot image for img2img temporal chaining
-        denoise_strength: 0.0-1.0, lower = more similar to init_image
-        characters: List of character config dicts
-        quality_tier: informational only (WS1 retired the "max" fork below —
-            pulid.json/ComfyUI production is now the only pipeline).
-        char_lora_path: reserved — dormant, kept for a possible future FLUX.2
-            A/B (separate, deferred track — not WS3).
-        char_lora_trigger: reserved — dormant, kept for a possible future
-            FLUX.2 A/B (separate, deferred track — not WS3).
+        continuity_reference: Approved previous keyframe, when present. Local
+            FLUX.2 may include it in its immutable reference-latent workflow.
         secondary_char_refs: P1-1 slice 1: additional character entries forwarded
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
-        style_reference: reserved — dormant, kept for a possible future FLUX.2
-            A/B (separate, deferred track — not WS3).
-        shot_hint: reserved — dormant, kept for a possible future FLUX.2 A/B
-            (separate, deferred track — not WS3).
+        shot_hint: Provider-neutral shot metadata used by identity validation.
 
     Returns:
         ImageGenResult(path, api_name, billed_rejects) naming the backend
-        that actually ran (GEMINI_IMAGE | COMFYUI_PULID | FLUX_KONTEXT |
+        that actually ran (GEMINI_IMAGE | FLUX2_KLEIN_LOCAL | FLUX_KONTEXT |
         FLUX_PRO | FLUX_SCHNELL | POLLINATIONS), or None if every backend
-        failed. Callers record ``api_name`` for cost attribution so a pod
-        generation is distinguishable from a FAL fallback (and both from a
-        Gemini-native generation) in cost_log. ``billed_rejects`` names any
+        failed. Callers record ``api_name`` for cost attribution so provider
+        routes remain distinguishable in cost_log. ``billed_rejects`` names any
         engine that billed for a generation this call incurred but did NOT
         win (WS3: a Gemini bill-but-identity-reject before falling through) —
         callers must record these too or the spend is invisible to the
         budget gate.
     """
-
-    mode = "img2img" if init_image else "txt2img"
 
     # Read per-project aspect ratio early — must be in scope at ALL six
     # _fal_flux_fallback call sites (including early-return and except paths).
@@ -180,7 +115,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # WS3 money-loss close-out (mirrors cinema/shots/controller.py's
     # _record_billed_rejects on the video side): Gemini can BILL a real
     # image (Nano Banana 2, $0.067) that then fails identity and falls through
-    # to the pod/FAL cascade below — a billed engine that never becomes the
+    # to the remaining cascade below — a billed engine that never becomes the
     # winner. Track it here and thread it onto whichever ImageGenResult this
     # call finally returns, so the caller's cost_tracker sees the spend even
     # though Gemini didn't win. Only the PRIORITY-0 block below appends to
@@ -390,21 +325,17 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             _recovery_out["_billed_rejects"] = tuple(billed_rejects)
         return result
 
-    # ----- PRIORITY 0: Gemini 3.1 Flash Image (Nano Banana 2, WS3) -----
-    # Google-first overhaul: Nano Banana 2 is the image PRIMARY for all
-    # projects (WS3, user-confirmed decision — "Nano Banana as image
-    # PRIMARY, pod demoted to first fallback"); a project sets
-    # identity_backend='pod' to opt OUT. The pod remains the arc-gate
-    # fallback below. Ordinary unbilled failure and safely retained identity
-    # rejection fall through. Ambiguous paid work or rejected-byte retention
-    # failure returns None with recovery evidence so no replacement provider
-    # can spend or overwrite the only output.
+    # ----- Primary image route: Gemini multi-reference -----
+    # Gemini runs only when the project selected it. Ordinary unbilled failure
+    # and safely retained identity rejection may continue through the guarded
+    # local/cloud cascade. Ambiguous paid work or rejected-byte retention
+    # failure stops every replacement provider.
     identity_backend = get_project_setting(ctx, "identity_backend", "gemini_multiref")
     if (
         (settings.google_api_key or settings.gemini_api_key)
         and character_image
         and os.path.exists(character_image)
-        and identity_backend != "pod"
+        and identity_backend == "gemini_multiref"
     ):
         try:
             from gemini_image_native import GeminiImageAPI
@@ -571,7 +502,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                         _recovery_out["_winner_paid_cost_recorded"] = True
                     return ImageGenResult(output_filename, "GEMINI_IMAGE")
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
-                      f"falling back to the pod/FAL cascade")
+                      f"falling back to the remaining provider cascade")
                 retained = _retain_rejected_gemini(
                     rejection_stage="identity_validation",
                     identity_score=id_result.overall_score,
@@ -605,24 +536,15 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                     },
                 )
             else:
-                print("   [GEMINI-IMAGE] Generation returned no image; falling back to the pod/FAL cascade")
+                print("   [GEMINI-IMAGE] Generation returned no image; falling back to the remaining provider cascade")
         except _ImagePaidCascadeStop as e:
             print(f"   [UNKNOWN] Gemini image cascade stopped: {e}")
             return None
         except Exception as e:
-            print(f"   [GEMINI-IMAGE] PRIORITY-0 block failed ({e}); falling back to the pod/FAL cascade")
+            print(f"   [GEMINI-IMAGE] Primary route failed ({e}); falling back to the remaining provider cascade")
 
-    # ----- Backend selection (PRIORITY order) -----
-    # The previous implementation relied on a confusing if/elif/else where
-    # only branch #1 fell through to the ComfyUI path below, and the
-    # downstream `if not server_url` check was dead code (the else-branch
-    # had already returned). Rewriting with explicit early-returns so the
-    # control flow is self-evident.
-    server_url = settings.comfyui_server_url
-
-    # PRIORITY 2 / 3: ComfyUI is unavailable — route to FLUX fallback.
-    # (Same args as the old elif/else, consolidated.)
-    if not (server_url and os.path.exists("pulid.json")):
+    # ----- Supported local/remote fallback selection -----
+    def _fall_through_to_fal():
         if character_image and os.path.exists(character_image) and settings.fal_key:
             return _with_rejects(_fal_fallback(
                 prompt, output_filename, seed,
@@ -639,319 +561,163 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             secondary_char_refs=None,
         ))
 
-    # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
-    print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
+    def _block_local(*, code: str, reason: str):
+        if isinstance(_recovery_out, dict):
+            _recovery_out.update({
+                "engine": "FLUX2_KLEIN_LOCAL",
+                "status": "blocked",
+                "provider_status": code,
+                "code": code,
+                "retryable": False,
+                "reason": reason,
+            })
+        print(f"   [BLOCKED] Local FLUX.2 Klein: {reason}")
+        return None
 
-    prompt_id = None
-    try:
-        if not os.path.exists("pulid.json"):
-            print("   [WARN] pulid.json missing — using Kontext fallback")
-            return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
-                                      aspect_ratio=aspect_ratio, secondary_char_refs=None))
-
-        with open("pulid.json", "r") as f:
-            workflow = json.load(f)
-
-        # WORKFLOW SELECTOR — apply shot-type-specific parameters
-        try:
-            from workflow_selector import classify_shot_type, get_workflow_params, apply_workflow_params
-            # Build a minimal shot dict for classification
-            shot_info = {"prompt": prompt, "characters_in_frame": ["char"] if character_image else []}
-            shot_type = classify_shot_type(shot_info)
-            wf_params = get_workflow_params(shot_type, settings=ctx.global_settings if ctx else None)
-            workflow = apply_workflow_params(workflow, wf_params)
-
-            # Apply adaptive PuLID weight override from continuity engine feedback loop
-            if pulid_weight_override is not None and "100" in workflow:
-                workflow["100"]["inputs"]["weight"] = pulid_weight_override
-                print(f"   [WORKFLOW] {shot_type}: PuLID={pulid_weight_override:.2f} (adaptive), CFG={wf_params['guidance']}, steps={wf_params['steps']}")
-            else:
-                print(f"   [WORKFLOW] {shot_type}: PuLID={wf_params['pulid_weight']}, CFG={wf_params['guidance']}, steps={wf_params['steps']}")
-
-            # Skip ComfyUI entirely for landscape shots (no face-lock needed)
-            if shot_type == "landscape" and character_image:
-                print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
-                return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=None,
-                                          aspect_ratio=aspect_ratio, secondary_char_refs=None))
-        except ImportError:
-            pass  # workflow_selector not available — use defaults
-
-        comfy = RunPodComfyUI(
-            server_url,
-            auth_token=settings.comfyui_api_key,
+    if identity_backend not in {"gemini_multiref", "local_flux2_klein"}:
+        return _block_local(
+            code="image_backend_invalid",
+            reason="The project has an unsupported image backend selection.",
         )
 
-        # 1. Inject LLM Text prompt to CLIP node "122"
-        workflow["122"]["inputs"]["text"] = prompt
+    local_references = []
+    for candidate in [
+        character_image,
+        *(multi_angle_refs or []),
+        *(
+            item
+            for entry in (secondary_char_refs or [])
+            for item in [entry.get("reference"), *(entry.get("multi_angle_refs") or [])]
+        ),
+        continuity_reference,
+    ]:
+        if (
+            candidate
+            and os.path.isfile(candidate)
+            and candidate not in local_references
+        ):
+            local_references.append(candidate)
+        if len(local_references) == 10:
+            break
 
-        # 2. Aspect ratio — native latent dims via EmptyLatentImage node "102"
-        #    portrait_swap transposes 1344×768 → 768×1344 when aspect_ratio=9:16;
-        #    landscape / unknown → unchanged. Phase 2 (portrait keyframe support).
-        _w, _h = portrait_swap(1344, 768, aspect_ratio)
-        workflow["102"]["inputs"]["width"] = _w
-        workflow["102"]["inputs"]["height"] = _h
-        workflow["102"]["inputs"]["batch_size"] = 1
+    explicit_local = identity_backend == "local_flux2_klein"
+    if explicit_local and not local_references:
+        return _block_local(
+            code="local_reference_required",
+            reason=(
+                "The local FLUX.2 workflow requires at least one approved "
+                "character or continuity reference image."
+            ),
+        )
 
-        # Keep the final ImageScale orientation aligned with the latent canvas.
-        # pulid.json stores the landscape default; portrait projects transpose it
-        # with the same single-source helper used for node 102 above.
-        _delivery_w, _delivery_h = portrait_swap(2688, 1536, aspect_ratio)
-        workflow["502"]["inputs"]["width"] = _delivery_w
-        workflow["502"]["inputs"]["height"] = _delivery_h
+    if local_references:
+        from paid_provider import (
+            PaidCallBudgetBlocked,
+            PaidCallDeferred,
+            PaidCallUnbilled,
+        )
+        from performance.flux2_klein import run_flux2_klein_image_job
+        from performance.worker_readiness import (
+            PerformanceWorkerUnavailable,
+            require_flux2_worker_ready,
+        )
 
-        # 3. Seed control via RandomNoise node "25"
-        if seed is not None:
-             workflow["25"]["inputs"]["noise_seed"] = seed
-
-        # 4. Primary character face-lock via PuLID LoadImage node "93"
-        if character_image and os.path.exists(character_image):
-            remote_face_filename = comfy.upload_image(character_image)
-            workflow["93"]["inputs"]["image"] = remote_face_filename
-            print(f"      ↳ PuLID face-locked to: {os.path.basename(character_image)}")
-        else:
-            # No character image — strip ALL PuLID nodes so ComfyUI doesn't validate them
-            # Rewire: FreeU takes model directly from UNETLoader (skip PuLID)
-            print("   ↳ No character — bypassing PuLID, pure txt2img mode")
-            for nid in ["93", "97", "99", "100", "101"]:
-                workflow.pop(nid, None)
-            # Rewire PAG to take model from UNETLoader directly (node 112), skipping PuLID
-            if "301" in workflow:
-                workflow["301"]["inputs"]["model"] = ["112", 0]
-
-        # 5. IMG2IMG MODE: Temporal consistency via init image.
-        # Keep this path limited to the provisioned, FLUX-compatible
-        # LoadImage -> VAEEncode graph. The former dynamic SD1.5 ControlNet and
-        # IP-Adapter nodes were not valid members of this production workflow.
-        # Injects a VAEEncode node to convert init image → latent, replacing EmptyLatentImage
-        if init_image and os.path.exists(init_image):
-            remote_init = comfy.upload_image(init_image)
-
-            # Add a LoadImage node for the init image (node "200")
-            workflow["200"] = {
-                "inputs": {"image": remote_init},
-                "class_type": "LoadImage",
-                "_meta": {"title": "Load Init Image (img2img)"}
-            }
-
-            # Add a VAEEncode node (node "201") to convert init image → latent
-            workflow["201"] = {
-                "inputs": {
-                    "pixels": ["200", 0],
-                    "vae": ["10", 0]  # Same VAE as the decode path (node 10)
-                },
-                "class_type": "VAEEncode",
-                "_meta": {"title": "VAE Encode Init (img2img)"}
-            }
-
-            # Rewire: SamplerCustomAdvanced (node 13) now takes latent from VAEEncode
-            # instead of EmptyLatentImage (node 102)
-            workflow["13"]["inputs"]["latent_image"] = ["201", 0]
-
-            # Set denoise strength in BasicScheduler (node 17).
-            # img2img_denoise from global_settings.continuity_options overrides the
-            # caller-supplied denoise_strength when present (slider: min 0.2, max 0.6).
-            _ui_denoise = _resolve_ui_denoise(ctx)
-            effective_denoise = _ui_denoise if _ui_denoise is not None else denoise_strength
-            workflow["17"]["inputs"]["denoise"] = effective_denoise
-            print(f"      ↳ img2img mode: denoise={effective_denoise:.2f} from {os.path.basename(init_image)}")
-        else:
-            # Full text-to-image: EmptyLatentImage feeds sampler (default workflow)
-            workflow["13"]["inputs"]["latent_image"] = ["102", 0]
-            if "17" in workflow:
-                workflow["17"]["inputs"]["denoise"] = 1.0
-
-        # FACE REFINEMENT removed. PuLID face-locking provides sufficient identity
-        # for the current pipeline; FAL PixVerse swap handles any post-video refinement
-        # (see phase_c_vision.face_swap_video_frames).
-
-        # 6/7. Queue and monitor under the shared paid-attempt authority when
-        # the pipeline supplied its project tracker. The prompt ID is durable
-        # before polling, so a worker restart resumes /history for that exact
-        # graph instead of opening a FAL replacement render.
-        if has_paid_attempt_authority(cost_tracker):
-            from cost_tracker import API_COST_USD
-            from paid_provider import (
-                PaidCallBudgetBlocked,
-                PaidCallDeferred,
-                PaidCallUnbilled,
-                file_fingerprint,
-                paid_attempt_id,
-                request_fingerprint,
-                run_durable_comfy_job,
-            )
-
-            local_assets = []
-            for candidate in [character_image, init_image, *(multi_angle_refs or [])]:
-                if candidate and os.path.exists(candidate):
-                    local_assets.append(file_fingerprint(candidate))
-            stable_request = request_fingerprint(
-                "comfy-pulid",
-                prompt,
-                negative_prompt,
-                seed,
-                aspect_ratio,
-                local_assets,
-                _delivery_w,
-                _delivery_h,
-                os.path.abspath(output_filename),
-            )
-            try:
-                history = run_durable_comfy_job(
-                    client=comfy,
-                    workflow=workflow,
-                    attempt_id=paid_attempt_id(
-                        "comfy-keyframe",
-                        video_id,
-                        shot_id,
-                        os.path.abspath(output_filename),
-                    ),
-                    engine="COMFYUI_PULID",
-                    operation="keyframe_generation",
-                    estimated_cost_usd=API_COST_USD["COMFYUI_PULID"],
-                    request_fingerprint_value=stable_request,
-                    cost_tracker=cost_tracker,
-                    shot_id=shot_id,
-                    video_id=video_id,
-                    poll_timeout_s=600.0,
-                    poll_interval_s=2.0,
+        try:
+            require_flux2_worker_ready(settings)
+        except PerformanceWorkerUnavailable as readiness_error:
+            if explicit_local:
+                return _block_local(
+                    code="local_flux2_not_ready",
+                    reason=str(readiness_error),
                 )
-                attempt = cost_tracker.get_latest_paid_attempt(
-                    video_id=video_id,
-                    shot_id=shot_id,
-                    engine="COMFYUI_PULID",
-                    operation="keyframe_generation",
-                )
-                prompt_id = str((attempt or {}).get("provider_job_id") or "")
-            except PaidCallUnbilled:
-                raise ComfyUIJobError("ComfyUI graph was rejected before billing")
-            except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
-                if isinstance(_recovery_out, dict):
-                    _recovery_out.clear()
-                    _recovery_out.update({
-                        "engine": "COMFYUI_PULID",
-                        "status": "recovery_required",
-                        "provider_status": (
-                            "budget_blocked"
-                            if isinstance(paid_error, PaidCallBudgetBlocked)
-                            else "job_state_unknown"
-                        ),
-                        "reason": (
-                            "ComfyUI paid prompt is reserved or recoverable by its "
-                            "durable prompt ID. No FAL replacement was started."
-                        ),
-                        "paid_attempt_id": paid_error.snapshot.attempt.get("attempt_id"),
-                    })
-                    job_id = paid_error.snapshot.attempt.get("provider_job_id")
-                    if job_id:
-                        _recovery_out["job_id"] = job_id
-                return None
+            print(
+                "   [PHASE C] Local FLUX.2 is not ready; continuing to the "
+                "supported cloud fallback."
+            )
         else:
-            # Legacy standalone path without a project tracker.
-            prompt_id = comfy.queue_prompt(workflow)
-            print(f"      ↳ ComfyUI Task {prompt_id} queued. Awaiting GPU computation...")
-            try:
-                history = comfy.wait_for_completion(prompt_id)
-            except KeyboardInterrupt:
-                try:
-                    comfy.cancel_prompt(prompt_id)
-                except Exception as cancel_error:
-                    print(f"      ↳ ComfyUI cancellation failed: {cancel_error}")
-                raise
-            except ComfyUIJobError:
-                raise
-            except ComfyUITimeout:
-                raise
-            except Exception as monitor_error:
-                try:
-                    cancelled = comfy.cancel_prompt(prompt_id)
-                except Exception as cancel_error:
-                    raise ComfyUIJobStateUnknown(
-                        f"ComfyUI monitoring failed ({monitor_error}); cancellation "
-                        f"could not be confirmed ({cancel_error})"
-                    ) from monitor_error
-                if not cancelled:
-                    raise ComfyUIJobStateUnknown(
-                        f"ComfyUI monitoring failed ({monitor_error}); prompt/output "
-                        "state remains UNKNOWN"
-                    ) from monitor_error
-                raise
-        record = history.get(prompt_id, {})
-        outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
-        if isinstance(outputs, dict):
-            for node_output in outputs.values():
-                images = node_output.get("images") if isinstance(node_output, dict) else None
-                if not isinstance(images, list) or not images:
-                    continue
-                img_info = images[0]
-                if not isinstance(img_info, dict):
-                    continue
-                try:
-                    comfy.download_image(
-                        img_info.get("filename"),
-                        img_info.get("subfolder", ""),
-                        img_info.get("type", "output"),
-                        output_filename,
-                        expected_dimensions=(_delivery_w, _delivery_h),
+            if not has_paid_attempt_authority(cost_tracker):
+                if explicit_local:
+                    return _block_local(
+                        code="durable_job_authority_required",
+                        reason=(
+                            "Local FLUX.2 dispatch requires the project-scoped "
+                            "durable job ledger."
+                        ),
                     )
-                except Exception as download_error:
-                    if has_paid_attempt_authority(cost_tracker):
-                        if isinstance(_recovery_out, dict):
-                            _recovery_out.update({
-                                "engine": "COMFYUI_PULID",
-                                "status": "recovery_required",
-                                "provider_status": "artifact_unavailable",
-                                "reason": (
-                                    "ComfyUI completed and may be billed, but its "
-                                    "image could not be published. Resume the durable "
-                                    "prompt instead of starting a FAL render."
-                                ),
-                                "job_id": prompt_id,
-                            })
-                        print(f"   [UNKNOWN] ComfyUI artifact publication failed: {download_error}")
-                        return None
-                    raise
-                print(f"      ✅ Downloaded {mode} render: {output_filename}")
-                if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
-                    _recovery_out["_winner_paid_cost_recorded"] = True
-                return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
+            else:
+                local_seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else 0
+                try:
+                    local_result = run_flux2_klein_image_job(
+                        prompt=prompt,
+                        reference_image_paths=local_references,
+                        output_path=output_filename,
+                        seed=local_seed,
+                        aspect_ratio=aspect_ratio,
+                        cost_tracker=cost_tracker,
+                        shot_id=shot_id,
+                        video_id=video_id,
+                        request_id=take_id,
+                    )
+                except PaidCallUnbilled as local_rejected:
+                    if explicit_local:
+                        return _block_local(
+                            code="local_flux2_rejected_unbilled",
+                            reason=str(local_rejected),
+                        )
+                    print(
+                        "   [PHASE C] Local FLUX.2 rejected the graph before "
+                        "execution; continuing to the supported cloud fallback."
+                    )
+                except (PaidCallBudgetBlocked, PaidCallDeferred) as local_deferred:
+                    if isinstance(_recovery_out, dict):
+                        _recovery_out.update({
+                            "engine": "FLUX2_KLEIN_LOCAL",
+                            "status": "recovery_required",
+                            "provider_status": (
+                                "budget_blocked"
+                                if isinstance(local_deferred, PaidCallBudgetBlocked)
+                                else "job_state_unknown"
+                            ),
+                            "reason": (
+                                "The local FLUX.2 job is reserved or recoverable "
+                                "by its durable prompt ID. No replacement image "
+                                "provider was started."
+                            ),
+                            "paid_attempt_id": local_deferred.snapshot.attempt.get(
+                                "attempt_id"
+                            ),
+                        })
+                        job_id = local_deferred.snapshot.attempt.get("provider_job_id")
+                        if job_id:
+                            _recovery_out["job_id"] = job_id
+                    print(f"   [UNKNOWN] Local FLUX.2 job requires recovery: {local_deferred}")
+                    return None
+                except Exception as local_error:
+                    # Readiness was proven immediately before dispatch, so any
+                    # later exception may follow upload, queue acceptance, or
+                    # completed GPU work. Conservatively block a replacement.
+                    if isinstance(_recovery_out, dict):
+                        _recovery_out.update({
+                            "engine": "FLUX2_KLEIN_LOCAL",
+                            "status": "recovery_required",
+                            "provider_status": "local_job_or_artifact_unknown",
+                            "reason": (
+                                "Local FLUX.2 failed after its readiness proof. "
+                                "Reconcile the durable prompt and output before retrying."
+                            ),
+                        })
+                    print(f"   [UNKNOWN] Local FLUX.2 outcome: {local_error}")
+                    return None
+                else:
+                    if isinstance(_recovery_out, dict):
+                        _recovery_out["_winner_paid_cost_recorded"] = True
+                    print(f"      [OK] Local FLUX.2 image: {local_result.published_path}")
+                    return _with_rejects(ImageGenResult(
+                        local_result.published_path,
+                        "FLUX2_KLEIN_LOCAL",
+                    ))
 
-        print("      ⚠️ ComfyUI task completed but produced no valid image output")
-
-        print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
-        return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
-
-    except (ComfyUISubmitUnknown, ComfyUIJobStateUnknown) as e:
-        # A lost acknowledgement or unconfirmed cancellation may leave a valid
-        # ComfyUI render in flight or recoverable. Starting FAL here would
-        # duplicate work/spend, so fail closed for operator recovery.
-        if isinstance(_recovery_out, dict):
-            _recovery_out.clear()
-            _recovery_out.update({
-                "engine": "COMFYUI_PULID",
-                "status": "recovery_required",
-                "provider_status": (
-                    "submission_unknown"
-                    if isinstance(e, ComfyUISubmitUnknown)
-                    else "job_state_unknown"
-                ),
-                "reason": (
-                    "ComfyUI may still have accepted or completed this keyframe. "
-                    "Reconcile its queue and history before allowing another render."
-                ),
-            })
-            if isinstance(prompt_id, str) and prompt_id:
-                _recovery_out["job_id"] = prompt_id
-            if billed_rejects:
-                # Internal-only accounting handoff. The controller removes
-                # this before persisting the public recovery descriptor.
-                _recovery_out["_billed_rejects"] = tuple(billed_rejects)
-        print(f"   [UNKNOWN] ComfyUI job state: {e}. Refusing duplicate fallback.")
-        return None
-    except Exception as e:
-        print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
-        return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio, secondary_char_refs=None))
+    return _fall_through_to_fal()
 
 
 def _parse_structured_prompt(prompt: str) -> dict:
@@ -1171,7 +937,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 f"{engine_key} completed but artifact publication failed"
             )
 
-        # PRIORITY 1: FLUX Kontext Max Multi (strongest identity — up to 9 refs)
+        # First supported reference-conditioned route (up to 9 refs).
         if character_image and os.path.exists(character_image):
             try:
                 if secondary_char_refs:

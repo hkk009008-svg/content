@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "workflow": "one-frame-expression-api.json",
+  "workflow_sha256": "d12fe10f0941fcc35bb8f6b47bf387bfd7d0e79d6edd053cbcce4a307a480a05",
+  "fixtures": [
+    {
+      "path": "source-face.jpg",
+      "expected_bytes": 35931,
+      "sha256": "b8c0cd0492ac29b397541d3ff8404d8b8dd4e5e37480563b2ef8d2ed0e51715a"
+    },
+    {
+      "path": "driving-expression.mp4",
+      "expected_bytes": 53730,
+      "sha256": "b2d830c863f1bd4db407a1ae295d64eb0d9e199df5d4bd06656dd248a5ba94db"
+    }
+  ],
+  "output_node_ids": ["19"]
+}

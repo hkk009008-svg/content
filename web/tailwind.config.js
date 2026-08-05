@@ -10,7 +10,7 @@ export default {
         app:'var(--bg)', gutter:'var(--gutter)', panel:'var(--panel)', head:'var(--head)', line:'var(--line)',
         tx:'var(--tx)', mut:'var(--mut)', dim:'var(--dim)',
         acc:'var(--acc)', 'acc-dim':'var(--acc-dim)', pri:'var(--pri)', 'pri-bg':'var(--pri-bg)',
-        pod:'var(--pod)', 'pod-bg':'var(--pod-bg)', ok:'var(--ok)', warn:'var(--warn)', fail:'var(--fail)',
+        local:'var(--local)', 'local-bg':'var(--local-bg)', ok:'var(--ok)', warn:'var(--warn)', fail:'var(--fail)',
       },
       fontFamily: {
         display: ['Fraunces', 'Georgia', 'serif'],

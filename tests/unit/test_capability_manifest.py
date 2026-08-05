@@ -202,7 +202,7 @@ class TestManifestValidation:
         spend_kind — catches a misspelled TOML value silently falling back to
         validate_component's default."""
         valid_exposure = {"ui", "api", "internal", "cli"}
-        valid_spend = {"none", "compute_local", "paid_api", "pod_gpu"}
+        valid_spend = {"none", "compute_local", "paid_api", "local_gpu"}
         components = build_manifest(REPO_ROOT)
         assert components, "expected at least one real component"
         for c in components:

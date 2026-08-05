@@ -1041,6 +1041,7 @@ def run_durable_comfy_job(
     workflow: Mapping[str, Any],
     attempt_id: str,
     engine: str,
+    provider: str = "comfyui",
     operation: str,
     estimated_cost_usd: float,
     request_fingerprint_value: str,
@@ -1053,10 +1054,12 @@ def run_durable_comfy_job(
     """Submit or resume one ComfyUI prompt ID under paid-attempt authority."""
     if not has_paid_attempt_authority(cost_tracker):
         raise TypeError("durable ComfyUI job requires explicit paid-attempt authority")
+    workflow_payload = dict(workflow)
+    queue_preflighted = getattr(client, "queue_prompt_preflighted", None)
     with cost_tracker_scope(cost_tracker) as tracker:
         attempt = tracker.reserve_paid_attempt(
             attempt_id=attempt_id,
-            provider="comfyui",
+            provider=provider,
             engine=engine,
             operation=operation,
             estimated_cost_usd=estimated_cost_usd,
@@ -1098,8 +1101,27 @@ def run_durable_comfy_job(
                     "ComfyUI submission acknowledgement is unknown", attempt=attempt
                 )
         else:
+            if callable(queue_preflighted):
+                # Only a genuinely new attempt needs graph readiness. Existing
+                # prompt IDs skip this branch and remain retrieval-only even
+                # during a worker outage. This split also proves every error
+                # here occurred before POST /prompt.
+                try:
+                    client.preflight(workflow_payload)
+                except Exception as exc:
+                    attempt = tracker.reconcile_paid_attempt(
+                        attempt_id,
+                        state="failed_unbilled",
+                        provider_status="preflight_failed",
+                        detail="ComfyUI GET-only preflight failed before queue acceptance",
+                    )
+                    raise PaidCallUnbilled(
+                        "ComfyUI preflight failed before queue acceptance",
+                        attempt=attempt,
+                    ) from exc
             try:
-                prompt_id = str(client.queue_prompt(dict(workflow)) or "")
+                submit = queue_preflighted if callable(queue_preflighted) else client.queue_prompt
+                prompt_id = str(submit(workflow_payload) or "")
             except Exception as exc:
                 if type(exc).__name__ == "ComfyUIPromptRejected":
                     attempt = tracker.reconcile_paid_attempt(

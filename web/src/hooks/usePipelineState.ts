@@ -142,7 +142,10 @@ export const STAGE_RAIL_MAP: Record<string, StageBucket> = {
   // KEYFRAME_REVIEW from the durable project marker after a reload.
   KEYFRAME_HALTED: { kind: 'route', id: 'KEYFRAME_REVIEW' },
   KEYFRAME_READY: { kind: 'info' },
+  KEYFRAME_RECOVERY: { kind: 'info' },
   PERFORMANCE_DONE: { kind: 'info' },
+  PERFORMANCE_BLOCKED: { kind: 'info' },
+  PERFORMANCE_DEFERRED: { kind: 'info' },
   PERFORMANCE_HALTED: { kind: 'info' },
   PERFORMANCE_READY: { kind: 'info' },
   PERFORMANCE_SKIPPED: { kind: 'info' },
@@ -153,6 +156,7 @@ export const STAGE_RAIL_MAP: Record<string, StageBucket> = {
   MOTION_READY: { kind: 'info' },
   MOTION_BELOW_FLOOR: { kind: 'info' },
   POSTPROCESS_READY: { kind: 'info' },
+  ARTIFACT_VERSION_RECOVERED: { kind: 'info' },
   REVIEW_COMPLETE: { kind: 'info' },
 
   // -- SSE control frames (Slice 11a). HEARTBEAT/END are filtered by
@@ -590,6 +594,81 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/shots/${shotId}/performance/${takeId}/approve`)
   }, [projectId, postJson])
 
+  const generatePerformance = useCallback(async (shotId: string) => {
+    if (!projectId) return null
+    const storageKey = `cinema:performance-request:${projectId}:${shotId}`
+    let requestId = ''
+    try {
+      requestId = window.sessionStorage.getItem(storageKey) || ''
+    } catch {
+      // Storage can be unavailable in privacy modes; cryptographic request
+      // identity still protects this individual HTTP action.
+    }
+    if (!/^[0-9a-f]{32}$/.test(requestId)) {
+      if (typeof globalThis.crypto?.randomUUID !== 'function') {
+        return {
+          success: false,
+          error: 'This browser cannot create a safe performance request ID.',
+          code: 'performance_request_id_unavailable',
+        }
+      }
+      requestId = globalThis.crypto.randomUUID().replace(/-/g, '').toLowerCase()
+      try {
+        window.sessionStorage.setItem(storageKey, requestId)
+      } catch {
+        // The request still carries the ID; only cross-refresh recovery is lost.
+      }
+    }
+    let result = await postJson(
+      `/api/projects/${projectId}/shots/${shotId}/performance/generate`,
+      { request_id: requestId },
+    )
+    const persistedRequestId = result?.code === 'performance_request_active'
+      ? String(result?.request?.request_id || '')
+      : ''
+    if (
+      /^[0-9a-f]{32}$/.test(persistedRequestId)
+      && persistedRequestId !== requestId
+    ) {
+      // A browser/session crash can lose sessionStorage while the server still
+      // owns a durable deferred request. Adopt the server-returned request ID
+      // and retry once; backend input binding decides whether it is safe to
+      // resume, so this cannot turn changed bytes into a new paid submission.
+      requestId = persistedRequestId
+      try {
+        window.sessionStorage.setItem(storageKey, requestId)
+      } catch {
+        // The in-memory retry remains safe even when storage is unavailable.
+      }
+      result = await postJson(
+        `/api/projects/${projectId}/shots/${shotId}/performance/generate`,
+        { request_id: requestId },
+      )
+    }
+    const keepForRecovery = result?.success !== true && (
+      result?.retryable === true
+      || !result?.code
+      || result?.code === 'provider_job_deferred'
+      || result?.code === 'performance_request_active'
+    )
+    if (!keepForRecovery) {
+      try {
+        window.sessionStorage.removeItem(storageKey)
+      } catch {
+        // Nothing else depends on storage cleanup.
+      }
+    }
+    return result
+  }, [projectId, postJson])
+
+  const skipPerformance = useCallback(async (shotId: string, reason: string) => {
+    if (!projectId) return null
+    return postJson(
+      `/api/projects/${projectId}/shots/${shotId}/performance/skip`,
+      { confirmed: true, reason },
+    )
+  }, [projectId, postJson])
+
   const generateMotion = useCallback(async (shotId: string) => {
     if (!projectId) return null
     return postJson(`/api/projects/${projectId}/shots/${shotId}/motion/generate`)
@@ -717,6 +796,8 @@ export function usePipelineState(projectId: string | null) {
     generateKeyframe,
     approveKeyframe,
     approvePerformance,
+    generatePerformance,
+    skipPerformance,
     generateMotion,
     approveFinal,
     regenerateShot,

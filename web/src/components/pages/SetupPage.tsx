@@ -11,7 +11,7 @@ import SettingsInspector from '../setup/SettingsInspector'
  *
  * The right column is the reconciled `SettingsInspector` (Task 8):
  * Project → Video → Image → Identity → Voice → Budget, Google-first engines,
- * pod/cloud badges, no retired max-quality tier.
+ * local/cloud badges, no retired quality-tier controls.
  */
 
 interface Props {

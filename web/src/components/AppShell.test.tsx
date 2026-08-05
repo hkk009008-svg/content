@@ -73,6 +73,8 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof AppShell>> = {
     onGenerateKeyframe: asyncNoop,
     onApproveKeyframe: asyncNoop,
     onApprovePerformance: asyncNoop,
+    onGeneratePerformance: asyncNoop,
+    onSkipPerformance: asyncNoop,
     onGenerateMotion: asyncNoop,
     onApproveFinal: asyncNoop,
     onRegenerateShot: asyncNoop,
@@ -105,6 +107,11 @@ describe('AppShell', () => {
     expect(screen.getByRole('button', { name: /Capability/ })).toBeInTheDocument()
   })
 
+  it('uses a provider-neutral local GPU legend', () => {
+    renderShell()
+    expect(screen.getByText('Local GPU')).toBeInTheDocument()
+  })
+
   it('defaults to the Setup page', () => {
     renderShell()
     expect(screen.getByTestId('mock-setup')).toBeInTheDocument()
@@ -124,6 +131,16 @@ describe('AppShell', () => {
 
     // Scene-jump wiring is deferred to Task 6 — none exists yet.
     expect(container.querySelector('.scene-jump')).toBeNull()
+  })
+
+  it('links to measured provider evidence instead of synthesizing a per-shot cost', () => {
+    renderShell()
+
+    expect(screen.queryByText(/est\s*~\$/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Open reconciled provider costs, health, and traces',
+    }))
+    expect(screen.getByTestId('mock-run')).toBeInTheDocument()
   })
 
   it('renders the BudgetHaltBanner (role=alert) when budgetHalt is set', () => {

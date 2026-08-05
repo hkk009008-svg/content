@@ -271,14 +271,14 @@ class TestLocationResearchToggleRoundTrip:
         # Simulate the save path (web_server.py:511)
         project["global_settings"].update({"location_research": True})
         # Simulate the read path (web_server.py:1128)
-        result = bool(project.get("global_settings", {}).get("location_research", False))
+        result = project.get("global_settings", {}).get("location_research", False) is True
         assert result is True
 
     def test_toggle_false_round_trips_to_read(self):
         """Setting location_research=False via the save path is visible at read."""
         project = _make_project()
         project["global_settings"].update({"location_research": False})
-        result = bool(project.get("global_settings", {}).get("location_research", False))
+        result = project.get("global_settings", {}).get("location_research", False) is True
         assert result is False
 
     def test_default_absent_reads_as_false(self):
@@ -286,7 +286,16 @@ class TestLocationResearchToggleRoundTrip:
         project = _make_project()
         # global_settings is empty — key absent
         assert "location_research" not in project["global_settings"]
-        result = bool(project.get("global_settings", {}).get("location_research", False))
+        result = project.get("global_settings", {}).get("location_research", False) is True
+        assert result is False
+
+    def test_malformed_legacy_value_fails_closed(self):
+        """A truthy string must not silently enable external research."""
+        project = _make_project()
+        project["global_settings"]["location_research"] = "false"
+
+        result = project.get("global_settings", {}).get("location_research", False) is True
+
         assert result is False
 
     def test_toggle_is_not_in_api_engine_defaults_namespace(self):

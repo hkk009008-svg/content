@@ -24,6 +24,7 @@ from ShotController.generate_performance_take().
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Optional
 
 from domain.shot_types import (
@@ -40,6 +41,29 @@ ENGINE_VIGGLE        = "VIGGLE"
 ENGINE_SKIP          = "SKIP"
 
 VALID_ENGINES = {ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE, ENGINE_SKIP}
+
+# Operator decisions are persisted into project history and logs. Keep the
+# reason useful but bounded, and reject control bytes rather than allowing
+# invisible line/log manipulation through an otherwise explicit decision.
+MAX_PERFORMANCE_SKIP_REASON_CHARS = 240
+
+
+def normalize_performance_skip_reason(value: object) -> str:
+    """Validate and normalize a durable operator performance-skip reason."""
+
+    if not isinstance(value, str):
+        raise ValueError("Performance skip reason must be text")
+    reason = value.strip()
+    if not reason:
+        raise ValueError("Performance skip reason is required")
+    if len(reason) > MAX_PERFORMANCE_SKIP_REASON_CHARS:
+        raise ValueError(
+            "Performance skip reason cannot exceed "
+            f"{MAX_PERFORMANCE_SKIP_REASON_CHARS} characters"
+        )
+    if any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in reason):
+        raise ValueError("Performance skip reason cannot contain control characters")
+    return reason
 
 
 def _shot_type(shot: dict) -> str:
@@ -93,15 +117,12 @@ def should_capture(shot: dict, scene: Optional[dict] = None) -> bool:
 
 def shot_needs_driving_video(shot: dict) -> bool:
     """True when the chosen engine requires a driving video as input.
-    Used to decide whether Mode B (synth from TTS+keyframe) should fire.
 
     All three real engines need one. ACT_ONE now routes to Runway Act-Two
     (performance/act_two.py) — the retired Act-One could auto-generate a
     performance from dialogue audio alone, but Act-Two cannot; it always
-    needs an actual reference/driving video, whether that's Mode-B synthesis
-    (TTS audio + keyframe, via performance/driving_video.py) or an
-    operator-supplied upload. LIVE_PORTRAIT and VIGGLE already needed an
-    explicit driving video. Only SKIP needs none.
+    needs an operator-supplied reference/driving video. LIVE_PORTRAIT and
+    VIGGLE also require an explicit driving video. Only SKIP needs none.
     """
     engine = route_performance_engine(shot, None)
     return engine in (ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE)
@@ -165,22 +186,87 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
     return ENGINE_SKIP
 
 
+def has_current_performance_skip(
+    shot: Mapping[str, object],
+    scene: Optional[Mapping[str, object]] = None,
+) -> bool:
+    """Return whether ``SKIP`` is backed by a decision for current inputs.
+
+    A bare legacy ``performance_engine=SKIP`` is not authority. Routing
+    decisions must still route to SKIP, while explicit operator decisions
+    must still describe the current route and driving-video revision.
+    """
+
+    if str(shot.get("performance_engine") or "").upper() != ENGINE_SKIP:
+        return False
+    decision = shot.get("performance_skip")
+    if not isinstance(decision, Mapping):
+        return False
+    if (
+        not str(decision.get("id") or "")
+        or decision.get("action") != "skip"
+        or not str(decision.get("created_at") or "")
+        or str(decision.get("driving_video_path") or "")
+        != str(shot.get("driving_video_path") or "")
+    ):
+        return False
+
+    current_route = route_performance_engine(dict(shot), dict(scene) if scene else None)
+    decision_source = str(decision.get("decision_source") or "")
+    routed_engine = str(decision.get("routed_engine") or "").upper()
+    if decision_source == "routing":
+        return (
+            decision.get("reason") == "routing"
+            and routed_engine == ENGINE_SKIP
+            and current_route == ENGINE_SKIP
+        )
+    if decision_source == "operator":
+        return (
+            bool(str(decision.get("operator_reason") or "").strip())
+            and routed_engine == current_route
+        )
+    return False
+
+
+def project_performance_review_can_skip(
+    project: Mapping[str, object],
+) -> bool:
+    """Return whether no approved-keyframe shot needs performance review.
+
+    This is the pipeline-level counterpart to
+    :func:`has_current_performance_skip`.  Keeping the aggregate rule here
+    prevents the orchestration bypass from drifting back to trusting a bare
+    persisted ``performance_engine=SKIP`` value.
+    """
+
+    entries: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
+    scenes = project.get("scenes")
+    if isinstance(scenes, list):
+        for scene in scenes:
+            if not isinstance(scene, Mapping):
+                continue
+            shots = scene.get("shots")
+            if not isinstance(shots, list):
+                continue
+            entries.extend(
+                (scene, shot) for shot in shots if isinstance(shot, Mapping)
+            )
+    return all(
+        has_current_performance_skip(shot, scene)
+        or not shot.get("approved_keyframe_take_id")
+        for scene, shot in entries
+    )
+
+
 def driving_video_source(shot: dict) -> str:
-    """Which Mode (A/B/C) sources the driving video for this shot?
+    """Report whether the shot has an operator-supplied driving video.
 
     Returns:
-        "upload"   — Mode A: operator-uploaded driving_video_path is set
-        "tts_auto" — Mode B: synth from TTS audio + keyframe (autopilot)
-        "none"     — Mode C: skip; let motion_render fall through
+        "upload" — operator-uploaded driving_video_path is set
+        "none"   — no supported driving input is available
     """
     uploaded = (shot.get("driving_video_path") or "").strip()
-    if uploaded:
-        return "upload"
-    if route_performance_engine(shot, None) == ENGINE_SKIP:
-        return "none"
-    if _has_dialogue(shot):
-        return "tts_auto"
-    return "none"
+    return "upload" if uploaded else "none"
 
 
 def precondition_error(
@@ -190,41 +276,15 @@ def precondition_error(
 ) -> Optional[str]:
     """Return an error string if the engine's inputs are missing, else None.
 
-    Called from cinema/shots/controller.py BEFORE Mode-B driving-video synth
-    runs and before allocating a take, so we don't leave orphan take metadata
-    when we already know the dispatch will fail.
-
-    Rules:
-      - ACT_ONE now routes to Runway Act-Two (performance/act_two.py), which
-        has NO audio-only generation mode — the retired Act-One could
-        synthesize a performance from dialogue audio alone, Act-Two cannot;
-        it always needs an actual reference/driving video by dispatch time.
-        Audio alone is NOT a valid Act-Two input, but audio alone DOES
-        satisfy this pre-check, because it is exactly what lets the caller's
-        Mode-B step (SadTalker, performance/driving_video.py) synthesize a
-        driving video from audio + keyframe before the engine call happens
-        — this function only runs BEFORE that synth attempt, so rejecting
-        audio-only shots here would kill the Mode-B autopilot path entirely
-        (see cinema_pipeline.py's PERFORMANCE CAPTURE PHASE comment: "The
-        autopilot path uses Mode B ... when no operator upload is
-        provided"). The precondition only fails when NEITHER a
-        driving_video_path NOR an audio_path is present — nothing exists or
-        could come to exist for the engine to consume. If Mode-B synthesis
-        is later attempted and fails, act_two.py's own runtime check (not
-        this function) catches the still-empty driving video and returns
-        None with a clear "driving/reference video" log line.
-      - LIVE_PORTRAIT and VIGGLE require an explicit driving_video_path —
-        unchanged; they have no Act-Two-style audio-enabled synth path here.
-      - SKIP has no preconditions.
+    ACT_ONE routes to Runway Act-Two, and all three real engines require a
+    concrete operator-uploaded reference/driving video. Dialogue audio alone
+    is never accepted as a substitute. ``audio_path`` stays in the interface
+    because Act-Two may also use it after the driving-video boundary passes.
     """
-    if engine == ENGINE_ACT_ONE:
-        if not (driving_video_path or "").strip() and not (audio_path or "").strip():
-            return (
-                "ACT_ONE (Runway Act-Two) requires a driving video — "
-                "supply driving_video_path directly, or audio_path so "
-                "Mode-B synthesis can produce one; got neither"
-            )
-    if engine in (ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE):
+    if engine in (ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE):
         if not (driving_video_path or "").strip():
-            return f"{engine} requires driving_video_path; got empty"
+            return (
+                f"{engine} requires an uploaded driving video; "
+                "upload one for this shot before performance capture"
+            )
     return None

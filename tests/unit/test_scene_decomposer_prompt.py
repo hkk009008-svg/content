@@ -321,7 +321,7 @@ def test_rendered_schema_respects_hc1_identity_firewall():
         ]["description"]
     )
     assert "location, action, wardrobe, and cinematic quality" in prompt_description
-    assert "reference/PuLID locking" in prompt_description
+    assert "approved reference images and identity anchor" in prompt_description
 
 
 def test_direct_and_competitive_paths_render_identical_canonical_schema(monkeypatch):

@@ -45,7 +45,7 @@ _GEMINI_OMNI_QUOTA_TTL_S: int = 600  # 10 min — Gemini Developer API Tier-1 ro
 
 # Providers that can produce 9:16 portrait video (aspect-aware via Phase-3 T3-T6, or
 # keyframe-driven). Portrait projects filter the cascade to this set. EXCLUDED:
-# LTX (native-only/pod-gated, not aspect-wired), FAL_SVD (not aspect-wired).
+# LTX and FAL_SVD are not wired for portrait aspect output.
 # SEEDANCE joined 2026-07-11: the fal-based dispatch passes fal_aspect_ratio()
 # and Seedance 2.0's aspect_ratio enum includes 9:16 (fal /api schema).
 # Note: the Kling dispatch keys are KLING_NATIVE + KLING_3_0

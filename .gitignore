@@ -82,6 +82,11 @@ logs/*
 !logs/cartesia-prosody-*.json
 !logs/cartesia-prosody-20260801/
 !logs/cartesia-prosody-20260801/**
+# EXCEPTION: raw and normalized Windows LivePortrait measurements are the
+# committed R-MEASURE evidence for the production duration/VRAM envelope.
+!logs/worker-benchmarks/
+!logs/worker-benchmarks/windows-liveportrait/
+!logs/worker-benchmarks/windows-liveportrait/*.json
 
 # Model weights (downloaded, never committed — e.g. AdaFace checkpoints via
 # scripts/download_adaface_ckpt.py)

@@ -210,7 +210,7 @@ def _resolve_stored_media_path(project: dict, stored_path: str) -> str:
     ``_to_project_relative`` above.
 
     Every reader that treats a stored character path as a real filesystem
-    path -- PuLID face-locking input (``get_reference_image``), identity
+    path -- image-provider reference input (``get_reference_image``), identity
     embedding (``get_character_embedding``), Kling multi-angle subject
     binding (``get_multi_angle_refs``) -- must route the raw string through
     this before ``os.path.exists`` / opening the file. Without it, a
@@ -659,7 +659,7 @@ def create_character_with_images(
     # 7. Persist every reference/canonical/embedding/multi-angle path
     # project-relative (Product invariant #6, FIX-REFS) -- mirrors slice
     # 10's take/shot persistence so an exact repo move doesn't strand the
-    # PuLID face-lock, Kling multi-angle subject binding, or identity
+    # image-provider reference conditioning, multi-angle subject binding, or identity
     # embedding behind a now-stale absolute path. Converted here, at the
     # very end, after every LOCAL absolute-path use above (face detection,
     # angle generation, embedding compute) has already happened against the
@@ -1085,7 +1085,7 @@ def assign_voice(
 
 
 def get_reference_image(project: dict, char_id: str) -> Optional[str]:
-    """Get the canonical reference image for PuLID face-locking."""
+    """Get the canonical approved identity-reference image."""
     char = get_character(project, char_id)
     if not char:
         return None

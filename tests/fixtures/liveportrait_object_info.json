@@ -1,0 +1,123 @@
+{
+  "LoadImage": {
+    "input": {
+      "required": {
+        "image": [["contract-keyframe.png", "remote-frame.png"], {}]
+      }
+    }
+  },
+  "VHS_LoadVideo": {
+    "input": {
+      "required": {
+        "video": [["contract-driving.mp4", "remote-driving.mp4"], {}],
+        "force_rate": ["FLOAT", {}],
+        "custom_width": ["INT", {}],
+        "custom_height": ["INT", {}],
+        "frame_load_cap": ["INT", {}],
+        "skip_first_frames": ["INT", {}],
+        "select_every_nth": ["INT", {}]
+      },
+      "optional": {
+        "meta_batch": ["VHS_BatchManager", {}],
+        "vae": ["VAE", {}],
+        "format": ["STRING", {}]
+      }
+    }
+  },
+  "DownloadAndLoadLivePortraitModels": {
+    "input": {
+      "required": {},
+      "optional": {
+        "precision": [["fp16", "fp32", "auto"], {}],
+        "mode": [["human", "animal"], {}]
+      }
+    }
+  },
+  "LivePortraitLoadMediaPipeCropper": {
+    "input": {
+      "required": {
+        "landmarkrunner_onnx_device": [["CPU", "CUDA", "ROCM", "CoreML", "torch_gpu"], {}],
+        "keep_model_loaded": ["BOOLEAN", {}]
+      }
+    }
+  },
+  "LivePortraitCropper": {
+    "input": {
+      "required": {
+        "pipeline": ["LIVEPORTRAITPIPE", {}],
+        "cropper": ["LPCROPPER", {}],
+        "source_image": ["IMAGE", {}],
+        "dsize": ["INT", {}],
+        "scale": ["FLOAT", {}],
+        "vx_ratio": ["FLOAT", {}],
+        "vy_ratio": ["FLOAT", {}],
+        "face_index": ["INT", {}],
+        "face_index_order": [["large-small", "left-right", "right-left", "top-bottom", "bottom-top", "small-large", "distance-from-retarget-face"], {}],
+        "rotate": ["BOOLEAN", {}]
+      }
+    }
+  },
+  "LivePortraitRetargeting": {
+    "input": {
+      "required": {
+        "driving_crop_info": ["CROPINFO", {}],
+        "eye_retargeting": ["BOOLEAN", {}],
+        "eyes_retargeting_multiplier": ["FLOAT", {}],
+        "lip_retargeting": ["BOOLEAN", {}],
+        "lip_retargeting_multiplier": ["FLOAT", {}]
+      }
+    }
+  },
+  "LivePortraitProcess": {
+    "input": {
+      "required": {
+        "pipeline": ["LIVEPORTRAITPIPE", {}],
+        "crop_info": ["CROPINFO", {}],
+        "source_image": ["IMAGE", {}],
+        "driving_images": ["IMAGE", {}],
+        "lip_zero": ["BOOLEAN", {}],
+        "lip_zero_threshold": ["FLOAT", {}],
+        "stitching": ["BOOLEAN", {}],
+        "delta_multiplier": ["FLOAT", {}],
+        "mismatch_method": [["constant", "cycle", "mirror", "cut"], {}],
+        "relative_motion_mode": [["relative", "source_video_smoothed", "relative_rotation_only", "single_frame", "off"], {}],
+        "driving_smooth_observation_variance": ["FLOAT", {}]
+      },
+      "optional": {
+        "opt_retargeting_info": ["RETARGETINGINFO", {}],
+        "expression_friendly": ["BOOLEAN", {}],
+        "expression_friendly_multiplier": ["FLOAT", {}]
+      }
+    }
+  },
+  "LivePortraitComposite": {
+    "input": {
+      "required": {
+        "source_image": ["IMAGE", {}],
+        "cropped_image": ["IMAGE", {}],
+        "liveportrait_out": ["LP_OUT", {}]
+      },
+      "optional": {
+        "mask": ["MASK", {}]
+      }
+    }
+  },
+  "VHS_VideoCombine": {
+    "input": {
+      "required": {
+        "images": ["IMAGE", {}],
+        "frame_rate": ["FLOAT", {}],
+        "loop_count": ["INT", {}],
+        "filename_prefix": ["STRING", {}],
+        "format": [["image/gif", "image/webp", "video/h264-mp4"], {}],
+        "pingpong": ["BOOLEAN", {}],
+        "save_output": ["BOOLEAN", {}]
+      },
+      "optional": {
+        "audio": ["AUDIO", {}],
+        "meta_batch": ["VHS_BatchManager", {}],
+        "vae": ["VAE", {}]
+      }
+    }
+  }
+}

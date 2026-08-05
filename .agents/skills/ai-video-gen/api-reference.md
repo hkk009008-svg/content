@@ -267,7 +267,7 @@ A **separate axis** from the base video generation above: talking-head /
 driving-video retargeting, selected by `domain/performance.py`'s
 `route_performance_engine()` and dispatched by `performance/_router.py`. Engine
 names are `ACT_ONE`, `LIVE_PORTRAIT`, `VIGGLE`, `SKIP`; per-provider concurrency
-caps live in `_router._SEMAPHORE_LIMITS` (Act-One 1, LivePortrait 2, Viggle 1).
+caps live in `_router._SEMAPHORE_LIMITS` (Act-Two 1, LivePortrait 1, Viggle 1).
 
 ### Runway Act-Two (`performance/act_two.py`) — migrated from Act-One
 
@@ -301,43 +301,27 @@ polled via `GET /v1/tasks/{id}`. Poll interval 3s. Auth reuses
 
 ### LivePortrait (`performance/live_portrait.py`)
 
-ComfyUI-pod based, the cheap opt-in path — `API_COST_USD["LIVE_PORTRAIT"] = 0.04`
-(amortized GPU cost). Chosen over Act-Two only when the project explicitly sets
-`performance_budget_mode` to `budget`/`cheap`, so the cheap path is opt-in rather
-than a silent regression. **Requires a driving video**; dispatch returns `None` if
-none is supplied.
+The cheap opt-in path runs on the authenticated local Windows ComfyUI worker
+through the Mac loopback SSH tunnel. It is selected over Act-Two only when the
+shot explicitly sets `performance_budget_mode` to `budget`/`cheap`. It requires
+an operator-supplied driving video, is serialized at concurrency one, and uses
+the pinned 25 fps/512-pixel/8-second graph contract. Production controller calls
+use durable prompt recovery; the adapter's compatibility path without a shared
+ledger is not crash-resumable.
 
-### Viggle (`performance/viggle.py`) — ⚠️ KNOWN_BROKEN, CONTAINED
+### Viggle (`performance/viggle.py`) — LIMITED
 
-Catalog entry `VIGGLE` is `ProductSupport.KNOWN_BROKEN`, flags `(False, False, False)`.
-Viggle *does* publish an official developer API (docs.viggle.ai, verified
-2026-07-31) — the adapter provably mismatches it:
+The adapter implements the official `https://apis.viggle.ai/v1/renders`
+multipart contract with `image`, `motion_video`, and
+`background_mode=original|solid|transparent`, then polls
+`/v1/renders/{id}` for `ready|failed|cancelled`. It requires
+`VIGGLE_API_KEY` and an operator-supplied driving video.
 
-| Adapter sends | Real contract |
-|---|---|
-| `https://api.viggle.ai/v1/motion-transfer` | `https://apis.viggle.ai/v1/renders` |
-| `GET https://api.viggle.ai/v1/jobs/{job_id}` | `GET /v1/renders/{id}` |
-| `files={"character_image", "motion_video"}` | `{"image"/"image_url", "motion_video"/"motion_video_url"}` |
-| `background_mode: white\|green\|transparent` | `background_mode: original\|solid\|transparent` (+ `bg_color`) |
-
-Wrong subdomain, wrong path, wrong polling shape, and two of three field names
-differ — a broken integration, not a credentials gap.
-
-**Where the containment actually lives** — be precise about this:
-- ✅ **Routing layer**: `route_performance_engine()` returns `ENGINE_SKIP` for the
-  action-without-dialogue branch that used to return `ENGINE_VIGGLE`
-  (`domain/performance.py`, Slice 6c 2026-07-31). Auto-routing can no longer select
-  it, so in practice Viggle is never dispatched. Action motion comes from the video
-  engines natively instead
-- ❌ **Dispatch layer**: `performance/_router.py` is **not** catalog-gated — it
-  imports nothing from `domain.provider_catalog`, so if `ENGINE_VIGGLE` reaches
-  `dispatch()` by any other route it still calls
-  `performance.viggle.generate_viggle_performance()` unconditionally
-
-The KNOWN_BROKEN row therefore fails closed for anything that consults
-`effective_policy` / `runtime_availability` (mirroring `RUNWAY_ACT_ONE`), but
-wiring the Mode-A dispatcher itself to consult the catalog is a **dedicated repair
-slice, not yet landed**. The routing branch returns `ENGINE_VIGGLE` again when it does.
+The catalog entry is `ProductSupport.LIMITED`: contract-correct and unit-tested,
+but not live-verified. `domain/performance.py` rule 3 automatically selects it
+for action shots without dialogue; do not describe that route as contained or
+fully supported. Durable callers recover a recorded render ID and fail closed
+on ambiguous acceptance.
 
 ---
 
@@ -404,16 +388,8 @@ path before blaming routing.
 
 ## Which claims here are machine-checked
 
-**Today: none of them.** Every fact on this page is hand-maintained prose that can
-rot silently — API shapes, polling intervals, parameter lists, cost figures, and
-all rationale alike. Re-read the adapter before trusting a specific parameter.
-
-`scripts/check_provider_catalog_claims.py` (Slice 14a, currently on
-`unification/waves-3-8` — **not yet on every branch**) re-derives a hand-picked
-fact set from `domain/provider_catalog.py`'s `CATALOG` and fails loud on drift:
-GEMINI_OMNI routable, SORA_2 fully retired, RUNWAY_ACT_ONE retired, VIGGLE
-KNOWN_BROKEN, and the LTX `{6, 8, 10}` duration enum. Its docstring currently
-scopes itself to `config/prompts/pipeline_context.md` and the two `SKILL.md`
-copies. **This file and `shot-routing.md` now assert the same five facts**, so
-when 14a lands here that scope note should be widened to name them — otherwise
-these two files carry checked-looking claims that nothing actually checks.
+API shapes, polling details, and cost prose remain hand-maintained; re-read the
+adapter before trusting a specific parameter. `scripts/check_provider_catalog_claims.py`
+does re-derive a narrow catalog fact set (Gemini routability, retired entries,
+Viggle `LIMITED`, and LTX's `{6, 8, 10}` duration enum), but it does not parse
+this page. Source and focused contract tests remain the authority.

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import stat
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -40,6 +41,39 @@ def _env(key: str, default: str = "") -> str:
 def _optional_env(key: str) -> str | None:
     value = os.environ.get(key, "").strip()
     return value or None
+
+
+def _secret_env(key: str) -> str:
+    """Read a secret directly or from a locked absolute file.
+
+    Deployment-injected direct values remain authoritative. The file form keeps
+    workstation secrets out of repository-local dotenv files and process lists.
+    """
+
+    direct = os.environ.get(key, "").strip()
+    if direct:
+        return direct
+    file_key = f"{key}_FILE"
+    raw_path = os.environ.get(file_key, "").strip()
+    if not raw_path:
+        return ""
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        raise ConfigurationError(f"{file_key} must be an absolute path")
+    try:
+        details = path.stat()
+        if not stat.S_ISREG(details.st_mode):
+            raise ConfigurationError(f"{file_key} must name a regular file")
+        if os.name != "nt" and details.st_mode & 0o077:
+            raise ConfigurationError(f"{file_key} must not be accessible by group or others")
+        value = path.read_text(encoding="utf-8").strip()
+    except ConfigurationError:
+        raise
+    except OSError as exc:
+        raise ConfigurationError(f"{file_key} cannot be read safely") from exc
+    if not value or "\x00" in value:
+        raise ConfigurationError(f"{file_key} does not contain a valid secret")
+    return value
 
 
 def _parse_int(
@@ -141,14 +175,16 @@ class Settings:
     firecrawl_api_key: str
     tavily_api_key: str
 
-    # ComfyUI
+    # ComfyUI image/keyframe worker. Performance capture may use a separate
+    # always-warm workstation through the dedicated fields below.
     comfyui_server_url: str | None
     comfyui_api_key: str
+    performance_comfyui_server_url: str | None
+    performance_comfyui_api_key: str
 
     # Paths
     project_root: Path
     experiments_db_path: str
-    performance_cache_dir: str   # SHA256-keyed driving-video cache (performance/_cache.py)
     pipeline_job_db_path: str    # Durable full-project queue
     pipeline_queue_concurrency: int
     cinema_trace_db_path: str    # Searchable structured trace index
@@ -191,9 +227,12 @@ class Settings:
             tavily_api_key=_env("TAVILY_API_KEY"),
             comfyui_server_url=_optional_env("COMFYUI_SERVER_URL"),
             comfyui_api_key=_env("COMFYUI_API_KEY"),
+            performance_comfyui_server_url=_optional_env(
+                "PERFORMANCE_COMFYUI_SERVER_URL"
+            ),
+            performance_comfyui_api_key=_secret_env("PERFORMANCE_COMFYUI_API_KEY"),
             project_root=_PROJECT_ROOT,
             experiments_db_path=_env("EXPERIMENTS_DB_PATH", "data/experiments.db"),
-            performance_cache_dir=_env("PERFORMANCE_CACHE_DIR", "data/cache/driving"),
             pipeline_job_db_path=(
                 _env("PIPELINE_JOB_DB_PATH", "data/pipeline_jobs.db").strip()
                 or "data/pipeline_jobs.db"

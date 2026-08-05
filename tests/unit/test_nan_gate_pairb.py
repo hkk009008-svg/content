@@ -1,15 +1,13 @@
-"""NaN/inf-gate tests for the Pair-B (video/assembly/delivery) lane — TDD RED-first.
+"""NaN/inf-gate tests for video, assembly, and delivery settings.
 
-Same defect class as ``test_quality_max_nan_gate.py`` (Pair-A): a NaN/inf settings
-value survives ``project.json`` (``json.load(allow_nan=True)`` is the default, so a
+A NaN/inf settings value survives ``project.json``
+(``json.load(allow_nan=True)`` is the default, so a
 bare ``NaN`` token persists on disk) and defeats a numeric gate because ``score <
 NaN`` and ``score >= NaN`` are BOTH ``False``.  A ``try/except (TypeError,
 ValueError)`` around ``float(...)`` does NOT catch it — ``float('nan')`` succeeds.
 
-director2 PM7 §4A sites (Pair-B / shared) covered here:
-  - ``cinema.context._finite_or`` — the shared read-side guard (the canonical home;
-    unifies the documented-temporary ``quality_max:191`` local copy via a later
-    Pair-A import-swap).
+Sites covered here:
+  - ``cinema.context._finite_or`` — the shared read-side guard.
   - ``lip_sync._sync_gate_settings`` — ``lipsync_validation_threshold`` (MAJOR): a
     NaN threshold => every engine fails the sync gate => always best-of-failed.
   - ``cinema/shots/controller.diagnose_clip`` — ``coherence_threshold`` (MAJOR) +
@@ -18,10 +16,8 @@ director2 PM7 §4A sites (Pair-B / shared) covered here:
   - ``cinema.capability_scorecard`` — lipsync/coherence reporting bars (minor): NaN
     skews the scorecard ``shots_clearing`` counts.
 
-The ``identity_strictness`` keyframe-gen site (controller ~:810) delegates entirely
-to ``_finite_or`` (default = the per-shot ``identity_threshold``); it is covered by
-the ``_finite_or`` unit tests below + the full suite, mirroring the approach
-operator-1 accepted as non-blocking for the quality_max inline call sites.
+The ``identity_strictness`` keyframe-generation site delegates to
+``_finite_or`` and is covered by the helper tests below plus the full suite.
 """
 from __future__ import annotations
 
@@ -38,11 +34,7 @@ from cinema.shots.controller import ShotController
 # Shared helper — cinema.context._finite_or (the new canonical home)
 # ---------------------------------------------------------------------------
 class TestSharedFiniteOr:
-    """Unit tests for the shared ``_finite_or(value, default)`` helper.
-
-    Mirrors quality_max's ``TestFiniteOrHelper`` so the two implementations are
-    provably behaviour-identical before Pair-A swaps its local copy for the import.
-    """
+    """Unit tests for the shared ``_finite_or(value, default)`` helper."""
 
     def test_nan_returns_default(self):
         from cinema.context import _finite_or
@@ -78,9 +70,7 @@ class TestSharedFiniteOr:
         assert _finite_or(0.0, 0.6) == pytest.approx(0.0)
 
     def test_huge_int_returns_default(self):
-        """float(10**309) raises OverflowError (NOT Type/ValueError); a huge JSON integer
-        must fall back to the default, not propagate uncaught. Kept byte-identical with
-        quality_max's TestFiniteOrHelper.test_huge_int_returns_default (the mirror)."""
+        """A huge JSON integer must fall back instead of propagating OverflowError."""
         from cinema.context import _finite_or
         assert _finite_or(10 ** 309, 0.5) == pytest.approx(0.5)
 
@@ -149,7 +139,7 @@ class TestScorecardBars:
         gs = {"quality_tier": "max",
               "coherence_threshold": float("nan"),
               "lipsync_validation_threshold": float("nan")}
-        sc = build_capability_scorecard(_scorecard_project(gs), project_dir="/tmp/nonexistent")
+        sc = build_capability_scorecard(_scorecard_project(gs))
         coh = next(d for d in sc["dimensions"] if d["key"] == "coherence")
         lip = next(d for d in sc["dimensions"] if d["key"] == "lipsync")
         assert math.isfinite(coh["bar"]), f"coherence bar {coh['bar']!r} must be finite"

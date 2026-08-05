@@ -248,6 +248,7 @@ def test_api_restart_shot_with_running_pipeline(mock_mutate, client):
     mock_mutate.return_value = scene_id
     
     fake_pipeline = MagicMock()
+    fake_pipeline.current_stage = "KEYFRAME_REVIEW"
     fake_pipeline.restart_shot.return_value = {"success": True}
     with _pipelines_lock:
         _running_pipelines[pid] = fake_pipeline
@@ -266,7 +267,7 @@ def test_api_restart_shot_with_running_pipeline(mock_mutate, client):
 @patch("web_server.CinemaPipeline")
 @patch("web_server.mutate_project")
 def test_api_restart_shot_without_running_pipeline(mock_mutate, mock_pipeline_class, mock_get_core, client):
-    """If no pipeline is running, it creates a temporary one to delegate."""
+    """A cold client cannot clear approvals outside KEYFRAME_REVIEW."""
     pid = "test_pid"
     shot_id = "s1"
     scene_id = "scene1"
@@ -281,7 +282,24 @@ def test_api_restart_shot_without_running_pipeline(mock_mutate, mock_pipeline_cl
         json={"positive_prompt": "new"}
     )
     
-    assert resp.status_code == 200
-    assert resp.json.get("restarted") is True
-    fake_pipeline_instance.restart_shot.assert_called_once_with(scene_id, shot_id, "new", None)
-    mock_pipeline_class.assert_called_once()
+    assert resp.status_code == 409
+    assert resp.json["code"] == "wrong_pipeline_stage"
+    assert resp.json["required_stage"] == "KEYFRAME_REVIEW"
+    fake_pipeline_instance.restart_shot.assert_not_called()
+    mock_pipeline_class.assert_not_called()
+
+
+@patch("web_server.mutate_project", return_value="scene1")
+def test_api_restart_shot_is_blocked_during_performance_review(mock_mutate, client):
+    pid = "test_pid"
+    fake_pipeline = MagicMock()
+    fake_pipeline.current_stage = "PERFORMANCE_REVIEW"
+    with _pipelines_lock:
+        _running_pipelines[pid] = fake_pipeline
+
+    response = client.post(f"/api/projects/{pid}/shots/s1/restart", json={})
+
+    assert response.status_code == 409
+    assert response.json["code"] == "wrong_pipeline_stage"
+    assert response.json["required_stage"] == "KEYFRAME_REVIEW"
+    fake_pipeline.restart_shot.assert_not_called()

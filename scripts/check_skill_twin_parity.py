@@ -6,9 +6,7 @@ WHY (ADR-077): `.agents/skills/` holds the Codex-seat twins of the maintained
 live Codex seats at them as authoritative doctrine. History shows the twins rot
 silently: the ai-video-gen twins froze at 7682c128 and missed four .claude-only
 maintenance commits including both 2026-07-11 routing migrations (fixed in
-9ba9cc92); comfyui-mastery's a24-integration.md + nodes-face-identity.md froze
-at the initial 3cb5db9d blobs and missed the ApplyPulidFlux / 22-node-graph
-corrections. A stale twin is worse than none — R-SKILL grants it authority.
+9ba9cc92). A stale twin is worse than none — R-SKILL grants it authority.
 
 WHAT: for each GATED dir, the set of `*.md` files must match on both sides and
 every file's BODY (after stripping a leading `--- ... ---` YAML frontmatter

@@ -422,7 +422,12 @@ def make_shot(
         "performance_takes": [],            # list[take dict] — make_take(kind="performance", ...)
         "approved_performance_take_id": "", # mirrors approved_keyframe_take_id
         "performance_engine": "",           # "ACT_ONE" | "LIVE_PORTRAIT" | "VIGGLE" | "SKIP" | ""
-        "driving_video_path": "",           # operator-uploaded reference, Mode A
+        "performance_budget_mode": "",      # "" auto | "budget" local LivePortrait
+        "driving_video_path": "",           # operator-uploaded performance reference
+        "driving_video_history": [],         # immutable upload revision records
+        "performance_skip": None,            # current explicit/natural skip decision
+        "performance_skip_history": [],      # append-only skip decisions
+        "performance_review_history": [],    # append-only operator decisions
     }
 
 
@@ -445,7 +450,6 @@ def make_project(name: str) -> dict:
             "creative_llm": "auto",
             "quality_judge_llm": "auto",
             "competitive_generation": True,
-            "adaptive_pulid": True,
             "coherence_check_enabled": True,
             "color_drift_sensitivity": 0.3,
             # F-B.2 closure (cycle-16 max-quality audit a79c59): LLM-based
@@ -633,6 +637,19 @@ def normalize_shot_schema(
         if str_field not in shot:
             shot[str_field] = ""
             changed = True
+
+    for history_field in (
+        "driving_video_history",
+        "performance_skip_history",
+        "performance_review_history",
+    ):
+        if not isinstance(shot.get(history_field), list):
+            shot[history_field] = []
+            changed = True
+    if not isinstance(shot.get("performance_skip"), dict):
+        if shot.get("performance_skip") is not None:
+            changed = True
+        shot["performance_skip"] = None
 
     if not shot["approved_keyframe_take_id"] and shot["keyframe_takes"] and shot.get("approved") is True:
         shot["approved_keyframe_take_id"] = shot["keyframe_takes"][-1]["id"]

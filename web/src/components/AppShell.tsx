@@ -54,6 +54,8 @@ interface AppShellProps
     | 'onGenerateKeyframe'
     | 'onApproveKeyframe'
     | 'onApprovePerformance'
+    | 'onGeneratePerformance'
+    | 'onSkipPerformance'
     | 'onGenerateMotion'
     | 'onApproveFinal'
     | 'onRegenerateShot'
@@ -99,10 +101,6 @@ const TABS: { id: Page; glyph: string; label: string }[] = [
   { id: 'capability', glyph: '▤', label: 'Capability' },
 ]
 
-// Rough per-shot cost used only for the top-bar estimate chrome (display, not
-// a gate). Order-of-magnitude of a Veo-class 8s clip; later tasks refine.
-const EST_PER_SHOT_USD = 3
-
 /* ─── Shell ───────────────────────────────────────────────────── */
 
 export default function AppShell({
@@ -141,6 +139,8 @@ export default function AppShell({
   onGenerateKeyframe,
   onApproveKeyframe,
   onApprovePerformance,
+  onGeneratePerformance,
+  onSkipPerformance,
   onGenerateMotion,
   onApproveFinal,
   onRegenerateShot,
@@ -183,8 +183,6 @@ export default function AppShell({
 
   const statusWord = isPaused ? 'held' : isGenerating ? 'running' : 'idle'
   const dotStatus = isPaused ? 'warn' : isGenerating ? 'run' : 'idle'
-  const estCost = totalShots * EST_PER_SHOT_USD
-
   /* ── PostRunSummary auto-open-on-DONE dedup (ported from EditorialShell) ─
      Opens the summary when the pipeline reaches DONE. The dedup key includes
      a monotonic run counter that bumps on each transition OUT of DONE, so a
@@ -263,6 +261,8 @@ export default function AppShell({
             onGenerateKeyframe={onGenerateKeyframe}
             onApproveKeyframe={onApproveKeyframe}
             onApprovePerformance={onApprovePerformance}
+            onGeneratePerformance={onGeneratePerformance}
+            onSkipPerformance={onSkipPerformance}
             onGenerateMotion={onGenerateMotion}
             onApproveFinal={onApproveFinal}
             onRegenerateShot={onRegenerateShot}
@@ -305,12 +305,16 @@ export default function AppShell({
 
         <div className="flex-1" />
 
-        {/* Cost estimate — display chrome only, not a budget gate. */}
-        <span className="font-mono text-[10px] uppercase tracking-wide text-mut" title="Rough estimate — not a budget gate">
-          est ~${estCost}
-        </span>
-        {/* Credential pills — provider/tier chrome derived from settings.
-           Full per-credential wiring is a later task. */}
+        <button
+          type="button"
+          onClick={() => setPage('run')}
+          aria-label="Open reconciled provider costs, health, and traces"
+          title="Open Run for reconciled cost estimates, provider health, and searchable traces"
+          className="font-mono text-[10px] uppercase tracking-wide text-mut hover:text-tx"
+        >
+          Costs &amp; health
+        </button>
+        {/* Project aspect ratio. Provider truth lives in the Run surfaces above. */}
         <Badge variant="cloud">{project.global_settings?.aspect_ratio || '16:9'}</Badge>
 
         {/* Re-open PostRunSummary (parity with EditorialShell footer link). */}
@@ -349,7 +353,7 @@ export default function AppShell({
       {/* ── Legend row (pinned above the page-bar) ─────────────── */}
       <div className="flex flex-none items-center gap-3 border-t border-line bg-gutter px-4 py-1">
         <Badge variant="cloud">Cloud</Badge>
-        <Badge variant="pod">Pod requires the pod</Badge>
+        <Badge variant="local">Local GPU</Badge>
         <Badge variant="pri">Primary</Badge>
       </div>
 

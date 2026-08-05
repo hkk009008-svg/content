@@ -16,11 +16,12 @@ from domain.performance import (
 )
 
 # Per-provider concurrency caps. Conservative defaults — Runway and Viggle
-# bill per-job and rate-limit hard; LivePortrait runs on our own pod and
-# can take a couple in flight. Tune via settings later if needed.
+# bill per-job and rate-limit hard. LivePortrait is intentionally serialized:
+# the local 16 GiB workstation is a single production worker, and overlapping
+# warm models would turn a valid graph into an avoidable OOM risk.
 _SEMAPHORE_LIMITS = {
     "ACT_ONE":       1,
-    "LIVE_PORTRAIT": 2,
+    "LIVE_PORTRAIT": 1,
     "VIGGLE":        1,
 }
 _SEMAPHORES = {
@@ -39,6 +40,7 @@ def _dispatch_inner(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    request_id: str = "",
     cost_tracker=None,
 ) -> Optional[str]:
     """Call the right adapter for the requested engine.
@@ -54,12 +56,20 @@ def _dispatch_inner(
 
     if engine == ENGINE_ACT_ONE:
         from performance.act_two import generate_act_two_performance
+        kwargs = {
+            "driving_video_path": driving_video_path,
+            "duration_s": duration_s,
+            "shot_id": shot_id,
+            "video_id": video_id,
+            "cost_tracker": cost_tracker,
+        }
+        # Keep the dispatcher's historical adapter contract intact for
+        # automatic/legacy callers. Operator-triggered work always supplies a
+        # request id, and only that path needs the new durable identity field.
+        if request_id:
+            kwargs["request_id"] = request_id
         return generate_act_two_performance(
-            keyframe_path, audio_path or "", output_mp4,
-            driving_video_path=driving_video_path,
-            duration_s=duration_s,
-            shot_id=shot_id, video_id=video_id,
-            cost_tracker=cost_tracker,
+            keyframe_path, audio_path or "", output_mp4, **kwargs,
         )
 
     if engine == ENGINE_LIVE_PORTRAIT:
@@ -68,11 +78,16 @@ def _dispatch_inner(
             print(f"   [DISPATCH] LIVE_PORTRAIT requires driving video; got none")
             return None
         from performance.live_portrait import generate_live_portrait_performance
+        kwargs = {
+            "duration_s": duration_s,
+            "shot_id": shot_id,
+            "video_id": video_id,
+            "cost_tracker": cost_tracker,
+        }
+        if request_id:
+            kwargs["request_id"] = request_id
         return generate_live_portrait_performance(
-            keyframe_path, driving_video_path, output_mp4,
-            duration_s=duration_s,
-            shot_id=shot_id, video_id=video_id,
-            cost_tracker=cost_tracker,
+            keyframe_path, driving_video_path, output_mp4, **kwargs,
         )
 
     if engine == ENGINE_VIGGLE:
@@ -80,10 +95,15 @@ def _dispatch_inner(
             print(f"   [DISPATCH] VIGGLE requires driving video; got none")
             return None
         from performance.viggle import generate_viggle_performance
+        kwargs = {
+            "shot_id": shot_id,
+            "video_id": video_id,
+            "cost_tracker": cost_tracker,
+        }
+        if request_id:
+            kwargs["request_id"] = request_id
         return generate_viggle_performance(
-            keyframe_path, driving_video_path, output_mp4,
-            shot_id=shot_id, video_id=video_id,
-            cost_tracker=cost_tracker,
+            keyframe_path, driving_video_path, output_mp4, **kwargs,
         )
 
     print(f"   [DISPATCH] unknown engine '{engine}'; skipping")
@@ -100,6 +120,7 @@ def dispatch(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    request_id: str = "",
     cost_tracker=None,
 ) -> Optional[str]:
     """Public entry. Acquires per-provider semaphore, then delegates.
@@ -119,6 +140,7 @@ def dispatch(
             keyframe_path=keyframe_path, audio_path=audio_path,
             driving_video_path=driving_video_path, output_mp4=output_mp4,
             duration_s=duration_s, shot_id=shot_id, video_id=video_id,
+            request_id=request_id,
             cost_tracker=cost_tracker,
         )
     with sem:
@@ -127,5 +149,6 @@ def dispatch(
             keyframe_path=keyframe_path, audio_path=audio_path,
             driving_video_path=driving_video_path, output_mp4=output_mp4,
             duration_s=duration_s, shot_id=shot_id, video_id=video_id,
+            request_id=request_id,
             cost_tracker=cost_tracker,
         )

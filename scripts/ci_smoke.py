@@ -14,9 +14,9 @@ runtime-executable ones):
            orchestrator's import graph stays composable).
   - §15.5  `phase_c_vision._get_shared_validator()` is a stable singleton
            across calls.
-  - §15.6  All four access paths return the same IdentityValidator instance
+  - §15.6  All three access paths return the same IdentityValidator instance
            (identity.get_shared_validator, phase_c_vision._get_shared_validator,
-           face_validator_gate._get_validator, performance.identity_gate._get_validator).
+           performance.identity_gate._get_validator).
   - §15.7  PipelineContext.global_settings plumbs through get_project_setting
            (the historical getattr(settings, ...) silent-failure bug stays fixed).
   - §15.8  phase_c_assembly.generate_ai_broll is importable (image-gen surface).
@@ -65,14 +65,12 @@ def main() -> int:
     from phase_c_vision import _get_shared_validator
     from phase_c_assembly import generate_ai_broll  # noqa: F401  — §15.8
     from identity import get_shared_validator
-    from face_validator_gate import _get_validator as fvg_get
     from performance.identity_gate import _get_validator as pig_get
 
-    # §15.5 + §15.6 — singleton across 4 access paths + idempotent.
+    # §15.5 + §15.6 — singleton across 3 access paths + idempotent.
     a, b = _get_shared_validator(), _get_shared_validator()
-    c, d = get_shared_validator(), fvg_get()
-    e = pig_get()
-    assert a is b is c is d is e, "singleton broken"
+    c, d = get_shared_validator(), pig_get()
+    assert a is b is c is d, "singleton broken"
 
     # §15.7 — project-setting plumbing (the getattr(settings,...) bug stays dead).
     ctx = PipelineContext(global_settings={"tts_provider": "CARTESIA_SONIC_2"})

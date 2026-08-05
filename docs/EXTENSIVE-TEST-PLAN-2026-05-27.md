@@ -137,8 +137,8 @@ Source: subagent Lane C survey (read-only; 2026-05-27 at HEAD `69202da`).
 | KEYFRAME image gen (sub) | `phase_c_assembly.py`, `quality_max.py` | `generate_ai_broll`, `generate_ai_broll_max` | ⚠️ `test_quality_max.py` covers N=8 overlays only; production `generate_ai_broll` pod-gated, no unit test |
 | KEYFRAME_REVIEW (Gate 2) | `cinema/review/controller.py` | `wait_for_gate("KEYFRAME_REVIEW")` | ⚠️ partial (cross controller test) |
 | PERFORMANCE | `cinema/phases/performance.py` | `PerformanceCapturePhase.run` | ❌ no `test_performance_phase.py` |
-| PERFORMANCE engines (sub) | `performance/*` | `dispatch`, provider modules | ✅ partial: `test_router_semaphore.py`, `test_motion_gate.py`, `test_driving_video_provider.py`, `test_performance_*`; integration smokes for Act One + LivePortrait |
-| PERFORMANCE_REVIEW (Gate 3) | (implicit) | bypass via `SKIP` or `approved_performance_take_id` | ❌ untested as a gate (handled by phase logic) |
+| PERFORMANCE engines (sub) | `performance/*` | `dispatch`, provider modules | ✅ partial: `test_router_semaphore.py`, `test_motion_gate.py`, `test_performance_*`; integration smokes for Act-Two + LivePortrait |
+| PERFORMANCE_REVIEW (Gate 3) | (implicit) | bound current `performance_skip`, no approved keyframe, or `approved_performance_take_id` | ✅ gate, stale-skip, replacement, and direct-stage lease coverage |
 | MOTION | `cinema/phases/motion_render.py` | `MotionRenderPhase.run` | ❌ no `test_motion_render.py` |
 | MOTION engines (sub) | `phase_c_ffmpeg.py` + `kling_native.py` / `sora_native.py` / `veo_native.py` / `ltx_native.py` | `generate_ai_video` dispatch | ⚠️ `test_cascade_logic.py` covers cascade ordering only; per-engine adapters untested |
 | REVIEW (Gate 4) | `cinema/review/controller.py` | `wait_for_gate("REVIEW")` | ⚠️ partial |
@@ -301,32 +301,37 @@ Each spec uses the predict-then-verify shape from §1. Predictions are AUTHORED 
 
 ### 4.8 PERFORMANCE (`PerformanceCapturePhase.run`)
 
-**Tier:** B (single shot Mode B / Hedra-FAL ~$0.10) | C (full performance pass) | **Trigger:** in-pipeline after keyframe approval
+**Tier:** B (single-shot local LivePortrait contract) | C (full performance pass) | **Trigger:** in-pipeline after keyframe approval
 
 **PREDICTION:**
-- Output: video clip under `projects/<pid>/performance/<shot_id>/take_<n>.mp4`. Identity gate score + motion gate score recorded.
-- Mode A (operator-uploaded driving video): uses Runway Act One; Mode B autopilot (Hedra-FAL → Hedra-direct → SadTalker cascade).
-- Per-shot duration: 30s-3min depending on engine.
-- Confidence: **medium** (cascade has many failure points).
-- Falsifiers: all 3 cascade engines fail → engine availability issue; identity score crashes <0.40 → DeepFace on video frames diverges from keyframe score; motion gate `needs_remotion=True` consistently → motion fidelity floor too tight.
+- Output: video clip under `projects/<pid>/shots/<shot_id>/outputs/<take_id>.mp4`. Identity-gate and motion-fidelity evidence are recorded on the take.
+- `ACT_ONE` (Runway Act-Two), `LIVE_PORTRAIT`, and `VIGGLE` all require an operator-uploaded visual driving video. The former audio-to-driving Hedra/SadTalker Mode B and its cache were retired; no audio-only fallback is expected.
+- Missing driving input blocks before dialogue-audio generation, budget reservation, or provider/GPU work. A shot routed to `SKIP` does not dispatch performance work.
+- Local LivePortrait must report role-bound technical readiness before source media leaves the Mac. Commercial-use model licensing remains a separate human review.
+- Confidence: **medium** until the supported per-shot duration envelope is represented in committed benchmark evidence.
+- Falsifiers: the worker is reachable but not role/manifest/execution-bound; any required node or model is missing; identity score crashes below its floor; or motion fidelity is repeatedly inconclusive/below the shot-type floor.
 
 **EXECUTION:**
-1. Tier B: single shot in Mode B (autopilot); observe cascade decisions
-2. Vary `motion_gate_samples` env (default 8) → does optical flow scoring change as predicted?
-3. Mode A: upload a driving video; predict Act One output quality
+1. Prove missing-input refusal on one eligible shot and verify that no provider/GPU attempt or spend is recorded.
+2. Upload a bounded, decodable driving video through the UI; verify the project refreshes and the exact source hash enters artifact provenance.
+3. For local LivePortrait, require the Performance worker UI state to be technically `Ready`, with the expected GPU, zero missing nodes, and an idle single-concurrency queue before dispatch.
+4. Run one valid local take, then exercise approve, replace/re-record, and explicit skip paths through `PERFORMANCE_REVIEW` without restarting the whole project.
+5. Optionally run one cloud engine (`ACT_ONE` or `VIGGLE`) with explicit spend authorization and compare the recorded provider outcome.
+6. Vary `MOTION_GATE_SAMPLES` (default 8) and record whether optical-flow scoring changes as predicted.
 
 **COMPARISON + INSIGHT:**
-- Cascade order: does Hedra-FAL always win? Or fallbacks regularly fire? (→ tune availability checks)
+- Local versus cloud identity, motion fidelity, latency, and reconciled cost for the same keyframe/driver pair.
+- Worker readiness versus dispatch outcome: a generic health response or node-name match must never be reported as model/execution proof.
 - Motion gate threshold: false-rejection rate at default vs tightened?
 - Identity gate on video: is the threshold consistent with keyframe-stage gate?
 
-### 4.9 PERFORMANCE_REVIEW Gate 3 (implicit)
+### 4.9 PERFORMANCE_REVIEW Gate 3
 
-**Tier:** A | **Behavior under test:** gate is implicit — bypassed when all shots are `performance_engine=="SKIP"` or all have `approved_performance_take_id`. ARCHITECTURE.md notes: NOT in `_gate_satisfied`; opens implicitly.
+**Tier:** A | **Behavior under test:** `ReviewController._gate_satisfied("PERFORMANCE_REVIEW")` accepts each shot only when it has a structured `performance_skip` decision bound to the current route and driving-video revision, lacks an approved keyframe, or has an explicitly approved performance take. The orchestrator bypasses the gate only when `project_performance_review_can_skip` proves that every approved-keyframe shot has a current bound skip decision.
 
-**PREDICTION:** Setting all shots' `performance_engine = "SKIP"` should bypass review entirely. Setting one shot to a real engine should pause for review.
+**PREDICTION:** A bare or stale `performance_engine = "SKIP"` must not bypass review. A current routing decision may skip only while the current route is still `SKIP`; an operator decision additionally requires a non-empty reason and bindings to the current route and driving-video path. A real engine with no approved take must keep the gate closed while the UI exposes a recoverable generate/re-record or explicit-skip path.
 
-**INSIGHT QUESTION:** Is the implicit-gate behavior intentional / well-documented for operators? (carry-forward F-question candidate)
+**INSIGHT QUESTION:** Do the explicit gate predicate, bypass condition, and UI recovery controls remain behaviorally aligned for every missing-input and failed-generation state?
 
 ### 4.10 MOTION (`MotionRenderPhase.run` + `generate_ai_video`)
 
@@ -391,7 +396,7 @@ Each spec uses the predict-then-verify shape from §1. Predictions are AUTHORED 
 - Stage 3 DECOMPOSE — expected shot count + shot types: ___
 - Stage 4 DIRECTOR validate — expected verdict (APPROVED / MODIFIED count): ___
 - Stage 6 KEYFRAME — expected per-shot identity score range: ___
-- Stage 8 PERFORMANCE — expected cascade win rate (Hedra-FAL %): ___
+- Stage 8 PERFORMANCE — expected per-shot engine, worker-readiness state, and approval/skip outcome: ___
 - Stage 10 MOTION — expected per-shot engine selection (predict per-shot): ___
 - Stage 13 ASSEMBLY — expected total runtime, output file size: ___
 - **Cost prediction:** $___ ± $___ (with reasoning per $-line item)
@@ -532,13 +537,13 @@ Per the user directive "_indications to reveal which paramters need to be tweeke
 ### 6.1 Environment variables (`config/settings.py`)
 
 **Production-critical (no tweak — keys only):**
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `KLING_*`, `FAL_KEY`, `LTX_API_KEY`, `RUNWAYML_API_SECRET`, `SEEDANCE_API_KEY`, `ELEVENLABS_API_KEY`, `CARTESIA_API_KEY`, `STABILITY_API_KEY`, `SUNO_API_KEY`, `VIGGLE_API_KEY`, `HEDRA_API_KEY` — set in `.env`; not tweakable per-run
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `KLING_*`, `FAL_KEY`, `LTX_API_KEY`, `RUNWAYML_API_SECRET`, `SEEDANCE_API_KEY`, `ELEVENLABS_API_KEY`, `CARTESIA_API_KEY`, `STABILITY_API_KEY`, `SUNO_API_KEY`, `VIGGLE_API_KEY`, `COMFYUI_API_KEY`, `PERFORMANCE_COMFYUI_API_KEY` — deployment secrets; not tweakable per-run. `PERFORMANCE_COMFYUI_API_KEY_FILE` is the preferred workstation file-based delivery form.
 - `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION` (default `us-central1`)
 
 **Infrastructure (rarely-tweaked):**
 - `COMFYUI_SERVER_URL` (default `http://127.0.0.1:8188`; per-deployment)
+- `PERFORMANCE_COMFYUI_SERVER_URL` (unset by default; dedicated LivePortrait gateway, normally a Mac loopback SSH tunnel)
 - `EXPERIMENTS_DB_PATH` (default `data/experiments.db`)
-- `PERFORMANCE_CACHE_DIR` (default `data/cache/driving`)
 - `WEB_BIND_HOST` (default `127.0.0.1`)
 - `WEB_CORS_ORIGINS` (default localhost-only; `*` for wide-open)
 
@@ -626,7 +631,7 @@ Per `workflow_selector.py:get_workflow_params(shot_type)` — 5 templates each c
 | `identity_strictness` (project) | 0.60 | Already in §6.3; reiterated for completeness |
 | `motion_gate_samples` (env) | 8 | Already in §6.1 |
 | Per-template `motion_fidelity_floor` | (per shot type) | Already in §6.5 |
-| Hedra aspect ratio | inferred | Override → predict cropping artifacts |
+| Uploaded driving-video aspect ratio | source media | Larger mismatch with the approved keyframe → predict crop/padding or face-tracking artifacts |
 | SyncNet threshold (`lip_sync.py:_sync_gate_settings`) | 1.0 fallback | Tighter threshold → more retries; loosened → faster but lower sync quality |
 
 **Parameter-tweak insight cycle:** for each parameter tweaked, the predict-then-verify shape from §1 applies. The DIRECTION OF EFFECT prediction is the falsifiable claim; magnitude is secondary.

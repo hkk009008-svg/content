@@ -32,4 +32,23 @@ describe('SelectPill', () => {
     expect(disabledOption).toBeDisabled()
     expect(disabledOption).toHaveAttribute('title', 'Not yet selectable')
   })
+
+  it('associates supporting instructions with the native select', () => {
+    render(
+      <>
+        <SelectPill
+          value="a"
+          onChange={vi.fn()}
+          options={['a', 'b']}
+          aria-label="Pick one"
+          aria-describedby="pick-one-help"
+        />
+        <p id="pick-one-help">Choose the verified option.</p>
+      </>,
+    )
+
+    expect(screen.getByRole('combobox', { name: 'Pick one' })).toHaveAccessibleDescription(
+      'Choose the verified option.',
+    )
+  })
 })

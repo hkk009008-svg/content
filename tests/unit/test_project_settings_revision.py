@@ -690,6 +690,27 @@ def test_patch_accepts_dialogue_toggle_settings_voicesection_family(client, tmp_
     assert "dialogue_mode_enabled" in invalid.get_json()["invalid_keys"]
 
 
+def test_patch_accepts_location_research_setup_control(client, tmp_path, monkeypatch):
+    """The Setup toggle writes the active project-level research flag."""
+    pid = _make_project(tmp_path, monkeypatch)
+
+    resp = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 0, "location_research": True}},
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["global_settings"]["location_research"] is True
+    assert _load(pid)["global_settings"]["location_research"] is True
+
+    invalid = client.patch(
+        f"/api/projects/{pid}",
+        json={"global_settings": {"revision": 1, "location_research": "yes"}},
+    )
+    assert invalid.status_code == 400
+    assert "location_research" in invalid.get_json()["invalid_keys"]
+
+
 def test_patch_accepts_lipsync_cluster_settings_voicesection_family(client, tmp_path, monkeypatch):
     """VoiceSection.tsx's active lip-sync validation settings."""
     pid = _make_project(tmp_path, monkeypatch)
@@ -821,7 +842,7 @@ def test_patch_accepts_postprocess_color_settings_videosection_family(client, tm
 
 
 def test_patch_accepts_identity_settings_identitysection_family(client, tmp_path, monkeypatch):
-    """IdentitySection.tsx's retry budget, FLUX guidance, and coherence floor."""
+    """IdentitySection.tsx's retry budget and coherence floor."""
     pid = _make_project(tmp_path, monkeypatch)
 
     resp = client.patch(
@@ -830,7 +851,6 @@ def test_patch_accepts_identity_settings_identitysection_family(client, tmp_path
             "global_settings": {
                 "revision": 0,
                 "identity_retry_max": 5,
-                "flux_guidance": 4.0,
                 "coherence_threshold": 0.75,
             }
         },
@@ -839,17 +859,16 @@ def test_patch_accepts_identity_settings_identitysection_family(client, tmp_path
     assert resp.status_code == 200
     settings = resp.get_json()["global_settings"]
     assert settings["identity_retry_max"] == 5
-    assert settings["flux_guidance"] == 4.0
     assert settings["coherence_threshold"] == 0.75
 
     persisted = _load(pid)["global_settings"]
     assert persisted["identity_retry_max"] == 5
-    assert persisted["flux_guidance"] == 4.0
     assert persisted["coherence_threshold"] == 0.75
 
 
-def test_patch_accepts_image_backend_settings_imagesection_family(client, tmp_path, monkeypatch):
-    """ImageSection.tsx's identity backend + its pod-only sampler controls."""
+def test_patch_accepts_supported_image_backend_and_rejects_unknown_selection(
+    client, tmp_path, monkeypatch
+):
     pid = _make_project(tmp_path, monkeypatch)
 
     resp = client.patch(
@@ -857,34 +876,35 @@ def test_patch_accepts_image_backend_settings_imagesection_family(client, tmp_pa
         json={
             "global_settings": {
                 "revision": 0,
-                "identity_backend": "pod",
-                "comfyui_sampler": "dpmpp_2m_sde",
-                "comfyui_steps": 28,
+                "identity_backend": "gemini_multiref",
             }
         },
     )
 
     assert resp.status_code == 200
-    settings = resp.get_json()["global_settings"]
-    assert settings["identity_backend"] == "pod"
-    assert settings["comfyui_sampler"] == "dpmpp_2m_sde"
-    assert settings["comfyui_steps"] == 28
+    assert resp.get_json()["global_settings"]["identity_backend"] == "gemini_multiref"
 
-    persisted = _load(pid)["global_settings"]
-    assert persisted["identity_backend"] == "pod"
-    assert persisted["comfyui_sampler"] == "dpmpp_2m_sde"
-    assert persisted["comfyui_steps"] == 28
+    blocked = client.patch(
+        f"/api/projects/{pid}",
+        json={
+            "global_settings": {
+                "revision": 1,
+                "identity_backend": "unknown-image-backend",
+            }
+        },
+    )
+    assert blocked.status_code == 400
+    assert "identity_backend" in blocked.get_json()["invalid_keys"]
+    assert _load(pid)["global_settings"]["identity_backend"] == "gemini_multiref"
 
 
 @pytest.mark.parametrize(
     "key,bad_value",
     [
         ("identity_retry_max", 2.5),        # not an int
-        ("flux_guidance", -0.1),            # negative
         ("coherence_threshold", 1.5),       # outside [0, 1]
         ("identity_backend", 123),          # not a string
-        ("comfyui_sampler", 123),           # not a string
-        ("comfyui_steps", 20.5),            # not an int
+        ("identity_backend", "retired-v1"), # not a recognized backend
     ],
 )
 def test_patch_slice_9d_keys_are_registered_and_validated(
@@ -892,11 +912,8 @@ def test_patch_slice_9d_keys_are_registered_and_validated(
 ):
     """Each slice-9d key is REGISTERED (invalid_keys), not rejected as unknown.
 
-    This is the exact regression slice 9d closes: before the registry entries
-    existed, IdentitySection.tsx / ImageSection.tsx writes 400ed with the key
-    in ``unknown_keys``. Landing in ``invalid_keys`` instead proves the key
-    now resolves to a validator AND that the validator rejects a wrong-typed
-    value rather than waving it through.
+    Landing in ``invalid_keys`` proves the supported setting resolves to a
+    validator and rejects an invalid value.
     """
     pid = _make_project(tmp_path, monkeypatch)
 

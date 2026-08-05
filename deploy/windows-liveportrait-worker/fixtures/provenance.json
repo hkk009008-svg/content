@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository_path": "tests/assets/live_contract/runway_act_two_synthetic_performer.jpg",
+    "sha256": "97471b9377c817251c86dbb58982464d7586b6b3d800936683f900da668c0fb6",
+    "width": 1254,
+    "height": 1254
+  },
+  "derived": [
+    {
+      "payload": "source-face.jpg.b64",
+      "decoded_filename": "source-face.jpg",
+      "decoded_bytes": 35931,
+      "decoded_sha256": "b8c0cd0492ac29b397541d3ff8404d8b8dd4e5e37480563b2ef8d2ed0e51715a",
+      "transformation": "top-left 627x627 neutral face crop, Lanczos resize to 512x512, JPEG"
+    },
+    {
+      "payload": "driving-expression.mp4.b64",
+      "decoded_filename": "driving-expression.mp4",
+      "decoded_bytes": 53730,
+      "decoded_sha256": "b2d830c863f1bd4db407a1ae295d64eb0d9e199df5d4bd06656dd248a5ba94db",
+      "transformation": "bottom-right 627x627 surprised-expression crop, Lanczos resize to 512x512, one H.264 yuv420p frame at 25 fps in MP4"
+    }
+  ]
+}

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from comfyui_client import ComfyUIReadinessError
 from cost_tracker import CostTracker
 from paid_provider import (
     PaidCallBudgetBlocked,
@@ -257,9 +258,9 @@ def _run_comfy(tracker, client):
         client=client,
         workflow={"1": {"class_type": "Test", "inputs": {}}},
         attempt_id="comfy:test",
-        engine="PERFORMANCE_DRIVING_SADTALKER",
-        operation="performance_capture_driving",
-        estimated_cost_usd=0.045,
+        engine="LIVE_PORTRAIT",
+        operation="performance_capture",
+        estimated_cost_usd=0.04,
         request_fingerprint_value=request_fingerprint("audio", "frame"),
         cost_tracker=tracker,
         shot_id="shot-1",
@@ -287,7 +288,86 @@ def test_comfy_prompt_id_resumes_after_worker_restart(tmp_path):
         assert _run_comfy(resumed, client)["prompt-1"]["outputs"]
         assert client.queue_calls == 0
         assert resumed.get_paid_attempt("comfy:test")["state"] == "succeeded"
-        assert resumed.get_video_cost("project-1")["total_usd"] == pytest.approx(0.045)
+        assert resumed.get_video_cost("project-1")["total_usd"] == pytest.approx(0.04)
+    finally:
+        resumed.close()
+
+
+def test_comfy_preflight_failure_occurs_before_paid_reservation(tmp_path):
+    class _PreflightRejectingClient:
+        submit_calls = 0
+
+        def preflight(self, _workflow):
+            raise ComfyUIReadinessError("required node is unavailable")
+
+        def queue_prompt_preflighted(self, _workflow):
+            self.submit_calls += 1
+            raise AssertionError("POST /prompt must not run after failed preflight")
+
+    tracker = CostTracker(db_path=str(tmp_path / "preflight.db"), budget_usd=1.0)
+    client = _PreflightRejectingClient()
+    try:
+        with pytest.raises(PaidCallUnbilled, match="preflight failed"):
+            _run_comfy(tracker, client)
+        assert client.submit_calls == 0
+        assert tracker.get_paid_attempt("comfy:test")["state"] == "failed_unbilled"
+        assert tracker.get_video_cost("project-1")["total_usd"] == 0.0
+    finally:
+        tracker.close()
+
+
+def test_comfy_retrieval_resume_skips_preflight_during_worker_drift(tmp_path):
+    db = str(tmp_path / "comfy-retrieval.db")
+    initial = CostTracker(db_path=db, budget_usd=1.0)
+    request_hash = request_fingerprint("audio", "frame")
+    try:
+        initial.reserve_paid_attempt(
+            attempt_id="comfy:test",
+            provider="comfyui",
+            engine="LIVE_PORTRAIT",
+            operation="performance_capture",
+            estimated_cost_usd=0.04,
+            shot_id="shot-1",
+            video_id="project-1",
+            request_fingerprint=request_hash,
+        )
+        initial.update_paid_attempt(
+            "comfy:test",
+            state="running",
+            provider_job_id="prompt-existing",
+            provider_status="queued",
+        )
+    finally:
+        initial.close()
+
+    class _RetrievalClient:
+        preflight_calls = 0
+        submit_calls = 0
+
+        def preflight(self, _workflow):
+            self.preflight_calls += 1
+            raise ComfyUIReadinessError("worker currently offline")
+
+        def queue_prompt_preflighted(self, _workflow):
+            self.submit_calls += 1
+            raise AssertionError("retrieval must not POST")
+
+        def wait_for_completion(self, prompt_id, *, timeout, poll_interval):
+            assert prompt_id == "prompt-existing"
+            return {
+                prompt_id: {
+                    "outputs": {"19": {"videos": [{"filename": "out.mp4"}]}}
+                }
+            }
+
+    resumed = CostTracker(db_path=db, budget_usd=1.0)
+    client = _RetrievalClient()
+    try:
+        result = _run_comfy(resumed, client)
+        assert "prompt-existing" in result
+        assert client.preflight_calls == 0
+        assert client.submit_calls == 0
+        assert resumed.get_paid_attempt("comfy:test")["state"] == "succeeded"
     finally:
         resumed.close()
 

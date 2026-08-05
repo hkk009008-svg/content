@@ -110,11 +110,6 @@ _LEGACY_API_REGISTRY_SEED = {
     "F5_TTS":        {"label": "F5-TTS (open-weights)", "category": "tts",      "description": "Best open-source TTS — voice cloning from a 5s sample, runs local", "modality": "tts", "best_for": ["dialogue_close_up", "narration"], "per_shot_cost": 0.00, "quality_score": 0.83, "latency_s": 8, "status": "planned"},
     "GPT_SOVITS":    {"label": "GPT-SoVITS v2",        "category": "tts",       "description": "Open-source — strongest few-shot voice cloning, multilingual", "modality": "tts", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.00, "quality_score": 0.81, "latency_s": 12, "status": "planned"},
 
-    # --- IMAGE GEN ALTERNATIVES ---
-    "FLUX_DEV":      {"label": "FLUX-Dev (current)",   "category": "image_gen", "description": "Production image gen on RunPod ComfyUI + PuLID", "modality": "image", "best_for": ["any"], "per_shot_cost": 0.03, "quality_score": 0.87, "latency_s": 30, "status": "live"},
-    "HIDREAM_I1":    {"label": "HiDream-I1-Full",      "category": "image_gen", "description": "17B params — beats FLUX on photorealism benchmarks. No production dispatcher currently wired (the only implementation, quality_max.py's _swap_to_hidream, was retired WS1 Task 4); would activate when HiDreamModelLoader is detected on pod (requires HiDream ComfyUI node + 35GB model install) if re-wired to a production path.", "modality": "image", "best_for": ["static_portrait", "macro_detail", "product_hero"], "per_shot_cost": 0.08, "quality_score": 0.91, "latency_s": 55, "status": "planned"},
-    "SD3_5_LARGE":   {"label": "Stable Diffusion 3.5 Large", "category": "image_gen", "description": "8B params, strong prompt adherence, alternative refiner", "modality": "image", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.05, "quality_score": 0.84, "latency_s": 40, "status": "planned"},
-
     # --- MUSIC ---
     "SUNO_V5":       {"label": "Suno V5",              "category": "music",     "description": "Generative music with vocals — current SOTA for full songs. Reached via the SunoAPI.org third-party proxy (no official Suno developer API), base https://api.sunoapi.org; requires SUNO_API_KEY env (that proxy's key, not a Suno-issued credential).", "modality": "music", "best_for": ["music_score"], "per_shot_cost": 0.10, "quality_score": 0.91, "latency_s": 60, "status": "live"},
     "ELEVENLABS_MUSIC":{"label": "ElevenLabs Music",   "category": "music",     "description": "ElevenLabs' new music endpoint — instrumental + vocal, prompt-driven", "modality": "music", "best_for": ["music_score"], "per_shot_cost": 0.12, "quality_score": 0.88, "latency_s": 45, "status": "planned"},
@@ -125,10 +120,8 @@ _LEGACY_API_REGISTRY_SEED = {
     "ADOBE_AUDIO_AI":{"label": "Adobe Audio AI (Project Sonic)", "category": "foley", "description": "Adobe's generative foley — high-quality SFX from text", "modality": "foley", "best_for": ["foley"], "per_shot_cost": 0.05, "quality_score": 0.85, "latency_s": 15, "status": "planned"},
 
     # --- UPSCALING ---
-    "SUPIR_V0Q":     {"label": "SUPIR-v0Q (image)",    "category": "upscale",   "description": "Image upscale — photoreal restoration, best for faces", "modality": "upscale", "best_for": ["upscale_image"], "per_shot_cost": 0.02, "quality_score": 0.92, "latency_s": 35, "status": "live"},
     "TOPAZ_ASTRA":   {"label": "Topaz Video AI Astra", "category": "upscale",   "description": "Video upscale + restoration — 4K/8K, the production benchmark", "modality": "upscale", "best_for": ["upscale_video"], "per_shot_cost": 0.15, "quality_score": 0.94, "latency_s": 240, "status": "planned"},
     "SEEDVR2":       {"label": "SeedVR2",              "category": "upscale",   "description": "Cloud video upscale, currently wired in post-process", "modality": "upscale", "best_for": ["upscale_video"], "per_shot_cost": 0.08, "quality_score": 0.86, "latency_s": 90, "status": "live"},
-    "CCSR":          {"label": "CCSR (image)",         "category": "upscale",   "description": "Real-world photo restoration — environments, lighter than SUPIR", "modality": "upscale", "best_for": ["upscale_image"], "per_shot_cost": 0.015, "quality_score": 0.88, "latency_s": 25, "status": "planned"},
 }
 
 # Compatibility projection: retain the compatibility rows above, including
@@ -184,14 +177,14 @@ PURPOSE_API_RANKING = {
     "dialogue_close_up":    ["SYNC_SO_V3", "GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "LATENTSYNC", "MUSETALK"],
     "talking_head_full":    ["OMNIHUMAN_V1_5", "RUNWAY_ACT_ONE", "GEMINI_OMNI", "VEO_NATIVE", "SYNC_SO_V3"],
     "action_motion":        ["GEMINI_OMNI", "SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_3_0", "RUNWAY_GEN4"],
-    "static_portrait":      ["GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
+    "static_portrait":      ["GEMINI_OMNI", "KLING_3_0", "KLING_NATIVE", "RUNWAY_GEN4"],
     "establishing_shot":    ["GEMINI_OMNI", "VEO_NATIVE", "LTX"],
-    "macro_detail":         ["SORA_NATIVE", "SEEDANCE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
+    "macro_detail":         ["SORA_NATIVE", "SEEDANCE", "LTX"],
     "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE"],
     "narration":            ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO", "F5_TTS"],
     "music_score":          ["SUNO_V5", "ELEVENLABS_MUSIC", "STABLE_AUDIO_2"],
     "foley":                ["STABLE_AUDIO_FOLEY", "ADOBE_AUDIO_AI"],
-    "upscale_image":        ["SUPIR_V0Q", "CCSR"],
+    "upscale_image":        [],
     "upscale_video":        ["TOPAZ_ASTRA", "SEEDVR2"],
     # Product / commercial routing:
     # - product_hero needs FLUX-class image quality + Mochi 2 / Sora 2 for the
@@ -201,7 +194,7 @@ PURPOSE_API_RANKING = {
     # - product_reveal_motion is the most demanding — needs Sora's physics for
     #   light glints + smooth rotation. Mochi 2 is a close second. SEEDANCE
     #   trails each Sora slot as its post-sunset successor (2026-09-24).
-    "product_hero":             ["HIDREAM_I1", "FLUX_DEV", "SORA_NATIVE", "SEEDANCE", "SD3_5_LARGE", "LTX"],
+    "product_hero":             ["SORA_NATIVE", "SEEDANCE", "LTX"],
     "product_in_scene":         ["KLING_3_0", "KLING_NATIVE", "VEO_NATIVE", "RUNWAY_GEN4", "SORA_NATIVE", "SEEDANCE"],
     "product_reveal_motion":    ["SORA_NATIVE", "SEEDANCE", "KLING_3_0", "RUNWAY_GEN4"],
 }
@@ -242,7 +235,6 @@ BILLING_PROVIDERS = {
     "ELEVENLABS":       ["ELEVENLABS_V3", "ELEVENLABS_DIALOGUE", "ELEVENLABS_MUSIC"],
     "CARTESIA":         ["CARTESIA_SONIC_2"],
     "OPEN_WEIGHTS":     ["F5_TTS", "GPT_SOVITS"],  # zero marginal cost — local GPU only
-    "RUNPOD_GPU":       ["FLUX_DEV", "HIDREAM_I1", "SD3_5_LARGE", "SUPIR_V0Q", "CCSR"],
     "SUNO":             ["SUNO_V5"],
     "STABILITY":        ["STABLE_AUDIO_2", "STABLE_AUDIO_FOLEY"],
     "ADOBE":            ["ADOBE_AUDIO_AI"],
@@ -280,8 +272,12 @@ def estimate_short_cost(
     dialogue_shots = int(shot_count * dialogue_shot_ratio) if has_dialogue else 0
     notes = []
 
-    # ----- Image gen (always, one per shot, multiplied by candidate count for max) -----
-    img_cost_per = API_REGISTRY["FLUX_DEV"]["per_shot_cost"]
+    # ----- Image gen (always, one per shot) -----
+    # The Google-first keyframe route is the shipping default. The local
+    # replacement candidate has zero provider charge but is not selectable
+    # until its runtime/benchmark contract passes, so it cannot truthfully be
+    # used as the estimator baseline yet.
+    img_cost_per = 0.067
     image_total = img_cost_per * shot_count * candidate_count
 
     # ----- Video gen (one per shot, no candidate multiplier — only one video per shot) -----
@@ -333,7 +329,7 @@ def estimate_short_cost(
         "Suno": round(music_total, 2) if has_dialogue else 0,
         "Stability": round(foley_total, 2),
         "Anthropic/OpenAI (LLM)": round(llm_total, 2),
-        "RunPod (FLUX GPU)": round(image_total, 2),
+        "Google (Gemini Image)": round(image_total, 2),
     }
 
     per_shot = {
@@ -443,7 +439,7 @@ def _build_cinedecompose_shot_schema(
                     "Detailed photorealistic image generation prompt with "
                     "location, action, wardrobe, and cinematic quality cues; "
                     "leave face, hair, skin, body, and all identity appearance "
-                    "to reference/PuLID locking"
+                    "to the approved reference images and identity anchor"
                 ),
             },
             "camera": {"type": "string", "enum": list(CAMERA_MOTIONS)},

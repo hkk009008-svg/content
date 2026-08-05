@@ -30,18 +30,11 @@ const emptyScorecard: CapabilityScorecard = {
     motion: { approved: 0, vetoed: 0, top_vetoes: [] },
     final: { approved: 0, vetoed: 0, top_vetoes: [] },
   },
-  lora_availability: {
-    training_available: false,
-    registration_available: false,
-    consumer_available: false,
-    policy: 'dormant',
-  },
-  lora: [],
   components: [],
   per_shot: [],
   provenance: [],
   media: null,
-  future_dimensions: ['pod_health', 'budget'],
+  future_dimensions: ['gpu_worker_health', 'budget'],
 }
 
 const readyScorecard: CapabilityScorecard = {
@@ -61,13 +54,6 @@ const readyScorecard: CapabilityScorecard = {
     motion: { approved: 3, vetoed: 0, top_vetoes: [] },
     final: { approved: 3, vetoed: 0, top_vetoes: [] },
   },
-  lora_availability: {
-    training_available: false,
-    registration_available: false,
-    consumer_available: false,
-    policy: 'dormant',
-  },
-  lora: [{ char_id: 'char_1', strength: 0.55, score: 0.87, verdict: 'ok' }],
   components: [
     {
       id: 'final_assembly', title: 'Final video assembly', status: 'live',
@@ -81,12 +67,6 @@ const readyScorecard: CapabilityScorecard = {
       engaged_static: false, runtime_availability: 'not_applicable', runtime_reason: null,
       reason: 'Not wired: implemented but has no production caller yet.',
     },
-    {
-      id: 'lora_validation', title: 'Historical LoRA validation records', status: 'inactive',
-      exposure: 'internal', spend_kind: 'none',
-      engaged_static: false, runtime_availability: 'not_applicable', runtime_reason: null,
-      reason: 'Deliberately unavailable by policy; historical records only.',
-    },
   ],
   per_shot: [
     { shot_id: 'sc1_sh1', identity: 0.82, coherence: 0.7, motion: 0.55, lipsync: null, lipsync_state: 'UNKNOWN', lipsync_applicable: true, engine: 'KLING_NATIVE' },
@@ -95,7 +75,7 @@ const readyScorecard: CapabilityScorecard = {
     { shot_id: 'sc1_sh1', engine: 'KLING_NATIVE', attempts: ['KLING_NATIVE'], fallback: false },
   ],
   media: null,
-  future_dimensions: ['pod_health', 'budget'],
+  future_dimensions: ['gpu_worker_health', 'budget'],
 }
 
 /** A component that claims `wired` (the AUTHORED status) but that the server
@@ -136,21 +116,6 @@ describe('CapabilityPage', () => {
     })
   })
 
-  it('renders LoRA records as inactive history and never advertises a second-character action', async () => {
-    mockFetchOnce(readyScorecard)
-    render(<CapabilityPage project={project} />)
-
-    await waitFor(() => {
-      expect(screen.getByText('Historical LoRA records')).toBeInTheDocument()
-    })
-    expect(screen.getByText(
-      'Training, registration, and production use are unavailable. Historical records are read-only.',
-    )).toBeInTheDocument()
-    expect(screen.queryByText(['Second-character', 'LoRA'].join(' '))).toBeNull()
-    expect(screen.getByText('1 of 3 systems engaged')).toBeInTheDocument()
-    expect(screen.getAllByText('inactive')).toHaveLength(1)
-  })
-
   it('labels the identity dimension GhostFaceNet, never ArcFace', async () => {
     mockFetchOnce(readyScorecard)
     render(<CapabilityPage project={project} />)
@@ -189,8 +154,8 @@ describe('CapabilityPage', () => {
     expect(screen.queryByText('wired')).toBeNull()
     // the human next-action reason is visible on the page, not hover-only
     expect(screen.getByText(/no production consumer is recorded/i)).toBeInTheDocument()
-    // still 1 of 4 — the unvalidated ghost capability never counts as engaged
-    expect(screen.getByText('1 of 4 systems engaged')).toBeInTheDocument()
+    // still 1 of 3 — the unvalidated ghost capability never counts as engaged
+    expect(screen.getByText('1 of 3 systems engaged')).toBeInTheDocument()
   })
 
   it('never renders a raw engine id, component slug, or internal note text in the operator view', async () => {

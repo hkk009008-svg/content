@@ -1,0 +1,10 @@
+# Dependencies intentionally selected instead of the custom node's requirements.txt.
+# That upstream file asks for onnxruntime-gpu; this profile uses the CPU ONNX
+# provider and MediaPipe, and deliberately does not install InsightFace.
+numpy==1.26.4
+mediapipe==0.10.14
+onnxruntime==1.19.2
+opencv-contrib-python==4.11.0.86
+pykalman==0.10.1
+onnx2torch==1.5.15
+imageio-ffmpeg==0.6.0

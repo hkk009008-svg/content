@@ -559,10 +559,17 @@ class TestIterateEndpointGateBypass:
     Surface A + Surface B workflow.
     """
 
-    def _post_iterate(self, client, pid, shot_id="shot_1_0", take_id="take_parent"):
+    def _post_iterate(
+        self,
+        client,
+        pid,
+        shot_id="shot_1_0",
+        take_id="take_parent",
+        target_stage="keyframe",
+    ):
         return client.post(
             f"/api/projects/{pid}/shots/{shot_id}/takes/{take_id}/iterate",
-            json={"prose": "tighten the framing", "target_stage": "keyframe"},
+            json={"prose": "tighten the framing", "target_stage": target_stage},
         )
 
     def _mock_pipeline_at_stage(self, stage: str) -> MagicMock:
@@ -596,17 +603,18 @@ class TestIterateEndpointGateBypass:
         body = resp.get_json()
         assert body["success"] is True
 
-    @pytest.mark.parametrize("gate_stage", [
-        "PLAN_REVIEW", "KEYFRAME_REVIEW", "PERFORMANCE_REVIEW", "REVIEW",
+    @pytest.mark.parametrize(("gate_stage", "target_stage"), [
+        ("KEYFRAME_REVIEW", "keyframe"),
+        ("PERFORMANCE_REVIEW", "performance"),
+        ("REVIEW", "motion"),
     ])
     def test_iterate_during_review_gates_with_running_pipeline(
-        self, iterate_client, iterate_flag_on, inject_pipeline, gate_stage,
+        self, iterate_client, iterate_flag_on, inject_pipeline, gate_stage, target_stage,
     ):
-        """All Surface A review gates (PLAN_REVIEW, KEYFRAME_REVIEW,
-        PERFORMANCE_REVIEW, REVIEW) must allow iterate through. Without
-        I1's gate-aware bypass, Surface A iterate has been broken at any
-        gate since S16 — undetected because no E2E test exercised the
-        endpoint with a parked pipeline.
+        """Each review gate only accepts iteration for its own artifact kind.
+
+        SCREENING remains the deliberate cross-stage exception, exercised by
+        the preceding test.
         """
         pid = f"proj-iterate-during-{gate_stage.lower()}"
         project = _make_minimal_project()
@@ -620,12 +628,44 @@ class TestIterateEndpointGateBypass:
         }
         with patch("web_server.load_project", return_value=project), \
              patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
-            resp = self._post_iterate(iterate_client, pid)
+            resp = self._post_iterate(
+                iterate_client, pid, target_stage=target_stage,
+            )
 
         assert resp.status_code == 200, (
-            f"Expected 200 for gate {gate_stage}, got {resp.status_code} "
+            f"Expected 200 for {target_stage} at gate {gate_stage}, "
+            f"got {resp.status_code} "
             f"body={resp.get_json()}"
         )
+
+    @pytest.mark.parametrize(("gate_stage", "target_stage"), [
+        ("PLAN_REVIEW", "keyframe"),
+        ("PERFORMANCE_REVIEW", "keyframe"),
+        ("PERFORMANCE_REVIEW", "motion"),
+        ("REVIEW", "keyframe"),
+        ("REVIEW", "performance"),
+    ])
+    def test_iterate_rejects_target_outside_its_exact_review_gate(
+        self, iterate_client, iterate_flag_on, inject_pipeline, gate_stage, target_stage,
+    ):
+        pid = f"proj-iterate-mismatch-{gate_stage.lower()}-{target_stage}"
+        project = _make_minimal_project()
+        project["id"] = pid
+        inject_pipeline(pid, self._mock_pipeline_at_stage(gate_stage))
+
+        mock_stage_pipeline = MagicMock()
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
+            resp = self._post_iterate(
+                iterate_client, pid, target_stage=target_stage,
+            )
+
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["code"] == "wrong_pipeline_stage"
+        assert body["target_stage"] == target_stage
+        assert body["current_stage"] == gate_stage
+        mock_stage_pipeline.regenerate_with_intent.assert_not_called()
 
     def test_iterate_during_non_gate_stage_still_busy_fences(
         self, iterate_client, iterate_flag_on, inject_pipeline,
@@ -647,13 +687,10 @@ class TestIterateEndpointGateBypass:
         body = resp.get_json()
         assert body["code"] == "project_busy"
 
-    def test_iterate_with_no_running_pipeline_proceeds_normally(
+    def test_iterate_with_no_running_pipeline_rejects_without_review_stage(
         self, iterate_client, iterate_flag_on,
     ):
-        """No pipeline running — endpoint MUST allow iterate through
-        (cold-start case). Regression guard: the gate-aware variant must
-        not falsely 409 when _running_pipelines is empty for the pid.
-        """
+        """Iteration is a review action, not a cold-start generation route."""
         pid = "proj-iterate-cold"
         project = _make_minimal_project()
         project["id"] = pid
@@ -666,4 +703,6 @@ class TestIterateEndpointGateBypass:
              patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
             resp = self._post_iterate(iterate_client, pid)
 
-        assert resp.status_code == 200
+        assert resp.status_code == 409
+        assert resp.get_json()["code"] == "wrong_pipeline_stage"
+        mock_stage_pipeline.regenerate_with_intent.assert_not_called()

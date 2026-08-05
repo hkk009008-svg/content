@@ -14,6 +14,7 @@ import time
 from typing import Callable, Optional
 
 from cinema.phases.base import PhaseResult
+from domain.performance import has_current_performance_skip
 
 
 class PerformanceCapturePhase:
@@ -64,7 +65,7 @@ class PerformanceCapturePhase:
                     skip_count += 1
                     continue
                 # Explicitly marked SKIP by previous routing — done
-                if (shot.get("performance_engine") or "").upper() == "SKIP":
+                if has_current_performance_skip(shot, scene):
                     skip_count += 1
                     continue
                 # No keyframe to drive off of yet — skip (motion_render also skips)

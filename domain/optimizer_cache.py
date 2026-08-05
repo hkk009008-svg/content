@@ -23,7 +23,6 @@ OPTIMIZER_SPEC_FIELD_TYPES: Final[Mapping[str, FieldType]] = MappingProxyType({
     "video_prompt": str,
     "purpose": str,
     "shot_type": str,
-    "suggested_image_api": str,
     "suggested_video_api": str,
     "suggested_lipsync": (str, type(None)),
     "negative_constraints": str,

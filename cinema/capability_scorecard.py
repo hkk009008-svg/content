@@ -1,9 +1,7 @@
 """Build the capability scorecard (Part 4 / U1+U2+U8) from a project dict.
 
-Pure aggregation: reads the already-persisted project + per-character LoRA
-status; projects the hard dormant LoRA availability policy; computes
-per-dimension measured-vs-bar, gate rollup, cascade routing, and
-component-wiring status. No mutation, no Flask.
+Pure aggregation: computes per-dimension measured-vs-bar, gate rollup,
+cascade routing, and component-wiring status. No mutation, no Flask.
 """
 from __future__ import annotations
 import logging
@@ -15,7 +13,6 @@ from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
 from cinema.capability_manifest import build_manifest, to_operator_view
 from cinema.context import _finite_or
 from domain.optimizer_cache import sanitize_optimizer_cache
-from prep.lora_policy import lora_dormant_status_fields
 
 # U3 — Final-media conformance constants.
 # LUFS pass = abs(value - target) <= tolerance (streaming-platform window,
@@ -228,7 +225,7 @@ def _build_media_block(project: dict) -> "dict | None":
         return None
 
 
-def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
+def build_capability_scorecard(project: dict) -> dict:
     shots = _all_shots(project)
     gs = project.get("global_settings", {}) or {}
     tier = gs.get("quality_tier", "production")
@@ -316,13 +313,11 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         "dimensions": dimensions,
         "routing": {"first_try": routing["first_try"], "fallback": routing["fallback"], "silent_fallback": routing["silent_fallback"]},
         "gates": _gate_rollup(shots),
-        "lora_availability": lora_dormant_status_fields(),
-        "lora": _lora_summary(project, project_dir),
         "components": _components(),
         "per_shot": per_shot,
         "provenance": provenance,
         "media": _build_media_block(project),
-        "future_dimensions": ["pod_health", "budget"],
+        "future_dimensions": ["gpu_worker_health", "budget"],
     }
 
 
@@ -380,29 +375,6 @@ def _gate_rollup(shots: list[dict]) -> dict:
     for g in out:
         out[g]["top_vetoes"] = veto_ctr[g].most_common(3)
     return out
-
-
-def _lora_summary(project: dict, project_dir: str) -> list[dict]:
-    try:
-        from prep.lora_training import get_lora_status
-    except Exception:
-        return []
-    rows = []
-    for ch in project.get("characters", []):
-        cid = ch.get("id")
-        if not cid:
-            continue
-        try:
-            st = get_lora_status(project_dir, cid)
-        except Exception:
-            logger.debug("capability scorecard: get_lora_status failed for %s", cid, exc_info=True)
-            continue
-        if st.get("status") in (None, "idle") and st.get("quality_score") is None:
-            continue
-        verdict = "rejected" if st.get("rejected") else ("warning" if st.get("quality_warning") else "ok")
-        rows.append({"char_id": cid, "strength": st.get("best_strength"),
-                     "score": st.get("quality_score"), "verdict": verdict})
-    return rows
 
 
 def _components() -> list[dict]:

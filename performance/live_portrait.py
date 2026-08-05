@@ -1,13 +1,13 @@
 """LivePortrait via ComfyUI — budget driving-face engine.
 
 LivePortrait drives a single still keyframe with a driving video to produce a
-matched-motion clip. The driving video must already exist (Mode A operator
-upload, or Mode B synth from performance/driving_video.py). LivePortrait
-itself does NOT generate motion from audio alone — it needs visual frames.
+matched-motion clip. The driving video must be uploaded by the operator.
+LivePortrait does NOT generate motion from audio alone — it needs visual
+frames.
 
-Runs on the existing RunPod / Railway ComfyUI pod via the
-ComfyUI-LivePortraitKJ custom node (Kijai's port). Falls through gracefully
-to None when the node isn't installed.
+Runs on the dedicated authenticated ComfyUI worker via the
+ComfyUI-LivePortraitKJ custom node (Kijai's port). Returns None when the
+role-bound worker contract is unavailable or execution fails.
 """
 
 from __future__ import annotations
@@ -17,10 +17,16 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 
-from comfyui_client import RunPodComfyUI
+from comfyui_client import ComfyUIClient
 from config.settings import settings
 from cost_tracker_lifecycle import cost_tracker_scope
 from paid_provider import has_paid_attempt_authority
+from performance.comfyui_endpoint import resolve_performance_comfyui
+from performance.live_portrait_workflow import build_live_portrait_workflow
+from performance.worker_readiness import (
+    performance_capability_from_unified,
+    validate_performance_gateway_readiness,
+)
 from performance._net import safe_download, validate_video_artifact
 
 
@@ -63,13 +69,22 @@ def generate_live_portrait_performance(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    request_id: str = "",
     poll_timeout_s: int = 300,
     cost_tracker=None,
 ) -> Optional[str]:
     """LivePortrait via ComfyUI — driving video required."""
-    server_url = (getattr(settings, "comfyui_server_url", "") or "").rstrip("/")
+    endpoint = resolve_performance_comfyui(settings)
+    server_url = endpoint.server_url
     if not server_url:
-        print("   [LIVE-PORTRAIT] COMFYUI_SERVER_URL not set; skipping")
+        print(
+            "   [LIVE-PORTRAIT] PERFORMANCE_COMFYUI_SERVER_URL not set; skipping"
+        )
+        return None
+    if not endpoint.usable:
+        print(
+            "   [LIVE-PORTRAIT] dedicated worker configuration rejected; skipping"
+        )
         return None
     if not (keyframe_path and os.path.exists(keyframe_path)):
         print(f"   [LIVE-PORTRAIT] keyframe missing: {keyframe_path}")
@@ -79,45 +94,28 @@ def generate_live_portrait_performance(
         return None
 
     try:
-        comfy = RunPodComfyUI(
+        comfy = ComfyUIClient(
             server_url,
-            auth_token=getattr(settings, "comfyui_api_key", "") or "",
+            auth_token=endpoint.api_key,
         )
+
+        # Validate the role, tracked workflow/manifests, and successful
+        # one-frame execution proof before any source media leaves the Mac.
+        if endpoint.requires_capability_proof:
+            performance_capability_from_unified(
+                comfy.get_gateway_capabilities_readiness()
+            )
+        else:
+            validate_performance_gateway_readiness(comfy.get_gateway_readiness())
 
         # The shared client provides bearer auth, graph preflight, bounded
         # transport, WebSocket/history recovery, and ID-scoped cancellation.
         remote_kf = comfy.upload_image(keyframe_path)
         remote_dv = comfy.upload_image(driving_video_path)
 
-        # 2) Build a minimal LivePortrait workflow. Node IDs are local to this
-        # workflow — they don't collide with the keyframe pipeline.
-        workflow = {
-            "10": {"class_type": "LoadImage", "inputs": {"image": remote_kf}},
-            "11": {"class_type": "VHS_LoadVideoPath", "inputs": {"video": remote_dv, "force_rate": 25}},
-            "20": {
-                "class_type": "LivePortraitProcess",
-                "inputs": {
-                    "source_image": ["10", 0],
-                    "driving_video": ["11", 0],
-                    "frame_load_cap": int(round(duration_s * 25)),
-                    "expression_friendly": True,
-                    "use_relative_motion": True,
-                    "lip_zero": False,
-                    "eye_retargeting": True,
-                    "lip_retargeting": True,
-                },
-            },
-            "30": {
-                "class_type": "VHS_VideoCombine",
-                "inputs": {
-                    "images": ["20", 0],
-                    "frame_rate": 25,
-                    "filename_prefix": "live_portrait",
-                    "format": "video/h264-mp4",
-                    "crf": 19,
-                },
-            },
-        }
+        # Build the pinned Kijai 1.1.0 graph. Frame limiting happens at video
+        # ingestion, before the driving batch can consume system/GPU memory.
+        workflow = build_live_portrait_workflow(remote_kf, remote_dv, duration_s)
 
         durable = has_paid_attempt_authority(cost_tracker)
         if durable:
@@ -133,6 +131,7 @@ def generate_live_portrait_performance(
                 file_fingerprint(keyframe_path),
                 file_fingerprint(driving_video_path),
                 float(duration_s),
+                request_id,
             )
             attempt_id = paid_attempt_id(
                 "comfy-live-portrait",
@@ -177,7 +176,7 @@ def generate_live_portrait_performance(
                         "type": ftype,
                     })
                     view = f"{server_url}/view?{query}"
-                    token = (getattr(settings, "comfyui_api_key", "") or "").strip()
+                    token = endpoint.api_key
                     request_headers = (
                         {"Authorization": f"Bearer {token}"} if token else None
                     )

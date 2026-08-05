@@ -154,6 +154,76 @@ afterEach(() => {
 })
 
 describe('ShotInspector -- truthful persistShot (sibling of PromptEditor.handleSave)', () => {
+  it('shows the backend-authoritative 8 second, 200 frame performance cap per shot', () => {
+    const shot = makeShot()
+    const scene = makeScene(shot)
+    scene.duration_seconds = 40
+    scene.num_shots = 2
+    scene.shots = [shot, makeShot({ id: 'shot-2' })]
+
+    render(
+      <ShotInspector project={makeProject(scene)} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={vi.fn()} />,
+    )
+
+    expect(screen.getByText('Performance duration')).toBeInTheDocument()
+    expect(screen.getByText('~8.0s')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent(
+      "Capped at 8.0s (200 frames) from the scene's ~20.0s per-shot allocation. The backend enforces this before dispatch.",
+    )
+  })
+
+  it('persists the local LivePortrait route through the shot save contract', async () => {
+    const fetchMock = stubFetch({ ok: true })
+    const shot = makeShot()
+    const scene = makeScene(shot)
+    const onRefreshProject = vi.fn()
+
+    render(
+      <ShotInspector project={makeProject(scene)} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={onRefreshProject} />,
+    )
+
+    const route = screen.getByRole('combobox', { name: 'Dialogue performance' })
+    expect(route).toHaveValue('')
+    fireEvent.change(route, { target: { value: 'budget' } })
+
+    await waitFor(() => expect(onRefreshProject).toHaveBeenCalledTimes(1))
+    const [, init] = fetchMock.mock.calls.find(([, request]) => request?.method === 'PUT')!
+    expect(JSON.parse(String(init?.body))).toMatchObject({ performance_budget_mode: 'budget' })
+    expect(route).toHaveValue('budget')
+  })
+
+  it('reverts the local route when an approved-take conflict rejects the save', async () => {
+    stubFetch({
+      ok: false,
+      status: 409,
+      body: { error: 'Cannot change dialogue performance routing while an approved performance take exists' },
+    })
+    const shot = makeShot({ approved_performance_take_id: 'performance-1' })
+    const scene = makeScene(shot)
+    const onRefreshProject = vi.fn()
+
+    render(
+      <ShotInspector project={makeProject(scene)} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={onRefreshProject} />,
+    )
+
+    const route = screen.getByRole('combobox', { name: 'Dialogue performance' })
+    fireEvent.change(route, { target: { value: 'budget' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('approved performance take exists')
+    await waitFor(() => expect(route).toHaveValue(''))
+    expect(onRefreshProject).not.toHaveBeenCalled()
+  })
+
+  it('renders the legacy cheap alias as the canonical local route', () => {
+    const shot = makeShot({ performance_budget_mode: 'cheap' })
+    const scene = makeScene(shot)
+    render(
+      <ShotInspector project={makeProject(scene)} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={vi.fn()} />,
+    )
+
+    expect(screen.getByRole('combobox', { name: 'Dialogue performance' })).toHaveValue('budget')
+  })
+
   it('a non-2xx PUT does not call onRefreshProject, surfaces an error, and reverts the Primary API pill', async () => {
     stubFetch({ ok: false, status: 404, body: { error: 'Shot not found' } })
     const shot = makeShot()
@@ -241,7 +311,7 @@ describe('ShotInspector -- truthful persistShot (sibling of PromptEditor.handleS
   })
 })
 
-describe('ShotInspector -- truthful updateGlobalSetting (Pace wpm + Identity toggle)', () => {
+describe('ShotInspector -- truthful updateGlobalSetting (Pace wpm)', () => {
   it('a non-2xx PUT for the pace field surfaces an error and does not refresh', async () => {
     stubFetch({ ok: false, status: 500, body: { error: 'wpm rejected' } })
     const shot = makeShot()
@@ -301,41 +371,6 @@ describe('ShotInspector -- truthful updateGlobalSetting (Pace wpm + Identity tog
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('a non-2xx PUT for the identity toggle surfaces an error and does not refresh', async () => {
-    stubFetch({ ok: false, status: 403, body: { error: 'toggle rejected' } })
-    const shot = makeShot()
-    const scene = makeScene(shot)
-    const project = makeProject(scene)
-    const onRefreshProject = vi.fn()
-
-    render(
-      <ShotInspector project={project} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={onRefreshProject} />,
-    )
-
-    const identityToggle = screen.getByRole('switch', { name: 'ComfyUI keyframe (pod)' })
-    fireEvent.click(identityToggle)
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('toggle rejected')
-    expect(onRefreshProject).not.toHaveBeenCalled()
-  })
-
-  it('a successful PUT for the identity toggle clears any error and refreshes the authoritative project', async () => {
-    stubFetch({ ok: true })
-    const shot = makeShot()
-    const scene = makeScene(shot)
-    const project = makeProject(scene)
-    const onRefreshProject = vi.fn()
-
-    render(
-      <ShotInspector project={project} config={CONFIG} scene={scene} shot={shot} shotState={undefined} onRefreshProject={onRefreshProject} />,
-    )
-
-    const identityToggle = screen.getByRole('switch', { name: 'ComfyUI keyframe (pod)' })
-    fireEvent.click(identityToggle)
-
-    await waitFor(() => expect(onRefreshProject).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
 })
 
 describe('ShotInspector -- truthful setVoice', () => {

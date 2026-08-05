@@ -797,6 +797,74 @@ def test_direct_shot_write_accepts_current_selectable_target(
     assert _find_shot(_load_project(pid), shot_id)["target_api"] == "KLING_3_0"
 
 
+def test_direct_shot_write_persists_local_performance_route(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    pid, _scene_id, (shot_id,) = _persist_project(tmp_path, monkeypatch)
+
+    response = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"performance_budget_mode": "budget"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["fields"] == ["performance_budget_mode"]
+    assert _find_shot(_load_project(pid), shot_id)["performance_budget_mode"] == "budget"
+
+
+@pytest.mark.parametrize("invalid", [None, 1, "cheap", "auto", " budget"])
+def test_direct_shot_write_rejects_noncanonical_performance_route(
+    client,
+    tmp_path,
+    monkeypatch,
+    invalid,
+):
+    pid, _scene_id, (shot_id,) = _persist_project(tmp_path, monkeypatch)
+
+    response = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"performance_budget_mode": invalid},
+    )
+
+    assert response.status_code == 400
+    assert _find_shot(_load_project(pid), shot_id)["performance_budget_mode"] == ""
+
+
+def test_approved_performance_take_blocks_route_change_but_allows_alias_canonicalization(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    from domain import project_manager
+
+    pid, _scene_id, (shot_id,) = _persist_project(tmp_path, monkeypatch)
+
+    def seed_approved_take(project):
+        shot = _find_shot(project, shot_id)
+        shot["performance_budget_mode"] = "cheap"
+        shot["approved_performance_take_id"] = "performance-approved"
+        return True
+
+    project_manager.mutate_project(pid, seed_approved_take)
+
+    canonical = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"performance_budget_mode": "budget"},
+    )
+    assert canonical.status_code == 200
+    assert _find_shot(_load_project(pid), shot_id)["performance_budget_mode"] == "budget"
+
+    conflict = client.put(
+        f"/api/projects/{pid}/shots/{shot_id}",
+        json={"performance_budget_mode": ""},
+    )
+    assert conflict.status_code == 409
+    assert conflict.get_json()["code"] == "approved_performance_route_conflict"
+    assert _find_shot(_load_project(pid), shot_id)["performance_budget_mode"] == "budget"
+
+
 @pytest.mark.parametrize(
     ("api_engines", "aspect_ratio", "target", "reason"),
     [
@@ -1273,12 +1341,15 @@ _STRICT_INVALID_SHOT_VALUES = [
     ("performance_take_id", []),
     ("performance_engine", []),
     ("driving_video_path", []),
+    ("driving_video_history", {}),
+    ("performance_skip", []),
+    ("performance_skip_history", {}),
+    ("performance_review_history", {}),
     ("diagnostics", {}),
     ("intent_notes", []),
     ("negative_constraints", []),
     ("continuity_constraints", []),
     ("optimizer_cache", []),
-    ("image_api", []),
     ("dialogue", 7),
     ("duration", "5"),
     ("motion_description", []),
@@ -1438,7 +1509,6 @@ _OPTIMIZER_SPEC_FIELDS = {
     "video_prompt",
     "purpose",
     "shot_type",
-    "suggested_image_api",
     "suggested_video_api",
     "suggested_lipsync",
     "negative_constraints",
@@ -1513,7 +1583,6 @@ _VALID_OPTIMIZER_SPEC = {
     "video_prompt": "video prompt",
     "purpose": "action_motion",
     "shot_type": "medium",
-    "suggested_image_api": "FLUX_DEV",
     "suggested_video_api": "SORA_NATIVE",
     "suggested_lipsync": None,
     "negative_constraints": "blur",
@@ -1563,7 +1632,22 @@ _ACTIVE_SHOT_EXTENSIONS = [
     ("approved_performance_take_id", "take_performance"),
     ("performance_engine", "SKIP"),
     ("driving_video_path", "/tmp/driving.mp4"),
-    ("image_api", "AUTO"),
+    (
+        "driving_video_history",
+        [{"path": "performance_inputs/scene/shot/driving-deadbeef.mp4"}],
+    ),
+    (
+        "performance_skip",
+        {"decision_source": "operator", "operator_reason": "Use motion fallback"},
+    ),
+    (
+        "performance_skip_history",
+        [{"decision_source": "operator", "operator_reason": "Use motion fallback"}],
+    ),
+    (
+        "performance_review_history",
+        [{"action": "upload", "driving_video_sha256": "a" * 64}],
+    ),
     ("dialogue", [{"text": "Hello"}]),
     ("duration", 4.5),
     ("motion_description", "subtle head turn"),
@@ -1597,7 +1681,7 @@ _ACTIVE_SHOT_EXTENSIONS = [
     (
         "deferred_keyframe_job",
         {
-            "engine": "COMFYUI_PULID",
+            "engine": "FLUX2_KLEIN_LOCAL",
             "status": "recovery_required",
             "provider_status": "job_state_unknown",
             "job_id": "prompt-schema-roundtrip",

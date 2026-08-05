@@ -11,7 +11,7 @@ figure is the design target once a reader is wired, not current behavior.
 
 Provider chain:
   1. WhisperX (preferred) — Whisper transcript + wav2vec2 forced alignment.
-     `whisperx` is not in the dev venv (returns None here); the Linux+GPU pod
+     `whisperx` is not in the dev venv (returns None here); the GPU worker
      is the intended runtime.
   2. Vanilla Whisper (`word_timestamps=True`) — always available (CPU here).
   3. None — graceful return when both fail.

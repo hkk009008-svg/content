@@ -75,6 +75,8 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof RunPage>> = {}
     onGenerateKeyframe: asyncNoop,
     onApproveKeyframe: asyncNoop,
     onApprovePerformance: asyncNoop,
+    onGeneratePerformance: asyncNoop,
+    onSkipPerformance: asyncNoop,
     onGenerateMotion: asyncNoop,
     onApproveFinal: asyncNoop,
     onRegenerateShot: asyncNoop,

@@ -116,6 +116,91 @@ def test_video_validator_rejects_non_mp4_before_ffprobe(tmp_path):
     probe.assert_not_called()
 
 
+def test_video_validator_enforces_upload_duration_and_geometry_before_decode(tmp_path):
+    video_path = tmp_path / "take.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+    cases = (
+        (
+            {"width": 1920, "height": 1080, "duration": "30.001"},
+            {"max_duration_s": 30.0},
+            "duration",
+        ),
+        (
+            {"width": 63, "height": 64, "duration": "2.5"},
+            {"min_dimensions": (64, 64)},
+            "below minimum",
+        ),
+        (
+            {"width": 4097, "height": 1080, "duration": "2.5"},
+            {"max_dimensions": (4096, 4096)},
+            "exceed maximum",
+        ),
+        (
+            {"width": 3000, "height": 3000, "duration": "2.5"},
+            {"max_pixels": 4096 * 2160},
+            "pixel count",
+        ),
+    )
+
+    for metadata, kwargs, expected_error in cases:
+        probe_result = _probe_payload({
+            "codec_type": "video",
+            "codec_name": "h264",
+            **metadata,
+        })
+        with patch("performance._net.subprocess.run", return_value=probe_result) as run:
+            error = validate_video_artifact(str(video_path), **kwargs)
+        assert expected_error in (error or "")
+        assert run.call_count == 1, "rejected metadata must not reach ffmpeg decode"
+
+
+def test_video_validator_accepts_upload_bounds_inclusively(tmp_path):
+    video_path = tmp_path / "take.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+    probe_result = _probe_payload({
+        "codec_type": "video",
+        "codec_name": "h264",
+        "width": 2160,
+        "height": 4096,
+        "duration": "30.0",
+    })
+
+    with patch("performance._net.subprocess.run", return_value=probe_result) as run:
+        error = validate_video_artifact(
+            str(video_path),
+            min_dimensions=(64, 64),
+            max_dimensions=(4096, 4096),
+            max_pixels=4096 * 2160,
+            max_duration_s=30.0,
+        )
+
+    assert error is None
+    assert run.call_count == 2, "valid metadata must reach full ffmpeg decode"
+
+
+def test_video_validator_uses_conservative_duration_when_probe_fields_disagree(
+    tmp_path,
+):
+    video_path = tmp_path / "take.mp4"
+    video_path.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+    probe_result = _probe_payload(
+        {
+            "codec_type": "video",
+            "codec_name": "h264",
+            "width": 1920,
+            "height": 1080,
+            "duration": "2.5",
+        },
+        duration="31.0",
+    )
+
+    with patch("performance._net.subprocess.run", return_value=probe_result) as run:
+        error = validate_video_artifact(str(video_path), max_duration_s=30.0)
+
+    assert "duration 31.000s" in (error or "")
+    assert run.call_count == 1
+
+
 def test_audio_validator_requires_decodable_stream_metadata(tmp_path):
     audio_path = tmp_path / "voice.mp3"
     audio_path.write_bytes(b"ID3fake")

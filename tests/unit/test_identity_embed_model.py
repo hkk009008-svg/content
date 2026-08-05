@@ -9,7 +9,7 @@ Now ``identity.validator.EMBED_MODEL`` is the single write-site, fed by the
 
 IMPORTANT calibration invariant pinned here: every identity threshold in the
 repo is calibrated on GhostFaceNet score distributions — a non-default model
-must trigger the structural warning until a pod re-calibration pass exists
+must trigger the structural warning until a production-host calibration pass exists
 (P5 in docs/RESEARCH-2026-07-10-component-upgrades.md).
 """
 from __future__ import annotations

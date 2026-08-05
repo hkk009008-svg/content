@@ -69,7 +69,7 @@ del _name
 
 def pytest_configure(config):
     """Register custom markers so pytest doesn't warn about them."""
-    config.addinivalue_line("markers", "e2e: end-to-end tests requiring GPU pod + API keys")
+    config.addinivalue_line("markers", "e2e: end-to-end tests requiring a GPU worker + API keys")
     config.addinivalue_line("markers", "grid_search: parameter grid search tests (long-running)")
 
 # ---------------------------------------------------------------------------

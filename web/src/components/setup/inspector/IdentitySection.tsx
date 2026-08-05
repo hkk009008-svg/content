@@ -1,5 +1,5 @@
-import { Section, Badge } from '../../ui'
-import { RangeRow, ToggleRow } from './controls'
+import { Section } from '../../ui'
+import { RangeRow } from './controls'
 
 interface Props {
   s: any
@@ -7,9 +7,9 @@ interface Props {
 }
 
 /**
- * Identity section — face-lock strictness, retry, adaptive PuLID, guidance,
- * coherence, active reference-based identity guidance, and the explicit
- * inactive/read-only LoRA policy.
+ * Identity section — provider-neutral face validation, retry, and coherence.
+ * Provider-specific image model controls belong to Image setup and are shown
+ * only when that backend has a validated runtime contract.
  */
 export function IdentitySection({ s, update }: Props) {
   return (
@@ -36,24 +36,6 @@ export function IdentitySection({ s, update }: Props) {
           hint="Max video regeneration attempts when face identity fails."
         />
 
-        <ToggleRow
-          label="Adaptive PuLID"
-          checked={s.adaptive_pulid !== false}
-          onChange={(v) => update('adaptive_pulid', v)}
-          hint="Auto-adjust face-lock strength from rolling identity scores. Off = shot-type defaults."
-        />
-
-        <RangeRow
-          label="FLUX guidance scale"
-          value={s.flux_guidance ?? 3.5}
-          min={2.0}
-          max={5.0}
-          step={0.1}
-          format={(v) => v.toFixed(1)}
-          onChange={(v) => update('flux_guidance', v)}
-          hint="Prompt adherence. 3.5 = FLUX sweet spot. Higher = stricter but risks oversaturation."
-        />
-
         <RangeRow
           label="Coherence threshold"
           value={s.coherence_threshold ?? 0.6}
@@ -64,25 +46,6 @@ export function IdentitySection({ s, update }: Props) {
           onChange={(v) => update('coherence_threshold', v)}
           hint="Min scene coherence score to accept. Below → mutation retry."
         />
-
-        {/* LoRA is policy-inactive; reference conditioning is the active path. */}
-        <div className="space-y-1.5 border-t border-line pt-3">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-tx">Per-character LoRA</span>
-            <Badge variant="neutral">Inactive</Badge>
-          </div>
-          <p className="text-[10px] leading-tight text-mut">
-            Training, registration, and production use are unavailable. Historical records are read-only.
-          </p>
-          {/* `text-mut`, not `text-dim` — this still reads as production
-              guidance (slice 13b contrast audit: text-dim on this column's
-              backgrounds measures ~2.6-2.9:1, well under WCAG AA's 4.5:1
-              floor for 10px body text; text-mut clears it at 4.96-5.55:1). */}
-          <p className="text-[10px] leading-tight text-mut">
-            Use clear reference images for the active identity path: Gemini multi-reference first,
-            with PuLID reference conditioning on the ComfyUI fallback.
-          </p>
-        </div>
       </div>
     </Section>
   )

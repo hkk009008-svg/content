@@ -85,7 +85,7 @@ describe('shared primitive accessibility (jest-axe)', () => {
     const { container } = render(
       <div>
         <Badge variant="ok">OK</Badge>
-        <Badge variant="pod">Pod</Badge>
+        <Badge variant="local">Local</Badge>
         <Badge variant="fail">Fail</Badge>
       </div>,
     )

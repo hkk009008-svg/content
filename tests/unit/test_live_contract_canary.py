@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -15,11 +18,34 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _base(target: str = "runway-act-two", budget: str = "0.15") -> dict[str, str]:
-    return {
+    environment = {
         canary.TARGET_ENV: target,
         canary.APPROVAL_ENV: canary.APPROVAL_PHRASE,
         canary.MAX_COST_ENV: budget,
     }
+    if target == "windows-liveportrait-performance":
+        environment[canary.WINDOWS_RUNNER_AUTHORIZATION_ENV] = (
+            canary.WINDOWS_RUNNER_AUTHORIZATION_PHRASE
+        )
+    return environment
+
+
+def test_script_direct_invocation_resolves_repository_modules():
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    environment.update(_base())
+
+    result = subprocess.run(
+        [sys.executable, "-S", "scripts/live_contract_canary.py", "check-inputs"],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "live-contract preflight passed" in result.stdout.lower()
 
 
 @pytest.mark.parametrize(
@@ -27,17 +53,10 @@ def _base(target: str = "runway-act-two", budget: str = "0.15") -> dict[str, str
     [
         ("runway-act-two", "0.15", "test_act_two_minimal_call_returns_mp4"),
         ("runway-act-two", "0.20", "test_act_two_minimal_call_returns_mp4"),
-        ("runpod-pulid-production", "0.04", "test_production_pulid_round_trip"),
-        ("runpod-pulid-production", "0.05", "test_production_pulid_round_trip"),
         (
-            "runpod-liveportrait-performance",
-            "0.03",
-            "test_live_portrait_pod_round_trip",
-        ),
-        (
-            "runpod-liveportrait-performance",
-            "0.05",
-            "test_live_portrait_pod_round_trip",
+            "windows-liveportrait-performance",
+            "0.00",
+            "test_live_portrait_windows_round_trip",
         ),
     ],
 )
@@ -59,15 +78,27 @@ def test_input_contract_accepts_only_bounded_fixed_selectors(target, budget, sel
         _base(budget="Infinity"),
         _base(budget="0.14"),
         _base(budget="0.201"),
-        _base("runpod-pulid-production", "0.03"),
-        _base("runpod-pulid-production", "0.06"),
-        _base("runpod-liveportrait-performance", "0.02"),
-        _base("runpod-liveportrait-performance", "0.06"),
+        _base("windows-liveportrait-performance", "0.01"),
+        _base("windows-liveportrait-performance", "-0.01"),
     ],
 )
 def test_input_contract_refuses_defaults_ambiguity_and_unsafe_budgets(environment):
     with pytest.raises(canary.CanaryPreflightError):
         canary.validate_inputs(environment)
+
+
+def test_windows_input_contract_requires_ephemeral_jit_runner_confirmation():
+    environment = _base("windows-liveportrait-performance", "0.00")
+    environment.pop(canary.WINDOWS_RUNNER_AUTHORIZATION_ENV)
+    with pytest.raises(canary.CanaryPreflightError, match="ephemeral JIT runner"):
+        canary.validate_inputs(environment)
+
+    cloud_environment = _base()
+    cloud_environment[canary.WINDOWS_RUNNER_AUTHORIZATION_ENV] = (
+        canary.WINDOWS_RUNNER_AUTHORIZATION_PHRASE
+    )
+    with pytest.raises(canary.CanaryPreflightError, match="only valid"):
+        canary.validate_inputs(cloud_environment)
 
 
 def test_secret_contract_is_target_specific_and_does_not_echo_secret(capsys):
@@ -88,14 +119,8 @@ def test_secret_contract_is_target_specific_and_does_not_echo_secret(capsys):
     ("target_name", "budget", "url_env", "token_env"),
     [
         (
-            "runpod-pulid-production",
-            "0.04",
-            "COMFYUI_SERVER_URL",
-            "COMFYUI_API_KEY",
-        ),
-        (
-            "runpod-liveportrait-performance",
-            "0.03",
+            "windows-liveportrait-performance",
+            "0.00",
             "PERFORMANCE_COMFYUI_SERVER_URL",
             "PERFORMANCE_COMFYUI_API_KEY",
         ),
@@ -104,15 +129,15 @@ def test_secret_contract_is_target_specific_and_does_not_echo_secret(capsys):
 @pytest.mark.parametrize(
     "url",
     [
-        "http://pod.example.test",
-        "https://user:pass@pod.example.test",
-        "https://pod.example.test/?token=secret",
-        "https://pod.example.test/proxy-prefix",
+        "http://worker.example.test",
+        "https://user:pass@worker.example.test",
+        "https://worker.example.test/?token=secret",
+        "https://worker.example.test/proxy-prefix",
         "https://127.0.0.1",
         "https://metadata.google.internal",
     ],
 )
-def test_runpod_secret_contract_rejects_unsafe_origins(
+def test_worker_secret_contract_rejects_unsafe_origins(
     target_name,
     budget,
     url_env,
@@ -126,16 +151,17 @@ def test_runpod_secret_contract_rejects_unsafe_origins(
         canary.validate_secrets(name, target, environment)
 
 
-def test_performance_target_cannot_fall_back_to_production_endpoint_secrets():
-    environment = _base("runpod-liveportrait-performance", "0.03")
+def test_windows_target_requires_the_fixed_mac_loopback_tunnel():
+    environment = _base("windows-liveportrait-performance", "0.00")
     environment.update(
         {
             "COMFYUI_SERVER_URL": "https://production.example.test",
             "COMFYUI_API_KEY": "p" * 32,
+            "PERFORMANCE_COMFYUI_API_KEY": "w" * 32,
         }
     )
     name, target, _budget = canary.validate_inputs(environment)
-    with pytest.raises(canary.CanaryPreflightError, match="PERFORMANCE_COMFYUI_SERVER_URL"):
+    with pytest.raises(canary.CanaryPreflightError, match="fixed Mac loopback tunnel"):
         canary.validate_secrets(name, target, environment)
 
 
@@ -156,15 +182,15 @@ def test_runner_invokes_only_the_constant_selector(monkeypatch):
     assert seen["kwargs"]["timeout"] == 720
 
 
-def test_performance_runner_maps_only_selected_endpoint_into_application_config(
+def test_windows_runner_preserves_dedicated_and_image_worker_configuration(
     monkeypatch,
 ):
-    environment = _base("runpod-liveportrait-performance", "0.03")
+    environment = _base("windows-liveportrait-performance", "0.00")
     environment.update(
         {
             "COMFYUI_SERVER_URL": "https://production.example.test",
             "COMFYUI_API_KEY": "p" * 32,
-            "PERFORMANCE_COMFYUI_SERVER_URL": "https://performance.example.test",
+            "PERFORMANCE_COMFYUI_SERVER_URL": canary.WINDOWS_LIVEPORTRAIT_ORIGIN,
             "PERFORMANCE_COMFYUI_API_KEY": "k" * 32,
         }
     )
@@ -178,69 +204,69 @@ def test_performance_runner_maps_only_selected_endpoint_into_application_config(
     monkeypatch.setattr(canary.subprocess, "run", fake_run)
     assert canary.run_canary(environment) == 0
     assert seen["command"][3] == canary.TARGETS[
-        "runpod-liveportrait-performance"
+        "windows-liveportrait-performance"
     ].test_selector
     assert seen["kwargs"]["env"]["COMFYUI_SERVER_URL"] == (
-        "https://performance.example.test"
+        "https://production.example.test"
     )
-    assert seen["kwargs"]["env"]["COMFYUI_API_KEY"] == "k" * 32
+    assert seen["kwargs"]["env"]["COMFYUI_API_KEY"] == "p" * 32
+    assert seen["kwargs"]["env"]["PERFORMANCE_COMFYUI_SERVER_URL"] == (
+        canary.WINDOWS_LIVEPORTRAIT_ORIGIN
+    )
+    assert seen["kwargs"]["env"]["PERFORMANCE_COMFYUI_API_KEY"] == "k" * 32
 
 
-@pytest.mark.parametrize(
-    ("target_name", "budget", "url_env", "token_env", "required_nodes"),
-    [
-        (
-            "runpod-pulid-production",
-            "0.04",
-            "COMFYUI_SERVER_URL",
-            "COMFYUI_API_KEY",
-            {
-                node["class_type"]
-                for node in json.loads((ROOT / "pulid.json").read_text()).values()
-            },
-        ),
-        (
-            "runpod-liveportrait-performance",
-            "0.03",
-            "PERFORMANCE_COMFYUI_SERVER_URL",
-            "PERFORMANCE_COMFYUI_API_KEY",
-            {
-                "LoadImage",
-                "VHS_LoadVideoPath",
-                "LivePortraitProcess",
-                "VHS_VideoCombine",
-            },
-        ),
-    ],
-)
-def test_runpod_probe_checks_selected_gateway_auth_and_required_nodes(
-    monkeypatch,
-    target_name,
-    budget,
-    url_env,
-    token_env,
-    required_nodes,
-):
-    environment = _base(target_name, budget)
-    environment.update({url_env: "https://pod.example.test", token_env: "k" * 32})
-    calls = []
-    responses = {
-        "/health/ready": {"status": "ready"},
-        "/system_stats": {"system": {}},
-        "/object_info": {name: {} for name in required_nodes},
-    }
+def test_windows_probe_binds_exact_readiness_and_shipping_graph(monkeypatch):
+    import comfyui_client
+    import performance.worker_readiness as worker_readiness
 
-    def fake_request(origin, path, *, token):
-        calls.append((origin, path, token))
-        return responses[path]
+    environment = _base("windows-liveportrait-performance", "0.00")
+    environment.update(
+        {
+            "PERFORMANCE_COMFYUI_SERVER_URL": canary.WINDOWS_LIVEPORTRAIT_ORIGIN,
+            "PERFORMANCE_COMFYUI_API_KEY": "w" * 32,
+        }
+    )
+    object_info = json.loads(
+        (ROOT / "tests/fixtures/liveportrait_object_info.json").read_text()
+    )
+    seen = {}
+    real_validate = comfyui_client.ComfyUIClient._validate_workflow_contract
 
-    monkeypatch.setattr(canary, "_request_runpod_json", fake_request)
-    canary.probe_runpod(environment)
-    assert calls == [
-        ("https://pod.example.test", "/health/ready", None),
-        ("https://pod.example.test", "/system_stats", "k" * 32),
-        ("https://pod.example.test", "/object_info", "k" * 32),
-    ]
+    def fake_require(settings_obj):
+        seen["readiness"] = settings_obj
+        return {"status": "ready", "role": "performance-liveportrait"}
+
+    class Client:
+        _validate_workflow_contract = staticmethod(real_validate)
+
+        def __init__(self, origin, **kwargs):
+            seen["client"] = (origin, kwargs)
+
+        def get_system_stats(self):
+            return {"system": {}, "devices": []}
+
+        def get_object_info(self):
+            return object_info
+
+    monkeypatch.setattr(
+        worker_readiness, "require_liveportrait_worker_ready", fake_require
+    )
+    monkeypatch.setattr(comfyui_client, "ComfyUIClient", Client)
+
+    canary.probe_worker(environment)
+
+    assert seen["readiness"].performance_comfyui_server_url == (
+        canary.WINDOWS_LIVEPORTRAIT_ORIGIN
+    )
+    assert seen["client"] == (
+        canary.WINDOWS_LIVEPORTRAIT_ORIGIN,
+        {
+            "auth_token": "w" * 32,
+            "connect_timeout": 2.0,
+            "read_timeout": 5.0,
+        },
+    )
 
 
 def test_workflow_is_manual_only_default_inert_and_immutable():
@@ -252,31 +278,54 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
     assert "default: '0'" in workflow
     assert "cancel-in-progress: false" in workflow
     assert "\npermissions:\n  contents: read\n" in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "name: live-contract-canary" in workflow
     assert "timeout-minutes: 15" in workflow
     assert workflow.count("deployments: write") == 1
     assert "\n  runway-fence:" not in workflow
     assert "python scripts/live_contract_canary.py verify-runway-fence" in workflow
     assert "CANARY_AUTHORITY_GITHUB_TOKEN" in workflow
-    assert "- runpod-pulid-production" in workflow
-    assert "- runpod-liveportrait-performance" in workflow
+    assert "- windows-liveportrait-performance" in workflow
     assert (
-        "inputs.target == 'runpod-pulid-production' && secrets.COMFYUI_SERVER_URL"
+        "runs-on: [self-hosted, macOS, content-liveportrait-ephemeral-jit]"
         in workflow
     )
-    assert (
-        "inputs.target == 'runpod-liveportrait-performance' "
-        "&& secrets.PERFORMANCE_COMFYUI_SERVER_URL"
-        in workflow
+    assert "windows_runner_authorization:" in workflow
+    assert canary.WINDOWS_RUNNER_AUTHORIZATION_ENV in workflow
+    windows_job = workflow.split(
+        "  windows-liveportrait-canary:\n", 1
+    )[1]
+    windows_job_environment = windows_job.split("    env:\n", 1)[1].split(
+        "    steps:\n", 1
+    )[0]
+    assert "PERFORMANCE_COMFYUI_API_KEY" not in windows_job_environment
+    assert windows_job.count(
+        "PERFORMANCE_COMFYUI_API_KEY: "
+        "${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}"
+    ) == 3
+    assert "CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv" in (
+        windows_job_environment
     )
-    assert "secrets.PERFORMANCE_COMFYUI_SERVER_URL" in workflow
-    assert "secrets.PERFORMANCE_COMFYUI_API_KEY" in workflow
+    assert 'python -m venv --clear "$CANARY_VENV"' in windows_job
+    assert "pip install --no-cache-dir --no-deps" in windows_job
+    for requirement in (
+        "pytest==8.4.2",
+        "Pillow==11.3.0",
+        "python-dotenv==1.2.1",
+        "requests==2.32.5",
+        "certifi==2026.2.25",
+        "charset-normalizer==3.4.6",
+        "idna==3.11",
+        "urllib3==2.6.3",
+        "iniconfig==2.3.0",
+        "packaging==26.0",
+        "pluggy==1.6.0",
+        "Pygments==2.19.2",
+    ):
+        assert f"'{requirement}'" in windows_job
     assert "sudo apt-get install --yes --no-install-recommends ffmpeg" in workflow
-    assert (
-        "inputs.target == 'runway-act-two' || "
-        "inputs.target == 'runpod-liveportrait-performance'"
-        in workflow
-    )
+    assert "PERFORMANCE_COMFYUI_SERVER_URL: http://127.0.0.1:18189" in workflow
+    assert "python scripts/live_contract_canary.py probe-worker" in workflow
     refs = re.findall(r"uses:\s+[^@\s]+@([^\s#]+)", workflow)
     assert refs and all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs)
 
@@ -328,11 +377,13 @@ def _github_fence_environment(tmp_path: Path) -> dict[str, str]:
 def _deployment(deployment_id: int = 42) -> dict:
     return {
         "id": deployment_id,
+        "sha": "a" * 40,
         "payload": {
             "schema_version": 1,
             "target": "runway-act-two",
             "logical_attempt": f"v3-{canary.RUNWAY_FIXTURE_SHA256[:8]}",
             "fixture_sha256": canary.RUNWAY_FIXTURE_SHA256,
+            "source_sha": "a" * 40,
             "owner_run_id": "1234",
             "owner_run_attempt": "1",
         },
@@ -365,6 +416,26 @@ def test_runway_claim_is_created_only_at_the_provider_boundary(
     assert create_payload["task"] == canary.RUNWAY_AUTHORITY_TASK
     assert create_payload["auto_merge"] is False
     assert create_payload["required_contexts"] == []
+    assert create_payload["payload"]["source_sha"] == "a" * 40
+
+
+def test_runway_recovery_rejects_deployment_from_another_source_commit(
+    monkeypatch,
+    tmp_path,
+):
+    environment = {
+        **_github_fence_environment(tmp_path),
+        "GITHUB_SHA": "c" * 40,
+    }
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        if method == "GET" and "/deployments?" in path:
+            return 200, [_deployment()]
+        raise AssertionError("source drift must fail before deployment status lookup")
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    with pytest.raises(canary.CanaryPreflightError, match="source SHA drifted"):
+        canary.verify_runway_fence(environment)
 
 
 def test_stale_fresh_output_cannot_bypass_attempt_two_remote_recheck(
@@ -490,9 +561,31 @@ def test_conflicting_deployment_task_ids_fail_closed():
 def test_configured_live_tests_fail_instead_of_skipping_on_empty_result():
     for path in (
         Path("tests/integration/test_act_two_smoke.py"),
-        Path("tests/integration/test_pulid_smoke.py"),
         Path("tests/integration/test_live_portrait_smoke.py"),
     ):
         source = path.read_text()
         assert "pytest.fail(" in source
         assert "pytest.skip(" not in source
+
+
+def test_liveportrait_fixture_encoder_normalizes_odd_h264_geometry(
+    monkeypatch,
+    tmp_path,
+):
+    """The hash-pinned 1254px sheet produces odd 627px panels."""
+    from PIL import Image
+    from tests.integration import test_live_portrait_smoke as smoke
+
+    panels = [Image.new("RGB", (627, 627), color=(index, 0, 0)) for index in range(4)]
+    monkeypatch.setattr(smoke, "_load_verified_expression_panels", lambda: panels)
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(command, **_kwargs):
+        seen["command"] = command
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(smoke.subprocess, "run", fake_run)
+    smoke._make_test_driving_video(str(tmp_path / "driving.mp4"), frames=2)
+
+    command = seen["command"]
+    assert command[command.index("-vf") + 1] == "pad=ceil(iw/2)*2:ceil(ih/2)*2"

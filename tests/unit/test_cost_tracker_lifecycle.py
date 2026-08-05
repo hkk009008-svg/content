@@ -63,7 +63,6 @@ def test_injected_tracker_remains_caller_owned(tmp_path):
     ("logger", "args"),
     [
         ("performance.live_portrait", (5.0, "shot", "project")),
-        ("performance.driving_video", ("sadtalker", 5.0, "shot", "project")),
         ("performance.viggle", ("shot", "project")),
     ],
 )

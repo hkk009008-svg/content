@@ -140,7 +140,27 @@ export interface Shot {
   performance_takes?: TakeRecord[]
   approved_performance_take_id?: string
   performance_engine?: 'ACT_ONE' | 'LIVE_PORTRAIT' | 'VIGGLE' | 'SKIP' | ''
+  /** Empty = automatic cloud route; budget = dedicated local LivePortrait. */
+  performance_budget_mode?: '' | 'budget' | 'cheap'
   driving_video_path?: string
+  driving_video_history?: Array<{
+    path: string
+    sha256: string
+    size_bytes: number
+    uploaded_at: string
+    artifact_id?: string
+  }>
+  performance_skip?: {
+    id: string
+    action: 'skip'
+    reason: string
+    decision_source?: 'operator' | 'routing'
+    operator_reason?: string
+    created_at: string
+    [key: string]: unknown
+  } | null
+  performance_skip_history?: Array<Record<string, unknown>>
+  performance_review_history?: Array<Record<string, unknown>>
   shot_type?: string
   /** Canonical shot-level dialogue survives in older projects even when a
    *  take predates metadata.has_dialogue. */
@@ -219,12 +239,11 @@ export interface GlobalSettings {
   music_mood: string
   color_palette: string
   style_rules: Record<string, string>
+  /** Opt-in visual-reference research when adding a location. */
+  location_research?: boolean
   // Audio
   music_mastering?: string
-  // ComfyUI (production tier)
-  comfyui_sampler?: string
-  comfyui_steps?: number
-  flux_guidance?: number
+  identity_backend?: 'gemini_multiref' | 'local_flux2_klein'
   // Post-Processing
   color_grade_preset?: string
   lip_sync_mode?: string
@@ -242,21 +261,12 @@ export interface GlobalSettings {
   identity_strictness?: number
   // V11: LLM model override (read by llm/chief_director.py per call)
   creative_llm?: string
-  // V11: Adaptive PuLID gate (read by domain/continuity_engine.py)
-  adaptive_pulid?: boolean
   // V11: Workflow & Coherence
   coherence_check_enabled?: boolean
   color_drift_sensitivity?: number
   // Scene Transitions (assembly cross-dissolve)
   scene_transitions?: boolean
   transition_duration?: number
-
-  // Legacy LoRA registry snapshots. These fields are read-only historical
-  // state: the product cannot train, register, or consume per-character LoRAs.
-  // They remain typed only so old project JSON can round-trip unchanged.
-  char_lora_paths?: Record<string, string>
-  char_lora_strengths?: Record<string, number>
-  char_lora_triggers?: Record<string, string>
 
   // -----------------------------------------------------------------
   // AUDIO & SYNC — TTS provider + lipsync engine preferences.
@@ -338,15 +348,6 @@ export interface VideoEngineRow {
 }
 
 export interface WorkflowTemplate {
-  pulid_weight: number
-  pulid_start_at: number
-  pulid_end_at: number
-  guidance: number
-  steps: number
-  sampler: string
-  scheduler: string
-  pag_scale: number
-  denoise_default: number
   target_api: string
   video_fallbacks: string[]
   description: string
@@ -610,6 +611,50 @@ export interface PipelineStage {
   status: StageStatus
 }
 
+/** Safe, read-only GPU worker readiness projection returned to the UI.
+ *  Deliberately excludes endpoint URLs and credentials. */
+export type GpuWorkerRole = 'image' | 'performance'
+
+export type GpuWorkerState =
+  | 'unconfigured'
+  | 'not_installed'
+  | 'needs_benchmark'
+  | 'offline'
+  | 'unauthorized'
+  | 'blocked'
+  | 'reachable'
+  | 'ready'
+  | 'incompatible'
+
+export interface GpuWorkerStatus {
+  role: GpuWorkerRole
+  label: string
+  configured: boolean
+  dedicated: boolean
+  state: GpuWorkerState
+  message: string
+  gpu_name?: string
+  vram_total_gib?: number
+  vram_free_gib?: number
+  running?: number
+  pending?: number
+  missing_node_classes?: string[]
+  blocker_code?: string
+  benchmark_state?: string
+  startup_ready?: boolean
+  execution_proven?: boolean
+  candidate_manifest_sha256?: string
+  workflow_sha256?: string
+  model_manifest_sha256?: string
+  revisions_manifest_sha256?: string
+  contract_digest?: string
+}
+
+export interface GpuWorkersResponse {
+  workers: GpuWorkerStatus[]
+  checked_at: string
+}
+
 export interface AppConfig {
   camera_motions: string[]
   visual_effects: string[]
@@ -622,20 +667,30 @@ export interface AppConfig {
   pacing_options: string[]
   mood_options: string[]
   post_processing: Record<string, { available: boolean; description: string }>
-  continuity_options: Record<string, { min: number; max: number; default: number; description: string }>
   color_grade_presets?: string[]
   lip_sync_modes?: string[]
   api_engine_defaults?: Record<string, ApiEngineConfig>
   // Model selection options
   creative_llm_options?: { value: string; label: string }[]
   quality_judge_options?: { value: string; label: string }[]
-  available_style_refs?: { path: string; label: string }[]          // style board references on disk
+  flux2_candidate?: {
+    capability: string
+    label: string
+    state: 'not_installed' | 'needs_benchmark' | 'ready' | 'blocked' | 'offline'
+    selectable: boolean
+    startup_ready: boolean
+    execution_proven: boolean
+    benchmark_state: string
+    blocker_code: string
+    license_state: string
+    license_blocker_code: string
+    reason: string
+  }
   // Purpose-based API routing (from PURPOSE_API_RANKING)
   purpose_tags?: PurposeTag[]
   purpose_api_ranking?: Record<PurposeTag, string[]>                // purpose -> ordered list of API keys
   // Billing attribution (from domain/scene_decomposer.BILLING_PROVIDERS) — keyed
-  // by PROVIDER (e.g. "RUNPOD_GPU", "FAL_AI"), each value the list of engine/API
-  // keys that provider bills. NOT engine-keyed — see web/src/lib/podGating.ts.
+  // by provider (for example "FAL_AI"), each value the list of billed engines.
   billing_providers?: Record<string, string[]>
   // Server-reconciled video-engine selectability view (web_server.py:627
   // `_project_video_engine_rows`) — present only when `/api/config` is
@@ -678,33 +733,6 @@ export interface ScorecardMedia {
   measured_at: string | null;
 }
 
-/** Diagnostic-only policy projection. These fields describe the current
- * dormant boundary and must never be interpreted as UI reactivation flags. */
-export interface LoraAvailability {
-  training_available: false;
-  registration_available: false;
-  consumer_available: false;
-  policy: 'dormant';
-}
-
-/** Read-only historical LoRA sidecar returned by the character status GET. */
-export interface LoraStatus extends LoraAvailability {
-  char_id: string;
-  status: string;
-  progress_percent: number;
-  started_at?: string | null;
-  finished_at?: string | null;
-  lora_path?: string | null;
-  quality_score?: number | null;
-  image_count?: number;
-  config?: Record<string, unknown> | null;
-  error?: string | null;
-  log_tail?: string | null;
-  rejected?: boolean;
-  quality_warning?: boolean;
-  best_strength?: number | null;
-}
-
 /** Evidence-backed capability row (Slice 12). `status` is the AUTHORED claim
  *  (live/wired/stubbed/parked/inactive/dead); `engaged_static` is the
  *  SEPARATELY COMPUTED, mechanically-validated fact — a component cannot be
@@ -722,7 +750,7 @@ export interface CapabilityComponent {
   title: string;
   status: string;
   exposure: 'ui' | 'api' | 'internal' | 'cli';
-  spend_kind: 'none' | 'compute_local' | 'paid_api' | 'pod_gpu';
+  spend_kind: 'none' | 'compute_local' | 'paid_api' | 'local_gpu';
   engaged_static: boolean;
   runtime_availability: 'available' | 'unavailable' | 'not_applicable';
   runtime_reason: string | null;
@@ -735,8 +763,6 @@ export interface CapabilityScorecard {
   dimensions: CapabilityDimension[];
   routing: { first_try: number; fallback: number; silent_fallback: number };
   gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; deferred?: number; top_vetoes: [string, number][] }>;
-  lora_availability: LoraAvailability;
-  lora: { char_id: string; strength: number | null; score: number | null; verdict: 'ok'|'warning'|'rejected' }[];
   components: CapabilityComponent[];
   per_shot: {
     shot_id: string;

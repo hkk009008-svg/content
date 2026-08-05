@@ -128,7 +128,7 @@ def _parse_multirange_terms(terms_text: str) -> "Optional[list[tuple[int, int]]]
 # Slash-list anchor: ONE backtick token citing slash-separated BARE lines —
 # `path:N / M / P` (PROGRAM-MANUAL compound table rows write the filename once
 # and continue with slashes INSIDE the same token, e.g.
-# `quality_max.py:461 / 509 / 543 / 564 / 587`). _INLINE_ANCHOR_RE requires the
+# `example.py:461 / 509 / 543 / 564 / 587`). _INLINE_ANCHOR_RE requires the
 # closing backtick right after the first number, _CONTINUATION_ANCHOR_RE wants
 # separate `:N` tokens, _MULTIRANGE_RE wants commas — so these cells were
 # silently unverified (PROGRAM-MANUAL:556 drifted +20 under a green gate; Lane V

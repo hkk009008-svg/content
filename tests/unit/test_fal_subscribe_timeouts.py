@@ -9,7 +9,7 @@ subclass), which the call sites' existing cascade/fallback handlers route
 around.
 
 AST-based so any NEW call site fails loud here until it picks a bound from
-`cinema/fal_limits.py`. Scripts (ephemeral pod drivers), tests, and
+`cinema/fal_limits.py`. Scripts, tests, and
 worktree copies are out of scope.
 """
 from __future__ import annotations

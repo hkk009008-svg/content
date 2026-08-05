@@ -38,7 +38,7 @@ const SPEND_LABEL: Record<CapabilityComponent['spend_kind'], string> = {
   none: 'no spend',
   compute_local: 'local compute',
   paid_api: 'paid API',
-  pod_gpu: 'GPU pod',
+  local_gpu: 'local GPU',
 }
 
 /** `KLING_NATIVE` -> `Kling Native`, `SORA_2` -> `Sora 2`, empty -> `—`.
@@ -311,43 +311,6 @@ function GateAudit({ sc }: { sc: CapabilityScorecard }) {
   )
 }
 
-// ── Section: historical LoRA records ─────────────────────────────────────────
-
-function LoraSummary({ sc }: { sc: CapabilityScorecard }) {
-  const availability = sc.lora_availability
-  const diagnostic = [
-    `policy=${availability.policy}`,
-    `training_available=${availability.training_available}`,
-    `registration_available=${availability.registration_available}`,
-    `consumer_available=${availability.consumer_available}`,
-  ].join(' · ')
-
-  return (
-    <div className="space-y-2 text-[11px]" data-policy={availability.policy}>
-      <div className="space-y-1" title={diagnostic}>
-        <Badge variant="neutral">Inactive</Badge>
-        <p className="text-mut">
-          Training, registration, and production use are unavailable. Historical records are read-only.
-        </p>
-      </div>
-      {sc.lora.length === 0 ? (
-        <div className="italic text-dim">No historical character LoRA records</div>
-      ) : (
-        <div className="space-y-1">
-          {sc.lora.map((row) => (
-            <div key={row.char_id} className="flex items-baseline gap-2">
-              <span className="text-dim">{row.char_id}</span>
-              {row.strength !== null && <span className="text-mut">historical str {row.strength.toFixed(2)}</span>}
-              {row.score !== null && <span className="text-mut">{row.score.toFixed(2)}</span>}
-              <Badge variant="neutral">{row.verdict}</Badge>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Section: Component status (Task 7, evidence-backed Slice 12) ────────────
 
 /** One capability chip. Shows the human title + a status badge computed
@@ -395,43 +358,25 @@ function ComponentStatus({ sc }: { sc: CapabilityScorecard }) {
 
 // ── Section: Available — not engaged (Task 11) ───────────────────────────────
 
-/** Curated capability inventory plus manifest entries marked
- *  `stubbed`/`parked`. Policy-inactive LoRA is deliberately absent: retained
- *  history is not an available capability. Foley is also excluded because it
- *  is a live, unconditional scene step. */
+/** Manifest entries marked `stubbed`/`parked`. Retired providers and retained
+ *  history are deliberately absent: neither is an available capability. Foley
+ *  is also excluded because it is a live, unconditional scene step. */
 function AvailableNotEngaged({ sc }: { sc: CapabilityScorecard }) {
-  const curated: { id: string; label: string; note: string; pod: boolean }[] = [
-    // Priority-1 fallback in generate_ai_broll's chain (phase_c_assembly.py) —
-    // there is no separate "max" tier to fall back to; WS1 retired that fork,
-    // so the label must not imply one still exists (comprehensive-unification
-    // audit: stale "max"-tier claims).
-    { id: 'comfy_pulid_keyframe_fallback', label: 'ComfyUI + PuLID keyframe (pod fallback)', note: 'Arc-gated fallback behind Nano Banana — needs the RunPod pod running.', pod: true },
-  ]
-
   const stubbedComponents = sc.components.filter((c) => c.status === 'stubbed' || c.status === 'parked')
 
   return (
     <div className="flex flex-wrap gap-2">
-      {curated.map((item) => (
-        <div
-          key={item.id}
-          title={item.note}
-          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
-        >
-          <StatusDot status="idle" />
-          <span className="text-tx">{item.label}</span>
-          <Badge variant={item.pod ? 'pod' : 'cloud'}>{item.pod ? 'Pod off' : 'Cloud'}</Badge>
-        </div>
-      ))}
       {stubbedComponents.map((c) => (
         <div
           key={c.id}
-          title={c.reason}
-          className="flex items-center gap-1.5 rounded border border-line bg-panel px-2 py-1 text-[11px]"
+          className="rounded border border-line bg-panel px-2 py-1 text-[11px]"
         >
-          <StatusDot status="idle" />
-          <span className="text-tx">{c.title}</span>
-          <Badge variant="neutral">{c.status}</Badge>
+          <div className="flex items-center gap-1.5">
+            <StatusDot status="idle" />
+            <span className="text-tx">{c.title}</span>
+            <Badge variant="neutral">{c.status}</Badge>
+          </div>
+          {c.reason && <p className="mt-1 max-w-64 text-[10px] leading-4 text-mut">{c.reason}</p>}
         </div>
       ))}
     </div>
@@ -493,10 +438,8 @@ export default function CapabilityConsole({ project }: Props) {
           {sc && (
             <span className="flex items-center gap-2 font-mono text-[11px] text-dim">
               {/* "max" is a retired, pre-WS1 tier value that may still be
-                  persisted on old projects; production/pulid.json is the only
-                  pipeline now (workflow_selector.py), so a legacy "max" value
-                  is labeled as history, not shown as if it still selects a
-                  distinct, currently-active tier. */}
+                  persisted on old projects. It no longer selects a distinct
+                  image pipeline, so the UI labels it as history. */}
               <span title={sc.tier === 'max' ? 'Legacy value — runs identically to production; the max tier was retired.' : undefined}>
                 <Badge variant={sc.tier === 'max' ? 'neutral' : 'pri'}>
                   {sc.tier === 'max' ? 'MAX (legacy)' : sc.tier.toUpperCase()}
@@ -536,10 +479,6 @@ export default function CapabilityConsole({ project }: Props) {
 
           <Section title="Gate audit">
             <GateAudit sc={sc} />
-          </Section>
-
-          <Section title="Historical LoRA records">
-            <LoraSummary sc={sc} />
           </Section>
 
           <Section title="Components">

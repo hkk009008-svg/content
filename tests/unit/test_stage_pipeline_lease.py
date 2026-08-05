@@ -50,7 +50,7 @@ def _project(pid: str) -> dict:
 
 
 def test_direct_motion_lease_blocks_settings_delete_generation_and_core_eviction(
-    client,
+    client, inject_pipeline,
 ):
     pid = "stage-lease-project"
     project = _project(pid)
@@ -60,6 +60,8 @@ def test_direct_motion_lease_blocks_settings_delete_generation_and_core_eviction
 
     nested: dict[str, object] = {}
     stage_pipeline = MagicMock()
+    stage_pipeline.current_stage = "REVIEW"
+    inject_pipeline(pid, stage_pipeline)
 
     def generate_while_probing_admin(_scene_id, _shot_id):
         assert pid in web_server._project_stage_in_flight
@@ -102,7 +104,12 @@ def test_direct_motion_lease_blocks_settings_delete_generation_and_core_eviction
             assert "direct stage operation" in body["error"]
         delete_project.assert_not_called()
         assert pid not in web_server._project_stage_in_flight
-        assert pid not in web_server._running_pipelines
+        assert web_server._running_pipelines[pid] is stage_pipeline
+
+        # Simulate the gate-waiting run finishing before exercising the
+        # ordinary post-run administration path.
+        with web_server._pipelines_lock:
+            web_server._running_pipelines.pop(pid, None)
 
         # Once the stage call releases its lease, destructive administration
         # may proceed and is then responsible for retiring the cached core.
@@ -114,11 +121,15 @@ def test_direct_motion_lease_blocks_settings_delete_generation_and_core_eviction
     delete_project.assert_called_once_with(pid, timeout=web_server.HTTP_PROJECT_TIMEOUT)
 
 
-def test_concurrent_direct_motion_is_rejected_before_second_provider_call(client):
+def test_concurrent_direct_motion_is_rejected_before_second_provider_call(
+    client, inject_pipeline,
+):
     pid = "stage-lease-duplicate"
     project = _project(pid)
     nested: dict[str, object] = {}
     stage_pipeline = MagicMock()
+    stage_pipeline.current_stage = "REVIEW"
+    inject_pipeline(pid, stage_pipeline)
 
     def first_motion(_scene_id, _shot_id):
         with app.test_client() as other_client:
@@ -144,10 +155,12 @@ def test_concurrent_direct_motion_is_rejected_before_second_provider_call(client
     assert pid not in web_server._project_stage_in_flight
 
 
-def test_stage_lease_releases_when_provider_raises(client):
+def test_stage_lease_releases_when_provider_raises(client, inject_pipeline):
     pid = "stage-lease-exception"
     project = _project(pid)
     stage_pipeline = MagicMock()
+    stage_pipeline.current_stage = "REVIEW"
+    inject_pipeline(pid, stage_pipeline)
     stage_pipeline.generate_motion_take.side_effect = RuntimeError("provider exploded")
 
     with (
@@ -158,6 +171,8 @@ def test_stage_lease_releases_when_provider_raises(client):
         client.post(f"/api/projects/{pid}/shots/shot-1/motion/generate")
 
     assert pid not in web_server._project_stage_in_flight
+    with web_server._pipelines_lock:
+        web_server._running_pipelines.pop(pid, None)
     assert web_server._reserve_project_admin(pid) is True
     web_server._release_project_admin(pid)
 

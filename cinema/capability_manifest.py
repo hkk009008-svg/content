@@ -51,7 +51,7 @@ ENGAGING_STATUSES = frozenset({"live", "wired"})
 
 _STATUS_REASON = {
     "stubbed": "Not wired: implemented but has no production caller yet.",
-    "parked": "Blocked on external state (pod/credential/install) before it can run.",
+    "parked": "Blocked on external state (worker/credential/install) before it can run.",
     "inactive": "Deliberately unavailable by policy; historical records only.",
     "dead": "Confirmed dead; scheduled for removal.",
 }

@@ -138,7 +138,7 @@ _AUXILIARY_DEPENDENCIES = {
     "character_embedding": ("domain/character_manager.py", "identity/validator.py"),
     "character_reference": ("domain/character_manager.py", "paid_provider.py"),
     "dialogue": ("audio/dialogue.py", "audio/effects.py"),
-    "driving_video": ("performance/driving_video.py",),
+    "driving_video": ("web_server.py", "performance/_net.py"),
     "foley": ("audio/foley.py", "audio/effects.py"),
     "scene_preview": ("cinema/shots/controller.py", "phase_c_ffmpeg.py"),
 }
@@ -393,11 +393,12 @@ def _take_source_hashes(
             _add_source_hash(hashes, store, label, metadata.get(field))
 
     if take.get("kind") == "performance":
-        # New accepted takes persist the exact resolved dispatch input here,
-        # covering both operator uploads and synthesized Mode-B driving.  The
-        # shot-level fallback keeps pre-ledger upload takes indexable without
-        # pretending a missing Mode-B path can be reconstructed.
-        driving_path = metadata.get("driving_video_path")
+        # New accepted takes persist the exact operator-uploaded dispatch input
+        # here. The shot-level fallback keeps pre-ledger upload takes indexable.
+        driving_path = (
+            metadata.get("dispatched_driving_video_path")
+            or metadata.get("driving_video_path")
+        )
         if not driving_path and shot is not None and metadata.get("driving_source") == "upload":
             driving_path = shot.get("driving_video_path")
         _add_source_hash(

@@ -62,7 +62,6 @@ def _valid_spec(image_prompt: str = "") -> dict:
         "video_prompt": "slow dolly-in",
         "purpose": "static_portrait",
         "shot_type": "portrait",
-        "suggested_image_api": "FLUX_DEV",
         "suggested_video_api": "AUTO",
         "suggested_lipsync": None,
         "negative_constraints": "plastic skin",

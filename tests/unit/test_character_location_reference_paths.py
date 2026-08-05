@@ -10,13 +10,13 @@ multi_angle_refs / embedding_cache for characters); every reader then called
 os.path.exists() on the raw stored string:
   - get_character_embedding      (embedding_cache / canonical_reference)
   - get_reference_image          (canonical_reference / reference_images) --
-    the PuLID face-locking input
+    the approved identity-reference input
   - get_multi_angle_refs         (multi_angle_refs / ... ) -- the Kling
     subject-binding input
   - get_location_reference       (reference_images)
 
 After an exact repo move (the same failure mode slice 10 fixed for takes),
-all four would silently degrade -- PuLID face-locking, Kling subject
+all four would silently degrade -- identity-reference conditioning, subject
 binding, and identity embedding would find nothing, with no error, no log.
 
 Fix mirrors slice 10 exactly:
@@ -204,7 +204,7 @@ class TestLocationWriteSidePersistsRelative:
 class TestCharacterSurvivesProjectRootRelocation:
     """A character created under dir A, whose project directory (and every
     file under it) is then physically relocated to dir B, must still
-    resolve for every downstream consumer -- PuLID face-locking, Kling
+    resolve for every downstream consumer -- identity conditioning,
     multi-angle subject binding, and identity embedding -- exactly as it
     did before the move.
 
@@ -253,7 +253,7 @@ class TestCharacterSurvivesProjectRootRelocation:
         assert reloaded is not None
 
         ref_img = get_reference_image(reloaded, cid)
-        assert ref_img is not None, "PuLID face-lock reference did not resolve after move"
+        assert ref_img is not None, "identity reference did not resolve after move"
         assert os.path.isabs(ref_img) and os.path.exists(ref_img)
         assert ref_img.startswith(str(root_b))
 

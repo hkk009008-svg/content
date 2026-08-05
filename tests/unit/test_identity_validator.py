@@ -82,7 +82,6 @@ def _make_char_result(
         frame_results=[],
         matched=matched,
         primary_failure_reason=failure_reason,
-        suggested_pulid_adjustment=0.0,
     )
 
 
@@ -164,7 +163,7 @@ class TestValidateImageHappyPath:
         assert result.passed is True
         assert result.overall_score >= get_threshold_for_shot("medium")
 
-    def test_history_appended_on_success(self):
+    def test_success_does_not_create_provider_tuning_history(self):
         ref_emb = _make_embedding(1.0)
         gen_emb = _make_embedding(0.999)
 
@@ -173,18 +172,15 @@ class TestValidateImageHappyPath:
              patch(
                  "identity.validator.DeepFace.represent",
                  side_effect=[_fake_represent(ref_emb), _fake_represent(gen_emb)],
-             ):
+            ):
             validator = IdentityValidator()
-            assert len(validator.history) == 0
             validator.validate_image("/gen.jpg", "/ref.jpg")
-            assert len(validator.history) == 1  # test case 6: history appended
+            assert not hasattr(validator, "history")
 
 
 class TestValidateImageMultiFace:
     """A multi-char frame must be scored on the BEST-matching detected face,
-    not the first-detected one (live repro 2026-06-11: S2 dual-PuLID two-shots
-    scored full:man 0.464 while the man's image half scored 0.743+ — the other
-    character's face was detection index 0)."""
+    not the first-detected one."""
 
     def test_best_face_wins_over_first_detected(self):
         ref_emb = _make_embedding(1.0)
@@ -693,139 +689,6 @@ class TestClassifyFailure:
 
 
 # ---------------------------------------------------------------------------
-# _compute_pulid_delta tests
-# ---------------------------------------------------------------------------
-
-class TestComputePulidDelta:
-    """Test case 13: all 4 outcomes of _compute_pulid_delta."""
-
-    def test_strong_match_returns_minus_005(self):
-        # matched=True, similarity > 0.80 → -0.05
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.85, matched=True)
-        assert delta == pytest.approx(-0.05)
-
-    def test_weak_match_returns_zero(self):
-        # matched=True, similarity <= 0.80 → 0.0
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.75, matched=True)
-        assert delta == pytest.approx(0.0)
-
-    def test_close_miss_returns_plus_005(self):
-        # matched=False, similarity > 0.55 → +0.05
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.60, matched=False)
-        assert delta == pytest.approx(0.05)
-
-    def test_clear_failure_returns_plus_010(self):
-        # matched=False, similarity <= 0.55 → +0.10
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.30, matched=False)
-        assert delta == pytest.approx(0.10)
-
-    def test_boundary_similarity_080_still_strong_match(self):
-        # matched=True, similarity == 0.80 is NOT > 0.80, so → 0.0 (not -0.05)
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.80, matched=True)
-        assert delta == pytest.approx(0.0)
-
-    def test_boundary_similarity_055_is_clear_failure(self):
-        # matched=False, similarity == 0.55 is NOT > 0.55, so → +0.10 (not +0.05)
-        delta = IdentityValidator._compute_pulid_delta(similarity=0.55, matched=False)
-        assert delta == pytest.approx(0.10)
-
-
-# ---------------------------------------------------------------------------
-# get_rolling_stats tests
-# ---------------------------------------------------------------------------
-
-class TestGetRollingStats:
-    """Test case 14: empty history → zero-stats; delta tiers by injecting fake results."""
-
-    def test_empty_history_returns_zero_stats(self):
-        validator = IdentityValidator()
-        stats = validator.get_rolling_stats("char_a")
-        assert stats["sample_count"] == 0
-        assert stats["mean_similarity"] == 0.0
-        assert stats["success_rate"] == 0.0
-        assert stats["suggested_pulid_delta"] == 0.0
-
-    def _inject_results(self, validator, char_id, records):
-        """Inject a list of (matched, best_similarity) as fake history entries."""
-        for matched, best_sim in records:
-            char_result = _make_char_result(char_id, matched=matched, best_similarity=best_sim)
-            fake_result = IdentityValidationResult(
-                passed=matched,
-                overall_score=best_sim,
-                character_results={char_id: char_result},
-                frames_sampled=1,
-                video_duration_seconds=5.0,
-                shot_type="medium",
-                threshold_used=0.65,
-            )
-            validator.history.append(fake_result)
-
-    def test_low_success_rate_gives_plus_010_delta(self):
-        # success_rate < 0.5 → suggested_pulid_delta = +0.10
-        validator = IdentityValidator()
-        # 1 success out of 4 = 0.25 < 0.5
-        self._inject_results(validator, "char_a", [
-            (True, 0.80),
-            (False, 0.40),
-            (False, 0.40),
-            (False, 0.40),
-        ])
-        stats = validator.get_rolling_stats("char_a")
-        assert stats["suggested_pulid_delta"] == pytest.approx(0.10)
-        assert stats["sample_count"] == 4
-
-    def test_medium_success_rate_gives_plus_005_delta(self):
-        # 0.5 <= success_rate < 0.8 → suggested_pulid_delta = +0.05
-        validator = IdentityValidator()
-        # 3 out of 5 = 0.6, in [0.5, 0.8)
-        self._inject_results(validator, "char_a", [
-            (True, 0.80),
-            (True, 0.75),
-            (True, 0.70),
-            (False, 0.40),
-            (False, 0.40),
-        ])
-        stats = validator.get_rolling_stats("char_a")
-        assert stats["suggested_pulid_delta"] == pytest.approx(0.05)
-
-    def test_perfect_success_high_mean_gives_minus_005_delta(self):
-        # success_rate == 1.0 AND mean_similarity > 0.80 → suggested_pulid_delta = -0.05
-        validator = IdentityValidator()
-        self._inject_results(validator, "char_a", [
-            (True, 0.90),
-            (True, 0.85),
-            (True, 0.88),
-        ])
-        stats = validator.get_rolling_stats("char_a")
-        assert stats["suggested_pulid_delta"] == pytest.approx(-0.05)
-
-    def test_perfect_success_low_mean_gives_zero_delta(self):
-        # success_rate == 1.0 but mean_similarity <= 0.80 → delta = 0.0
-        validator = IdentityValidator()
-        self._inject_results(validator, "char_a", [
-            (True, 0.70),
-            (True, 0.72),
-        ])
-        stats = validator.get_rolling_stats("char_a")
-        assert stats["suggested_pulid_delta"] == pytest.approx(0.0)
-
-    def test_window_limits_to_last_n(self):
-        validator = IdentityValidator()
-        # Inject 20 entries but only look at last 5
-        self._inject_results(validator, "char_a", [(False, 0.30)] * 15)
-        self._inject_results(validator, "char_a", [(True, 0.90)] * 5)
-        stats = validator.get_rolling_stats("char_a", window=5)
-        assert stats["sample_count"] == 5
-        assert stats["success_rate"] == pytest.approx(1.0)
-
-    def test_character_not_in_history_gives_empty(self):
-        validator = IdentityValidator()
-        self._inject_results(validator, "char_a", [(True, 0.90)])
-        stats = validator.get_rolling_stats("char_b")
-        assert stats["sample_count"] == 0
-
-
-# ---------------------------------------------------------------------------
 # _estimate_face_angle tests
 # ---------------------------------------------------------------------------
 
@@ -873,25 +736,14 @@ class TestEstimateFaceAngle:
 # ---------------------------------------------------------------------------
 
 class TestSingletonIndependence:
-    """Test case 16: two IdentityValidator() instances have independent .history."""
+    """Two fresh validators have independent embedding caches."""
 
-    def test_independent_history(self):
+    def test_independent_embedding_caches(self):
         v1 = IdentityValidator()
         v2 = IdentityValidator()
-
-        ref_emb = _make_embedding(1.0)
-        gen_emb = _make_embedding(0.999)
-
-        with patch("identity.validator.os.path.exists", return_value=True), \
-             patch("identity.validator.DEEPFACE_AVAILABLE", True), \
-             patch(
-                 "identity.validator.DeepFace.represent",
-                 side_effect=[_fake_represent(ref_emb), _fake_represent(gen_emb)],
-             ):
-            v1.validate_image("/gen.jpg", "/ref.jpg")
-
-        assert len(v1.history) == 1
-        assert len(v2.history) == 0
+        v1.embedding_cache["char_a"] = _make_embedding(1.0)
+        assert "char_a" in v1.embedding_cache
+        assert "char_a" not in v2.embedding_cache
 
     def test_get_shared_validator_reset(self):
         """Resetting _SHARED_VALIDATOR gives a fresh instance."""

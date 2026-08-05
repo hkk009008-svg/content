@@ -1,0 +1,161 @@
+{
+  "10": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "source-face.jpg"
+    }
+  },
+  "11": {
+    "class_type": "VHS_LoadVideo",
+    "inputs": {
+      "custom_height": 0,
+      "custom_width": 512,
+      "force_rate": 25,
+      "frame_load_cap": 1,
+      "select_every_nth": 1,
+      "skip_first_frames": 0,
+      "video": "driving-expression.mp4"
+    }
+  },
+  "12": {
+    "class_type": "DownloadAndLoadLivePortraitModels",
+    "inputs": {
+      "mode": "human",
+      "precision": "fp16"
+    }
+  },
+  "13": {
+    "class_type": "LivePortraitLoadMediaPipeCropper",
+    "inputs": {
+      "keep_model_loaded": true,
+      "landmarkrunner_onnx_device": "CPU"
+    }
+  },
+  "14": {
+    "class_type": "LivePortraitCropper",
+    "inputs": {
+      "cropper": [
+        "13",
+        0
+      ],
+      "dsize": 512,
+      "face_index": 0,
+      "face_index_order": "large-small",
+      "pipeline": [
+        "12",
+        0
+      ],
+      "rotate": true,
+      "scale": 2.3,
+      "source_image": [
+        "10",
+        0
+      ],
+      "vx_ratio": 0.0,
+      "vy_ratio": -0.125
+    }
+  },
+  "15": {
+    "class_type": "LivePortraitCropper",
+    "inputs": {
+      "cropper": [
+        "13",
+        0
+      ],
+      "dsize": 512,
+      "face_index": 0,
+      "face_index_order": "large-small",
+      "pipeline": [
+        "12",
+        0
+      ],
+      "rotate": true,
+      "scale": 2.3,
+      "source_image": [
+        "11",
+        0
+      ],
+      "vx_ratio": 0.0,
+      "vy_ratio": -0.125
+    }
+  },
+  "16": {
+    "class_type": "LivePortraitRetargeting",
+    "inputs": {
+      "driving_crop_info": [
+        "15",
+        1
+      ],
+      "eye_retargeting": true,
+      "eyes_retargeting_multiplier": 1.0,
+      "lip_retargeting": true,
+      "lip_retargeting_multiplier": 1.0
+    }
+  },
+  "17": {
+    "class_type": "LivePortraitProcess",
+    "inputs": {
+      "crop_info": [
+        "14",
+        1
+      ],
+      "delta_multiplier": 1.0,
+      "driving_images": [
+        "11",
+        0
+      ],
+      "driving_smooth_observation_variance": 3e-06,
+      "expression_friendly": true,
+      "expression_friendly_multiplier": 1.0,
+      "lip_zero": false,
+      "lip_zero_threshold": 0.03,
+      "mismatch_method": "constant",
+      "opt_retargeting_info": [
+        "16",
+        0
+      ],
+      "pipeline": [
+        "12",
+        0
+      ],
+      "relative_motion_mode": "relative",
+      "source_image": [
+        "10",
+        0
+      ],
+      "stitching": true
+    }
+  },
+  "18": {
+    "class_type": "LivePortraitComposite",
+    "inputs": {
+      "cropped_image": [
+        "17",
+        0
+      ],
+      "liveportrait_out": [
+        "17",
+        1
+      ],
+      "source_image": [
+        "10",
+        0
+      ]
+    }
+  },
+  "19": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "filename_prefix": "live_portrait",
+      "format": "video/h264-mp4",
+      "frame_rate": 25,
+      "images": [
+        "18",
+        0
+      ],
+      "loop_count": 0,
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

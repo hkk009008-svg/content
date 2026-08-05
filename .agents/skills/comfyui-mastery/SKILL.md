@@ -1,95 +1,121 @@
 ---
 name: "comfyui-mastery"
-description: "Use when building, modifying, debugging, or understanding ComfyUI workflows, nodes, or API-format JSON. Use when generating images via ComfyUI, configuring samplers, ControlNet, PuLID, IP-Adapter, AnimateDiff, or any custom node. Use when integrating ComfyUI with RunPod, Railway, or production pipelines."
+description: "Use when building, modifying, debugging, or reviewing this repository's hash-bound FLUX.2 Klein image graph, pinned LivePortrait performance graph, ComfyUI API JSON, worker readiness, or durable local-GPU dispatch."
 ---
 
 # ComfyUI Mastery
 
-ComfyUI is a node-based execution graph for Stable Diffusion and FLUX models. Workflows are directed acyclic graphs where each node has a `class_type`, typed `inputs` (scalars or links to other nodes), and typed outputs. The engine resolves execution order automatically from the graph topology.
+ComfyUI executes a directed graph. API-format nodes use string IDs, a
+`class_type`, and typed `inputs`; links are `[source_node_id, output_index]`.
+Graph validity is necessary but is not worker readiness.
 
-## Workflow JSON Format (API)
+This repository has exactly two supported production graph contracts:
+
+1. FLUX.2 Klein 4B distilled reference-conditioned image generation.
+2. LivePortrait driving-performance transfer.
+
+Do not substitute an interactive UI export, a historical graph, a cached node
+list, or an unbound remote service for either tracked contract.
+
+## API graph shape
 
 ```json
 {
   "node_id": {
-    "inputs": { "param": value, "linked_param": ["source_node_id", output_slot_index] },
     "class_type": "NodeClassName",
-    "_meta": { "title": "Display Name" }
+    "inputs": {
+      "scalar": "value",
+      "linked_input": ["source_node_id", 0]
+    }
   }
 }
 ```
 
-- Node IDs are **strings** (e.g., `"8"`, `"100"`)
-- Links are `["source_node_id", output_slot_index]` — slot 0 is the first output
-- Execution flows from loaders → conditioning → sampler → decoder → save
-- See `workflow-json-spec.md` for the complete format spec, validation rules, and generation algorithm
+- Node IDs and link source IDs are strings.
+- Every link output index is an integer. The tracked package validators prove
+  link existence/types, graph reachability, bounds, and fixed dimensions.
+- Immediately before submission, the generic live client validates class
+  availability, required/unknown inputs, and installed enum/model choices
+  against authenticated `/object_info`; do not overstate that live check as a
+  full graph/type/range validator.
+- A graph/UI export may contain metadata or widgets that are not valid API
+  input. Use the tracked flat builders.
 
-## Quick Reference: Core Node Types
+## Current node families
 
-| class_type | Purpose | Key Inputs |
-|---|---|---|
-| CheckpointLoaderSimple | Load SD checkpoint | ckpt_name |
-| UNETLoader | Load FLUX/UNET model | unet_name, weight_dtype |
-| DualCLIPLoader | Load T5+CLIP for FLUX | clip_name1, clip_name2, type |
-| VAELoader | Load VAE model | vae_name |
-| CLIPTextEncode | Text → conditioning | text, clip |
-| FluxGuidance | FLUX CFG guidance | guidance, conditioning |
-| EmptyLatentImage | Create blank latent | width, height, batch_size |
-| KSampler | Standard sampler | model, positive, negative, seed, steps, cfg, sampler, scheduler |
-| SamplerCustomAdvanced | Advanced sampler | noise, guider, sampler, sigmas, latent_image |
-| BasicScheduler | Compute sigmas | model, scheduler, steps, denoise |
-| KSamplerSelect | Choose sampler algo | sampler_name |
-| BasicGuider | CFG guider | model, conditioning |
-| RandomNoise | Seed-based noise | noise_seed |
-| VAEDecode | Latent → image | samples, vae |
-| VAEEncode | Image → latent | pixels, vae |
-| SaveImage | Save to disk | images, filename_prefix |
-| LoadImage | Load from disk | image (filename) |
-| ApplyPulid | PuLID face-lock | weight, start_at, end_at, model, pulid, eva_clip, face_analysis, image |
-| ControlNetApply | Apply ControlNet | conditioning, control_net, image, strength |
-| LoraLoader | Load LoRA weights | model, clip, lora_name, strength_model, strength_clip |
+### FLUX.2 Klein
 
-## Common Workflow Patterns
+`UNETLoader`, `CLIPLoader`, `VAELoader`, `CLIPTextEncode`,
+`ConditioningZeroOut`, `LoadImage`, `ImageScaleToTotalPixels`, `VAEEncode`,
+`ReferenceLatent`, `RandomNoise`, `KSamplerSelect`, `Flux2Scheduler`,
+`EmptyFlux2LatentImage`, `CFGGuider`, `SamplerCustomAdvanced`, `VAEDecode`, and
+`SaveImage`.
 
-| Pattern | Description | Template in workflow-patterns.md |
-|---|---|---|
-| txt2img-basic | Checkpoint → CLIP → KSampler → VAE → Save | #1 |
-| txt2img-flux-pulid | FLUX + PuLID face-lock (this project's pipeline) | #2 |
-| img2img | Load → VAEEncode → KSampler (denoise < 1.0) | #3 |
-| controlnet-pose | OpenPose → ControlNet → KSampler | #4 |
-| inpainting | Mask → SetLatentNoiseMask → InpaintModel | #5 |
-| upscale-hires | Generate → LatentUpscale → KSampler (hires fix) | #6 |
-| ip-adapter-style | Style reference → IP-Adapter → KSampler | #7 |
-| animatediff-txt2vid | AnimateDiff → KSampler → VideoCombine | #8 |
+### LivePortrait
 
-## Reference File Routing
+`LoadImage`, `VHS_LoadVideo`, `DownloadAndLoadLivePortraitModels`,
+`LivePortraitLoadMediaPipeCropper`, `LivePortraitCropper`,
+`LivePortraitRetargeting`, `LivePortraitProcess`, `LivePortraitComposite`, and
+`VHS_VideoCombine`.
 
-| You need to... | Read this file |
-|---|---|
-| Understand the JSON format, generate or validate workflows | `workflow-json-spec.md` |
-| Get a complete workflow template to modify | `workflow-patterns.md` |
-| Work with model loaders, samplers, VAE, conditioning | `nodes-core.md` |
-| Add ControlNet, depth, pose, or edge guidance | `nodes-controlnet.md` |
-| Add face identity (PuLID, IP-Adapter, InstantID, ReActor) | `nodes-face-identity.md` |
-| Generate video (AnimateDiff, SVD) or interpolate frames | `nodes-video.md` |
-| Upscale, segment, inpaint, or mask images | `nodes-image-processing.md` |
-| Use math, logic, switches, reroutes, or conversions | `nodes-utility.md` |
-| Use WAS, Impact Pack, or other ecosystem packs | `custom-node-packs.md` |
-| Understand this project's ComfyUI + RunPod integration | `a24-integration.md` |
+Read `a24-integration.md` for the exact data flow and contract boundary.
 
-## This Project's Integration
+## Immutable builders
 
-The A24 Engine uses ComfyUI as the primary image generation backend:
-- **Workflows**: `pulid.json` — 22-node FLUX + PuLID production pipeline
-  (incl. PAG + RealESRGAN hires chain). This is the ONLY image tier — the
-  60-node `pulid_max.json` max tier + `quality_max.py` driver were retired in
-  WS1 (2026-07; DECISIONS.md ADR-065 / ADR-024: the max graph over-cooked).
-- **Server**: self-hosted ComfyUI pod at `COMFYUI_SERVER_URL` — currently a
-  Novita RTX 6000 Ada (CUDA 12.4 → cu124 wheels; see OPERATIONS.md GPU/CUDA
-  matrix). Host-agnostic; the `RunPodComfyUI` class name is historical.
-- **API class**: `RunPodComfyUI` in `phase_c_assembly.py`
-- **Shot optimization**: `workflow_selector.py` — 5 shot classes
-  (portrait/medium/wide/action/landscape) via `WORKFLOW_TEMPLATES` (the single
-  production tier; `MAX_QUALITY_TEMPLATES` was removed with the max tier, WS1)
-- **Cascade**: ComfyUI → FAL.ai Kontext → FAL.ai FLUX-Pro
-- See `a24-integration.md` for full annotated architecture
+- FLUX.2: `deploy/windows-flux2-klein/workflow.py`. The whole candidate package
+  is bound by `candidate.json`; application code loads that builder through
+  `performance/flux2_klein.py` only after validating all bindings.
+- LivePortrait: `performance/live_portrait_workflow.py`. Its tracked worker
+  probe graph must equal the builder output, and model/revision/workflow hashes
+  form the performance capability digest.
+
+Changing a builder or tracked probe invalidates its existing evidence. Update
+the corresponding manifest/package bindings and rerun that role's required
+execution/acceptance evidence; never relabel old evidence as current.
+
+## Worker topology and readiness
+
+- Raw ComfyUI and the gateway bind only to Windows loopback.
+- The Mac application uses an SSH tunnel to a Mac loopback URL and a strong
+  bearer token.
+- A shared endpoint must expose exactly `image-flux2-klein` and
+  `performance-liveportrait`, with the same credential configured for both
+  roles.
+- `/health/live`, `/system_stats`, an empty queue, or a successful
+  `/object_info` response proves only a partial fact.
+- Production admission requires the exact authenticated capability payload,
+  expected hashes, fixed execution proof, and role-specific state.
+
+FLUX.2 may run only in state `ready`; installation alone is
+`not_installed`, and a passing fixed probe without the sequential
+1/2/10-reference capacity run is `needs_benchmark`. LivePortrait requires its
+pinned startup execution proof and role-bound readiness digest.
+
+## Submission discipline
+
+1. Validate local inputs and output destination before constructing a client.
+2. Fetch and validate authenticated capability readiness.
+3. Upload bounded source media only after readiness passes.
+4. Build the graph from the tracked builder using returned remote filenames.
+5. Reserve/recover a durable attempt and submit once.
+6. Persist the prompt ID, poll history, validate the output record and media,
+   then publish atomically.
+7. Treat an ambiguous submit/status result as unknown; reconcile the accepted
+   prompt instead of queuing a replacement.
+
+The shared desktop GPU is single-queue production capacity. Serialize
+LivePortrait, keep its 25 fps/512-pixel/8-second ingest envelope, and stop other
+GPU workloads before canaries, benchmarks, or worker startup.
+
+## Reference routing
+
+| Need | Read |
+| --- | --- |
+| Project topology, readiness, and data flow | `a24-integration.md` |
+| API JSON validation and safe mutation | `workflow-json-spec.md` |
+| Current graph patterns | `workflow-patterns.md` |
+| Current loader/sampler/latent nodes | `nodes-core.md` |
+| Reference conditioning and identity evidence | `nodes-face-identity.md` |
+| LivePortrait/video nodes | `nodes-video.md` |
+| Image scaling/validation nodes | `nodes-image-processing.md` |
+| Generic utility nodes | `nodes-utility.md` |

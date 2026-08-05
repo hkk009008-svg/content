@@ -112,34 +112,16 @@ Mood-aware transition prompt patterns between shots:
 
 ---
 
-## Parameter Tuning Rules of Thumb
+## Image-generation controls
 
-### PuLID Weight Adjustment
-- **Increase by 0.1 if**: Identity validator fails repeatedly (but NOT for FACE_ANGLE_EXTREME or SMALL_FACE_REGION)
-- **Decrease by 0.05 if**: Face looks uncanny or plastic
-- **Range**: 0.0–1.0 (clamped)
+Prompt authors control descriptive intent, approved references, seed, and the
+supported aspect ratio. The local FLUX.2 Klein graph is hash-bound at four
+steps, Euler sampling, CFG 1.0, and fixed dimensions. Do not prescribe hidden
+weights, step/scheduler overrides, or dynamic node injection.
 
-### Guidance Scale
-- **Increase by 0.5 if**: Prompt not being followed accurately
-- **Decrease by 0.5 if**: Over-saturated colors, unnatural appearance
-- **Safe range**: 3.0–4.0 (3.5 is FLUX sweet spot)
-
-### Steps
-- **Increase by 5 if**: Visible noise or graininess
-- **Decrease by 5 if**: Too slow and quality is acceptable
-- **Range**: 10–30 (portrait: 25, action/medium: 20)
-
-### PAG Scale (Perturbed Attention Guidance)
-- **3.5**: Maximum detail sharpening (landscapes, architecture)
-- **3.0**: Portrait/medium sweet spot
-- **2.5**: Wide shots (avoid over-sharpening distance)
-- **2.0**: Action/motion (allow dynamic softness)
-
-### Removed structural controls
-
-The production FLUX graph has no dynamic ControlNet or IP-Adapter branch.
-Do not prescribe `controlnet_depth_strength` or `ip_adapter_weight`; those
-template fields were reader-less after the invalid nodes were removed.
+If an output misses the prompt or identity gate, preserve the failed artifact
+and evidence, then create a new version with an explicit prompt/reference/seed
+change or request manual review.
 
 ---
 

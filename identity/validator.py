@@ -7,14 +7,12 @@ Features:
 - Adaptive frame sampling (3-10 frames based on duration and shot type)
 - Per-character scoring with detailed diagnostics
 - Failure reason analysis (face angle, occlusion, wrong person, etc.)
-- Rolling history for adaptive PuLID weight feedback loop
 """
 
 import contextlib
 import os
 import tempfile
 from typing import Optional, List, Dict, Callable, Tuple
-from collections import Counter
 
 import cv2
 import numpy as np
@@ -43,12 +41,11 @@ except ImportError:
 # Embedding backbone for ALL identity QC. character_manager and
 # continuity_engine import this constant — single write-site (the string was
 # previously hardcoded at three sites). IMPORTANT: every calibrated identity
-# threshold in the repo (workflow-template validation floors, the
-# face_validator_gate arc floors, the rolling-stats PuLID deltas) is
-# calibrated on GhostFaceNet score distributions. Selecting another DeepFace
+# threshold in the repo is calibrated on GhostFaceNet score distributions.
+# Selecting another DeepFace
 # model (e.g. Buffalo_L — NON-COMMERCIAL model license — or a future
 # AdaFace/CVLFace adapter, P5 in docs/RESEARCH-2026-07-10-component-upgrades.md)
-# INVALIDATES those thresholds until re-calibrated on the pod.
+# INVALIDATES those thresholds until re-calibrated on the production host.
 def _resolve_embed_model() -> str:
     try:
         from config.settings import settings
@@ -62,7 +59,7 @@ def _resolve_embed_model() -> str:
             f"[identity] STRUCTURAL: IDENTITY_EMBED_MODEL={model!r} — every "
             "calibrated identity threshold assumes GhostFaceNet score "
             "distributions; gates are UNCALIBRATED for this model until a "
-            "pod measurement pass re-derives them."
+            "production-host measurement pass re-derives them."
         )
         # BOTH channels, deliberately: the TF/Keras chain (imported via
         # `from deepface import DeepFace` ABOVE, before this runs) fronts a
@@ -131,23 +128,20 @@ def _cv2_single_thread():
     handful of clean runs is NOT evidence the guard is needed or working.
 
     CROSS-PLATFORM: cv2.setNumThreads(1) yields one thread on TBB/pthreads
-    (Linux pod) but is a NO-OP on the GCD backend (macOS dev): there
+    (Linux) but is a NO-OP on the GCD backend (macOS): there
     getNumThreads() stays at the system default and only setNumThreads(0)
     serializes. We therefore set 1, and fall back to 0 if 1 didn't take — so
     cv2 is single-threaded on BOTH backends. ⚠ The deterministic value is
-    OpenCV-build-specific; the macOS single-threaded value (man 0.870) must be
-    re-confirmed on the Linux pod before it is trusted as the production
-    pinned value (review 2026-06-13, robustness lens).
+    OpenCV-build-specific and must be calibrated on the production host before
+    a numeric score is treated as portable.
 
     The prior thread count is restored afterward (even on exception) so the
     serialization is localized. Both the binding instrument and the production
     identity path (validate_image/validate_video, via represent AND
     extract_faces — both align) route through this guard.
 
-    NOTE: cv2.setNumThreads is process-global. quality_max.py used to score
-    candidates in a ThreadPoolExecutor before that module was retired in WS1
-    Task 4; the underlying
-    determinism fix stays valid regardless (any future concurrent caller has
+    NOTE: cv2.setNumThreads is process-global. The determinism fix remains
+    relevant for any future concurrent caller: if two threads enter here concurrently, EACH call
     the same property): if two threads enter here concurrently, EACH call
     still runs single-threaded (determinism holds per-call), but the restore
     may land at 1 (a benign process-state leak — single-threaded is the
@@ -473,7 +467,6 @@ class IdentityValidator:
     ):
         self.embedding_cache = embedding_cache or {}
         self.cache_dir = cache_dir  # Directory for persisting embeddings to disk
-        self.history: List[IdentityValidationResult] = []
         self._vision_fallback = vision_fallback
 
     # ------------------------------------------------------------------
@@ -533,7 +526,6 @@ class IdentityValidator:
             frame_results=[frame_sample],
             matched=frame_sample.matched,
             primary_failure_reason=frame_sample.failure_reason,
-            suggested_pulid_adjustment=self._compute_pulid_delta(frame_sample.similarity, frame_sample.matched),
         )
 
         result = IdentityValidationResult(
@@ -546,7 +538,6 @@ class IdentityValidator:
             threshold_used=threshold,
         )
 
-        self.history.append(result)
         icon = "✅" if result.passed else "❌"
         print(f"      {icon} Image identity: similarity={result.overall_score:.3f} (threshold={threshold})")
         return result
@@ -666,7 +657,7 @@ class IdentityValidator:
           - both 'none' → binding_ok=False
 
         Boundary: w // 2 EXACTLY — matches _s1_rescore_crops.crop_half and the
-        0-based masks in scripts/_arc_score_session.py.
+        0-based mask convention used by the archived evaluation.
 
         validate_image is NOT called here; scores come from _figure_read_score
         directly so blob/degenerate detections cannot pollute the binding
@@ -958,8 +949,6 @@ class IdentityValidator:
             threshold_used=threshold,
         )
 
-        self.history.append(result)
-
         # Log results
         for cid, cr in character_results.items():
             icon = "✅" if cr.matched else "❌"
@@ -971,52 +960,6 @@ class IdentityValidator:
             )
 
         return result
-
-    def get_rolling_stats(self, character_id: str, window: int = 10) -> Dict:
-        """
-        Rolling identity performance statistics for a character.
-        Used by the adaptive PuLID weight system.
-        """
-        recent = [
-            r.character_results[character_id]
-            for r in self.history[-window:]
-            if character_id in r.character_results
-        ]
-        if not recent:
-            return {
-                "mean_similarity": 0.0,
-                "success_rate": 0.0,
-                "common_failure": FailureReason.NO_FACE_DETECTED,
-                "suggested_pulid_delta": 0.0,
-                "sample_count": 0,
-            }
-
-        sims = [r.best_similarity for r in recent]
-        successes = sum(1 for r in recent if r.matched)
-        failures = [r.primary_failure_reason for r in recent if not r.matched]
-
-        success_rate = successes / len(recent)
-        mean_sim = sum(sims) / len(sims)
-
-        # Compute suggested PuLID delta
-        if success_rate < 0.5:
-            delta = +0.10
-        elif success_rate < 0.8:
-            delta = +0.05
-        elif success_rate == 1.0 and mean_sim > 0.80:
-            delta = -0.05  # identity is great, allow more creativity
-        else:
-            delta = 0.0
-
-        common = Counter(failures).most_common(1)
-
-        return {
-            "mean_similarity": mean_sim,
-            "success_rate": success_rate,
-            "common_failure": common[0][0] if common else FailureReason.PASSED,
-            "suggested_pulid_delta": delta,
-            "sample_count": len(recent),
-        }
 
     # ------------------------------------------------------------------
     # Internals
@@ -1309,7 +1252,6 @@ class IdentityValidator:
                 best_similarity=0.0, mean_similarity=0.0, min_similarity=0.0,
                 frame_results=[], matched=False,
                 primary_failure_reason=FailureReason.NO_FACE_DETECTED,
-                suggested_pulid_adjustment=0.10,
             )
 
         sims = [f.similarity for f in frames if f.face_detected]
@@ -1319,7 +1261,6 @@ class IdentityValidator:
                 best_similarity=0.0, mean_similarity=0.0, min_similarity=0.0,
                 frame_results=frames, matched=False,
                 primary_failure_reason=self._diagnose_failure(frames),
-                suggested_pulid_adjustment=0.10,
             )
 
         best = max(sims)
@@ -1328,8 +1269,6 @@ class IdentityValidator:
         matched = best >= threshold
 
         failure_reason = FailureReason.PASSED if matched else self._diagnose_failure(frames)
-        delta = self._compute_pulid_delta(best, matched)
-
         return CharacterIdentityResult(
             character_id=char_id,
             character_name=char_name,
@@ -1339,7 +1278,6 @@ class IdentityValidator:
             frame_results=frames,
             matched=matched,
             primary_failure_reason=failure_reason,
-            suggested_pulid_adjustment=delta,
         )
 
     def _diagnose_failure(self, frames: List[FrameSample]) -> FailureReason:
@@ -1401,18 +1339,6 @@ class IdentityValidator:
         if similarity < 0.35:
             return FailureReason.WRONG_PERSON
         return FailureReason.POOR_LIGHTING
-
-    @staticmethod
-    def _compute_pulid_delta(similarity: float, matched: bool) -> float:
-        """Compute suggested PuLID weight adjustment for a single result."""
-        if matched and similarity > 0.80:
-            return -0.05  # Strong match, can relax for creativity
-        elif matched:
-            return 0.0
-        elif similarity > 0.55:
-            return +0.05  # Close miss
-        else:
-            return +0.10  # Clear failure
 
     @staticmethod
     def _skipped_result(shot_type: str, threshold: float) -> IdentityValidationResult:
@@ -1481,7 +1407,6 @@ class IdentityValidator:
             frame_results=[frame_sample],
             matched=False,
             primary_failure_reason=failure,
-            suggested_pulid_adjustment=self._compute_pulid_delta(0.0, False),
         )
         return IdentityValidationResult(
             passed=False,
@@ -1546,7 +1471,6 @@ class IdentityValidator:
                 error_reason=result.get("error_reason", "identity_check_unavailable"),
                 issues=result.get("issues"),
             )
-            self.history.append(validation_result)
             print(
                 "      ❌ Vision-LLM identity: check unavailable "
                 f"({validation_result.metadata['error_reason']})"
@@ -1586,7 +1510,6 @@ class IdentityValidator:
             frame_results=[frame_sample],
             matched=matched,
             primary_failure_reason=failure,
-            suggested_pulid_adjustment=self._compute_pulid_delta(confidence, matched),
         )
 
         validation_result = IdentityValidationResult(
@@ -1599,7 +1522,6 @@ class IdentityValidator:
             threshold_used=threshold,
         )
 
-        self.history.append(validation_result)
         icon = "✅" if matched else "❌"
         print(f"      {icon} Vision-LLM identity: confidence={confidence:.3f} (threshold={threshold})")
         return validation_result
@@ -1713,7 +1635,6 @@ class IdentityValidator:
                 best_similarity=confidence, mean_similarity=confidence,
                 min_similarity=confidence, frame_results=[frame_sample],
                 matched=matched, primary_failure_reason=failure,
-                suggested_pulid_adjustment=self._compute_pulid_delta(confidence, matched),
             )
 
         # Cleanup temp frames
@@ -1736,8 +1657,6 @@ class IdentityValidator:
                 "vision_errors": vision_errors,
             } if vision_errors else {},
         )
-
-        self.history.append(validation_result)
 
         for cid, cr in character_results.items():
             icon = "✅" if cr.matched else "❌"

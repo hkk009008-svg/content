@@ -1,5 +1,0 @@
-**
-!deploy/runpod-comfyui/**
-!pulid.json
-**/__pycache__/**
-**/*.pyc

@@ -63,7 +63,6 @@ class TestCharacterIdentityResult:
             frame_results=[],
             matched=True,
             primary_failure_reason=FailureReason.PASSED,
-            suggested_pulid_adjustment=0.0,
         )
         assert result.character_id == "char_01"
         assert result.matched is True
@@ -81,7 +80,6 @@ def _make_validation_result(passed=True, score=0.85):
         frame_results=[],
         matched=True,
         primary_failure_reason=FailureReason.PASSED,
-        suggested_pulid_adjustment=0.0,
     )
     return IdentityValidationResult(
         passed=passed,

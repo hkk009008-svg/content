@@ -195,9 +195,6 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
               <span className="text-eyebrow text-mut bg-panel px-1.5 py-0.5 rounded">
                 Best: {apiRegistry?.[shotTemplate.target_api]?.label || shotTemplate.target_api}
               </span>
-              <span className="text-eyebrow text-mut bg-panel px-1.5 py-0.5 rounded">
-                CFG {shotTemplate.guidance} / {shotTemplate.steps} steps
-              </span>
             </>
           )}
         </div>

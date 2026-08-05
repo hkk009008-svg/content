@@ -75,10 +75,10 @@ API_COST_USD: dict[str, float] = {
     "ACT_ONE":        0.25,    # Runway Act-Two retargeting (key name is legacy — see comment above), approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
-    "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
     # Image APIs (per still)
-    "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
-    "FLUX_PULID":    0.05,
+    # Marginal API charge is zero; electricity/hardware depreciation are not
+    # provider invoices and remain outside this reconciled estimate.
+    "FLUX2_KLEIN_LOCAL": 0.00,
     # fal.ai list price read 2026-06-11 (model page for flux-pro/kontext/max/multi,
     # the variant production actually calls): "$0.08 per image" — per OUTPUT image,
     # no per-input-ref surcharge listed. The old 0.04 was the non-max Kontext tier.
@@ -86,7 +86,6 @@ API_COST_USD: dict[str, float] = {
     "FLUX_PRO":      0.05,
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
-    "HIDREAM_I1":    0.06,
     "GEMINI_IMAGE":  0.067,  # gemini-3.1-flash-image (Nano Banana 2) — migrated off gemini-2.5-flash-image (shutdown deadline 2026-10-02, Slice 6b). The provider pricing page (ai.google.dev/gemini-api/docs/pricing, 2026-07-31) publishes the EXACT per-image figure for the 1K resolution this adapter hardcodes (gemini_image_native.py image_size="1K"): $0.067/img (quality review of 3c7714e4 — the earlier $0.077 token-estimate overstated it ~15%). PROVIDER-CLAIMED, recalibrate against invoice per R-MEASURE.
     # Conservative reservation ceiling for one 500-token Claude vision
     # identity decision. Terminal reconciliation uses the SDK's actual token
@@ -134,8 +133,7 @@ API_COST_USD: dict[str, float] = {
 # dispatched duration — grepped for an existing duration-aware pattern in
 # this module before adding this (money-gate finding 2026-07-30: none
 # existed here; the closest precedent is the per-module ``_cost_log``
-# helpers in performance/act_two.py, performance/live_portrait.py, and
-# performance/driving_video.py, which each compute
+# helpers in performance/act_two.py and performance/live_portrait.py, which compute
 # ``cost_usd = round(rate * duration_s, N)`` inline). Pulling the rate up to
 # the shared record site (rather than a bespoke per-caller helper) lets any
 # duration-billed engine opt in without its own copy of the arithmetic.
@@ -378,9 +376,7 @@ def _finite_budget_or_block(value) -> float:
     ``cinema.context._finite_or``: that import is circular-safe (verified) but
     inverts the layering — ``cost_tracker`` is a low-level root util — and would
     drag the ``cinema.context`` dependency tree into a foundational module;
-    consolidation is deferred to the dedicated import-swap pass. (Formerly
-    mirrored the ``quality_max:191`` documented-temporary local-copy precedent;
-    that module was retired WS1 Task 4.)
+    consolidation is deferred to a dedicated dependency-cleanup pass.
     """
     try:
         v = float(value)
@@ -1798,9 +1794,7 @@ class CostTracker:
                 )
 
         # Derive a human-readable provider name from the API key.
-        # Prefix match in insertion order; first hit wins. Pod (ComfyUI/PuLID)
-        # image backends map to a provider DISTINCT from "fal" so cost_log can
-        # tell "ran on the pod" from "fell back to FAL".
+        # Prefix match in insertion order; first hit wins.
         _provider_map = {
             # Fal-proxy engines that share a prefix with a native provider must
             # sit BEFORE that prefix (first-prefix-wins) or the fal invoice
@@ -1813,12 +1807,12 @@ class CostTracker:
             "VEO_NATIVE": "google",  # Vertex/Gemini — before "VEO"→fal below
             "GEMINI_OMNI": "google",  # Gemini Developer API only (not on Vertex yet) — shares the "google" cost-log bucket with VEO_NATIVE
             "GEMINI_IMAGE": "google",  # gemini-3.1-flash-image (Nano Banana 2, migrated Slice 6b) — Gemini Developer API only, same "google" bucket
+            "FLUX2_KLEIN_LOCAL": "local_gpu",
             "VEO": "fal",            # fal-ai/veo3.1 — replaces the old "VEO"→google
             "KLING": "kling", "SORA": "openai",
             "LTX": "ltx", "RUNWAY": "runway",
-            "COMFYUI": "comfyui",
             "POLLINATIONS": "pollinations",
-            "FLUX": "fal", "HIDREAM": "fal", "SEEDANCE": "fal",
+            "FLUX": "fal", "SEEDANCE": "fal",
         }
         provider = "unknown"
         for prefix, prov in _provider_map.items():

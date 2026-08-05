@@ -1,11 +1,10 @@
 """Provenance threading for image-generation backends (phase_c_assembly).
 
 Keyframe cost attribution requires knowing which backend actually produced an
-image — the ComfyUI/PuLID pod vs a FAL fallback (and which FAL model). These
-tests pin the `api_name` each branch reports via `ImageGenResult`, so cost_log
-can distinguish "ran on the pod" from "fell back to FAL".
+image. These tests pin the `api_name` each active branch reports via
+`ImageGenResult`.
 
-Offline: fal_client and the image download are stubbed; no GPU, no pod, no
+Offline: fal_client and the image download are stubbed; no GPU and no
 network, no API calls.
 """
 
@@ -232,15 +231,15 @@ class TestImageGenResultShape:
     """`ImageGenResult` is a lightweight, backward-compatible carrier."""
 
     def test_is_truthy_and_carries_fields(self):
-        r = pca.ImageGenResult("/tmp/x.jpg", "COMFYUI_PULID")
+        r = pca.ImageGenResult("/tmp/x.jpg", "FLUX2_KLEIN_LOCAL")
         assert r  # truthy on success (the caller's `if not result` guard)
         assert r.path == "/tmp/x.jpg"
-        assert r.api_name == "COMFYUI_PULID"
+        assert r.api_name == "FLUX2_KLEIN_LOCAL"
 
 
 class TestGeminiImagePriorityZero:
-    """WS3 PRIORITY-0 gate: Gemini 2.5 Flash Image (Nano Banana) tried before
-    the pod when identity_backend != 'pod'. Offline: gemini_image_native and
+    """Gemini image is tried before local and supported cloud fallbacks.
+    Offline: gemini_image_native and
     phase_c_vision are stubbed via monkeypatch so this runs without any real
     Google/Vertex/network call (COST CONTROL)."""
 
@@ -312,24 +311,18 @@ class TestGeminiImagePriorityZero:
         monkeypatch.setattr("phase_c_vision._get_shared_validator", lambda: _FakeValidator())
         return _passed_box
 
-    def test_gemini_image_success_skips_pod_entirely(
+    def test_gemini_image_success_skips_remaining_providers(
         self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch
     ):
-        """A passing identity check returns GEMINI_IMAGE and never touches the
-        pod (comfyui_server_url present but never read/called)."""
+        """A passing identity check returns GEMINI_IMAGE immediately."""
         monkeypatch.setattr(
             pca, "settings",
             dataclasses.replace(pca.settings, google_api_key="test-google-key",
-                                comfyui_server_url="http://pod-should-not-be-called:8188"),
+                                comfyui_server_url="http://worker-should-not-be-called:8188"),
         )
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
         out = str(tmp_path / "out.jpg")
-
-        # RunPodComfyUI must never be constructed on this path.
-        def _fail_if_called(*a, **kw):
-            raise AssertionError("pod (RunPodComfyUI) must not be called when Gemini succeeds")
-        monkeypatch.setattr(pca, "RunPodComfyUI", _fail_if_called)
 
         res = pca.generate_ai_broll(
             "a prompt", out, character_image=str(char),
@@ -342,23 +335,23 @@ class TestGeminiImagePriorityZero:
         assert stub_gemini_client["constructed"] is True
         assert os.path.exists(out)
 
-    def test_gemini_identity_fail_falls_through_to_pod_and_traces_artifact(
-        self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch, caplog
+    def test_gemini_identity_fail_falls_through_and_traces_artifact(
+        self, gemini_enabled_settings, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch, caplog
     ):
         """A failing identity check does NOT return GEMINI_IMAGE — it falls
-        through to the pod (PRIORITY-1, mocked queue_prompt reached) and
+        through to a supported provider and
         emits one central trace tied to the retained candidate."""
-        from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path
-
         stub_validator["passed"] = False
         stub_validator["score"] = 0.31
-
-        # Reuse the established real-pulid.json pod-dispatch stub so the pod
-        # path is reached exactly like the portrait suite exercises it — no
-        # real GPU/pod/network. Runs AFTER
-        # gemini_enabled_settings, so its dataclasses.replace(pca.settings, ...)
-        # base already carries google_api_key="test-google-key" forward.
-        captured_workflow = _stub_comfyui_path(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            pca,
+            "settings",
+            dataclasses.replace(
+                pca.settings,
+                google_api_key="test-google-key",
+                fal_key="test-key",
+            ),
+        )
 
         monkeypatch.chdir(tmp_path)
         caplog.set_level("INFO", logger="phase_c_assembly")
@@ -394,9 +387,8 @@ class TestGeminiImagePriorityZero:
             project_root=tmp_path,
         )
 
-        # The pod path was reached: queue_prompt captured a real workflow dict.
-        assert captured_workflow, "identity-score-fail must fall through to the pod, not return early"
-        assert res.api_name != "GEMINI_IMAGE"
+        assert res.api_name == "FLUX_KONTEXT"
+        assert stub_fal.subscribe.called
         assert len(retained) == 1
         rejected_take = retained[0][0][3]
         assert rejected_take["id"] == "take-1"
@@ -417,14 +409,12 @@ class TestGeminiImagePriorityZero:
         gemini_enabled_settings,
         stub_gemini_client,
         stub_validator,
+        stub_fal,
         tmp_path,
         monkeypatch,
     ):
         """The only paid frame remains recoverable when immutable copy fails."""
-        from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path
-
         stub_validator["passed"] = False
-        captured_workflow = _stub_comfyui_path(monkeypatch, tmp_path)
         monkeypatch.setattr(
             "cinema.artifact_indexing.record_take_version",
             MagicMock(side_effect=OSError("artifact store unavailable")),
@@ -452,7 +442,7 @@ class TestGeminiImagePriorityZero:
         )
 
         assert result is None
-        assert not captured_workflow
+        stub_fal.subscribe.assert_not_called()
         with open(out, "rb") as handle:
             assert handle.read() == b"gemini-image-bytes"
         assert recovery["provider_status"] == "artifact_retention_failed"
@@ -512,7 +502,7 @@ class TestGeminiImagePriorityZero:
     ):
         """An exception anywhere in the PRIORITY-0 block (e.g. GeminiImageAPI
         construction raising) must not propagate — it falls through to the
-        existing FAL/pod cascade exactly like a missing pod does."""
+        next eligible supported route."""
         import sys
         import types as _types
 
@@ -555,52 +545,13 @@ class TestGeminiImagePriorityZero:
         assert isinstance(res, pca.ImageGenResult)
         assert res.api_name == "FLUX_KONTEXT"
 
-    def test_identity_backend_pod_skips_gemini_entirely(self, tmp_path, monkeypatch, stub_fal):
-        """Explicit identity_backend='pod' (a project's WS3 opt-out from the
-        now-default gemini_multiref primary — FIX C) must never engage the
-        PRIORITY-0 block — the production pod/FAL cascade behavior stays
-        byte-for-byte unchanged for opted-out projects. (Key-ABSENT no
-        longer means 'pod' — it now means gemini_multiref; see
-        test_no_ctx_now_defaults_to_gemini_primary below.)"""
-        import sys
-        gemini_constructed = {"value": False}
-
-        class _FakeGeminiImageAPI:
-            def __init__(self):
-                gemini_constructed["value"] = True
-
-        import types as _types
-        fake_module = _types.ModuleType("gemini_image_native")
-        fake_module.GeminiImageAPI = _FakeGeminiImageAPI
-        monkeypatch.setitem(sys.modules, "gemini_image_native", fake_module)
-
-        # Force the ComfyUI branch off (comfyui_server_url="") so the call
-        # deterministically lands in the already-stubbed FAL path — this repo
-        # has a real pod URL in .env, and generate_ai_broll (unlike
-        # _fal_flux_fallback called directly elsewhere in this file) would
-        # otherwise attempt a real pod HTTP call (COST CONTROL).
-        monkeypatch.setattr(pca, "settings", dataclasses.replace(pca.settings, comfyui_server_url=""))
-
-        char = tmp_path / "face.jpg"
-        char.write_bytes(b"face")
-        out = str(tmp_path / "out.jpg")
-
-        from cinema.context import PipelineContext
-        res = pca.generate_ai_broll(
-            "a prompt", out, character_image=str(char),
-            ctx=PipelineContext(global_settings={"identity_backend": "pod"}),
-        )
-
-        assert isinstance(res, pca.ImageGenResult)
-        assert gemini_constructed["value"] is False
-
     def test_no_ctx_now_defaults_to_gemini_primary(
         self, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch
     ):
         """FIX C (WS3 default-on, user-confirmed): ctx=None hits
         get_project_setting's None-safe branch (cinema/context.py:177-178),
         which returns the passed-in default with no project to read from —
-        and that default is now 'gemini_multiref', not 'pod'. There is no
+        and that default is 'gemini_multiref'. There is no
         special-casing between "no ctx" and "ctx present but
         identity_backend unset": both share the same
         get_project_setting(..., default=...) plumbing, so this INVERTS the
@@ -633,7 +584,7 @@ class TestGeminiImagePriorityZero:
     # -----------------------------------------------------------------
     # WS3 money-loss close-out: Gemini bills ($0.03) on generation,
     # independent of whether the identity check later rejects it. A
-    # bill-but-reject must not vanish when the pod/FAL cascade wins —
+    # bill-but-reject must not vanish when a later supported route wins —
     # mirror of cinema/shots/controller.py::_record_billed_rejects on the
     # video side (money-gate finding 2026-07-11: offline-probe proven,
     # invisible to would_exceed/is_over_budget before this fix).
@@ -643,17 +594,15 @@ class TestGeminiImagePriorityZero:
         self, gemini_enabled_settings, stub_gemini_client, stub_validator, stub_fal, tmp_path, monkeypatch
     ):
         """A Gemini bill-but-identity-reject must be threaded onto whichever
-        backend the pod/FAL cascade ultimately returns as `billed_rejects`,
+        backend the remaining route chain ultimately returns as `billed_rejects`,
         so the caller can record the $0.03 Google already billed even
         though Gemini lost the identity check."""
         stub_validator["passed"] = False
         stub_validator["score"] = 0.31
 
-        # COST CONTROL: this repo has a real pod URL in .env — force the
-        # ComfyUI branch off (mirrors test_identity_backend_pod_skips_gemini_
-        # entirely / test_no_ctx_now_defaults_to_gemini_primary above) so the
+        # COST CONTROL: force the local worker branch off so the
         # call deterministically lands in the already-stubbed FAL path
-        # instead of risking a real pod HTTP call.
+        # instead of risking a real worker HTTP call.
         monkeypatch.setattr(
             pca, "settings",
             dataclasses.replace(pca.settings, google_api_key="test-google-key",
@@ -750,7 +699,7 @@ class TestGeminiImagePriorityZero:
         monkeypatch.setattr(
             pca, "settings",
             dataclasses.replace(pca.settings, google_api_key="test-google-key",
-                                comfyui_server_url="http://pod-should-not-be-called:8188"),
+                                comfyui_server_url="http://worker-should-not-be-called:8188"),
         )
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
@@ -780,7 +729,7 @@ class TestGeminiImagePriorityZero:
         stub_validator["passed"] = False
         stub_validator["score"] = 0.31
 
-        # COST CONTROL: force the ComfyUI branch off (real pod URL in .env)
+        # COST CONTROL: force the local worker branch off
         # so the call deterministically lands in the already-stubbed FAL
         # path, same rationale as the generate_ai_broll-level tests above.
         monkeypatch.setattr(

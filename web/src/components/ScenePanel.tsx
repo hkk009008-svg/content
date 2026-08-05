@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Project, AppConfig, Scene } from '../types/project'
 import { classifyShotType, getSceneGuidance, getShotTemplate } from '../lib/guidance'
 import { videoEngines, humanizeEngineReason } from '../lib/engines'
+import DrivingVideoUploadControl from './pipeline/DrivingVideoUploadControl'
 
 const API = '/api'
 
@@ -372,9 +373,6 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                             </div>
                             <div className="mt-1 flex flex-wrap items-center gap-2">
                               <span className="rounded bg-app px-1.5 py-0.5 text-eyebrow-sm uppercase text-acc">{shotType}</span>
-                              {template && (
-                                <span className="rounded bg-app px-1.5 py-0.5 text-eyebrow-sm">CFG {template.guidance} / {template.steps} steps</span>
-                              )}
                               {/* Per-shot API override picker */}
                               <select
                                 value={shot.target_api || 'AUTO'}
@@ -404,48 +402,38 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                               {(() => {
                                 const eng = (shot as any).performance_engine || ''
                                 const approvedId = (shot as any).approved_performance_take_id || ''
-                                const drivingUploaded = !!((shot as any).driving_video_path)
                                 if (eng === 'SKIP') {
-                                  return <span className="text-eyebrow-sm text-mut italic">skipped (wide/no-dialogue)</span>
+                                  const decision = shot.performance_skip
+                                  const operatorSkip = decision?.decision_source === 'operator'
+                                    || decision?.reason === 'operator'
+                                  return (
+                                    <span
+                                      className="text-eyebrow-sm text-mut italic"
+                                      title={operatorSkip
+                                        ? decision?.operator_reason || decision?.reason
+                                        : 'Automatic routing: wide framing or no dialogue'}
+                                    >
+                                      {operatorSkip ? 'skipped by operator' : 'skipped by routing'}
+                                    </span>
+                                  )
                                 }
                                 if (approvedId) {
-                                  return (
-                                    <>
-                                      <span className="text-eyebrow-sm text-ok font-bold">✓ {eng || 'captured'}</span>
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm('Clear performance take? Next run will regenerate.')) return
-                                          await fetch(`${API}/projects/${project.id}/shots/${shot.id}/performance`, { method: 'DELETE' })
-                                          onRefresh()
-                                        }}
-                                        className="text-eyebrow-sm text-fail hover:underline">
-                                        clear
-                                      </button>
-                                    </>
-                                  )
+                                  return <span className="text-eyebrow-sm text-ok font-bold">✓ {eng || 'captured'}</span>
                                 }
                                 return <span className="text-eyebrow-sm text-mut">{eng || 'pending'}</span>
                               })()}
-                              {/* Driving video upload (Mode A) */}
-                              <label className="text-eyebrow-sm text-acc hover:text-acc cursor-pointer underline ml-2">
-                                {((shot as any).driving_video_path) ? '↻ replace driving' : '+ upload driving'}
-                                <input
-                                  type="file"
-                                  accept="video/*"
-                                  className="hidden"
-                                  onChange={async e => {
-                                    const f = e.target.files?.[0]
-                                    if (!f) return
-                                    const fd = new FormData()
-                                    fd.append('driving_video', f)
-                                    const r = await fetch(`${API}/projects/${project.id}/shots/${shot.id}/upload-driving-video`, {
-                                      method: 'POST', body: fd,
-                                    })
-                                    if (r.ok) onRefresh()
-                                    else alert('Upload failed')
-                                  }}
+                              {/* The setup/editor surface reuses the canonical,
+                                  checked and keyboard-accessible upload control
+                                  from PERFORMANCE_REVIEW. */}
+                              <div className="ml-2">
+                                <DrivingVideoUploadControl
+                                  projectId={project.id}
+                                  shotId={shot.id}
+                                  hasDrivingVideo={Boolean(shot.driving_video_path)}
+                                  onUploaded={onRefresh}
+                                  compact
                                 />
-                              </label>
+                              </div>
                             </div>
 
                             {/* Objects-in-frame editor */}

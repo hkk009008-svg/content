@@ -28,6 +28,7 @@ from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
 from cinema.phases.performance import PerformanceCapturePhase
+from domain.performance import project_performance_review_can_skip
 from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
@@ -272,6 +273,9 @@ class CinemaPipeline:
 
     def generate_performance_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_performance_take(*args, **kwargs)
+
+    def skip_performance_take(self, *args, **kwargs):
+        return self._shot_ctrl.skip_performance_take(*args, **kwargs)
 
     def generate_motion_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_motion_take(*args, **kwargs)
@@ -1427,9 +1431,9 @@ class CinemaPipeline:
 
         # --- PERFORMANCE CAPTURE PHASE (handoff §10) ---
         # Sits between KEYFRAME_REVIEW and motion render. Routes each shot to
-        # an engine (ACT_ONE / LIVE_PORTRAIT / VIGGLE) or SKIP. The autopilot
-        # path uses Mode B (TTS-driven driving face synth) when no operator
-        # upload is provided. Operator can override via PERFORMANCE_REVIEW gate.
+        # an engine (ACT_ONE / LIVE_PORTRAIT / VIGGLE) or SKIP. Real engines
+        # require a per-shot operator driving-video upload. Operator can review
+        # and override accepted takes via the PERFORMANCE_REVIEW gate.
         def _on_performance_fail(scene_id: str, shot_id: str, error: str):
             self.failed_shots.append(shot_id)
             self.progress(
@@ -1453,15 +1457,11 @@ class CinemaPipeline:
             return None
 
         # PERFORMANCE_REVIEW gate — operator can preview each take, re-record
-        # (upload a new driving video), or skip. Gate is auto-skipped when
-        # every shot routed to SKIP (handoff §19 open question #4).
+        # (upload a new driving video), or skip. Gate bypass requires every
+        # approved-keyframe shot to carry a current, input-bound skip decision;
+        # a bare or stale performance_engine=SKIP value is not authority.
         project = self._refresh_project_snapshot() or self.project
-        all_skipped = all(
-            (shot.get("performance_engine") or "").upper() == "SKIP"
-            or not shot.get("approved_keyframe_take_id")
-            for scene in project.get("scenes", [])
-            for shot in scene.get("shots", [])
-        )
+        all_skipped = project_performance_review_can_skip(project)
         if not all_skipped:
             if not self._wait_for_gate(
                 "PERFORMANCE_REVIEW",

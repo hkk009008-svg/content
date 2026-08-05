@@ -65,6 +65,7 @@ for the behavior-change rationale.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
@@ -79,6 +80,7 @@ from cinema.auto_approve import (
     pick_best_take_for_final,
 )
 from cinema.lifecycle import LifecycleService
+from domain.performance import has_current_performance_skip
 
 _aa_logger = logging.getLogger(__name__ + ".auto_approve")
 
@@ -251,7 +253,10 @@ class ReviewController:
 
     def _project_gate_status(self, project: Optional[dict] = None) -> dict:
         active_project = project or self.project
-        shots = [shot for _, _, shot in self._all_shots(active_project)]
+        shot_entries = [
+            (scene, shot) for scene, _, shot in self._all_shots(active_project)
+        ]
+        shots = [shot for _, shot in shot_entries]
         total = len(shots)
         return {
             "total_shots": total,
@@ -264,7 +269,10 @@ class ReviewController:
 
     def _gate_satisfied(self, gate: str, project: Optional[dict] = None) -> bool:
         active_project = project or self.project
-        shots = [shot for _, _, shot in self._all_shots(active_project)]
+        shot_entries = [
+            (scene, shot) for scene, _, shot in self._all_shots(active_project)
+        ]
+        shots = [shot for _, shot in shot_entries]
         if not shots:
             return False
         if gate == "PLAN_REVIEW":
@@ -273,15 +281,15 @@ class ReviewController:
             return all(shot.get("approved_keyframe_take_id") for shot in shots)
         if gate == "PERFORMANCE_REVIEW":
             # A shot is satisfied for PERFORMANCE_REVIEW iff it doesn't need a
-            # performance (SKIP engine or no keyframe approved) OR the operator
-            # has explicitly approved a performance take. Mirrors the orchestrator's
-            # all_skipped bypass at cinema_pipeline.py:1133-1140, extended with the
-            # explicit-approval branch.
+            # performance (a current, input-bound skip decision or no keyframe
+            # approved) OR the operator has explicitly approved a performance
+            # take. Mirrors the orchestrator's project-level bound-skip check,
+            # extended with the explicit-approval branch.
             return all(
-                (shot.get("performance_engine") or "").upper() == "SKIP"
+                has_current_performance_skip(shot, scene)
                 or not shot.get("approved_keyframe_take_id")
                 or shot.get("approved_performance_take_id")
-                for shot in shots
+                for scene, shot in shot_entries
             )
         if gate == "REVIEW":
             return all(shot.get("approved_final_take_id") for shot in shots)
@@ -588,6 +596,8 @@ class ReviewController:
         self._run_auto_approve_pass(gate)
 
         def predicate() -> bool:
+            if bool(getattr(self._host, "_direct_stage_in_flight", False)):
+                return False
             project = self._host._refresh_project_snapshot() or self.project
             return self._gate_satisfied(gate, project)
 
@@ -597,6 +607,10 @@ class ReviewController:
         # plan-review-gate stall). Web runs leave headless False and keep the
         # blocking poll below.
         if self._runstate.headless:
+            if bool(getattr(self._host, "_direct_stage_in_flight", False)):
+                raise GateNotSatisfiedError(
+                    f"{gate} cannot advance while a direct-stage action is in flight"
+                )
             # Refresh the snapshot once and reuse it for both the satisfied-check
             # and the reason detail (avoids a redundant second snapshot on the
             # raise path).
@@ -622,7 +636,7 @@ class ReviewController:
         """
         active_project = project or self.project
         details: list[str] = []
-        for _scene, _shot_index, shot in self._all_shots(active_project):
+        for scene, _shot_index, shot in self._all_shots(active_project):
             sid = shot.get("id", "?")
             if gate == "PLAN_REVIEW":
                 if shot.get("plan_status") == "approved":
@@ -646,7 +660,7 @@ class ReviewController:
                 # Unsatisfied iff the shot NEEDS a performance but lacks an
                 # approved one (mirror of _gate_satisfied's PERFORMANCE branch).
                 if (
-                    (shot.get("performance_engine") or "").upper() != "SKIP"
+                    not has_current_performance_skip(shot, scene)
                     and shot.get("approved_keyframe_take_id")
                     and not shot.get("approved_performance_take_id")
                 ):
@@ -732,6 +746,26 @@ class ReviewController:
             elif approval_kind == "performance":
                 if collection_name != "performance_takes":
                     return MutationResult({"error": "Take is not a performance"}, save=False)
+                metadata = take.get("metadata") if isinstance(take.get("metadata"), dict) else {}
+                current_revision = str(shot.get("driving_video_path") or "")
+                take_revision = str(metadata.get("driving_video_path") or "")
+                revisions_match = bool(current_revision and take_revision)
+                if revisions_match:
+                    current_path = self._resolve_stored_media_path(current_revision)
+                    take_path = self._resolve_stored_media_path(take_revision)
+                    revisions_match = bool(
+                        current_path
+                        and take_path
+                        and os.path.realpath(current_path) == os.path.realpath(take_path)
+                    )
+                if not revisions_match or metadata.get("input_revision_stale") is True:
+                    return MutationResult({
+                        "error": (
+                            "Performance take was generated from a different or "
+                            "unknown driving-video revision"
+                        ),
+                        "code": "stale_performance_input",
+                    }, save=False)
                 shot["approved_performance_take_id"] = take_id
             elif approval_kind == "final":
                 if collection_name == "keyframe_takes":

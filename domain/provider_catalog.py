@@ -67,7 +67,6 @@ class Provider(StrEnum):
     ELEVENLABS = "elevenlabs"
     CARTESIA = "cartesia"
     LOCAL_OPEN_WEIGHTS = "local_open_weights"
-    RUNPOD_COMFYUI = "runpod_comfyui"
     SUNO_API_ORG = "sunoapi_org_proxy"
     STABILITY = "stability"
     ADOBE = "adobe"
@@ -326,7 +325,7 @@ class RuntimeSnapshot:
         ``module_probe`` is injectable for deterministic tests.  The default
         uses ``importlib.util.find_spec`` and treats probe errors as absence.
         Services are explicit observations; a configured URL is not proof that
-        a remote service or pod is ready.
+        a remote worker is ready.
         """
 
         credential_names = _RUNTIME_REQUIREMENT_NAMES[RequirementKind.CREDENTIAL]
@@ -1008,38 +1007,6 @@ _CATALOG_ROWS = (
         (False, False, False),
     ),
     _entry(
-        "FLUX_DEV",
-        "FLUX-Dev (current)",
-        Modality.IMAGE,
-        Maturity.STABLE,
-        Lifecycle.ACTIVE,
-        ProductSupport.SUPPORTED,
-        Provider.RUNPOD_COMFYUI,
-        (False, True, True),
-        runtime_options=((_service("comfyui_readiness"),),),
-        source=_source(kind=SourceKind.REPO_EVIDENCE),
-    ),
-    _entry(
-        "HIDREAM_I1",
-        "HiDream-I1-Full",
-        Modality.IMAGE,
-        Maturity.UNKNOWN,
-        Lifecycle.ACTIVE,
-        ProductSupport.NOT_IMPLEMENTED,
-        Provider.RUNPOD_COMFYUI,
-        (False, False, False),
-    ),
-    _entry(
-        "SD3_5_LARGE",
-        "Stable Diffusion 3.5 Large",
-        Modality.IMAGE,
-        Maturity.UNKNOWN,
-        Lifecycle.ACTIVE,
-        ProductSupport.NOT_IMPLEMENTED,
-        Provider.RUNPOD_COMFYUI,
-        (False, False, False),
-    ),
-    _entry(
         "SUNO_V5",
         "Suno V5 (SunoAPI.org proxy)",
         Modality.MUSIC,
@@ -1098,17 +1065,6 @@ _CATALOG_ROWS = (
         (False, False, False),
     ),
     _entry(
-        "SUPIR_V0Q",
-        "SUPIR-v0Q (image)",
-        Modality.UPSCALE,
-        Maturity.UNKNOWN,
-        Lifecycle.RETIRED,
-        ProductSupport.DISCONNECTED,
-        Provider.RUNPOD_COMFYUI,
-        (False, False, False),
-        source=_source(kind=SourceKind.REPO_EVIDENCE),
-    ),
-    _entry(
         "TOPAZ_ASTRA",
         "Topaz Video AI Astra",
         Modality.UPSCALE,
@@ -1128,17 +1084,6 @@ _CATALOG_ROWS = (
         Provider.FAL,
         (False, True, True),
         runtime_options=_FAL_RUNTIME,
-    ),
-    _entry(
-        "CCSR",
-        "CCSR (image)",
-        Modality.UPSCALE,
-        Maturity.UNKNOWN,
-        Lifecycle.ACTIVE,
-        ProductSupport.DISCONNECTED,
-        Provider.RUNPOD_COMFYUI,
-        (False, False, False),
-        source=_source(kind=SourceKind.REPO_EVIDENCE),
     ),
     _entry(
         # Slice 6c3 found Viggle now publishes a developer API at

@@ -2,10 +2,9 @@
 
 The single-source-of-truth pattern (config/settings.py docstring) requires
 every env-derived value to land on the Settings dataclass first. These
-tests lock down the fields added to absorb three pre-existing bypasses:
+tests lock down the fields added to absorb pre-existing bypasses:
 
   * audio/music.py     — SUNO_API_KEY / SUNO_TOKEN / SUNO_API_BASE
-  * performance/_cache.py        — PERFORMANCE_CACHE_DIR
   * performance/motion_gate.py   — MOTION_GATE_SAMPLES
 """
 from __future__ import annotations
@@ -32,16 +31,6 @@ class TestNewSettingsFields:
         monkeypatch.setenv("SUNO_API_BASE", "https://api.suno.dev/v2")
         s = Settings.from_env()
         assert s.suno_api_base == "https://api.suno.dev/v2"
-
-    def test_performance_cache_dir_default(self, monkeypatch):
-        monkeypatch.delenv("PERFORMANCE_CACHE_DIR", raising=False)
-        s = Settings.from_env()
-        assert s.performance_cache_dir == "data/cache/driving"
-
-    def test_performance_cache_dir_reads_from_env(self, monkeypatch):
-        monkeypatch.setenv("PERFORMANCE_CACHE_DIR", "/tmp/driving")
-        s = Settings.from_env()
-        assert s.performance_cache_dir == "/tmp/driving"
 
     def test_motion_gate_samples_default_is_int(self, monkeypatch):
         monkeypatch.delenv("MOTION_GATE_SAMPLES", raising=False)
@@ -98,6 +87,48 @@ class TestNewSettingsFields:
     def test_comfyui_is_unconfigured_when_env_is_absent(self, monkeypatch):
         monkeypatch.delenv("COMFYUI_SERVER_URL", raising=False)
         assert Settings.from_env().comfyui_server_url is None
+
+    def test_performance_comfyui_is_independently_configured(self, monkeypatch):
+        monkeypatch.setenv(
+            "PERFORMANCE_COMFYUI_SERVER_URL", "http://gpu-worker.local:8189"
+        )
+        monkeypatch.setenv("PERFORMANCE_COMFYUI_API_KEY", "performance-secret")
+        s = Settings.from_env()
+        assert s.performance_comfyui_server_url == "http://gpu-worker.local:8189"
+        assert s.performance_comfyui_api_key == "performance-secret"
+
+    def test_performance_comfyui_secret_can_come_from_locked_file(
+        self, monkeypatch, tmp_path
+    ):
+        secret = tmp_path / "performance-token"
+        secret.write_text("f" * 64 + "\n", encoding="utf-8")
+        secret.chmod(0o600)
+        monkeypatch.delenv("PERFORMANCE_COMFYUI_API_KEY", raising=False)
+        monkeypatch.setenv("PERFORMANCE_COMFYUI_API_KEY_FILE", str(secret))
+
+        assert Settings.from_env().performance_comfyui_api_key == "f" * 64
+
+    def test_direct_performance_secret_outranks_file(self, monkeypatch, tmp_path):
+        secret = tmp_path / "performance-token"
+        secret.write_text("file-secret", encoding="utf-8")
+        secret.chmod(0o600)
+        monkeypatch.setenv("PERFORMANCE_COMFYUI_API_KEY", "direct-secret")
+        monkeypatch.setenv("PERFORMANCE_COMFYUI_API_KEY_FILE", str(secret))
+
+        assert Settings.from_env().performance_comfyui_api_key == "direct-secret"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX mode check")
+    def test_performance_secret_file_rejects_group_access(
+        self, monkeypatch, tmp_path
+    ):
+        secret = tmp_path / "performance-token"
+        secret.write_text("f" * 64, encoding="utf-8")
+        secret.chmod(0o640)
+        monkeypatch.delenv("PERFORMANCE_COMFYUI_API_KEY", raising=False)
+        monkeypatch.setenv("PERFORMANCE_COMFYUI_API_KEY_FILE", str(secret))
+
+        with pytest.raises(ConfigurationError, match="group or others"):
+            Settings.from_env()
 
     @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.5", "content.local"])
     def test_unauthenticated_remote_bind_is_rejected(self, monkeypatch, host):

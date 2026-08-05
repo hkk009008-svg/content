@@ -64,7 +64,6 @@ function mockConfig(): AppConfig {
       portrait: { target_api: 'GEMINI_OMNI' },
     },
     billing_providers: {
-      RUNPOD_GPU: ['FLUX_DEV', 'HIDREAM_I1', 'SUPIR_V0Q'],
       GOOGLE_GEMINI_API: ['GEMINI_OMNI'],
     },
   } as unknown as AppConfig
@@ -169,7 +168,7 @@ describe('VideoSection', () => {
     expect(screen.getByText('runtime unavailable')).toBeInTheDocument()
   })
 
-  it('marks GEMINI_OMNI Primary and every surfaced engine Cloud (none pod)', () => {
+  it('marks GEMINI_OMNI Primary and every surfaced engine Cloud', () => {
     render(<VideoSection s={{}} config={mockConfig()} update={vi.fn()} />)
 
     // Exactly one Primary badge, on the first (GEMINI_OMNI) row.
@@ -179,35 +178,10 @@ describe('VideoSection', () => {
     expect(gemini.getAttribute('data-engine-key')).toBe('GEMINI_OMNI')
     expect(gemini.textContent).toContain('Primary')
 
-    // All three surfaced engines are cloud — RUNPOD_GPU doesn't bill any of them.
+    // Every supported video engine is hosted.
     expect(screen.getAllByText('Cloud')).toHaveLength(3)
     expect(screen.queryByText('Pod')).toBeNull()
     expect(screen.queryByText('⚙')).toBeNull()
-  })
-
-  it('shows a ⚙ Pod badge when a surfaced video engine is pod-gated', () => {
-    // Contrived "if surfaced anywhere" case: a selectable video-modality
-    // engine that RUNPOD_GPU bills → isPodGated true → the row must carry
-    // the ⚙ Pod badge.
-    const config = {
-      api_registry: {
-        GEMINI_OMNI: api({ label: 'Gemini Omni Flash' }),
-        FLUX_DEV: api({ label: 'FLUX-Dev (pod video)' }),
-      },
-      video_engines: [
-        row({ key: 'GEMINI_OMNI', label: 'Gemini Omni Flash' }),
-        row({ key: 'FLUX_DEV', label: 'FLUX-Dev (pod video)' }),
-      ],
-      billing_providers: { RUNPOD_GPU: ['FLUX_DEV'] },
-    } as unknown as AppConfig
-
-    render(<VideoSection s={{}} config={config} update={vi.fn()} />)
-
-    const fluxRow = screen
-      .getAllByTestId('video-engine-row')
-      .find((r) => r.getAttribute('data-engine-key') === 'FLUX_DEV')!
-    expect(fluxRow.textContent).toContain('Pod')
-    expect(fluxRow.textContent).toContain('⚙')
   })
 
   it('shows "No video engines available" when config has no server-selectable view', () => {

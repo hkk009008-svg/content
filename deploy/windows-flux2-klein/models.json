@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-08-06T00:00:00Z",
+  "capability": "image-flux2-klein",
+  "artifacts": [
+    {
+      "id": "flux2-klein-4b-distilled-fp8",
+      "required": true,
+      "source": {
+        "repository": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8",
+        "revision": "5b4408e59397a4a37ccb46afe426d8ed86379441",
+        "path": "flux-2-klein-4b-fp8.safetensors",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-fp8/resolve/5b4408e59397a4a37ccb46afe426d8ed86379441/flux-2-klein-4b-fp8.safetensors?download=true"
+      },
+      "expected_bytes": 4070624520,
+      "sha256": "97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6",
+      "destination": "diffusion_models/flux-2-klein-4b-fp8.safetensors",
+      "license": {
+        "source_declaration": "Apache-2.0",
+        "provenance": "Black Forest Labs declares FLUX.2 Klein 4B open weights commercially usable under Apache-2.0.",
+        "review_state": "source_declaration_recorded"
+      }
+    },
+    {
+      "id": "qwen3-4b-text-encoder",
+      "required": true,
+      "source": {
+        "type": "deterministic_official_shard_merge",
+        "repository": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+        "revision": "5e67da950fce4a097bc150c22958a05716994cea",
+        "index": {
+          "path": "text_encoder/model.safetensors.index.json",
+          "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/5e67da950fce4a097bc150c22958a05716994cea/text_encoder/model.safetensors.index.json?download=true",
+          "expected_bytes": 32855,
+          "sha256": "06b3d5319b6d76d1a4a2433419180016cfd54ed62d086a5e6567a809f8c82634"
+        },
+        "inputs": [
+          {
+            "path": "text_encoder/model-00001-of-00002.safetensors",
+            "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/5e67da950fce4a097bc150c22958a05716994cea/text_encoder/model-00001-of-00002.safetensors?download=true",
+            "expected_bytes": 4967215360,
+            "sha256": "8c0506e7f4936fa7e26183a4fd8da4e2bdbc5990ba64ae441f965d51228f36ea"
+          },
+          {
+            "path": "text_encoder/model-00002-of-00002.safetensors",
+            "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/5e67da950fce4a097bc150c22958a05716994cea/text_encoder/model-00002-of-00002.safetensors?download=true",
+            "expected_bytes": 3077766632,
+            "sha256": "82f2bd839378541b0557bfabaf37c7d3d637071fdcb73302dedd7cf61162ce07"
+          }
+        ],
+        "derivation": {
+          "script": "merge_qwen_encoder.py",
+          "tensor_order": "lexicographic_tensor_name",
+          "metadata": null,
+          "expected_tensor_count": 398,
+          "expected_header_bytes": 45848,
+          "execution_state": "not_executed"
+        }
+      },
+      "expected_bytes": 8044982048,
+      "sha256": "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+      "destination": "text_encoders/qwen_3_4b.safetensors",
+      "license": {
+        "source_declaration": "Apache-2.0",
+        "upstream_provenance": "The pinned BFL Apache repository contains the Qwen3ForCausalLM BF16 shard set; Qwen/Qwen3-4B also declares Apache-2.0 upstream.",
+        "review_state": "official_source_derivation_not_execution_proven",
+        "review_note": "The Comfy mirror is not an installation source. Commercial clearance remains conditional until merge_qwen_encoder.py verifies both official shard hashes and produces the manifest-gated single-file SHA-256."
+      }
+    },
+    {
+      "id": "flux2-vae",
+      "required": true,
+      "source": {
+        "type": "direct_official_artifact",
+        "repository": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+        "revision": "5e67da950fce4a097bc150c22958a05716994cea",
+        "path": "vae/diffusion_pytorch_model.safetensors",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B/resolve/5e67da950fce4a097bc150c22958a05716994cea/vae/diffusion_pytorch_model.safetensors?download=true"
+      },
+      "expected_bytes": 168120878,
+      "sha256": "ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04",
+      "destination": "vae/flux2-klein-vae-bf16.safetensors",
+      "license": {
+        "source_declaration": "Apache-2.0",
+        "upstream_provenance": "Direct artifact from the pinned Black Forest Labs FLUX.2 Klein 4B Apache repository.",
+        "review_state": "official_source_and_static_compatibility_verified",
+        "review_note": "The official BF16 file has the same 251 tensor names and shapes as the prior Comfy F32 artifact; every F32 tensor rounds to the official BF16 tensor bit-for-bit. Pinned ComfyUI accepts BF16 safetensors and detects the architecture from these keys. Runtime execution remains unproven."
+      }
+    }
+  ]
+}

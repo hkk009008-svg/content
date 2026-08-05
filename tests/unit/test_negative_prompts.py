@@ -114,17 +114,16 @@ def test_advisory_none_when_no_failure_reason():
 
 
 def test_advisory_known_reason_has_negative_prompt():
-    adv = build_remediation_advisory("wrong_person", 0.05)
+    adv = build_remediation_advisory("wrong_person")
     assert adv == {
         "failure_reason": "wrong_person",
         "suggested_negative_prompt": "wrong person, different face, identity drift, mismatched features",
-        "suggested_pulid_adjustment": 0.05,
         "source": "deterministic",
     }
 
 
 def test_advisory_unknown_reason_empty_negative_prompt():
-    adv = build_remediation_advisory("low_identity", 0.0)
+    adv = build_remediation_advisory("low_identity")
     assert adv["failure_reason"] == "low_identity"
     assert adv["suggested_negative_prompt"] == ""   # not in the map -> opt-in empty
     assert adv["source"] == "deterministic"

@@ -1,15 +1,19 @@
-"""LivePortrait performance-capture smoke (handoff §13).
+"""Windows LivePortrait performance-capture smoke.
 
-Calls the existing ComfyUI pod's LivePortrait workflow with a synthetic
-keyframe + a 2s driving video (a tiny generated mp4). Gated behind
-an explicit `runpod-liveportrait-performance` selection. The canary runner
-maps that target's dedicated performance endpoint into the application
-adapter's canonical COMFYUI_SERVER_URL and COMFYUI_API_KEY variables.
+Calls the dedicated Windows worker through the Mac's authenticated loopback
+tunnel with a hash-verified fictional-adult keyframe and a two-second facial-
+expression driving video. Gated behind an explicit
+`windows-liveportrait-performance` selection and the exact role-bound worker
+readiness contract.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import io
 import os
+from pathlib import Path
 import subprocess
 import tempfile
 
@@ -20,54 +24,107 @@ from config.settings import settings
 
 SELECTED = (
     os.environ.get("LIVE_CONTRACT_CANARY_TARGET", "")
-    == "runpod-liveportrait-performance"
+    == "windows-liveportrait-performance"
 )
 HAS_COMFYUI = bool(
-    getattr(settings, "comfyui_server_url", "")
-    and getattr(settings, "comfyui_api_key", "")
+    getattr(settings, "performance_comfyui_server_url", "")
+    and getattr(settings, "performance_comfyui_api_key", "")
+)
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_FIXTURE_SHEET = (
+    _REPOSITORY_ROOT
+    / "tests"
+    / "assets"
+    / "live_contract"
+    / "runway_act_two_synthetic_performer.jpg"
+)
+_FIXTURE_SHEET_SHA256 = (
+    "97471b9377c817251c86dbb58982464d7586b6b3d800936683f900da668c0fb6"
 )
 
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(
         not SELECTED or not HAS_COMFYUI,
-        reason="RunPod/ComfyUI was not selected or configured",
+        reason="Windows LivePortrait worker was not selected or configured",
     ),
 ]
 
 
+def _load_verified_expression_panels():
+    """Load four detected-face expressions and reject fixture byte drift."""
+    from PIL import Image
+
+    payload = _FIXTURE_SHEET.read_bytes()
+    actual_sha256 = hashlib.sha256(payload).hexdigest()
+    if not hmac.compare_digest(actual_sha256, _FIXTURE_SHEET_SHA256):
+        raise RuntimeError(
+            f"LivePortrait fixture hash mismatch: expected {_FIXTURE_SHEET_SHA256}, "
+            f"received {actual_sha256}"
+        )
+    with Image.open(io.BytesIO(payload)) as opened:
+        sheet = opened.convert("RGB")
+    width, height = sheet.size
+    if width != height or width % 2:
+        raise RuntimeError("LivePortrait expression sheet must be an even square")
+    half = width // 2
+    return [
+        sheet.crop((0, 0, half, half)),
+        sheet.crop((half, 0, width, half)),
+        sheet.crop((0, half, half, height)),
+        sheet.crop((half, half, width, height)),
+    ]
+
+
 def _make_test_keyframe(path: str) -> None:
-    """Tiny portrait-shaped keyframe."""
-    from PIL import Image, ImageDraw
-    img = Image.new("RGB", (512, 512), (60, 60, 80))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse((150, 130, 360, 380), fill=(220, 200, 180))
-    draw.ellipse((210, 220, 235, 245), fill=(40, 30, 30))
-    draw.ellipse((278, 220, 303, 245), fill=(40, 30, 30))
-    img.save(path, "JPEG", quality=88)
+    _load_verified_expression_panels()[0].save(path, "JPEG", quality=92)
 
 
-def _make_test_driving_video(path: str, frames: int = 30, fps: int = 15) -> None:
-    """Generate a deterministic mp4 with a small moving rectangle via ffmpeg."""
-    # ffmpeg's testsrc2 gives a movement pattern with timestamps — sufficient
-    # for LivePortrait to ingest as a driving signal.
+def _make_test_driving_video(path: str, frames: int = 50, fps: int = 25) -> None:
+    """Cross-blend real facial expressions into a deterministic driving clip."""
+    from PIL import Image
+
+    panels = _load_verified_expression_panels()
+    sequence = [0, 1, 2, 3, 2, 1, 0]
+    frames_dir = Path(path).with_suffix("").with_name("liveportrait-frames")
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    for frame_index in range(frames):
+        progress = frame_index * (len(sequence) - 1) / (frames - 1)
+        segment = min(int(progress), len(sequence) - 2)
+        frame = Image.blend(
+            panels[sequence[segment]],
+            panels[sequence[segment + 1]],
+            progress - segment,
+        )
+        frame.save(frames_dir / f"{frame_index:03d}.jpg", "JPEG", quality=90)
     subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi",
-         "-i", f"testsrc2=size=256x256:rate={fps}:duration={frames/fps:.2f}",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast", path],
+        [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-framerate", str(fps), "-i", str(frames_dir / "%03d.jpg"),
+            "-frames:v", str(frames), "-an",
+            # The hash-pinned expression sheet is 1254 px square, so each
+            # source panel is 627x627. H.264 yuv420p requires even geometry;
+            # pad one deterministic edge pixel instead of mutating the
+            # verified source fixture or depending on encoder tolerance.
+            "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p", "-preset", "fast",
+            "-movflags", "+faststart", path,
+        ],
         check=True, capture_output=True, timeout=30,
     )
 
 
-def test_live_portrait_pod_round_trip():
-    """Pod accepts the workflow + returns a video file. Asserts shape, not quality."""
+def test_live_portrait_windows_round_trip():
+    """The exact Windows worker accepts the graph and returns a valid video."""
     from performance.live_portrait import generate_live_portrait_performance
 
     # Confirm ffmpeg is available — otherwise we can't make the driving video.
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
     except (subprocess.SubprocessError, FileNotFoundError):
-        pytest.fail("ffmpeg not on PATH; selected RunPod canary cannot create its fixture")
+        pytest.fail("ffmpeg not on PATH; Windows canary cannot create its fixture")
 
     with tempfile.TemporaryDirectory() as td:
         kf = os.path.join(td, "kf.jpg")
@@ -84,7 +141,7 @@ def test_live_portrait_pod_round_trip():
             poll_timeout_s=120,  # tighter for smoke
         )
         if result is None:
-            pytest.fail("configured RunPod/ComfyUI LivePortrait returned no result")
+            pytest.fail("configured Windows LivePortrait worker returned no result")
         assert result == out
         assert os.path.exists(out)
         assert os.path.getsize(out) > 1024

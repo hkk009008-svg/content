@@ -146,7 +146,6 @@ def test_prompt_optimizer_constructs_ensemble_with_shared_tracker(tmp_path, monk
                     "video_prompt": "slow dolly-in",
                     "purpose": "static_portrait",
                     "shot_type": "portrait",
-                    "suggested_image_api": "FLUX_DEV",
                     "suggested_video_api": "AUTO",
                     "suggested_lipsync": None,
                     "negative_constraints": "plastic skin",

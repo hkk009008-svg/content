@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "path": "reference.png",
+  "encoding": "base64",
+  "payload": "reference.png.b64",
+  "expected_bytes": 173,
+  "sha256": "cd91b55001d19f88023fe80098c6919baeb99a62d4a65ba2d2339e9ca217bca8",
+  "media_type": "image/png",
+  "decoded": {
+    "format": "PNG",
+    "mode": "RGB",
+    "width": 64,
+    "height": 64
+  }
+}

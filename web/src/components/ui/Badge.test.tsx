@@ -3,9 +3,9 @@ import { describe, it, expect } from 'vitest'
 import { Badge } from './Badge'
 
 describe('Badge', () => {
-  it('pod variant shows gear + pod token class', () => {
-    const { container } = render(<Badge variant="pod">Pod</Badge>)
-    expect(screen.getByText(/Pod/)).toBeInTheDocument()
-    expect(container.firstChild).toHaveClass('text-pod')
+  it('local variant shows gear + local token class', () => {
+    const { container } = render(<Badge variant="local">Local</Badge>)
+    expect(screen.getByText(/Local/)).toBeInTheDocument()
+    expect(container.firstChild).toHaveClass('text-local')
   })
 })

@@ -1,6 +1,13 @@
+from dataclasses import fields
+
 import pytest
 
-from identity.types import get_threshold_for_shot
+from identity.types import (
+    CharacterIdentityResult,
+    FailureReason,
+    FrameSample,
+    get_threshold_for_shot,
+)
 from identity.validator import IdentityValidator
 
 
@@ -17,46 +24,33 @@ def test_threshold_degrades_standard_to_lenient(capability_record):
 
 
 @pytest.mark.offline
-def test_pulid_delta_from_similarity(capability_record):
-    f = IdentityValidator._compute_pulid_delta  # @staticmethod, callable unbound
-    assert f(0.85, True) == pytest.approx(-0.05)
-    assert f(0.70, True) == pytest.approx(0.0)
-    assert f(0.58, False) == pytest.approx(0.05)
-    assert f(0.40, False) == pytest.approx(0.10)
-    capability_record(claim_id="ID-06", passed=True)
-
-
-from identity.types import (
-    IdentityValidationResult, CharacterIdentityResult, FailureReason,
-)
-
-
-def _history_result(cid, similarity, matched):
-    """Shape get_rolling_stats expects: self.history is a List[IdentityValidationResult];
-    each carries a CharacterIdentityResult per character (identity/types.py:46-85)."""
-    cr = CharacterIdentityResult(
-        character_id=cid, character_name=cid,
-        best_similarity=similarity, mean_similarity=similarity, min_similarity=similarity,
-        frame_results=[], matched=matched,
-        primary_failure_reason=FailureReason.PASSED if matched else FailureReason.WRONG_PERSON,
-        suggested_pulid_adjustment=0.0,
+@pytest.mark.offline
+def test_character_aggregation_preserves_failure_reason(capability_record):
+    validator = IdentityValidator()
+    frame = FrameSample(
+        frame_index=0,
+        frame_position_ratio=0.5,
+        face_detected=True,
+        face_confidence=0.95,
+        face_area_ratio=0.2,
+        face_angle_estimate="frontal",
+        similarity=0.2,
+        matched=False,
+        failure_reason=FailureReason.WRONG_PERSON,
     )
-    return IdentityValidationResult(
-        passed=matched, overall_score=similarity, character_results={cid: cr},
-        frames_sampled=1, video_duration_seconds=1.0, shot_type="portrait",
-        threshold_used=0.70,
+    result = validator._aggregate_character(
+        "char_test", "Character", [frame], threshold=0.7
     )
+    assert result.primary_failure_reason is FailureReason.WRONG_PERSON
+    capability_record(claim_id="ID-05", passed=True)
 
 
 @pytest.mark.offline
-def test_rolling_stats_suggested_delta(capability_record):
-    v = IdentityValidator()  # __init__ sets only dict/list attrs; no torch/DeepFace
-    cid = "char_test"
-    # 5 misses -> success_rate < 0.5 -> suggested_pulid_delta +0.10
-    v.history.extend(_history_result(cid, 0.40, matched=False) for _ in range(5))
-    stats = v.get_rolling_stats(cid, window=10)
-    assert stats["suggested_pulid_delta"] == pytest.approx(0.10)
-    capability_record(claim_id="ID-05", passed=True)
+def test_identity_diagnostics_are_provider_neutral(capability_record):
+    field_names = {item.name for item in fields(CharacterIdentityResult)}
+    assert "suggested_pulid_adjustment" not in field_names
+    assert all("provider" not in name for name in field_names)
+    capability_record(claim_id="ID-06", passed=True)
 
 
 @pytest.mark.offline

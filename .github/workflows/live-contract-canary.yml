@@ -12,18 +12,22 @@ on:
         options:
           - none
           - runway-act-two
-          - runpod-pulid-production
-          - runpod-liveportrait-performance
+          - windows-liveportrait-performance
       approval:
         description: Type the exact approval phrase documented in docs/LIVE_CONTRACT_CANARY.md
         required: true
         type: string
         default: ''
       max_cost_usd:
-        description: Finite cap for one fixed canary; default zero is refused
+        description: Finite API cap; cloud targets refuse zero and the local target requires it
         required: true
         type: string
         default: '0'
+      windows_runner_authorization:
+        description: Windows only - type the documented ephemeral JIT runner confirmation
+        required: true
+        type: string
+        default: ''
 
 # Never cancel a worker after a provider may have accepted a paid task.
 concurrency:
@@ -36,12 +40,14 @@ permissions:
 jobs:
   authorize:
     name: Validate explicit authorization without secrets
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
       LIVE_CONTRACT_CANARY_TARGET: ${{ inputs.target }}
       LIVE_CONTRACT_CANARY_APPROVAL: ${{ inputs.approval }}
       LIVE_CONTRACT_CANARY_MAX_COST_USD: ${{ inputs.max_cost_usd }}
+      LIVE_CONTRACT_CANARY_WINDOWS_RUNNER_AUTHORIZATION: ${{ inputs.windows_runner_authorization }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
@@ -55,6 +61,7 @@ jobs:
   live-canary:
     name: Run one protected live boundary
     needs: authorize
+    if: inputs.target != 'windows-liveportrait-performance'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -66,11 +73,8 @@ jobs:
       LIVE_CONTRACT_CANARY_TARGET: ${{ inputs.target }}
       LIVE_CONTRACT_CANARY_APPROVAL: ${{ inputs.approval }}
       LIVE_CONTRACT_CANARY_MAX_COST_USD: ${{ inputs.max_cost_usd }}
+      LIVE_CONTRACT_CANARY_WINDOWS_RUNNER_AUTHORIZATION: ${{ inputs.windows_runner_authorization }}
       RUNWAYML_API_SECRET: ${{ inputs.target == 'runway-act-two' && secrets.RUNWAYML_API_SECRET || '' }}
-      COMFYUI_SERVER_URL: ${{ inputs.target == 'runpod-pulid-production' && secrets.COMFYUI_SERVER_URL || '' }}
-      COMFYUI_API_KEY: ${{ inputs.target == 'runpod-pulid-production' && secrets.COMFYUI_API_KEY || '' }}
-      PERFORMANCE_COMFYUI_SERVER_URL: ${{ inputs.target == 'runpod-liveportrait-performance' && secrets.PERFORMANCE_COMFYUI_SERVER_URL || '' }}
-      PERFORMANCE_COMFYUI_API_KEY: ${{ inputs.target == 'runpod-liveportrait-performance' && secrets.PERFORMANCE_COMFYUI_API_KEY || '' }}
       CANARY_AUTHORITY_GITHUB_TOKEN: ${{ github.token }}
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
@@ -94,7 +98,7 @@ jobs:
             runway-act-two-ledger-v3-97471b93-
 
       - name: Install video fixture tooling
-        if: inputs.target == 'runway-act-two' || inputs.target == 'runpod-liveportrait-performance'
+        if: inputs.target == 'runway-act-two'
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ffmpeg
@@ -112,8 +116,8 @@ jobs:
       - name: Verify installed dependency graph
         run: python -m pip check
 
-      - name: Probe authenticated RunPod readiness without generation
-        run: python scripts/live_contract_canary.py probe-runpod
+      - name: Probe the selected authenticated worker without generation
+        run: python scripts/live_contract_canary.py probe-worker
 
       - name: Re-read Runway authority for this exact job attempt
         env:
@@ -142,3 +146,70 @@ jobs:
           path: ${{ runner.temp }}/live-contract-canary/
           if-no-files-found: warn
           retention-days: 30
+
+  windows-liveportrait-canary:
+    name: Run the protected Windows LivePortrait boundary
+    needs: authorize
+    if: inputs.target == 'windows-liveportrait-performance'
+    runs-on: [self-hosted, macOS, content-liveportrait-ephemeral-jit]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    environment:
+      name: live-contract-canary
+    env:
+      LIVE_CONTRACT_CANARY_TARGET: ${{ inputs.target }}
+      LIVE_CONTRACT_CANARY_APPROVAL: ${{ inputs.approval }}
+      LIVE_CONTRACT_CANARY_MAX_COST_USD: ${{ inputs.max_cost_usd }}
+      LIVE_CONTRACT_CANARY_WINDOWS_RUNNER_AUTHORIZATION: ${{ inputs.windows_runner_authorization }}
+      COMFYUI_SERVER_URL: ''
+      COMFYUI_API_KEY: ''
+      PERFORMANCE_COMFYUI_SERVER_URL: http://127.0.0.1:18189
+      CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+
+      - name: Require the Mac runner and preinstalled fixture tooling
+        run: |
+          test "$(uname -s)" = Darwin
+          ffmpeg -version
+
+      - name: Install pinned dependencies in a disposable environment
+        run: |
+          python -m venv --clear "$CANARY_VENV"
+          "$CANARY_VENV/bin/python" -m pip install --no-cache-dir --no-deps \
+            'pytest==8.4.2' \
+            'Pillow==11.3.0' \
+            'python-dotenv==1.2.1' \
+            'requests==2.32.5' \
+            'certifi==2026.2.25' \
+            'charset-normalizer==3.4.6' \
+            'idna==3.11' \
+            'urllib3==2.6.3' \
+            'iniconfig==2.3.0' \
+            'packaging==26.0' \
+            'pluggy==1.6.0' \
+            'Pygments==2.19.2'
+
+      - name: Verify installed dependency graph
+        run: '"$CANARY_VENV/bin/python" -m pip check'
+
+      - name: Revalidate protected token and fixed loopback tunnel
+        env:
+          PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
+        run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py check-ready'
+
+      - name: Verify exact role-bound Windows worker readiness
+        env:
+          PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
+        run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py probe-worker'
+
+      - name: Run exactly one local LivePortrait contract
+        env:
+          PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
+        run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py run'

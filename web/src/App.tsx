@@ -144,7 +144,8 @@ function AppInner() {
     stages, activeStage, shotStates, directorReview, processEvent,
     isPaused, failedShots, running, allowedActions, checkpoint, queue, refreshPipelineState,
     pause: pausePipeline, resume: resumePipeline,
-    approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
+    approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance,
+    generatePerformance, skipPerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
     approveScreening, reassembleProject,
   } = usePipelineState(project?.id ?? null)
@@ -255,6 +256,7 @@ function AppInner() {
       setActionError(
         `Project refresh failed: ${err instanceof Error && err.message ? err.message : 'Unknown error'}`,
       )
+      throw err
     }
   }, [project, loadProject])
 
@@ -398,7 +400,9 @@ function AppInner() {
       'COMPLETE',
     ])
     if (refreshStages.has(latest.stage)) {
-      refreshProject()
+      void refreshProject().catch(() => {
+        // refreshProject already exposes the failure through actionError.
+      })
     }
   }, [latest, project, refreshProject])
 
@@ -532,6 +536,8 @@ function AppInner() {
         onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
         onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
         onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
+        onGeneratePerformance={generatePerformance}
+        onSkipPerformance={skipPerformance}
         onGenerateMotion={handleGenerateMotion}
         onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
         onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}

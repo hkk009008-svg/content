@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-08-06T00:00:00Z",
+  "capability": "image-flux2-klein",
+  "components": [
+    {
+      "id": "comfyui",
+      "repository": "https://github.com/Comfy-Org/ComfyUI.git",
+      "commit": "b1693ecba9f5b65f8c80ab36b195ab963ec92413",
+      "version": "0.30.0",
+      "license": "GPL-3.0",
+      "selection": "Reuses the repository's currently pinned Windows-worker ComfyUI core revision; this candidate does not modify the accepted LivePortrait installation."
+    },
+    {
+      "id": "official-workflow-template",
+      "repository": "https://github.com/Comfy-Org/workflow_templates.git",
+      "commit": "6c038ced23eb9d4de675b14aa854b616a6a7cd16",
+      "path": "templates/image_flux2_klein_image_edit_4b_distilled.json",
+      "license": "MIT"
+    }
+  ],
+  "core_contract": {
+    "comfy_core_template_version": "0.8.2",
+    "required_node_classes": [
+      "CFGGuider",
+      "CLIPLoader",
+      "CLIPTextEncode",
+      "ConditioningZeroOut",
+      "EmptyFlux2LatentImage",
+      "Flux2Scheduler",
+      "ImageScaleToTotalPixels",
+      "KSamplerSelect",
+      "LoadImage",
+      "RandomNoise",
+      "ReferenceLatent",
+      "SamplerCustomAdvanced",
+      "SaveImage",
+      "UNETLoader",
+      "VAEDecode",
+      "VAEEncode",
+      "VAELoader"
+    ],
+    "source_files": {
+      "EmptyFlux2LatentImage": "comfy_extras/nodes_flux.py",
+      "Flux2Scheduler": "comfy_extras/nodes_flux.py",
+      "ReferenceLatent": "comfy_extras/nodes_edit_model.py",
+      "ImageScaleToTotalPixels": "comfy_extras/nodes_post_processing.py",
+      "RandomNoise": "comfy_extras/nodes_custom_sampler.py",
+      "KSamplerSelect": "comfy_extras/nodes_custom_sampler.py",
+      "CFGGuider": "comfy_extras/nodes_custom_sampler.py",
+      "SamplerCustomAdvanced": "comfy_extras/nodes_custom_sampler.py"
+    }
+  }
+}

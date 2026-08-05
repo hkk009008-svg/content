@@ -99,18 +99,6 @@ export default function PromptEditor({ shot, shotId, projectId, currentPrompt, o
                 <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">
                   Recommended API: {config?.api_registry?.[template.target_api]?.label || template.target_api}
                 </span>
-                <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">
-                  CFG {template.guidance}
-                </span>
-                <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">
-                  {template.steps} steps
-                </span>
-                <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">
-                  Denoise {template.denoise_default}
-                </span>
-                <span className="rounded bg-app px-2 py-0.5 text-eyebrow text-mut">
-                  PuLID {template.pulid_weight}
-                </span>
               </div>
             )}
           </div>

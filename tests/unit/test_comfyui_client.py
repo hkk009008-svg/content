@@ -112,8 +112,8 @@ def _image_bytes(fmt="PNG", size=(8, 6), color=(10, 20, 30, 255)):
 
 def test_client_uses_bounded_timeouts_and_bearer_auth():
     session = _Session(gets=[_Response({})])
-    client = cc.RunPodComfyUI(
-        "https://pod.example/",
+    client = cc.ComfyUIClient(
+        "https://worker.example/",
         auth_token="secret",
         session=session,
         connect_timeout=3,
@@ -124,19 +124,54 @@ def test_client_uses_bounded_timeouts_and_bearer_auth():
     assert session.headers == {"Authorization": "Bearer secret"}
     assert session.get_calls == [
         (
-            "https://pod.example/history/prompt%2Fid",
+            "https://worker.example/history/prompt%2Fid",
             {"timeout": (3.0, 11.0), "stream": True},
         )
     ]
 
 
+def test_capability_readiness_uses_authenticated_bounded_route():
+    contract = {
+        "schema_version": 1,
+        "status": "partial",
+        "capabilities": {},
+    }
+    session = _Session(gets=[_Response(contract)])
+    client = cc.ComfyUIClient(
+        "http://127.0.0.1:18189",
+        auth_token="c" * 32,
+        session=session,
+        connect_timeout=2,
+        read_timeout=4,
+    )
+
+    assert client.get_gateway_capabilities_readiness() == contract
+    assert session.headers == {"Authorization": f"Bearer {'c' * 32}"}
+    assert session.get_calls == [
+        (
+            "http://127.0.0.1:18189/api/capabilities/ready",
+            {"timeout": (2.0, 4.0), "stream": True},
+        )
+    ]
+
+
+def test_capability_readiness_rejects_non_object_body():
+    client = cc.ComfyUIClient(
+        "http://127.0.0.1:18189",
+        session=_Session(gets=[_Response([])]),
+    )
+
+    with pytest.raises(cc.ComfyUIReadinessError, match="must return a JSON object"):
+        client.get_gateway_capabilities_readiness()
+
+
 @pytest.mark.parametrize(
     "server_url",
-    ["", "pod:8188", "file:///tmp/socket", "https://pod.example/?token=leak"],
+    ["", "worker:8188", "file:///tmp/socket", "https://worker.example/?token=leak"],
 )
 def test_client_rejects_non_http_server_urls(server_url):
     with pytest.raises(ValueError, match="non-empty|http|query"):
-        cc.RunPodComfyUI(server_url)
+        cc.ComfyUIClient(server_url)
 
 
 def test_default_pool_retries_only_idempotent_reads():
@@ -154,7 +189,7 @@ def test_queue_prompt_preflights_then_submits_once():
         gets=_ready_gets(),
         posts=[_Response({"prompt_id": "p-1", "number": 4})],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     assert client.queue_prompt(_workflow()) == "p-1"
     assert [url.rsplit("/", 1)[-1] for url, _ in session.get_calls] == [
@@ -164,7 +199,7 @@ def test_queue_prompt_preflights_then_submits_once():
     ]
     assert len(session.post_calls) == 1
     url, kwargs = session.post_calls[0]
-    assert url == "http://pod:8188/prompt"
+    assert url == "http://worker:8188/prompt"
     assert kwargs["timeout"] == (5.0, 30.0)
     assert kwargs["stream"] is True
     assert kwargs["json"]["prompt"] == _workflow()
@@ -174,11 +209,11 @@ def test_upload_uses_bounded_timeout_and_parses_remote_name(tmp_path):
     image_path = tmp_path / "face.png"
     image_path.write_bytes(b"local-image")
     session = _Session(posts=[_Response({"name": "face_1.png", "type": "input"})])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     assert client.upload_image(str(image_path)) == "face_1.png"
     url, kwargs = session.post_calls[0]
-    assert url == "http://pod:8188/upload/image"
+    assert url == "http://worker:8188/upload/image"
     assert kwargs["timeout"] == (5.0, 120.0)
     assert kwargs["stream"] is True
     assert set(kwargs["files"]) == {"image"}
@@ -199,7 +234,7 @@ def test_preflight_rejects_missing_class_unknown_input_and_model():
     }
 
     with pytest.raises(cc.ComfyUIReadinessError) as caught:
-        cc.RunPodComfyUI._validate_workflow_contract(bad_workflow, object_info)
+        cc.ComfyUIClient._validate_workflow_contract(bad_workflow, object_info)
 
     message = str(caught.value)
     assert "missing.safetensors" in message
@@ -216,7 +251,7 @@ def test_prompt_error_and_node_errors_are_raised_immediately():
         gets=_ready_gets(),
         posts=[_Response(rejection, status_code=400)],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUIPromptRejected) as caught:
         client.queue_prompt(_workflow())
@@ -231,7 +266,7 @@ def test_prompt_transport_failure_is_unknown_and_never_blindly_retried():
         gets=_ready_gets(),
         posts=[requests.ConnectionError("ack lost")],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUISubmitUnknown, match="UNKNOWN"):
         client.queue_prompt(_workflow())
@@ -253,7 +288,7 @@ def test_prompt_transport_failure_is_unknown_and_never_blindly_retried():
 )
 def test_ambiguous_prompt_acknowledgements_are_unknown(response):
     session = _Session(gets=_ready_gets(), posts=[response])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUISubmitUnknown, match="UNKNOWN"):
         client.queue_prompt(_workflow())
@@ -276,7 +311,7 @@ def test_wait_for_completion_surfaces_history_execution_error(monkeypatch):
         }
     }
     session = _Session(gets=[_Response(history)])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUIJobError, match="CUDA OOM"):
         client.wait_for_completion("p-1", timeout=1)
@@ -321,13 +356,13 @@ def test_wait_for_completion_consumes_websocket_progress_and_completion(monkeypa
         return _Websocket()
 
     monkeypatch.setattr(cc, "_websocket_connect", _connect)
-    client = cc.RunPodComfyUI("https://pod.example/proxy", auth_token="key", session=session)
+    client = cc.ComfyUIClient("https://worker.example/proxy", auth_token="key", session=session)
 
     history = client.wait_for_completion("p-1", timeout=1, on_progress=progress.append)
 
     assert history["p-1"]["status"]["completed"] is True
     assert progress == [{"prompt_id": "p-1", "value": 2, "max": 4}]
-    assert seen["url"].startswith("wss://pod.example/proxy/ws?clientId=")
+    assert seen["url"].startswith("wss://worker.example/proxy/ws?clientId=")
     assert seen["kwargs"]["additional_headers"] == {"Authorization": "Bearer key"}
 
 
@@ -375,7 +410,7 @@ def test_modern_execution_success_ignores_foreign_terminal_error(monkeypatch):
             return next(self.messages)
 
     monkeypatch.setattr(cc, "_websocket_connect", lambda *args, **kwargs: _Websocket())
-    client = cc.RunPodComfyUI("https://pod.example", session=session)
+    client = cc.ComfyUIClient("https://worker.example", session=session)
 
     history = client.wait_for_completion("p-1", timeout=1)
 
@@ -392,17 +427,17 @@ def test_legacy_pending_delete_is_dispatched_but_not_claimed_atomic():
         gets=[_Response(queue)],
         posts=[_Response({}, status_code=404), _Response({})],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUIJobStateUnknown, match="cannot atomically confirm"):
         client.cancel_prompt("p-1")
     assert session.post_calls == [
         (
-            "http://pod:8188/api/jobs/p-1/cancel",
+            "http://worker:8188/api/jobs/p-1/cancel",
             {"timeout": (5.0, 30.0), "stream": True},
         ),
         (
-            "http://pod:8188/queue",
+            "http://worker:8188/queue",
             {
                 "json": {"delete": ["p-1"]},
                 "timeout": (5.0, 30.0),
@@ -418,13 +453,13 @@ def test_legacy_running_cancel_refuses_racy_global_interrupt():
         "queue_pending": [],
     }
     session = _Session(gets=[_Response(queue)], posts=[_Response({}, status_code=404)])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUIJobStateUnknown, match="racy global /interrupt"):
         client.cancel_prompt("p-1")
     assert session.post_calls == [
         (
-            "http://pod:8188/api/jobs/p-1/cancel",
+            "http://worker:8188/api/jobs/p-1/cancel",
             {"timeout": (5.0, 30.0), "stream": True},
         )
     ]
@@ -432,13 +467,13 @@ def test_legacy_running_cancel_refuses_racy_global_interrupt():
 
 def test_cancel_prefers_atomic_prompt_scoped_route():
     session = _Session(posts=[_Response({"cancelled": True})])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     assert client.cancel_prompt("p/1") is True
     assert session.get_calls == []
     assert session.post_calls == [
         (
-            "http://pod:8188/api/jobs/p%2F1/cancel",
+            "http://worker:8188/api/jobs/p%2F1/cancel",
             {"timeout": (5.0, 30.0), "stream": True},
         )
     ]
@@ -446,13 +481,13 @@ def test_cancel_prefers_atomic_prompt_scoped_route():
 
 def test_explicit_global_interrupt_is_bounded_and_not_retried():
     session = _Session(posts=[_Response({})])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     client.interrupt()
 
     assert session.post_calls == [
         (
-            "http://pod:8188/interrupt",
+            "http://worker:8188/interrupt",
             {"timeout": (5.0, 30.0), "stream": True},
         )
     ]
@@ -467,14 +502,14 @@ def test_job_deadline_allows_fallback_only_after_confirmed_scoped_cancel(monkeyp
         gets=[_Response({}), _Response({})],
         posts=[_Response({"cancelled": True})],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUITimeout, match="cancellation requested"):
         client.wait_for_completion("p-1", timeout=1.0, poll_interval=0.1)
 
     assert session.post_calls == [
         (
-            "http://pod:8188/api/jobs/p-1/cancel",
+            "http://worker:8188/api/jobs/p-1/cancel",
             {"timeout": (5.0, 30.0), "stream": True},
         )
     ]
@@ -491,7 +526,7 @@ def test_job_deadline_fails_closed_when_scoped_cancel_finds_no_active_job(
         gets=[_Response({}), _Response({})],
         posts=[_Response({"cancelled": False})],
     )
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUIJobStateUnknown, match="UNKNOWN"):
         client.wait_for_completion("p-1", timeout=1.0, poll_interval=0.1)
@@ -507,7 +542,7 @@ def test_download_validates_png_and_atomically_publishes_jpeg(tmp_path, monkeypa
         chunks=[png[:12], png[12:]],
     )
     session = _Session(gets=[response])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
     destination = tmp_path / "take.jpg"
     destination.write_bytes(b"known-good")
     real_replace = cc.os.replace
@@ -550,7 +585,7 @@ def test_invalid_download_preserves_existing_destination(
 ):
     response = _Response(body=body, headers=headers, chunks=[body])
     session = _Session(gets=[response])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
     destination = tmp_path / "take.jpg"
     destination.write_bytes(b"known-good")
 
@@ -569,7 +604,7 @@ def test_wrong_dimensions_preserve_existing_destination(tmp_path):
         chunks=[png],
     )
     session = _Session(gets=[response])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
     destination = tmp_path / "take.png"
     destination.write_bytes(b"known-good")
 
@@ -593,7 +628,7 @@ def test_excessive_pixel_count_preserves_existing_destination(tmp_path):
         chunks=[png],
     )
     session = _Session(gets=[response])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
     destination = tmp_path / "take.png"
     destination.write_bytes(b"known-good")
 
@@ -607,7 +642,7 @@ def test_excessive_pixel_count_preserves_existing_destination(tmp_path):
 
 def test_unsafe_output_metadata_is_rejected_before_network(tmp_path):
     session = _Session()
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUITransportError, match="unsafe output filename"):
         client.download_image("../secret.png", "", "output", str(tmp_path / "x.png"))
@@ -638,7 +673,7 @@ def test_json_limit_is_enforced_while_streaming(monkeypatch):
             return False
 
     session = _Session(gets=[_StreamingOnlyResponse()])
-    client = cc.RunPodComfyUI("http://pod:8188", session=session)
+    client = cc.ComfyUIClient("http://worker:8188", session=session)
 
     with pytest.raises(cc.ComfyUITransportError, match="exceeds 5 bytes"):
         client.get_history("p-1")

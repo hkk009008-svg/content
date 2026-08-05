@@ -124,6 +124,13 @@ class Shot(BaseModel):
     performance_take_id: str = ""
     performance_engine: str = ""
     driving_video_path: str = ""
+    # Validated uploads are immutable, content-addressed inputs.  The active
+    # pointer may change, while these histories preserve every prior revision
+    # and explicit review decision for reproducibility/audit.
+    driving_video_history: List[dict] = Field(default_factory=list)
+    performance_skip: Optional[dict] = None
+    performance_skip_history: List[dict] = Field(default_factory=list)
+    performance_review_history: List[dict] = Field(default_factory=list)
     # Misc shot metadata
     diagnostics: List[dict] = Field(default_factory=list)
     intent_notes: str = ""
@@ -134,7 +141,6 @@ class Shot(BaseModel):
     # Keeping the model permissive preserves historical load compatibility;
     # public replacement boundaries separately reject undeclared extras.
     optimizer_cache: dict = Field(default_factory=dict)
-    image_api: str = "AUTO"
     dialogue: str | List[dict] | None = None
     duration: float = 5.0
     motion_description: str = ""

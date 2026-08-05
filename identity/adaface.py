@@ -33,7 +33,7 @@ Design decisions (deliberate — do not "simplify" away):
   broad except and validate_* would silently SKIP (passed=True) — the
   silent-gate-degradation class.
 
-* UNCALIBRATED until P5 item 2 (pod paired measurement on the ADR-025
+* UNCALIBRATED until P5 item 2 (paired measurement on the production
   reference sets): every identity threshold in the repo assumes GhostFaceNet
   score distributions. The structural warning in _resolve_embed_model keeps
   firing for AdaFace by design. Do NOT flip the default before item 2 lands.

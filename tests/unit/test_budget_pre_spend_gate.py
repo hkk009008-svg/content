@@ -1776,6 +1776,10 @@ class TestPerformancePreSpendBudgetGate:
         with (
             patch("performance._router.dispatch", side_effect=_dispatch) as dispatch,
             patch("performance.identity_gate.validate_performance_take", return_value=None),
+            patch(
+                "performance.driving_clip.prepare_bounded_driving_clip",
+                side_effect=lambda source_path, **_kwargs: source_path,
+            ),
         ):
             result = ctrl.generate_performance_take("scene_1", "shot_1_0")
 
@@ -1784,85 +1788,7 @@ class TestPerformancePreSpendBudgetGate:
         lifecycle.pause.assert_not_called()
         cost_tracker.would_exceed.assert_called_once_with("ACT_ONE")
 
-    def test_mode_b_refuses_when_combined_driving_and_engine_cost_exceeds_budget(self, tmp_path):
-        """Correct behavior: refuse before Mode-B synth when combined spend exceeds cap."""
-        from cost_tracker import CostTracker
-
-        audio = tmp_path / "scene.mp3"
-        audio.write_bytes(b"fake_mp3")
-        driving = tmp_path / "driving.mp4"
-
-        project = {
-            "id": "proj_perf_mode_b_budget_gap",
-            "characters": [{"id": "char_1", "name": "Alice"}],
-            "global_settings": {},
-            "scenes": [{
-                "id": "scene_1",
-                "title": "Scene",
-                "duration_seconds": 5.0,
-                "characters_present": ["char_1"],
-                "shots": [{
-                    "id": "shot_1_0",
-                    "prompt": "Medium dialogue shot",
-                    "plan_status": "approved",
-                    "shot_type": "medium",
-                    "characters_in_frame": ["char_1"],
-                    "dialogue": "hello there",
-                    "approved_keyframe_take_id": "kf_t1",
-                }],
-            }],
-        }
-        ctrl, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
-        ctrl._host._ensure_scene_audio.return_value = str(audio)
-        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.00)
-        # WS4: Hedra removed from Mode-B (2026-07-18) — the pre-spend gate's
-        # driving-cost estimate now uses the sole surviving engine (sadtalker,
-        # $0.02 base + $0.005/s), so 0.71 spent is the smallest bump that still
-        # pushes ACT_ONE (0.25) + sadtalker driving (0.045 @ 5s) = 0.295 over
-        # the $1.00 cap (0.71 + 0.295 = 1.005 > 1.00).
-        tracker.spent_usd = 0.71
-        ctrl._core.cost_tracker = tracker
-
-        def _synth(**kwargs):
-            driving.write_bytes(b"fake_driving")
-            tracker.log_api(
-                provider="sadtalker",
-                model="driving_face",
-                operation="performance_capture_driving",
-                cost_usd=0.045,  # matches estimate_driving_face_cost('sadtalker', 5s)
-            )
-            return str(driving), "sadtalker"
-
-        def _dispatch(*args, **kwargs):
-            output = kwargs["output_mp4"]
-            open(output, "wb").write(b"fake_mp4")
-            tracker.log_api(
-                provider="runway",
-                model="act_two",
-                operation="performance_capture",
-                cost_usd=0.25,
-            )
-            return output
-
-        try:
-            with (
-                patch("performance.driving_video.synth_driving_face_from_audio", side_effect=_synth) as synth,
-                patch("performance._router.dispatch", side_effect=_dispatch) as dispatch,
-                patch("performance.identity_gate.validate_performance_take", return_value=None),
-            ):
-                result = ctrl.generate_performance_take("scene_1", "shot_1_0")
-
-            assert result.get("success") is False
-            assert result.get("error_kind") == "budget"
-            synth.assert_not_called()
-            dispatch.assert_not_called()
-            lifecycle.pause.assert_called_once()
-            assert tracker.spent_usd == pytest.approx(0.71)
-            assert not driving.exists()
-        finally:
-            tracker.close()
-
-    def test_mode_b_budget_pause_parks_at_performance_review_not_cancel(self):
+    def test_performance_budget_pause_parks_at_review_not_cancel(self):
         """Budget refusal pauses the run; review/cancel remains operator-owned."""
         from cinema.lifecycle import ThreadedLifecycle
 
@@ -1933,17 +1859,54 @@ class TestPerformancePhaseBudgetAbort:
         assert on_failure.call_count == 3
         assert result.ok is True
 
+    def test_phase_does_not_trust_bare_persisted_skip_engine(self):
+        from cinema.phases.performance import PerformanceCapturePhase
+
+        project = self._make_project(n_shots=1)
+        project["scenes"][0]["shots"][0]["performance_engine"] = "SKIP"
+        gen = MagicMock()
+        gen.generate_performance_take.return_value = {
+            "success": True,
+            "skipped": True,
+        }
+        phase = PerformanceCapturePhase(shot_generator=gen, project=project)
+
+        result = phase.run(self._make_ctx())
+
+        assert result.ok is True
+        gen.generate_performance_take.assert_called_once_with("scene_1", "s1_0")
+
+    def test_phase_accepts_current_routing_skip_decision(self):
+        from cinema.phases.performance import PerformanceCapturePhase
+
+        project = self._make_project(n_shots=1)
+        shot = project["scenes"][0]["shots"][0]
+        shot["performance_engine"] = "SKIP"
+        shot["performance_skip"] = {
+            "id": "skip-routing-s1-0",
+            "action": "skip",
+            "reason": "routing",
+            "decision_source": "routing",
+            "created_at": "2026-08-05T00:00:00+00:00",
+            "routed_engine": "SKIP",
+            "driving_video_path": "",
+        }
+        gen = MagicMock()
+        phase = PerformanceCapturePhase(shot_generator=gen, project=project)
+
+        result = phase.run(self._make_ctx())
+
+        assert result.ok is True
+        gen.generate_performance_take.assert_not_called()
+
 
 class TestKeyframePreSpendBudgetGate:
     """generate_keyframe_take refuses to spend when the estimated image-gen
     cost would push spend past the budget cap (FOLLOW-UP (a) Site 1).
 
-    generate_ai_broll's backend cascade is PRIORITY-0 Gemini (GEMINI_IMAGE)
-    whenever character_image (== primary_reference) is truthy
-    (phase_c_assembly.py); otherwise the cascade's next entry point is the
-    ComfyUI PuLID path (COMFYUI_PULID). Harness mirrors
-    _build_controller_for_lora_strength() in test_char_lora_strength_thread.py
-    (lightweight seam to generate_ai_broll — no real project-dir disk I/O).
+    The estimate follows the selected and configured image route. The harness
+    stops at the generate_ai_broll seam, with no project-directory or provider
+    I/O.
     """
 
     def _build_controller(self, primary_reference=None):
@@ -2001,8 +1964,7 @@ class TestKeyframePreSpendBudgetGate:
         core.cost_tracker = cost_tracker
 
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
-        # Lightweight seam (mirrors test_char_lora_strength_thread.py): a
-        # nonexistent output path means generate_ai_broll's own return value
+        # A nonexistent output path means generate_ai_broll's own return value
         # never needs to be a real ImageGenResult — os.path.exists(img_path)
         # fails right after the call, which is fine for these tests (they
         # only assert on whether/how generate_ai_broll was invoked).
@@ -2020,7 +1982,15 @@ class TestKeyframePreSpendBudgetGate:
         cost_tracker.budget_usd = 1.00
 
         gen_broll = MagicMock()
-        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+        configured = types.SimpleNamespace(
+            google_api_key="google-key",
+            gemini_api_key="",
+            fal_key="",
+        )
+        with (
+            patch("cinema.shots.controller.generate_ai_broll", gen_broll),
+            patch("cinema.shots.controller.env_settings", configured),
+        ):
             result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
 
         assert result.get("success") is False
@@ -2036,22 +2006,29 @@ class TestKeyframePreSpendBudgetGate:
         events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
         assert "BUDGET_EXCEEDED" in events
 
-    def test_refuses_generation_uses_comfyui_pulid_estimate_when_no_primary_ref(self):
-        """Anti-mutation pin: absent primary_reference must price COMFYUI_PULID,
-        not silently fall back to GEMINI_IMAGE (or an unpriced 0.0 estimate)."""
+    def test_refuses_generation_uses_free_fallback_estimate_without_credentials(self):
+        """No reference or cloud credential prices the free fallback."""
         ctrl, lifecycle, cost_tracker = self._build_controller(primary_reference=None)
         cost_tracker.would_exceed.return_value = True
         cost_tracker.spent_usd = 0.80
         cost_tracker.budget_usd = 1.00
 
         gen_broll = MagicMock()
-        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+        unconfigured = types.SimpleNamespace(
+            google_api_key="",
+            gemini_api_key="",
+            fal_key="",
+        )
+        with (
+            patch("cinema.shots.controller.generate_ai_broll", gen_broll),
+            patch("cinema.shots.controller.env_settings", unconfigured),
+        ):
             result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
 
         assert result.get("success") is False
         assert result.get("error_kind") == "budget"
         gen_broll.assert_not_called()
-        cost_tracker.would_exceed.assert_called_once_with("COMFYUI_PULID")
+        cost_tracker.would_exceed.assert_called_once_with("POLLINATIONS")
         lifecycle.pause.assert_called_once()
 
     def test_proceeds_when_within_budget(self):
@@ -2060,7 +2037,15 @@ class TestKeyframePreSpendBudgetGate:
         cost_tracker.would_exceed.return_value = False
 
         gen_broll = MagicMock()
-        with patch("cinema.shots.controller.generate_ai_broll", gen_broll):
+        configured = types.SimpleNamespace(
+            google_api_key="google-key",
+            gemini_api_key="",
+            fal_key="",
+        )
+        with (
+            patch("cinema.shots.controller.generate_ai_broll", gen_broll),
+            patch("cinema.shots.controller.env_settings", configured),
+        ):
             ctrl.generate_keyframe_take("scene_1", "shot_1_0")
 
         gen_broll.assert_called_once()
