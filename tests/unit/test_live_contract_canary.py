@@ -267,6 +267,12 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
     )
     assert "secrets.PERFORMANCE_COMFYUI_SERVER_URL" in workflow
     assert "secrets.PERFORMANCE_COMFYUI_API_KEY" in workflow
+    assert "sudo apt-get install --yes --no-install-recommends ffmpeg" in workflow
+    assert (
+        "inputs.target == 'runway-act-two' || "
+        "inputs.target == 'runpod-liveportrait-performance'"
+        in workflow
+    )
     refs = re.findall(r"uses:\s+[^@\s]+@([^\s#]+)", workflow)
     assert refs and all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs)
 
