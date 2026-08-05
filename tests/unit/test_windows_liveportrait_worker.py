@@ -628,6 +628,15 @@ def test_install_is_verified_and_does_not_start_or_register() -> None:
     assert "Staged worker package differs from source" in installer
     assert 'Where-Object { $_.Name -ne "__pycache__" }' not in installer
     assert "Remove-PythonBytecode" in installer
+    for exact_flux_model in (
+        "!! models/diffusion_models/flux-2-klein-4b-fp8.safetensors",
+        "!! models/text_encoders/qwen_3_4b.safetensors",
+        "!! models/vae/flux2-klein-vae-bf16.safetensors",
+    ):
+        assert exact_flux_model in installer
+    assert 'StartsWith("!! models/diffusion_models/")' not in installer
+    assert 'StartsWith("!! models/text_encoders/")' not in installer
+    assert 'StartsWith("!! models/vae/")' not in installer
 
 
 def test_tracked_probe_matches_runtime_builder_and_fixture_contract() -> None:
@@ -1089,11 +1098,22 @@ def test_source_status_allowlist_rejects_ignored_executable_and_config() -> None
         "!! custom_nodes/ComfyUI-LivePortraitKJ/",
         "!! custom_nodes/ComfyUI-VideoHelperSuite/",
         "!! models/liveportrait/landmark.onnx",
+        "!! models/diffusion_models/flux-2-klein-4b-fp8.safetensors",
+        "!! models/text_encoders/qwen_3_4b.safetensors",
+        "!! models/vae/flux2-klein-vae-bf16.safetensors",
+        "!! models/diffusion_models/flux-2-klein-4b-fp8.safetensors.partial",
+        "!! models/diffusion_models/evil.safetensors",
+        "?? models/text_encoders/qwen_3_4b.safetensors",
+        "!! models/vae/",
         "!! custom_nodes/evil.py",
         "?? startup-config.yaml",
         " M main.py",
     ]
     assert preflight.unexpected_source_changes("comfyui", status, allowed_nested) == [
+        "!! models/diffusion_models/flux-2-klein-4b-fp8.safetensors.partial",
+        "!! models/diffusion_models/evil.safetensors",
+        "?? models/text_encoders/qwen_3_4b.safetensors",
+        "!! models/vae/",
         "!! custom_nodes/evil.py",
         "?? startup-config.yaml",
         " M main.py",

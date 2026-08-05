@@ -58,8 +58,9 @@ RUNWAY_AUTHORITY_TOKEN_ENV = "CANARY_AUTHORITY_GITHUB_TOKEN"
 RUNWAY_FIXTURE_SHA256 = (
     "97471b9377c817251c86dbb58982464d7586b6b3d800936683f900da668c0fb6"
 )
+RUNWAY_ATTEMPT_VERSION = "v4"
 RUNWAY_AUTHORITY_TASK = (
-    "live-canary:runway-act-two:v3:"
+    f"live-canary:runway-act-two:{RUNWAY_ATTEMPT_VERSION}:"
     f"{RUNWAY_FIXTURE_SHA256[:8]}"
 )
 RUNWAY_AUTHORITY_ENVIRONMENT = "live-contract-canary"
@@ -298,7 +299,7 @@ def _runway_authority_payload(payload: object, expected_sha: str) -> dict:
     expected = {
         "schema_version": 1,
         "target": "runway-act-two",
-        "logical_attempt": f"v3-{RUNWAY_FIXTURE_SHA256[:8]}",
+        "logical_attempt": f"{RUNWAY_ATTEMPT_VERSION}-{RUNWAY_FIXTURE_SHA256[:8]}",
         "fixture_sha256": RUNWAY_FIXTURE_SHA256,
         "source_sha": expected_sha,
     }
@@ -445,7 +446,7 @@ def claim_runway_submission(environ: Mapping[str, str]) -> int:
     authority_payload = {
         "schema_version": 1,
         "target": "runway-act-two",
-        "logical_attempt": f"v3-{RUNWAY_FIXTURE_SHA256[:8]}",
+        "logical_attempt": f"{RUNWAY_ATTEMPT_VERSION}-{RUNWAY_FIXTURE_SHA256[:8]}",
         "fixture_sha256": RUNWAY_FIXTURE_SHA256,
         "source_sha": head_sha,
         "owner_run_id": run_id,

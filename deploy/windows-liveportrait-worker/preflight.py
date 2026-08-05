@@ -105,6 +105,15 @@ def _run(command: list[str], *, timeout: int = 300) -> str:
     return completed.stdout.strip()
 
 
+SHARED_FLUX_MODEL_PATHS = frozenset(
+    {
+        "models/diffusion_models/flux-2-klein-4b-fp8.safetensors",
+        "models/text_encoders/qwen_3_4b.safetensors",
+        "models/vae/flux2-klein-vae-bf16.safetensors",
+    }
+)
+
+
 def unexpected_source_changes(
     component_id: Any,
     status_lines: list[str],
@@ -121,6 +130,11 @@ def unexpected_source_changes(
         for line in status_lines
         if line
         and line not in allowed_nested_repositories
+        and not (
+            component_id == "comfyui"
+            and line.startswith("!! ")
+            and line[3:] in SHARED_FLUX_MODEL_PATHS
+        )
         and not (
             component_id == "comfyui"
             and (

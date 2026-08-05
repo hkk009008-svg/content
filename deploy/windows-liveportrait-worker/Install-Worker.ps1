@@ -34,7 +34,13 @@ function Assert-PinnedRepositoryClean {
             "!! custom_nodes/ComfyUI-LivePortraitKJ/",
             "!! custom_nodes/ComfyUI-LivePortraitKJ",
             "!! custom_nodes/ComfyUI-VideoHelperSuite/",
-            "!! custom_nodes/ComfyUI-VideoHelperSuite"
+            "!! custom_nodes/ComfyUI-VideoHelperSuite",
+            # The shared FLUX.2 candidate installs only these three exact,
+            # manifest-bound model destinations. Do not permit either whole
+            # model directories or a filename prefix here.
+            "!! models/diffusion_models/flux-2-klein-4b-fp8.safetensors",
+            "!! models/text_encoders/qwen_3_4b.safetensors",
+            "!! models/vae/flux2-klein-vae-bf16.safetensors"
         )
     }
     $unexpected = @($statusLines | Where-Object {

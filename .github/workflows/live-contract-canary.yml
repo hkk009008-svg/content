@@ -93,9 +93,9 @@ jobs:
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ runner.temp }}/live-contract-canary
-          key: runway-act-two-ledger-v3-97471b93-${{ github.run_id }}-${{ github.run_attempt }}
+          key: runway-act-two-ledger-v4-97471b93-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            runway-act-two-ledger-v3-97471b93-
+            runway-act-two-ledger-v4-97471b93-
 
       - name: Install video fixture tooling
         if: inputs.target == 'runway-act-two'
@@ -136,7 +136,7 @@ jobs:
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ runner.temp }}/live-contract-canary
-          key: runway-act-two-ledger-v3-97471b93-${{ github.run_id }}-${{ github.run_attempt }}
+          key: runway-act-two-ledger-v4-97471b93-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Retain the Runway attempt ledger
         if: always() && inputs.target == 'runway-act-two'
@@ -165,7 +165,6 @@ jobs:
       COMFYUI_SERVER_URL: ''
       COMFYUI_API_KEY: ''
       PERFORMANCE_COMFYUI_SERVER_URL: http://127.0.0.1:18189
-      CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -180,6 +179,8 @@ jobs:
           ffmpeg -version
 
       - name: Install pinned dependencies in a disposable environment
+        env:
+          CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
         run: |
           python -m venv --clear "$CANARY_VENV"
           "$CANARY_VENV/bin/python" -m pip install --no-cache-dir --no-deps \
@@ -197,19 +198,24 @@ jobs:
             'Pygments==2.19.2'
 
       - name: Verify installed dependency graph
+        env:
+          CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
         run: '"$CANARY_VENV/bin/python" -m pip check'
 
       - name: Revalidate protected token and fixed loopback tunnel
         env:
+          CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
           PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
         run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py check-ready'
 
       - name: Verify exact role-bound Windows worker readiness
         env:
+          CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
           PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
         run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py probe-worker'
 
       - name: Run exactly one local LivePortrait contract
         env:
+          CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv
           PERFORMANCE_COMFYUI_API_KEY: ${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}
         run: '"$CANARY_VENV/bin/python" scripts/live_contract_canary.py run'

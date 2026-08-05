@@ -303,9 +303,10 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
         "PERFORMANCE_COMFYUI_API_KEY: "
         "${{ secrets.PERFORMANCE_COMFYUI_API_KEY }}"
     ) == 3
-    assert "CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv" in (
-        windows_job_environment
-    )
+    assert "runner.temp" not in windows_job_environment
+    assert windows_job.count(
+        "CANARY_VENV: ${{ runner.temp }}/content-liveportrait-canary-venv"
+    ) == 5
     assert 'python -m venv --clear "$CANARY_VENV"' in windows_job
     assert "pip install --no-cache-dir --no-deps" in windows_job
     for requirement in (
@@ -351,7 +352,8 @@ def test_workflow_restores_and_retains_complete_runway_attempt_state():
     assert "LIVE_CONTRACT_CANARY_FIXTURE_DIR" in workflow
     assert "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25" in workflow
     assert "actions/cache/save@caa296126883cff596d87d8935842f9db880ef25" in workflow
-    assert "runway-act-two-ledger-v3-97471b93-" in workflow
+    assert "runway-act-two-ledger-v4-97471b93-" in workflow
+    assert "runway-act-two-ledger-v3-97471b93-" not in workflow
     assert "restore-keys:" in workflow
     assert workflow.count("if: always() && inputs.target == 'runway-act-two'") == 2
     assert "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f" in workflow
@@ -381,7 +383,10 @@ def _deployment(deployment_id: int = 42) -> dict:
         "payload": {
             "schema_version": 1,
             "target": "runway-act-two",
-            "logical_attempt": f"v3-{canary.RUNWAY_FIXTURE_SHA256[:8]}",
+            "logical_attempt": (
+                f"{canary.RUNWAY_ATTEMPT_VERSION}-"
+                f"{canary.RUNWAY_FIXTURE_SHA256[:8]}"
+            ),
             "fixture_sha256": canary.RUNWAY_FIXTURE_SHA256,
             "source_sha": "a" * 40,
             "owner_run_id": "1234",
