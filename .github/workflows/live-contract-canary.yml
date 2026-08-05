@@ -71,8 +71,6 @@ jobs:
       COMFYUI_API_KEY: ${{ inputs.target == 'runpod-pulid-production' && secrets.COMFYUI_API_KEY || '' }}
       PERFORMANCE_COMFYUI_SERVER_URL: ${{ inputs.target == 'runpod-liveportrait-performance' && secrets.PERFORMANCE_COMFYUI_SERVER_URL || '' }}
       PERFORMANCE_COMFYUI_API_KEY: ${{ inputs.target == 'runpod-liveportrait-performance' && secrets.PERFORMANCE_COMFYUI_API_KEY || '' }}
-      LIVE_CONTRACT_CANARY_LEDGER_PATH: ${{ runner.temp }}/live-contract-canary/runway-act-two.sqlite3
-      LIVE_CONTRACT_CANARY_FIXTURE_DIR: ${{ github.workspace }}/.live-contract-canary-fixture
       CANARY_AUTHORITY_GITHUB_TOKEN: ${{ github.token }}
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
@@ -118,9 +116,15 @@ jobs:
         run: python scripts/live_contract_canary.py probe-runpod
 
       - name: Re-read Runway authority for this exact job attempt
+        env:
+          LIVE_CONTRACT_CANARY_LEDGER_PATH: ${{ runner.temp }}/live-contract-canary/runway-act-two.sqlite3
+          LIVE_CONTRACT_CANARY_FIXTURE_DIR: ${{ github.workspace }}/.live-contract-canary-fixture
         run: python scripts/live_contract_canary.py verify-runway-fence
 
       - name: Run exactly one selected live contract
+        env:
+          LIVE_CONTRACT_CANARY_LEDGER_PATH: ${{ runner.temp }}/live-contract-canary/runway-act-two.sqlite3
+          LIVE_CONTRACT_CANARY_FIXTURE_DIR: ${{ github.workspace }}/.live-contract-canary-fixture
         run: python scripts/live_contract_canary.py run
 
       - name: Save durable Runway attempt ownership

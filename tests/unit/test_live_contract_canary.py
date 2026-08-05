@@ -308,6 +308,9 @@ def test_workflow_restores_and_retains_complete_runway_attempt_state():
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "path: ${{ runner.temp }}/live-contract-canary/" in workflow
     assert "if-no-files-found: warn" in workflow
+    live_job = workflow.split("  live-canary:\n", 1)[1]
+    job_env = live_job.split("    env:\n", 1)[1].split("    steps:\n", 1)[0]
+    assert "runner.temp" not in job_env
 
 
 def _github_fence_environment(tmp_path: Path) -> dict[str, str]:
