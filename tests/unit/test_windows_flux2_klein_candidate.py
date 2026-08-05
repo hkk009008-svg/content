@@ -39,6 +39,24 @@ def _object_info():
     return json.loads((PACKAGE / "fixtures" / "object_info.json").read_text())
 
 
+def _live_combo_object_info():
+    info = _object_info()
+    for raw in info.values():
+        input_info = raw.get("input", {})
+        for location in ("required", "optional"):
+            for name, spec in input_info.get(location, {}).items():
+                if (
+                    isinstance(spec, list)
+                    and len(spec) == 1
+                    and isinstance(spec[0], list)
+                ):
+                    input_info[location][name] = [
+                        "COMBO",
+                        {"multiselect": False, "options": spec[0]},
+                    ]
+    return info
+
+
 def _graph(*, references=("reference-1.png", "reference-2.png")):
     return workflow.build_flux2_klein_workflow(
         prompt="Keep the person from image1 and the wardrobe from image2.",
@@ -236,6 +254,116 @@ def test_static_object_info_and_workflow_preflight_pass_without_execution():
     }
 
 
+def test_live_combo_object_info_and_workflow_preflight_pass_without_execution():
+    result = preflight.validate_workflow(_graph(), _live_combo_object_info())
+
+    assert result == {
+        "status": "static_preflight_passed",
+        "node_count": 23,
+        "reference_count": 2,
+        "execution_proven": False,
+    }
+
+
+def test_mixed_live_and_legacy_metadata_combo_schema_passes():
+    info = _live_combo_object_info()
+    info["UNETLoader"]["input"]["required"]["weight_dtype"] = [
+        ["default", "fp8_e4m3fn", "fp8_e4m3fn_fast", "fp8_e5m2"],
+        {"advanced": True},
+    ]
+    info["CLIPLoader"]["input"]["optional"]["device"] = [
+        ["default", "cpu"],
+        {"advanced": True},
+    ]
+    info["LoadImage"]["input"]["required"]["image"] = [
+        [f"reference-{index}.png" for index in range(1, 11)],
+        {"image_upload": True},
+    ]
+
+    result = preflight.validate_workflow(_graph(), info)
+
+    assert result["status"] == "static_preflight_passed"
+    assert result["reference_count"] == 2
+
+
+def test_preupload_empty_load_image_combo_is_structurally_valid():
+    info = _object_info()
+    info["LoadImage"]["input"]["required"]["image"] = [
+        [],
+        {"image_upload": True},
+    ]
+
+    result = preflight.validate_workflow(
+        _graph(references=("content-flux2-klein/run-reference-01.png",)),
+        info,
+    )
+
+    assert result["status"] == "static_preflight_passed"
+    assert result["reference_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("class_name", "input_name", "required_choice", "spec"),
+    [
+        (
+            "KSamplerSelect",
+            "sampler_name",
+            "euler",
+            ["COMBO", {"multiselect": False, "options": []}],
+        ),
+        (
+            "UNETLoader",
+            "unet_name",
+            "flux-2-klein-4b-fp8.safetensors",
+            [[]],
+        ),
+    ],
+)
+def test_empty_required_combo_does_not_satisfy_pinned_choice(
+    class_name, input_name, required_choice, spec
+):
+    info = _object_info()
+    info[class_name]["input"]["required"][input_name] = spec
+
+    with pytest.raises(
+        preflight.CandidateContractError,
+        match=rf"{required_choice!r} unavailable",
+    ):
+        preflight.validate_object_info(info)
+
+
+def test_live_combo_object_info_rejects_missing_required_choice():
+    info = _live_combo_object_info()
+    info["KSamplerSelect"]["input"]["required"]["sampler_name"][1][
+        "options"
+    ] = ["dpmpp_2m"]
+
+    with pytest.raises(preflight.CandidateContractError, match="'euler' unavailable"):
+        preflight.validate_object_info(info)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        ["COMBO", {"multiselect": False, "options": "euler"}],
+        ["COMBO", {"multiselect": True, "options": ["euler"]}],
+        ["COMBO", {"multiselect": False, "options": ["euler"], "unsafe": True}],
+        ["COMBO", {"multiselect": False, "options": [{"value": "euler"}]}],
+        ["COMBO", {"multiselect": False, "options": ["euler", "euler"]}],
+        [["euler"], {"multiselect": True}],
+    ],
+)
+def test_live_combo_object_info_rejects_malformed_or_unsafe_schema(spec):
+    info = _live_combo_object_info()
+    info["KSamplerSelect"]["input"]["required"]["sampler_name"] = spec
+
+    with pytest.raises(
+        preflight.CandidateContractError,
+        match="KSamplerSelect.sampler_name: required COMBO, got missing",
+    ):
+        preflight.validate_object_info(info)
+
+
 @pytest.mark.parametrize(
     "mutation, message",
     [
@@ -300,6 +428,48 @@ def test_workflow_falsifications_fail_closed(mutation, message):
     mutation(graph)
 
     with pytest.raises(preflight.CandidateContractError, match=message):
+        preflight.validate_workflow(graph, _object_info())
+
+
+def test_load_image_accepts_safe_uploaded_subfolder_name_absent_from_enumeration():
+    graph = _graph(references=("content-flux2-klein/run-reference-01.png",))
+
+    result = preflight.validate_workflow(graph, _object_info())
+
+    assert result["status"] == "static_preflight_passed"
+    assert result["reference_count"] == 1
+
+
+def test_non_load_image_combo_still_rejects_value_absent_from_enumeration():
+    graph = copy.deepcopy(_graph())
+    graph["1"]["inputs"]["weight_dtype"] = "not-installed"
+
+    with pytest.raises(
+        preflight.CandidateContractError,
+        match="node 1.weight_dtype: value is not installed/allowed",
+    ):
+        preflight.validate_workflow(graph, _object_info())
+
+
+@pytest.mark.parametrize(
+    "unsafe_name",
+    [
+        "../escape.png",
+        "content-flux2-klein/../escape.png",
+        "/absolute.png",
+        "content-flux2-klein\\escape.png",
+        "content-flux2-klein//escape.png",
+        "content-flux2-klein/./escape.png",
+    ],
+)
+def test_load_image_rejects_unsafe_relative_filename(unsafe_name):
+    graph = copy.deepcopy(_graph(references=("reference-1.png",)))
+    graph["100"]["inputs"]["image"] = unsafe_name
+
+    with pytest.raises(
+        preflight.CandidateContractError,
+        match="unsafe relative POSIX filename",
+    ):
         preflight.validate_workflow(graph, _object_info())
 
 

@@ -242,17 +242,69 @@ def _spec_type(spec: object) -> str:
         return ""
     value = spec[0]
     if isinstance(value, str):
+        if value == "COMBO" and _combo_choices(spec) is None:
+            return ""
         return value
-    if isinstance(value, (list, tuple)):
+    if _combo_choices(spec) is not None:
         return "COMBO"
     return ""
 
 
+def _combo_choices(spec: object) -> tuple[str, ...] | None:
+    """Parse only the two reviewed single-select COMBO schema encodings."""
+
+    if not isinstance(spec, (list, tuple)):
+        return None
+    choices: object
+    if (
+        len(spec) in (1, 2)
+        and isinstance(spec[0], (list, tuple))
+        and (
+            len(spec) == 1
+            or (
+                isinstance(spec[1], Mapping)
+                and (
+                    "multiselect" not in spec[1]
+                    or spec[1].get("multiselect") is False
+                )
+            )
+        )
+    ):
+        choices = spec[0]
+    elif (
+        len(spec) == 2
+        and spec[0] == "COMBO"
+        and isinstance(spec[1], Mapping)
+        and set(spec[1]) == {"multiselect", "options"}
+        and spec[1].get("multiselect") is False
+    ):
+        choices = spec[1].get("options")
+    else:
+        return None
+    if (
+        not isinstance(choices, (list, tuple))
+        or any(not isinstance(choice, str) or not choice for choice in choices)
+        or len(set(choices)) != len(choices)
+    ):
+        return None
+    return tuple(choices)
+
+
 def _spec_choices(spec: object) -> tuple[object, ...]:
-    if not isinstance(spec, (list, tuple)) or not spec:
-        return ()
-    value = spec[0]
-    return tuple(value) if isinstance(value, (list, tuple)) else ()
+    choices = _combo_choices(spec)
+    return choices if choices is not None else ()
+
+
+def _safe_load_image_name(value: object) -> bool:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value.startswith("/")
+        or "\\" in value
+        or "\x00" in value
+    ):
+        return False
+    return all(part not in {"", ".", ".."} for part in value.split("/"))
 
 
 def validate_object_info(object_info: object) -> Mapping[str, Any]:
@@ -426,7 +478,12 @@ def validate_workflow(
                 errors.append(f"node {node_id}.{name}: expected FLOAT")
             spec = required_schema.get(name, optional_schema.get(name))
             choices = _spec_choices(spec)
-            if choices and value not in choices:
+            if class_name == "LoadImage" and name == "image":
+                if not _safe_load_image_name(value):
+                    errors.append(
+                        f"node {node_id}.{name}: unsafe relative POSIX filename"
+                    )
+            elif choices and value not in choices:
                 errors.append(f"node {node_id}.{name}: value is not installed/allowed")
 
     if _has_dependency_cycle(workflow):

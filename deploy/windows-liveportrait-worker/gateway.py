@@ -26,11 +26,11 @@ IMAGE_BLOCKER_CODE = "candidate_artifacts_not_installed"
 # validator and this gateway contract.
 FLUX2_PACKAGE_FIELDS = {
     "capability": IMAGE_CAPABILITY,
-    "candidate_manifest_sha256": "5f859d6e232a92eb6db68dfe461c2e1d8ef0e36f693f353711e1267d7abe1667",
+    "candidate_manifest_sha256": "43c505f8776ad4d9e6f6bab281db24f8763b9f6d0a9076efd0f1d2c05ee7944b",
     "workflow_sha256": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d",
     "model_manifest_sha256": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
     "revisions_manifest_sha256": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
-    "contract_digest": "d570dcbd18ded048a9a60f87c4d4d36fe37051159af3a4657b184c7bb9252415",
+    "contract_digest": "303732a6cf772342a1451a4e7a845128b25fa044d4850224cc58c7c381d6f069",
 }
 HOP_BY_HOP = {
     "connection",
