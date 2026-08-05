@@ -1,0 +1,136 @@
+{
+  "benchmark": {
+    "cases": [
+      {
+        "evidence_sha256": "bea8e52dc25d8dcf5a67ace5afa493beada898fffa5d78636acb7916a7afadac",
+        "latency_seconds": 8.469,
+        "minimum_vram_free_bytes": 3197805194,
+        "output_sha256": "cbd4b672da8dca14c0a069bd6aef2031e1325e86c981d004ff5cc38cf4b747e6",
+        "peak_vram_used_bytes": 13896670582,
+        "reference_count": 1,
+        "run_id": "319ef01ee7dd4a8a9c22c7910da26067",
+        "workflow_sha256": "1a944ad774c7ff1ac3d17edacd653beeccfefc5d0145187858b805852495aa01"
+      },
+      {
+        "evidence_sha256": "460d1dd63a000f77e99ad447de0e4fe80b65dda4aa3556a5834f96238e11f7b3",
+        "latency_seconds": 6.5,
+        "minimum_vram_free_bytes": 3703550602,
+        "output_sha256": "b23a3e14179a2dd2d5e405028567670803e6611d5ee1737c67efbca1a3b74400",
+        "peak_vram_used_bytes": 13390925174,
+        "reference_count": 2,
+        "run_id": "b569fb3f8c784080bf48e6facf99bd3a",
+        "workflow_sha256": "f300fba191ca98535da5d88f3d2f6b75c577f14b79edb7106f3bc85478fa3fef"
+      },
+      {
+        "evidence_sha256": "b74e685245359f1e04e34c924f5d3cf84bb1cc930d285eb9ed54833803d7b6aa",
+        "latency_seconds": 52.11,
+        "minimum_vram_free_bytes": 1795027580,
+        "output_sha256": "24ebb9ce54fb5b0aa935d5f76b72d12d9d5eb3c0d55ae7c49fa62d83c4053231",
+        "peak_vram_used_bytes": 15299448196,
+        "reference_count": 10,
+        "run_id": "54b3e5eb252c4ca6967587941e850b35",
+        "workflow_sha256": "49e11b3ee9d1fe2066e0d8aaebf1a5a1c11332f45e24801f071ffd0e2a795cc6"
+      }
+    ],
+    "completed_at": "2026-08-05T18:55:00.485030Z",
+    "evidence_sha256": "053a3eb7a5ac68f3c9beb678a46e1891531dbd840c6a517704bd8aecb6ef2297",
+    "run_id": "07defa19791e4140a48e37483ba44407",
+    "sequence": [
+      1,
+      2,
+      10
+    ],
+    "sequential_no_overlap": true,
+    "status": "benchmark_passed"
+  },
+  "contracts": {
+    "candidate_manifest_sha256": "43c505f8776ad4d9e6f6bab281db24f8763b9f6d0a9076efd0f1d2c05ee7944b",
+    "gateway_contract_digest": "303732a6cf772342a1451a4e7a845128b25fa044d4850224cc58c7c381d6f069",
+    "model_manifest_sha256": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
+    "revisions_manifest_sha256": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
+    "runtime_contract_sha256": "07a9e41f497b1cee57b6bcbdc75aecd80ebd6e5606dce4918a046679dc164d74",
+    "workflow_contract_sha256": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d"
+  },
+  "decision": {
+    "maximum_gpu_concurrency": 1,
+    "reason": "The accepted sequence proves bounded serial execution only; the 10-reference case left 1795027580 bytes free and does not authorize parallel GPU workloads."
+  },
+  "hardware": {
+    "cpu": "Intel(R) Core(TM) i9-9900KS CPU @ 4.00GHz",
+    "gpu": "NVIDIA GeForce RTX 5070 Ti",
+    "operating_system": "Windows-11-10.0.26200-SP0",
+    "system_ram_bytes": 68548980736,
+    "vram_total_bytes": 17094475776
+  },
+  "installation": {
+    "artifact_bytes": 12283727446,
+    "artifacts": [
+      {
+        "bytes": 4070624520,
+        "destination": "diffusion_models/flux-2-klein-4b-fp8.safetensors",
+        "id": "flux2-klein-4b-distilled-fp8",
+        "sha256": "97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6"
+      },
+      {
+        "bytes": 8044982048,
+        "destination": "text_encoders/qwen_3_4b.safetensors",
+        "id": "qwen3-4b-text-encoder",
+        "sha256": "e37269b7ca1301ad72a92627ce95432ab5aad5f89143a06055886aad3419d12f"
+      },
+      {
+        "bytes": 168120878,
+        "destination": "vae/flux2-klein-vae-bf16.safetensors",
+        "id": "flux2-vae",
+        "sha256": "ca70d2202afe6415bdbcb8793ba8cd99fd159cfe6192381504d6c4d3036e0f04"
+      }
+    ],
+    "current_install_json_sha256": "77df8e1f32ca1e20423bdbfdf32e960c8bc7dcf65db7c5a401561737ca57accd",
+    "evidence_sha256": "2ea881bc4801be2ff74287b18aa619c47da29a3f740251030e3156d518e80158",
+    "license_review_state": "official_source_derivation_verified",
+    "qwen_derivation_tensor_count": 398,
+    "run_id": "1785955799-4d6c476377184a96a9cec334f596fe76"
+  },
+  "pre_submission_attempt": {
+    "evidence_sha256": "4307607e9e1925df54f5d59c475b0046e2e3013a27c3b1e3cb0fc9871f5d84c7",
+    "execution_proven": false,
+    "gpu_work_enqueued": false,
+    "media_uploaded": false,
+    "run_id": "b0c0e86f054a45d39173537840111f31",
+    "status": "failed_pre_submission"
+  },
+  "probe": {
+    "cleanup": {
+      "owned_inputs": "deleted",
+      "owned_outputs": "deleted"
+    },
+    "evidence_sha256": "85633b0f850415a1a10a0f08d5dd4ab7f60dad3ad468d0ddaeb23c11d389d15d",
+    "latency_seconds": 8.469,
+    "minimum_vram_free_bytes": 3197805194,
+    "output": {
+      "bytes": 1014866,
+      "height": 1024,
+      "sha256": "d6a7a1e36eb3a04ebb3e7f76023f23944e71237695e15bf2919f86a6ac37e1a3",
+      "width": 1024
+    },
+    "peak_vram_used_bytes": 13896670582,
+    "reference_count": 1,
+    "run_id": "3fbac8e605864f32abb95e2b742c5f01",
+    "status": "fixed_probe_passed"
+  },
+  "repository": {
+    "head_sha": "2fa398f055446543035c9437b30b132d115917b9"
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "status_json_sha256": "f1596ebb97e18f8175542562165640b812c1ebbf2795284a28697a827c66d706",
+  "target": "windows-flux2-klein",
+  "worker": {
+    "aggregate_state": "ready",
+    "image_state": "ready",
+    "performance_state": "ready",
+    "queue_pending": 0,
+    "queue_running": 0,
+    "state_root": "D:\\ContentFlux2Klein",
+    "validated_at": "2026-08-05T19:01:04.742780Z"
+  }
+}

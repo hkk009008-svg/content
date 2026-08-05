@@ -14,6 +14,13 @@ There are two selectable targets:
 The local FLUX.2 fixed probe and 1/2/10-reference benchmark run through its
 guarded Windows package, not this GitHub live-contract workflow.
 
+The latest accepted local FLUX.2 evidence is the successful 2026-08-06 KST
+install, fixed probe, and sequential 1/2/10-reference benchmark recorded in
+`logs/worker-benchmarks/windows-flux2-klein/rtx-5070-ti-2026-08-06-v1.summary.json`.
+The tested 16 GB RTX 5070 Ti worker remained single-concurrency: the
+10-reference case peaked at 15,299,448,196 bytes of VRAM use with
+1,795,027,580 bytes free, so the result does not authorize parallel GPU work.
+
 ## Authorization
 
 Dispatch the workflow only from `main`, select one non-default target, and type
@@ -66,6 +73,20 @@ different endpoint is not sufficient.
 
 Remove the temporary runner registration and stop the tunnel after the job.
 Never register a persistent shared runner for this workflow.
+
+## Local FLUX.2 boundary
+
+The accepted local image-worker sequence is install, one fixed probe, a cold
+restart, sequential 1/2/10-reference benchmarks, another cold restart, and an
+authenticated zero-media shared-readiness check. Every workload submission is
+single-concurrency and bound to the tracked candidate, model, revision,
+workflow, runtime, input, output, and evidence hashes.
+
+The repository retains the sanitized summary and hashes. The Windows worker's
+`D:\ContentFlux2Klein` evidence tree retains the exact JSON records and small
+generated PNGs; the model cache is deliberately not copied into Git. A failed
+pre-submission schema check is recorded separately and did not upload media,
+submit a prompt, or enqueue GPU work.
 
 ## Local preflight
 

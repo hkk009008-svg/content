@@ -87,6 +87,10 @@ logs/*
 !logs/worker-benchmarks/
 !logs/worker-benchmarks/windows-liveportrait/
 !logs/worker-benchmarks/windows-liveportrait/*.json
+# EXCEPTION: the accepted local FLUX.2 install/probe/1-2-10 benchmark summary
+# is source-of-record evidence; model weights and generated PNGs remain local.
+!logs/worker-benchmarks/windows-flux2-klein/
+!logs/worker-benchmarks/windows-flux2-klein/*.json
 # EXCEPTION: sanitized live-contract manifests bind paid canaries to their
 # workflow, provider-attempt ledger, retained artifact, and reconciled estimate.
 !logs/live-contract-canary/
