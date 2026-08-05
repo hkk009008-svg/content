@@ -30,20 +30,20 @@
     ]
   },
   "bindings": {
-    "Benchmark-Candidate.ps1": "763766beb996cdf8a1c26e9893468e8a18de0eac09a8c1df6e44010f2f251d19",
+    "Benchmark-Candidate.ps1": "55809cf4391fc12a904e0afc30670afa2fd7d98dadf4a6e4607ea2e4f0dc7eee",
     "Install-Candidate.ps1": "827bdaa4b398a9cfe600ab036f114881c38a6f54f0f57dae7cbd073cbc6ef1e2",
-    "PROVENANCE.md": "4500136925f75a04b57e708544ee4af59a1cc905f55dc2264f28b7965a17f5e9",
-    "Probe-Candidate.ps1": "12c39b38c8090aeb2f0e3f7f27c392e8873a66297f54a038f4e223112574bc07",
-    "README.md": "9d8674264da7a59e394dcd1fb030bf1ba4f3a6627bec340a7a6b38195dbdf0dd",
+    "PROVENANCE.md": "25b1af56ee5bf1cf16c9133987e668380da2a597661128bbd3a6bd31bc3d03e4",
+    "Probe-Candidate.ps1": "fe03a52bb1a6ff5b0a7d984f85edeec170396243f2a8cecb07e2fdddb9f71a21",
+    "README.md": "d251b396ed523d2368dca672580b7ca2df97db35aaffb33da46f39432b427a63",
     "fixtures/object_info.json": "c6f10ea09b2260e5ea797924dfaa5472e9cf0ae0cb24cbc945e0829a3a4a6e81",
     "fixtures/reference.json": "a326b06f857ca1ac456c15a918d75f752908a250633b74aedea60f95acd4ea4d",
     "fixtures/reference.png.b64": "b52587e2eb72d4e1458f4f77466482e5a76e26d815247729c940d08d350c8276",
     "install.py": "45fc8c72806f41e9d8cea5b2859636667c1825379396362556615b60c946246f",
-    "merge_qwen_encoder.py": "5f7e359a803a63bd445d046ead300ec496fe99f861c14f17b2b7cdc5ac67169a",
-    "models.json": "2de21b60fd6824de5f252fec878785226ec28891c8cedaffe37e7b2d497b0382",
-    "preflight.py": "ff9b5ca463cdf6cccad4286fe72205afd1855b2d2304ad0bd57740afe80e3223",
+    "merge_qwen_encoder.py": "0233c636b3915ad4c103c570ecbe0b81ed306f57e3d716c8142cb8a5851d788c",
+    "models.json": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
+    "preflight.py": "824740726c641f61b7256f95526b19f44ad6f94d0698f3de1f99271e9dbb4bfa",
     "revisions.json": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
-    "runtime.py": "fdb534ab29ed78cbf132ecec9028870efd306c4aa0449b84815a4508c98daf1b",
+    "runtime.py": "846712f1bc89c898a722102b3896415957e3a95b4b8496e7093a8dfdc2eda7aa",
     "workflow.py": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d"
   }
 }

@@ -297,13 +297,13 @@ durable pipeline queue; increasing its configured concurrency does not bypass
 the worker's one-queue execution boundary.
 
 The profile is one worker and one ComfyUI queue. The accepted schema-3
-2026-08-05 run
+2026-08-06 run
 completed one warm-up plus ten sequential 8-second/200-frame jobs, decoded every
-output, and passed clean-restart recovery. It measured 33.7235 seconds mean and
-34.02585 seconds inclusive p95 latency, with 3,810 MiB peak VRAM and
-6,245,519,360 bytes peak worker RSS. The worker-RSS sampler was bound to the
+output, and passed clean-restart recovery. It measured 33.6689 seconds mean and
+33.8001 seconds inclusive p95 latency, with 3,978 MiB peak VRAM and
+6,301,261,824 bytes peak worker RSS. The worker-RSS sampler was bound to the
 exact ComfyUI descendant of the supervisor and recorded a nonzero
-2,413,662,208-byte baseline. Its 1,217 samples had a 0.36-second maximum
+2,412,048,384-byte baseline. Its 1,221 samples had a 0.359-second maximum
 observed interval. Those measurements establish the supported
 single-job envelope; they do not authorize parallel GPU jobs on the 16 GB card.
 The raw evidence uses schema version 3 and its normalized summary uses schema
@@ -338,17 +338,14 @@ the tracked release evidence with the committed normalizer:
 
 ```bash
 .venv/bin/python deploy/windows-liveportrait-worker/normalize_benchmark.py \
-  --raw logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-05-v3.raw.json \
-  --output logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-05-v3.summary.json
+  --raw logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-06-v3.raw.json \
+  --output logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-06-v3.summary.json
 .venv/bin/python deploy/windows-liveportrait-worker/normalize_benchmark.py \
-  --raw logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-05-v3.raw.json \
-  --output logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-05-v3.summary.json \
+  --raw logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-06-v3.raw.json \
+  --output logs/worker-benchmarks/windows-liveportrait/rtx-5070-ti-2026-08-06-v3.summary.json \
   --check
 ```
 
-The unversioned RTX 5070 Ti raw and normalized records are preserved in that
-directory as historical schema-2/schema-1 evidence. They use cache-disabled
-full-graph execution, but predate the expanded instrument and supervisor/PID
-binding and are not current release evidence. The `-v3` pair is the accepted
-production-envelope record. The still-earlier 2-second measurement and cached
-timing were superseded and are not production-envelope evidence.
+The `2026-08-06-v3` pair is the accepted production-envelope record. Superseded
+test and pre-schema-3 records were removed during the fresh-start cleanup so
+they cannot be mistaken for current release evidence.

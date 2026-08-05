@@ -128,6 +128,12 @@ def test_model_manifest_has_exact_reviewed_revisions_sizes_and_hashes():
     }
 
     qwen = artifacts["qwen3-4b-text-encoder"]
+    assert qwen["sha256"] == (
+        "e37269b7ca1301ad72a92627ce95432ab5aad5f89143a06055886aad3419d12f"
+    )
+    assert qwen["sha256"] != (
+        "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a"
+    )
     assert qwen["source"]["type"] == "deterministic_official_shard_merge"
     assert {
         item["path"]: (item["expected_bytes"], item["sha256"])
@@ -515,15 +521,17 @@ def test_official_qwen_merge_rejects_tampered_shard_without_output(tmp_path):
 
 
 def test_official_qwen_merge_rejects_wrong_output_gate_without_output(tmp_path):
-    manifest, source_root, _, _ = _synthetic_qwen_contract(tmp_path)
+    manifest, source_root, expected_bytes, _ = _synthetic_qwen_contract(tmp_path)
     output = tmp_path / "qwen_3_4b.safetensors"
     contract = json.loads(manifest.read_text(encoding="utf-8"))
     contract["artifacts"][0]["sha256"] = "0" * 64
     manifest.write_text(json.dumps(contract), encoding="utf-8")
 
-    with pytest.raises(merge_qwen.MergeContractError, match="output SHA-256"):
+    actual_hash = hashlib.sha256(expected_bytes).hexdigest()
+    with pytest.raises(merge_qwen.MergeContractError, match="output SHA-256") as exc:
         merge_qwen.merge_from_manifest(manifest, source_root, output)
 
+    assert f"expected {'0' * 64}, got {actual_hash}" in str(exc.value)
     assert not output.exists()
 
 

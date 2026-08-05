@@ -71,6 +71,30 @@ def test_fixed_fixture_has_exact_contract_and_decodes():
     }
 
 
+def test_runtime_cli_requires_explicit_input_and_output_roots():
+    with pytest.raises(SystemExit):
+        runtime._parser().parse_args(
+            [
+                "probe",
+                "--comfy-root",
+                "C:\\ComfyUI",
+                "--state-root",
+                "C:\\State",
+            ]
+        )
+
+
+def test_runtime_roots_reject_state_or_cleanup_overlap(tmp_path):
+    state_root = tmp_path / "state"
+    input_root = state_root / "input"
+    output_root = tmp_path / "output"
+
+    with pytest.raises(runtime.RuntimeContractError, match="separate"):
+        runtime._require_separate_runtime_roots(
+            state_root, input_root, output_root
+        )
+
+
 def test_verified_download_publishes_only_after_full_hash(tmp_path):
     payload = b"pinned-official-payload"
     destination = tmp_path / "cache" / "artifact.bin"
@@ -258,6 +282,10 @@ def _output_png() -> bytes:
 
 def _runtime_context(tmp_path):
     comfy = _comfy_root(tmp_path)
+    input_root = tmp_path / "configured-input"
+    output_root = tmp_path / "configured-output"
+    input_root.mkdir()
+    output_root.mkdir()
     fixture, fixture_contract = runtime.load_fixed_fixture()
     binding = {
         "package": {"candidate_sha256": "a" * 64, "bound_files": {}},
@@ -269,6 +297,8 @@ def _runtime_context(tmp_path):
     }
     return {
         "comfy_root": comfy,
+        "input_root": input_root,
+        "output_root": output_root,
         "state_root": tmp_path / "state",
         "fixture": fixture,
         "binding": binding,
@@ -295,9 +325,20 @@ def _stats(*, free=12_000_000_000):
 class _FakeClient:
     endpoint_sha256 = "c" * 64
 
-    def __init__(self, *, schema_error=False, submit_unknown=False):
+    def __init__(
+        self,
+        context,
+        *,
+        schema_error=False,
+        submit_unknown=False,
+        output_file_payload=None,
+    ):
         self.schema_error = schema_error
         self.submit_unknown = submit_unknown
+        self.input_root = Path(context["input_root"])
+        self.output_root = Path(context["output_root"])
+        self.output_file_payload = output_file_payload
+        self.output_name = ""
         self.uploads = 0
         self.submissions = 0
         self.events = []
@@ -317,24 +358,38 @@ class _FakeClient:
     def upload_image(self, payload, filename):
         self.events.append("upload")
         self.uploads += 1
-        return f"content-flux2-klein/{filename}"
+        remote = f"content-flux2-klein/{filename}"
+        local = self.input_root / "content-flux2-klein" / filename
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_bytes(payload)
+        return remote
 
     def submit_once(self, workflow, client_id):
         self.events.append("submit")
         self.submissions += 1
         if self.submit_unknown:
             raise runtime.SubmissionUnknownError("unknown")
+        self.output_name = f"{workflow['filename_prefix']}_00001_.png"
         return "prompt-1"
 
     def get_history(self, prompt_id):
         self.events.append("history")
+        (self.output_root / self.output_name).write_bytes(
+            self.output_file_payload
+            if self.output_file_payload is not None
+            else _output_png()
+        )
         return {
             prompt_id: {
                 "status": {"completed": True, "status_str": "success"},
                 "outputs": {
                     "23": {
                         "images": [
-                            {"filename": "out.png", "subfolder": "", "type": "output"}
+                            {
+                                "filename": self.output_name,
+                                "subfolder": "",
+                                "type": "output",
+                            }
                         ]
                     }
                 },
@@ -353,7 +408,11 @@ def _schema_validator(value):
 
 
 def _builder(**kwargs):
-    return {"reference_images": kwargs["reference_images"], "seed": kwargs["seed"]}
+    return {
+        "reference_images": kwargs["reference_images"],
+        "seed": kwargs["seed"],
+        "filename_prefix": kwargs["filename_prefix"],
+    }
 
 
 def _workflow_validator(graph, object_info):
@@ -370,9 +429,15 @@ def _case_options():
 
 
 def test_probe_validates_before_upload_submits_once_and_decodes_output(tmp_path):
-    client = _FakeClient()
+    context = _runtime_context(tmp_path)
+    unrelated_input = Path(context["input_root"]) / "content-flux2-klein" / "keep.png"
+    unrelated_input.parent.mkdir(parents=True)
+    unrelated_input.write_bytes(context["fixture"])
+    unrelated_output = Path(context["output_root"]) / "keep.png"
+    unrelated_output.write_bytes(_output_png())
+    client = _FakeClient(context)
     result = runtime.run_probe(
-        client=client, context=_runtime_context(tmp_path), **_case_options()
+        client=client, context=context, **_case_options()
     )
 
     assert result["status"] == "fixed_probe_passed"
@@ -384,11 +449,99 @@ def test_probe_validates_before_upload_submits_once_and_decodes_output(tmp_path)
     assert client.submissions == 1
     assert client.events.index("object_info") < client.events.index("upload")
     assert Path(result["evidence_path"]).is_file()
+    assert result["cleanup"] == {
+        "inputs": {"state": "deleted", "count": 1},
+        "output": {"state": "deleted", "count": 1},
+    }
+    assert unrelated_input.is_file()
+    assert unrelated_output.is_file()
+    assert not (
+        Path(context["input_root"])
+        / "content-flux2-klein"
+        / f"{result['run_id']}-reference-01.png"
+    ).exists()
+    assert not (Path(context["output_root"]) / client.output_name).exists()
+
+
+def test_cleanup_refuses_hash_or_prefix_drift_without_deleting_files(tmp_path):
+    context = _runtime_context(tmp_path)
+    run_id = "a" * 32
+    remote_name = runtime._expected_upload_name(run_id, 1)
+    input_path = Path(context["input_root"]).joinpath(*Path(remote_name).parts)
+    input_path.parent.mkdir(parents=True)
+    input_path.write_bytes(b"not-the-fixture")
+
+    with pytest.raises(runtime.RuntimeContractError, match="hash"):
+        runtime._cleanup_owned_inputs(
+            Path(context["input_root"]),
+            [remote_name],
+            run_id=run_id,
+            fixture_hash=hashlib.sha256(context["fixture"]).hexdigest(),
+        )
+    assert input_path.read_bytes() == b"not-the-fixture"
+
+    output_payload = _output_png()
+    unrelated_output = Path(context["output_root"]) / "keep.png"
+    unrelated_output.write_bytes(output_payload)
+    with pytest.raises(runtime.RuntimeContractError, match="prefix"):
+        runtime._cleanup_owned_output(
+            Path(context["output_root"]),
+            {"filename": "keep.png", "subfolder": "", "type": "output"},
+            run_id=run_id,
+            evidence_kind="probe",
+            output_hash=hashlib.sha256(output_payload).hexdigest(),
+        )
+    assert unrelated_output.read_bytes() == output_payload
+
+
+def test_cleanup_rejects_intermediate_link_without_deleting_target(tmp_path):
+    root = tmp_path / "input"
+    real_subfolder = root / "real-subfolder"
+    real_subfolder.mkdir(parents=True)
+    linked_subfolder = root / "content-flux2-klein"
+    try:
+        linked_subfolder.symlink_to(real_subfolder, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable on this host")
+    payload = b"owned-fixture"
+    target = real_subfolder / "owned.png"
+    target.write_bytes(payload)
+
+    with pytest.raises(runtime.RuntimeContractError, match="link or reparse"):
+        runtime._verified_runtime_file(
+            root.resolve(),
+            "content-flux2-klein/owned.png",
+            hashlib.sha256(payload).hexdigest(),
+            "owned input",
+        )
+    assert target.read_bytes() == payload
+
+
+def test_post_execution_cleanup_failure_is_durable_and_never_deletes_drift(tmp_path):
+    context = _runtime_context(tmp_path)
+    client = _FakeClient(context, output_file_payload=b"drifted-local-output")
+
+    with pytest.raises(runtime.RuntimeContractError, match="hash"):
+        runtime.run_probe(client=client, context=context, **_case_options())
+
+    evidence_path = next(
+        (Path(context["state_root"]) / "evidence" / "probe").glob(
+            "*/evidence.json"
+        )
+    )
+    evidence = json.loads(evidence_path.read_text())
+    assert evidence["status"] == "post_execution_cleanup_failed"
+    assert evidence["blocker_code"] == "flux2_runtime_cleanup_failed"
+    assert evidence["execution_proven"] is True
+    assert evidence["automatic_retry_allowed"] is False
+    assert (Path(context["output_root"]) / client.output_name).read_bytes() == (
+        b"drifted-local-output"
+    )
 
 
 def test_schema_failure_occurs_before_upload_and_writes_failure_evidence(tmp_path):
-    client = _FakeClient(schema_error=True)
     context = _runtime_context(tmp_path)
+    client = _FakeClient(context, schema_error=True)
 
     with pytest.raises(runtime.RuntimeContractError, match="schema drift"):
         runtime.run_probe(client=client, context=context, **_case_options())
@@ -401,8 +554,8 @@ def test_schema_failure_occurs_before_upload_and_writes_failure_evidence(tmp_pat
 
 
 def test_ambiguous_submission_is_not_retried_and_persists_unknown(tmp_path):
-    client = _FakeClient(submit_unknown=True)
     context = _runtime_context(tmp_path)
+    client = _FakeClient(context, submit_unknown=True)
 
     with pytest.raises(runtime.SubmissionUnknownError):
         runtime.run_probe(client=client, context=context, **_case_options())
@@ -412,6 +565,12 @@ def test_ambiguous_submission_is_not_retried_and_persists_unknown(tmp_path):
     evidence = json.loads(evidence_path.read_text())
     assert evidence["status"] == "submission_unknown"
     assert evidence["blocker_code"] == "flux2_submission_or_execution_unknown"
+    retained = (
+        Path(context["input_root"])
+        / "content-flux2-klein"
+        / f"{evidence['run_id']}-reference-01.png"
+    )
+    assert retained.is_file()
 
 
 def test_benchmark_requires_bound_probe_and_runs_exact_sequence(tmp_path):
@@ -534,14 +693,18 @@ def test_atomic_status_promotes_only_through_bound_probe_and_benchmark(tmp_path)
     }
     context = {
         "comfy_root": comfy,
+        "input_root": tmp_path / "configured-input",
+        "output_root": tmp_path / "configured-output",
         "state_root": state,
         "package_root": package,
         "fixture": fixture,
         "binding": binding,
         "runtime_contract_sha256": runtime._contract_digest(binding),
     }
+    context["input_root"].mkdir()
+    context["output_root"].mkdir()
     probe = runtime.run_probe(
-        client=_FakeClient(), context=context, **_case_options()
+        client=_FakeClient(context), context=context, **_case_options()
     )
     needs_benchmark = runtime.publish_probe_status(
         context=context, probe_result=probe

@@ -120,7 +120,9 @@ run:
 
 ```powershell
 .\deploy\windows-flux2-klein\Probe-Candidate.ps1 `
-  -ComfyRoot C:\ComfyUI
+  -ComfyRoot C:\ComfyUI `
+  -InputRoot C:\ComfyUI\input `
+  -OutputRoot C:\ComfyUI\output
 ```
 
 Before uploading anything, `runtime.py` revalidates the bound package,
@@ -133,9 +135,16 @@ requires one `SaveImage` output that downloads, fully decodes, and is exactly
 1024 by 1024. The output and immutable evidence include the graph, model,
 fixture, package, latency, and bounded GPU-memory bindings.
 
-Uploaded fixed input files are removed only when their local bytes still match
-the committed fixture. They are retained after an UNKNOWN submission because
-the accepted job may still need them.
+`InputRoot` and `OutputRoot` are mandatory because ComfyUI may be configured
+with runtime directories outside its source checkout. Before submission, the
+probe requires the uploaded UUID-owned input to exist under the declared input
+root with the committed fixture hash. After a decoded pass, it removes only
+UUID/prefix-owned input and output files whose bytes match the immutable
+fixture/output evidence. A root mismatch, link, unexpected name, or hash drift
+fails closed without deleting the unrelated file. Uploaded inputs are retained
+after an UNKNOWN submission because the accepted job may still need them.
+A cleanup failure after decoded execution is durably recorded as
+`post_execution_cleanup_failed` with automatic retry forbidden.
 
 A passing probe atomically advances `status.json` to `needs_benchmark`. The
 status record contains the state-root-relative immutable canary evidence path,
@@ -150,6 +159,8 @@ After a passing fixed probe, pass its immutable evidence path explicitly:
 ```powershell
 .\deploy\windows-flux2-klein\Benchmark-Candidate.ps1 `
   -ComfyRoot C:\ComfyUI `
+  -InputRoot C:\ComfyUI\input `
+  -OutputRoot C:\ComfyUI\output `
   -ProbeEvidence C:\Users\you\AppData\Local\ContentFlux2Klein\evidence\probe\RUN_ID\evidence.json
 ```
 

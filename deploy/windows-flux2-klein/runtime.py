@@ -15,6 +15,7 @@ import importlib.util
 import io
 import json
 import os
+import stat
 import sys
 import time
 import urllib.error
@@ -37,6 +38,7 @@ FIXED_SEED = 424242
 FIXED_ASPECT_RATIO = "1:1"
 BENCHMARK_REFERENCE_COUNTS = (1, 2, 10)
 SAVE_NODE_ID = "23"
+UPLOAD_SUBFOLDER = "content-flux2-klein"
 MAX_JSON_BYTES = 16 * 1024 * 1024
 MAX_IMAGE_BYTES = 256 * 1024 * 1024
 DEFAULT_EXECUTION_TIMEOUT_SECONDS = 1800.0
@@ -324,8 +326,52 @@ def _validate_decoded_image(
     return actual
 
 
+def _is_link_or_reparse(path: Path, metadata: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+    file_attributes = getattr(metadata, "st_file_attributes", 0)
+    return path.is_symlink() or bool(reparse_flag and file_attributes & reparse_flag)
+
+
+def _require_runtime_directory(path: Path, label: str) -> Path:
+    """Resolve one explicit Comfy runtime root without following a root link."""
+
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeContractError(f"{label} is missing or inaccessible") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or _is_link_or_reparse(path, metadata):
+        raise RuntimeContractError(f"{label} must be a real directory")
+    return resolved
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    return left == right or left in right.parents or right in left.parents
+
+
+def _require_separate_runtime_roots(
+    state_root: Path, input_root: Path, output_root: Path
+) -> None:
+    if any(
+        _paths_overlap(left, right)
+        for left, right in (
+            (state_root, input_root),
+            (state_root, output_root),
+            (input_root, output_root),
+        )
+    ):
+        raise RuntimeContractError(
+            "candidate state and worker input/output roots must be separate directories"
+        )
+
+
 def prepare_runtime_context(
-    *, comfy_root: Path, state_root: Path, package_root: Path = ROOT
+    *,
+    comfy_root: Path,
+    state_root: Path,
+    input_root: Path,
+    output_root: Path,
+    package_root: Path = ROOT,
 ) -> Mapping[str, Any]:
     """Verify source package, install evidence, and every installed model byte."""
 
@@ -339,11 +385,15 @@ def prepare_runtime_context(
         "windows_flux2_klein_bound_install_runtime", "install.py"
     )
     resolved_root, model_root = installer.validate_comfy_root(comfy_root)
+    resolved_state = _require_runtime_directory(state_root, "candidate state root")
+    resolved_input = _require_runtime_directory(input_root, "worker input root")
+    resolved_output = _require_runtime_directory(output_root, "worker output root")
+    _require_separate_runtime_roots(resolved_state, resolved_input, resolved_output)
     manifest = _load_json(package_root / "models.json", "model manifest")
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list) or len(artifacts) != 3:
         raise RuntimeContractError("model artifact manifest is invalid")
-    install_evidence_path = state_root.resolve() / "install.json"
+    install_evidence_path = resolved_state / "install.json"
     install_evidence = _load_json(install_evidence_path, "install evidence")
     package_binding = installer._package_binding(package_root)
     if (
@@ -390,8 +440,10 @@ def prepare_runtime_context(
     }
     return {
         "comfy_root": resolved_root,
+        "input_root": resolved_input,
+        "output_root": resolved_output,
         "model_root": model_root,
-        "state_root": state_root.resolve(),
+        "state_root": resolved_state,
         "package_root": package_root.resolve(),
         "fixture": fixture,
         "fixture_contract": fixture_contract,
@@ -503,7 +555,7 @@ class ComfyClient:
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode(),
             payload,
             f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"type\"\r\n\r\ninput\r\n".encode(),
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"subfolder\"\r\n\r\ncontent-flux2-klein\r\n".encode(),
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"subfolder\"\r\n\r\n{UPLOAD_SUBFOLDER}\r\n".encode(),
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\nfalse\r\n".encode(),
             f"--{boundary}--\r\n".encode(),
         ]
@@ -700,21 +752,120 @@ def _gpu_summary(samples: Sequence[Mapping[str, Any]]) -> Mapping[str, Any]:
     }
 
 
-def _cleanup_owned_inputs(comfy_root: Path, names: Sequence[str], fixture_hash: str) -> None:
-    input_root = (comfy_root / "input").resolve()
-    if not input_root.exists():
-        return
-    for name in names:
-        relative = PurePosixPath(_safe_remote_name(name))
-        candidate = input_root.joinpath(*relative.parts).resolve(strict=False)
-        if input_root != candidate.parent and input_root not in candidate.parents:
-            continue
-        if candidate.is_file() and not candidate.is_symlink():
-            try:
-                if _sha256_file(candidate) == fixture_hash:
-                    candidate.unlink()
-            except RuntimeContractError:
-                continue
+def _bound_runtime_file(root: Path, relative_name: str, label: str) -> Path:
+    relative = PurePosixPath(_safe_remote_name(relative_name))
+    candidate = root.joinpath(*relative.parts)
+    current = root
+    for index, part in enumerate(relative.parts):
+        current = current / part
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise RuntimeContractError(
+                f"{label} is missing from its configured root"
+            ) from exc
+        if _is_link_or_reparse(current, metadata):
+            raise RuntimeContractError(f"{label} path contains a link or reparse point")
+        if index < len(relative.parts) - 1 and not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeContractError(f"{label} parent is not a directory")
+    resolved = candidate.resolve(strict=True)
+    if root not in resolved.parents:
+        raise RuntimeContractError(f"{label} escapes its configured runtime root")
+    return resolved
+
+
+def _verified_runtime_file(
+    root: Path, relative_name: str, expected_hash: str, label: str
+) -> Path:
+    candidate = _bound_runtime_file(root, relative_name, label)
+    metadata = candidate.lstat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeContractError(f"{label} must be an owned regular file")
+    if _sha256_file(candidate) != expected_hash:
+        raise RuntimeContractError(f"{label} hash does not match the owned artifact")
+    return candidate
+
+
+def _expected_upload_name(run_id: str, index: int) -> str:
+    return f"{UPLOAD_SUBFOLDER}/{run_id}-reference-{index:02d}.png"
+
+
+def _verify_owned_input(
+    input_root: Path,
+    remote_name: str,
+    *,
+    run_id: str,
+    index: int,
+    fixture_hash: str,
+) -> Path:
+    expected = _expected_upload_name(run_id, index)
+    if remote_name != expected:
+        raise RuntimeContractError("worker did not preserve the owned upload name")
+    return _verified_runtime_file(
+        input_root, remote_name, fixture_hash, f"owned input {index}"
+    )
+
+
+def _delete_verified_files(paths: Sequence[Path], label: str) -> None:
+    for path in paths:
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise RuntimeContractError(f"could not remove {label}") from exc
+        if path.exists():
+            raise RuntimeContractError(f"{label} remained after cleanup")
+
+
+def _cleanup_owned_inputs(
+    input_root: Path,
+    names: Sequence[str],
+    *,
+    run_id: str,
+    fixture_hash: str,
+) -> Mapping[str, Any]:
+    paths = [
+        _verify_owned_input(
+            input_root,
+            name,
+            run_id=run_id,
+            index=index,
+            fixture_hash=fixture_hash,
+        )
+        for index, name in enumerate(names, 1)
+    ]
+    _delete_verified_files(paths, "owned input")
+    return {"state": "deleted", "count": len(paths)}
+
+
+def _owned_output_name(
+    locator: Mapping[str, Any], *, run_id: str, evidence_kind: str
+) -> str:
+    filename = locator.get("filename")
+    subfolder = locator.get("subfolder", "")
+    if not isinstance(filename, str) or subfolder != "":
+        raise RuntimeContractError("owned output must remain in the output root")
+    prefix = f"flux2-klein-{evidence_kind}-{run_id[:12]}"
+    if not filename.startswith(prefix + "_") or not filename.lower().endswith(".png"):
+        raise RuntimeContractError("worker output does not match the owned run prefix")
+    return _safe_remote_name(filename)
+
+
+def _cleanup_owned_output(
+    output_root: Path,
+    locator: Mapping[str, Any],
+    *,
+    run_id: str,
+    evidence_kind: str,
+    output_hash: str,
+) -> Mapping[str, Any]:
+    relative_name = _owned_output_name(
+        locator, run_id=run_id, evidence_kind=evidence_kind
+    )
+    path = _verified_runtime_file(
+        output_root, relative_name, output_hash, "owned output"
+    )
+    _delete_verified_files([path], "owned output")
+    return {"state": "deleted", "count": 1}
 
 
 def execute_case(
@@ -784,11 +935,19 @@ def execute_case(
 
         fixture = context["fixture"]
         for index in range(reference_count):
+            requested_name = f"{run_id}-reference-{index + 1:02d}.png"
             remote = client.upload_image(
-                fixture, f"{run_id}-reference-{index + 1:02d}.png"
+                fixture, requested_name
             )
             if remote in uploaded:
                 raise RuntimeContractError("worker returned duplicate upload filenames")
+            _verify_owned_input(
+                Path(context["input_root"]),
+                remote,
+                run_id=run_id,
+                index=index + 1,
+                fixture_hash=str(context["binding"]["fixture"]["sha256"]),
+            )
             uploaded.append(remote)
         phase = "uploaded"
 
@@ -822,6 +981,9 @@ def execute_case(
             sleeper(poll_interval_seconds)
         latency = clock() - start
         output_locator = _save_output_locator(record)
+        _owned_output_name(
+            output_locator, run_id=run_id, evidence_kind=evidence_kind
+        )
         output_payload, content_type = client.download_output(output_locator)
         expected_dimensions = {"width": 1024, "height": 1024}
         decoded = _validate_decoded_image(
@@ -829,6 +991,21 @@ def execute_case(
         )
         output_path = case_root / "output.png"
         _write_bytes_new(output_path, output_payload)
+        output_hash = _sha256_bytes(output_payload)
+        phase = "cleanup"
+        input_cleanup = _cleanup_owned_inputs(
+            Path(context["input_root"]),
+            uploaded,
+            run_id=run_id,
+            fixture_hash=str(context["binding"]["fixture"]["sha256"]),
+        )
+        output_cleanup = _cleanup_owned_output(
+            Path(context["output_root"]),
+            output_locator,
+            run_id=run_id,
+            evidence_kind=evidence_kind,
+            output_hash=output_hash,
+        )
         evidence = {
             **case_base,
             "status": "fixed_probe_passed" if evidence_kind == "probe" else "benchmark_case_passed",
@@ -842,22 +1019,35 @@ def execute_case(
             "output": {
                 "path": "output.png",
                 "bytes": len(output_payload),
-                "sha256": _sha256_bytes(output_payload),
+                "sha256": output_hash,
                 "content_type": content_type,
                 "decoded": decoded,
             },
+            "cleanup": {
+                "inputs": input_cleanup,
+                "output": output_cleanup,
+            },
         }
         _write_json_new(case_root / "evidence.json", evidence)
-        _cleanup_owned_inputs(
-            Path(context["comfy_root"]), uploaded, str(context["binding"]["fixture"]["sha256"])
-        )
         return {**evidence, "evidence_path": str(case_root / "evidence.json")}
     except Exception as exc:
-        status = (
-            "submission_unknown"
-            if isinstance(exc, SubmissionUnknownError) or phase in {"submitting", "submitted"}
-            else "failed_pre_submission"
-        )
+        if phase == "cleanup":
+            status = "post_execution_cleanup_failed"
+        elif isinstance(exc, SubmissionUnknownError) or phase in {"submitting", "submitted"}:
+            status = "submission_unknown"
+        else:
+            status = "failed_pre_submission"
+        cleanup_failure: str | None = None
+        if status == "failed_pre_submission" and uploaded:
+            try:
+                _cleanup_owned_inputs(
+                    Path(context["input_root"]),
+                    uploaded,
+                    run_id=run_id,
+                    fixture_hash=str(context["binding"]["fixture"]["sha256"]),
+                )
+            except RuntimeContractError as cleanup_exc:
+                cleanup_failure = type(cleanup_exc).__name__
         failure = {
             **case_base,
             "status": status,
@@ -865,15 +1055,32 @@ def execute_case(
             "blocker_code": (
                 "flux2_submission_or_execution_unknown"
                 if status == "submission_unknown"
-                else "flux2_probe_precondition_failed"
+                else (
+                    "flux2_runtime_cleanup_failed"
+                    if status == "post_execution_cleanup_failed"
+                    else "flux2_probe_precondition_failed"
+                )
             ),
             "error_type": type(exc).__name__,
         }
-        _write_json_new(case_root / "evidence.json", failure)
-        if status == "failed_pre_submission":
-            _cleanup_owned_inputs(
-                Path(context["comfy_root"]), uploaded, str(context["binding"]["fixture"]["sha256"])
+        if status == "post_execution_cleanup_failed":
+            failure.update(
+                {
+                    "execution_proven": True,
+                    "automatic_retry_allowed": False,
+                    "prompt_id_sha256": _sha256_bytes(prompt_id.encode("utf-8")),
+                    "output": {
+                        "path": "output.png",
+                        "bytes": len(output_payload),
+                        "sha256": output_hash,
+                        "content_type": content_type,
+                        "decoded": decoded,
+                    },
+                }
             )
+        if cleanup_failure is not None:
+            failure["cleanup_error_type"] = cleanup_failure
+        _write_json_new(case_root / "evidence.json", failure)
         if isinstance(exc, RuntimeContractError):
             raise
         raise RuntimeContractError("candidate execution failed closed") from exc
@@ -1103,6 +1310,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("mode", choices=("probe", "benchmark"))
     parser.add_argument("--comfy-root", type=Path, required=True)
     parser.add_argument("--state-root", type=Path, required=True)
+    parser.add_argument("--input-root", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--endpoint", default="http://127.0.0.1:8188")
     parser.add_argument("--token-env", default="CONTENT_COMFY_TOKEN")
     parser.add_argument("--probe-evidence", type=Path)
@@ -1120,6 +1329,8 @@ if __name__ == "__main__":
     runtime_context = prepare_runtime_context(
         comfy_root=arguments.comfy_root,
         state_root=arguments.state_root,
+        input_root=arguments.input_root,
+        output_root=arguments.output_root,
     )
     runtime_client = ComfyClient(arguments.endpoint, token=token)
     options = {"execution_timeout_seconds": arguments.execution_timeout_seconds}

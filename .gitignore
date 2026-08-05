@@ -87,6 +87,10 @@ logs/*
 !logs/worker-benchmarks/
 !logs/worker-benchmarks/windows-liveportrait/
 !logs/worker-benchmarks/windows-liveportrait/*.json
+# EXCEPTION: sanitized live-contract manifests bind paid canaries to their
+# workflow, provider-attempt ledger, retained artifact, and reconciled estimate.
+!logs/live-contract-canary/
+!logs/live-contract-canary/*.json
 
 # Model weights (downloaded, never committed — e.g. AdaFace checkpoints via
 # scripts/download_adaface_ckpt.py)

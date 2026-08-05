@@ -29,7 +29,7 @@ the state dictionary. The matching `decoder.conv_in.weight` and
 whose working dtypes include BF16. That is sufficient for this offline
 candidate contract; a real fixed probe is still required after installation.
 
-## Qwen: official shards selected, deterministic merge still pending
+## Qwen: official shards selected, deterministic digest resolved
 
 The Comfy mirror is no longer an installation source. The candidate instead
 pins the two Qwen3ForCausalLM BF16 text-encoder shards and index from the same
@@ -44,9 +44,18 @@ official BFL Apache repository commit:
 Header-only inspection established that the official shard union and the known
 Comfy-compatible single file have the same 398 tensor names, dtypes, and
 shapes. A lexicographic merge that omits `__metadata__`, matching the known
-single-file contract, synthesizes the same 45,848-byte header and an expected
-total size of 8,044,982,048 bytes.
-Header and size agreement do not prove payload identity.
+single-file structure, synthesizes the same 45,848-byte header and an expected
+total size of 8,044,982,048 bytes. Header and size agreement do not prove
+payload identity: the mirror file's `6c671498...` digest is not the digest of a
+merge from these pinned official shards.
+
+On 2026-08-06, two independent no-output streaming derivations verified the
+three pinned source hashes, reconstructed all 398 indexed tensor spans with the
+declared lexicographic/no-metadata serialization, and produced the same complete
+SHA-256, `e37269b7ca1301ad72a92627ce95432ab5aad5f89143a06055886aad3419d12f`.
+One pass used an independent reconstruction and the other used the production
+helper's source/header selection. Neither pass changed the source shards or
+published a model destination.
 
 `merge_qwen_encoder.py` is therefore the mandatory source boundary. It:
 
@@ -55,7 +64,7 @@ Header and size agreement do not prove payload identity.
 3. streams tensors in lexicographic name order into a new file;
 4. refuses to overwrite an existing destination; and
 5. publishes only if the complete derived file matches SHA-256
-   `6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a`.
+   `e37269b7ca1301ad72a92627ce95432ab5aad5f89143a06055886aad3419d12f`.
 
 Until that complete merge succeeds, Qwen provenance is
 `official_source_derivation_not_execution_proven`, license approval remains

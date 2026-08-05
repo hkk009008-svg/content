@@ -377,8 +377,12 @@ def merge_from_manifest(
                     handle.close()
             destination.flush()
             os.fsync(destination.fileno())
-        if digest.hexdigest() != expected_hash:
-            raise MergeContractError("derived Qwen output SHA-256 does not match manifest")
+        actual_hash = digest.hexdigest()
+        if actual_hash != expected_hash:
+            raise MergeContractError(
+                "derived Qwen output SHA-256 does not match manifest: "
+                f"expected {expected_hash}, got {actual_hash}"
+            )
         if Path(temporary_name).stat().st_size != expected_bytes:
             raise MergeContractError("derived Qwen output byte size drifted")
         try:

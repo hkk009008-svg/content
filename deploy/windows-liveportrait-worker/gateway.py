@@ -26,11 +26,11 @@ IMAGE_BLOCKER_CODE = "candidate_artifacts_not_installed"
 # validator and this gateway contract.
 FLUX2_PACKAGE_FIELDS = {
     "capability": IMAGE_CAPABILITY,
-    "candidate_manifest_sha256": "79a3121392ac10a9baaf14bdf408c2fafdda9e2c91ca5dcfc03f8779695d63e6",
+    "candidate_manifest_sha256": "5f859d6e232a92eb6db68dfe461c2e1d8ef0e36f693f353711e1267d7abe1667",
     "workflow_sha256": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d",
-    "model_manifest_sha256": "2de21b60fd6824de5f252fec878785226ec28891c8cedaffe37e7b2d497b0382",
+    "model_manifest_sha256": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
     "revisions_manifest_sha256": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
-    "contract_digest": "15d36a63111e57a871df524c3f160c84b2ab7ed7420c2dcc476204a28d2665b2",
+    "contract_digest": "d570dcbd18ded048a9a60f87c4d4d36fe37051159af3a4657b184c7bb9252415",
 }
 HOP_BY_HOP = {
     "connection",
@@ -432,7 +432,7 @@ class AuthenticatedGateway:
         image = self._flux2_status_record()
         return {
             "schema_version": CAPABILITY_SCHEMA_VERSION,
-            "status": "partial",
+            "status": "ready" if image.get("state") == "ready" else "partial",
             "capabilities": {
                 WORKER_ROLE: performance,
                 IMAGE_CAPABILITY: image,

@@ -1,0 +1,45 @@
+{
+  "artifact": {
+    "expires_on": "2026-09-04",
+    "github_artifact_id": 8941419244,
+    "name": "runway-act-two-ledger-31032662615-1",
+    "retention_days": 30,
+    "sqlite_quick_check": "ok",
+    "sqlite_sha256": "57b0acce2c4780ef190314aa615f0d2c7fc42551d75472240fc6a7918a074c6e"
+  },
+  "authority": {
+    "deployment_id": 5766820814,
+    "logical_attempt": "v4-97471b93",
+    "task": "live-canary:runway-act-two:v4:97471b93"
+  },
+  "cost": {
+    "billed_flag": true,
+    "currency": "USD",
+    "invoice_authoritative": false,
+    "maximum_application_estimate": 0.15,
+    "reconciled_application_estimate": 0.15
+  },
+  "fixture_sha256": "97471b9377c817251c86dbb58982464d7586b6b3d800936683f900da668c0fb6",
+  "provider_attempt": {
+    "attempt_id": "05858eb6c7e6fc3306a10e1c7d976949bb16ec46d490b4b3336ea12ec55dcca8",
+    "completed_at": "2026-08-05T18:04:31.792823+00:00",
+    "engine": "ACT_ONE",
+    "paid_attempt_rows": 1,
+    "provider": "runway",
+    "provider_status": "SUCCEEDED",
+    "provider_task_id": "2369f3d3-565f-46d6-9b24-22e4e583d04d",
+    "reconciled_cost_rows": 1,
+    "started_at": "2026-08-05T18:03:02.550111+00:00",
+    "state": "succeeded"
+  },
+  "schema_version": 1,
+  "target": "runway-act-two",
+  "workflow": {
+    "conclusion": "success",
+    "head_sha": "563c92c0c99c9b2805480dc1b61e0be3b925df29",
+    "paid_step_elapsed_seconds": 91.26,
+    "run_attempt": 1,
+    "run_id": 31032662615,
+    "url": "https://github.com/hkk009008-svg/content/actions/runs/31032662615"
+  }
+}

@@ -143,7 +143,7 @@ EXPECTED_ARTIFACTS = {
     ),
     "qwen3-4b-text-encoder": (
         8044982048,
-        "6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a",
+        "e37269b7ca1301ad72a92627ce95432ab5aad5f89143a06055886aad3419d12f",
         "text_encoders/qwen_3_4b.safetensors",
     ),
     "flux2-vae": (

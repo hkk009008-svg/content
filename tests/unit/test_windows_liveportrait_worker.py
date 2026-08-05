@@ -930,12 +930,17 @@ def test_gateway_rejects_stale_or_unproven_sentinel(tmp_path: Path) -> None:
         },
     }), encoding="utf-8")
     worker.flux2_state_root = state_root
-    assert worker._capability_record()["capabilities"]["image-flux2-klein"][
-        "state"
-    ] == "ready"
+    ready_capabilities = worker._capability_record()
+    assert ready_capabilities["status"] == "ready"
+    assert (
+        ready_capabilities["capabilities"]["image-flux2-klein"]["state"]
+        == "ready"
+    )
 
     (evidence_root / "canary.json").write_text("{}", encoding="utf-8")
-    blocked = worker._capability_record()["capabilities"]["image-flux2-klein"]
+    blocked_capabilities = worker._capability_record()
+    assert blocked_capabilities["status"] == "partial"
+    blocked = blocked_capabilities["capabilities"]["image-flux2-klein"]
     assert blocked["state"] == "blocked"
     assert blocked["blocker_code"] == "candidate_status_evidence_invalid"
 

@@ -39,6 +39,13 @@ The ledger is restored before a retry and retained for 30 days. An ambiguous or
 already-owned provider submission is recovered or refused; it is never replaced
 with a second paid request merely because the GitHub job was retried.
 
+The latest accepted Runway boundary evidence is the successful 2026-08-06 KST
+run recorded in
+`logs/live-contract-canary/runway-act-two-2026-08-06.json`. The repository
+record binds the workflow/head, fixture, provider task, one-attempt ledger hash,
+deployment authority, artifact retention identity, and reconciled application
+cost without retaining provider credentials or generated media.
+
 ## Windows LivePortrait boundary
 
 The Windows target requires:
