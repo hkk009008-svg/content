@@ -291,6 +291,10 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
         in workflow
     )
     assert "windows_runner_authorization:" in workflow
+    windows_authorization_input = workflow.split(
+        "      windows_runner_authorization:\n", 1
+    )[1].split("\n\n", 1)[0]
+    assert "required: false" in windows_authorization_input
     assert canary.WINDOWS_RUNNER_AUTHORIZATION_ENV in workflow
     windows_job = workflow.split(
         "  windows-liveportrait-canary:\n", 1

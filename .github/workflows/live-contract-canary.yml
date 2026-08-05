@@ -25,7 +25,7 @@ on:
         default: '0'
       windows_runner_authorization:
         description: Windows only - type the documented ephemeral JIT runner confirmation
-        required: true
+        required: false
         type: string
         default: ''
 
