@@ -1,0 +1,9 @@
+# Executable minimum-version contracts exercised by CI.
+#
+# Do not replace this with a generic "lowest version of every direct and
+# transitive dependency" resolver.  Several broad historical floors in
+# requirements.txt do not form one mechanically solvable environment across
+# every supported Python/platform combination.  Add a pin here only when code
+# relies on a specific dependency API or behavior, and pair it with a focused
+# test that reaches that behavior through the public call path.
+requests==2.32.3

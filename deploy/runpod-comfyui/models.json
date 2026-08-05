@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-08-05T02:05:00Z",
+  "artifacts": [
+    {
+      "id": "flux1-dev-fp8",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/Kijai/flux-fp8",
+        "revision": "2ef6f85f9f4b94634f995ba0bfa84fd3ab865c1d",
+        "url": "https://huggingface.co/Kijai/flux-fp8/resolve/2ef6f85f9f4b94634f995ba0bfa84fd3ab865c1d/flux1-dev-fp8.safetensors?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "other",
+        "upstream_terms": "FLUX.1-dev non-commercial license",
+        "review_note": "Confirm intended use against the upstream FLUX.1-dev terms before deployment."
+      },
+      "expected_bytes": 11901525888,
+      "sha256": "1be961341be8f5307ef26c787199f80bf4e0de3c1c0b4617095aa6ee5550dfce",
+      "destination": "diffusion_models/FLUX1/flux1-dev-fp8.safetensors"
+    },
+    {
+      "id": "t5xxl-fp8",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/comfyanonymous/flux_text_encoders",
+        "revision": "6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5",
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5/t5xxl_fp8_e4m3fn.safetensors?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "Apache-2.0",
+        "upstream_terms": "Apache-2.0",
+        "review_note": "License metadata captured from the pinned distributor revision."
+      },
+      "expected_bytes": 4893934904,
+      "sha256": "7d330da4816157540d6bb7838bf63a0f02f573fc48ca4d8de34bb0cbfd514f09",
+      "destination": "clip/t5xxl_fp8_e4m3fn.safetensors"
+    },
+    {
+      "id": "clip-l",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/comfyanonymous/flux_text_encoders",
+        "revision": "6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5",
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5/clip_l.safetensors?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "Apache-2.0",
+        "upstream_terms": "Apache-2.0",
+        "review_note": "License metadata captured from the pinned distributor revision."
+      },
+      "expected_bytes": 246144152,
+      "sha256": "660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd",
+      "destination": "clip/clip_l.safetensors"
+    },
+    {
+      "id": "flux-vae",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/ffxvs/vae-flux",
+        "revision": "1419d8cd542a9bc785f834a7bdb456fb7ebfd1e1",
+        "url": "https://huggingface.co/ffxvs/vae-flux/resolve/1419d8cd542a9bc785f834a7bdb456fb7ebfd1e1/ae.safetensors?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_terms": "FLUX.1-dev model terms",
+        "review_note": "The mirror does not declare a license; validate the upstream FLUX VAE terms before deployment."
+      },
+      "expected_bytes": 335304388,
+      "sha256": "afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38",
+      "destination": "vae/ae.safetensors"
+    },
+    {
+      "id": "pulid-flux-v0.9.1",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/guozinan/PuLID",
+        "revision": "492b1451255dc9d9bc3c857259690b5f8b998d4a",
+        "url": "https://huggingface.co/guozinan/PuLID/resolve/492b1451255dc9d9bc3c857259690b5f8b998d4a/pulid_flux_v0.9.1.safetensors?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "Apache-2.0",
+        "upstream_terms": "Apache-2.0",
+        "review_note": "License metadata captured from the pinned distributor revision."
+      },
+      "expected_bytes": 1142099520,
+      "sha256": "92c41c3af322b02e58e1b32842e4601e08c8f16ec1fe80089dbe957df510f51d",
+      "destination": "pulid/pulid_flux_v0.9.1.safetensors"
+    },
+    {
+      "id": "eva02-clip-l-336",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://huggingface.co/QuanSun/EVA-CLIP",
+        "revision": "11afd202f2ae80869d6cef18b1ec775e79bd8d12",
+        "url": "https://huggingface.co/QuanSun/EVA-CLIP/resolve/11afd202f2ae80869d6cef18b1ec775e79bd8d12/EVA02_CLIP_L_336_psz14_s6B.pt?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "MIT",
+        "upstream_terms": "MIT",
+        "review_note": "License metadata captured from the pinned distributor revision."
+      },
+      "expected_bytes": 856461210,
+      "sha256": "84c3a17a228c567a155259b2245b0b59072bf7da510260a0a02ec54de6d50b05",
+      "destination": ".huggingface/hub/models--QuanSun--EVA-CLIP/blobs/84c3a17a228c567a155259b2245b0b59072bf7da510260a0a02ec54de6d50b05",
+      "huggingface_cache": {
+        "repo_id": "QuanSun/EVA-CLIP",
+        "revision": "11afd202f2ae80869d6cef18b1ec775e79bd8d12",
+        "filename": "EVA02_CLIP_L_336_psz14_s6B.pt"
+      }
+    },
+    {
+      "id": "antelopev2",
+      "required": true,
+      "kind": "zip",
+      "source": {
+        "repository": "https://huggingface.co/MonsterMMORPG/tools",
+        "revision": "2cc250d767e22019bef3ae1aefaa1ad8a73ef64c",
+        "url": "https://huggingface.co/MonsterMMORPG/tools/resolve/2cc250d767e22019bef3ae1aefaa1ad8a73ef64c/antelopev2.zip?download=true"
+      },
+      "license": {
+        "declared_by_distributor": "UNDECLARED",
+        "upstream_terms": "InsightFace pretrained-model non-commercial research terms",
+        "review_note": "The mirror declares no license; confirm the InsightFace model-use terms before deployment."
+      },
+      "expected_bytes": 360662982,
+      "sha256": "8e182f14fc6e80b3bfa375b33eb6cff7ee05d8ef7633e738d1c89021dcf0c5c5",
+      "destination": ".archives/antelopev2.zip",
+      "extract_to": "insightface/models/antelopev2",
+      "required_members": [
+        "1k3d68.onnx",
+        "2d106det.onnx",
+        "genderage.onnx",
+        "glintr100.onnx",
+        "scrfd_10g_bnkps.onnx"
+      ]
+    },
+    {
+      "id": "realesrgan-x4plus",
+      "required": true,
+      "kind": "file",
+      "source": {
+        "repository": "https://github.com/xinntao/Real-ESRGAN",
+        "revision": "v0.1.0",
+        "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
+      },
+      "license": {
+        "declared_by_distributor": "BSD-3-Clause",
+        "upstream_terms": "BSD-3-Clause",
+        "review_note": "Repository license and release tag recorded with the content checksum."
+      },
+      "expected_bytes": 67040989,
+      "sha256": "4fa0d38905f75ac06eb49a7951b426670021be3018265fd191d2125df9d682f1",
+      "destination": "upscale_models/RealESRGAN_x4plus.pth"
+    }
+  ]
+}

@@ -1,12 +1,13 @@
 #!/bin/bash
 # ---------------------------------------------------------------------------
-# RunPod E2E Test Environment Setup
+# RunPod development/E2E bootstrap — NOT A PRODUCTION DEPLOYMENT
 # ---------------------------------------------------------------------------
-# This script configures a RunPod GPU pod for running the cinema pipeline
-# end-to-end tests. Run it once after launching a new pod.
+# This mutable script configures a disposable RunPod GPU pod for cinema-pipeline
+# end-to-end tests. It is not reproducible enough for production. Production
+# uses the immutable image under deploy/runpod-comfyui/.
 #
 # Prerequisites:
-#   - RunPod GPU pod, RTX 4090 (24GB) recommended — the production pulid.json
+#   - RunPod GPU pod, RTX 4090 (24GB) recommended — the active pulid.json
 #     graph is all-fp8 (FLUX-dev-fp8 + t5xxl-fp8 + PuLID) and fits comfortably;
 #     the old max tier (SUPIR/48GB+) was retired, so a bigger card isn't needed.
 #   - Ubuntu 22.04+ base image with NVIDIA drivers (any recent RunPod/Novita
@@ -26,6 +27,11 @@
 
 set -euo pipefail
 
+if [ "$#" -ne 0 ]; then
+    echo "ERROR: setup_runpod.sh accepts no arguments; retired production/max flags are unsupported." >&2
+    exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 # RunPod mounts the persistent network volume at /workspace by default —
@@ -36,7 +42,8 @@ COMFYUI_DIR="$WORKSPACE/ComfyUI"
 COMFYUI_PORT=8188
 
 echo "============================================"
-echo " RunPod E2E Environment Setup"
+echo " RunPod DEVELOPMENT/E2E Environment Setup"
+echo " NOT FOR PRODUCTION — use deploy/runpod-comfyui/"
 echo "============================================"
 
 # ------------------------------------------------------------------
@@ -63,7 +70,7 @@ echo ""
 echo "[2/6] Setting up ComfyUI..."
 
 if [ ! -d "$COMFYUI_DIR" ]; then
-    git clone https://github.com/comfyanonymous/ComfyUI.git "$COMFYUI_DIR"
+    env -u GIT_INDEX_FILE git clone https://github.com/comfyanonymous/ComfyUI.git "$COMFYUI_DIR"
     pip install -r "$COMFYUI_DIR/requirements.txt" -q
 else
     echo "  ComfyUI already installed at $COMFYUI_DIR"
@@ -74,7 +81,7 @@ CUSTOM_NODES_DIR="$COMFYUI_DIR/custom_nodes"
 mkdir -p "$CUSTOM_NODES_DIR"
 
 declare -A CUSTOM_NODES=(
-    # cubiq/PuLID_ComfyUI — KEPT despite being the "SDXL PuLID" pack: production
+    # cubiq/PuLID_ComfyUI — kept despite being the "SDXL PuLID" pack: the active
     # pulid.json uses balazik's ApplyPulidFlux/PulidFluxModelLoader/
     # PulidFluxEvaClipLoader for identity, but its face loader is cubiq's
     # `PulidInsightFaceLoader` class specifically (balazik's own loader is a
@@ -101,6 +108,7 @@ for node_name in "${!CUSTOM_NODES[@]}"; do
         else
             echo "  ERROR: Failed to download $node_name"
             rm -rf "$node_path"
+            exit 1
         fi
     else
         echo "  $node_name already installed."
@@ -108,18 +116,18 @@ for node_name in "${!CUSTOM_NODES[@]}"; do
 done
 
 # ComfyUI-PuLID-Flux (balazik) — provides ApplyPulidFlux / PulidFluxModelLoader /
-# PulidFluxEvaClipLoader for the PRODUCTION workflow (pulid.json). git clone to
-# match the brief v2.0 §11.1 manual one-liner. Closes C-D4 / A10 step 2.
+# PulidFluxEvaClipLoader for the active workflow (pulid.json).
 PULID_FLUX_DIR="$CUSTOM_NODES_DIR/ComfyUI-PuLID-Flux"
 if [ ! -d "$PULID_FLUX_DIR" ]; then
     echo "  Installing ComfyUI-PuLID-Flux (balazik)..."
-    if git clone --depth 1 https://github.com/balazik/ComfyUI-PuLID-Flux "$PULID_FLUX_DIR"; then
+    if env -u GIT_INDEX_FILE git clone --depth 1 https://github.com/balazik/ComfyUI-PuLID-Flux "$PULID_FLUX_DIR"; then
         if [ -f "$PULID_FLUX_DIR/requirements.txt" ]; then
-            pip install -r "$PULID_FLUX_DIR/requirements.txt" -q || true
+            pip install -r "$PULID_FLUX_DIR/requirements.txt" -q
         fi
     else
-        echo "  ERROR: failed to clone ComfyUI-PuLID-Flux; production PuLID-FLUX unavailable."
+        echo "  ERROR: failed to clone ComfyUI-PuLID-Flux; PuLID-FLUX E2E path unavailable."
         rm -rf "$PULID_FLUX_DIR"
+        exit 1
     fi
 else
     echo "  ComfyUI-PuLID-Flux already installed."
@@ -133,8 +141,10 @@ fi
 # each pack's -q requirements.txt (which can fail silently). onnxruntime-gpu suits the
 # pod GPU; swap to onnxruntime if a CUDA mismatch surfaces. Closes the C-D4 root.
 echo "  Installing InsightFace stack (insightface, onnxruntime-gpu, facexlib)..."
-pip install -q insightface onnxruntime-gpu facexlib || \
-    echo "  WARNING: InsightFace stack install failed — PulidInsightFaceLoader will NOT register. Resolve on-pod."
+if ! pip install -q insightface onnxruntime-gpu facexlib; then
+    echo "  ERROR: InsightFace stack install failed; required PuLID nodes cannot register." >&2
+    exit 1
+fi
 
 echo "  Done."
 
@@ -196,8 +206,7 @@ fi
 if [ ! -f "$MODELS_DIR/pulid/pulid_flux_v0.9.1.safetensors" ]; then
     echo "  Downloading PuLID-Flux v0.9.1..."
     wget -q --show-progress -O "$MODELS_DIR/pulid/pulid_flux_v0.9.1.safetensors" \
-        "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors" \
-        || echo "  WARNING: PuLID-Flux model download failed — install into models/pulid/ manually."
+        "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors"
 fi
 
 # antelopev2 InsightFace model (C-D4 / A10 step 3). PulidInsightFaceLoader loads
@@ -218,10 +227,9 @@ if [ ! -f "$ANTELOPE_CANON/glintr100.onnx" ]; then
         find /tmp/antelope_dl -name '*.onnx' -exec mv -t "$ANTELOPE_CANON/" {} + 2>/dev/null || true
     fi
     if [ ! -f "$ANTELOPE_CANON/glintr100.onnx" ]; then
-        echo "  WARNING: antelopev2 auto-download failed or changed layout. MANUAL STEP —"
-        echo "    place these 5 files into $ANTELOPE_CANON/ :"
-        echo "    1k3d68.onnx 2d106det.onnx genderage.onnx glintr100.onnx scrfd_10g_bnkps.onnx"
-        echo "    (verify the source on-pod where you have shell access — Q6.)"
+        echo "  ERROR: antelopev2 auto-download failed or changed layout." >&2
+        echo "    Required files were not installed into $ANTELOPE_CANON/." >&2
+        exit 1
     fi
 fi
 mkdir -p "$MODELS_DIR/insightface"
@@ -355,11 +363,13 @@ COMFYUI_LOG="$WORKSPACE/comfyui.log"
 # at its own start, BEFORE this run's custom-node installs, so it will not serve the
 # newly-installed PuLID nodes and the /object_info probe below would false-negative
 # (Lane V #14 F2). On a fresh/restarted pod nothing is running and this is a no-op.
-if curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1; then
+if curl -fsS "http://127.0.0.1:${COMFYUI_PORT}/system_stats" 2>/dev/null \
+        | jq -e 'type == "object" and (.system | type == "object")' > /dev/null; then
     echo "  ComfyUI already running — restarting to load newly-installed nodes..."
     pkill -f "main.py.*--port ${COMFYUI_PORT}" 2>/dev/null || true
     for i in $(seq 1 15); do
-        curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1 || break
+        curl -fsS "http://127.0.0.1:${COMFYUI_PORT}/system_stats" 2>/dev/null \
+            | jq -e 'type == "object" and (.system | type == "object")' > /dev/null || break
         sleep 2
     done
 fi
@@ -373,7 +383,8 @@ echo "  ComfyUI starting (PID: $COMFYUI_PID), log: $COMFYUI_LOG"
 # Wait for ComfyUI to be ready (up to 120s)
 echo "  Waiting for ComfyUI to initialize..."
 for i in $(seq 1 60); do
-    if curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:${COMFYUI_PORT}/system_stats" 2>/dev/null \
+            | jq -e 'type == "object" and (.system | type == "object")' > /dev/null; then
         echo "  ComfyUI ready after ${i}x2 seconds."
         break
     fi
@@ -396,7 +407,8 @@ echo ""
 echo "[verify] Checking PuLID node availability via /object_info..."
 PULID_NODES_OK=1
 for node in PulidInsightFaceLoader ApplyPulidFlux; do
-    if curl -s "http://127.0.0.1:${COMFYUI_PORT}/object_info/${node}" | grep -q "\"${node}\""; then
+    if curl -fsS "http://127.0.0.1:${COMFYUI_PORT}/object_info/${node}" \
+            | jq -e --arg node "$node" 'type == "object" and has($node)' > /dev/null; then
         echo "  OK: ${node} registered."
     else
         echo "  MISSING: ${node} not registered — PuLID identity path will fall back (C-D4)."
@@ -404,16 +416,37 @@ for node in PulidInsightFaceLoader ApplyPulidFlux; do
     fi
 done
 if [ "$PULID_NODES_OK" -eq 0 ]; then
-    echo "  -> Inspect $COMFYUI_LOG for custom-node import errors (usually a missing"
-    echo "     insightface/onnxruntime dep or absent antelopev2 model)."
+    echo "  ERROR: required PuLID nodes are missing. Inspect $COMFYUI_LOG." >&2
+    exit 1
 fi
+
+echo "[verify] Checking required E2E model files..."
+REQUIRED_MODEL_FILES=(
+    "$MODELS_DIR/diffusion_models/FLUX1/flux1-dev-fp8.safetensors"
+    "$MODELS_DIR/clip/t5xxl_fp8_e4m3fn.safetensors"
+    "$MODELS_DIR/clip/clip_l.safetensors"
+    "$MODELS_DIR/vae/ae.safetensors"
+    "$MODELS_DIR/pulid/pulid_flux_v0.9.1.safetensors"
+    "$MODELS_DIR/upscale_models/RealESRGAN_x4plus.pth"
+    "$ANTELOPE_CANON/1k3d68.onnx"
+    "$ANTELOPE_CANON/2d106det.onnx"
+    "$ANTELOPE_CANON/genderage.onnx"
+    "$ANTELOPE_CANON/glintr100.onnx"
+    "$ANTELOPE_CANON/scrfd_10g_bnkps.onnx"
+)
+for required_model in "${REQUIRED_MODEL_FILES[@]}"; do
+    if [ ! -s "$required_model" ]; then
+        echo "  ERROR: required E2E model is missing or empty: $required_model" >&2
+        exit 1
+    fi
+done
 
 # ------------------------------------------------------------------
 # Summary
 # ------------------------------------------------------------------
 echo ""
 echo "============================================"
-echo " Setup Complete"
+echo " Development/E2E Setup Complete (Not Production)"
 echo "============================================"
 echo ""
 echo " ComfyUI:  http://127.0.0.1:${COMFYUI_PORT}"

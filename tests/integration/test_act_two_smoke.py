@@ -4,7 +4,8 @@ audited SDK contract).
 
 Runs ONE real Runway Act-Two call with a small keyframe + a short synthetic
 reference/driving video, asserts a non-empty mp4 comes back. Gated behind
-RUNWAYML_API_SECRET so CI without creds skips cleanly.
+an explicit `runway-act-two` selection and RUNWAYML_API_SECRET, so ordinary CI
+and ambient developer credentials cannot trigger spend.
 
 Marked `@pytest.mark.e2e` to match the existing tests/integration/* gating.
 Tag with `-m e2e` to run; `-m "not e2e"` skips.
@@ -26,11 +27,16 @@ import pytest
 from config.settings import settings
 
 
-HAS_RUNWAY = bool(getattr(settings, "runwayml_api_secret", ""))
+SELECTED = os.environ.get("LIVE_CONTRACT_CANARY_TARGET", "") == "runway-act-two"
+_RUNWAY_SECRET = getattr(settings, "runwayml_api_secret", "")
+HAS_RUNWAY = bool(_RUNWAY_SECRET and "placeholder" not in _RUNWAY_SECRET.lower())
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(not HAS_RUNWAY, reason="RUNWAYML_API_SECRET not set; Act-Two smoke skipped"),
+    pytest.mark.skipif(
+        not SELECTED or not HAS_RUNWAY,
+        reason="Runway Act-Two was not selected or configured",
+    ),
 ]
 
 
@@ -65,7 +71,7 @@ def test_act_two_minimal_call_returns_mp4():
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
     except (subprocess.SubprocessError, FileNotFoundError):
-        pytest.skip("ffmpeg not on PATH; cannot synth the reference video Act-Two requires")
+        pytest.fail("ffmpeg not on PATH; selected Act-Two canary cannot create its fixture")
 
     with tempfile.TemporaryDirectory() as td:
         kf = os.path.join(td, "kf.jpg")
@@ -81,13 +87,8 @@ def test_act_two_minimal_call_returns_mp4():
             driving_video_path=reference,
             duration_s=3.0,
         )
-        # Two acceptable outcomes:
-        #   - result == out AND file exists with non-trivial size (happy path)
-        #   - result is None (Runway rejected the input — schema drift / quota)
-        # We accept both; the test is here primarily to surface integration
-        # regressions, not to assert specific Runway behavior.
         if result is None:
-            pytest.skip("Act-Two returned None (likely Runway rejected the synthetic input)")
+            pytest.fail("configured Runway Act-Two returned no result")
         assert result == out, f"Expected {out}, got {result}"
         assert os.path.exists(out), f"Output file missing: {out}"
         assert os.path.getsize(out) > 1024, f"Output suspiciously small: {os.path.getsize(out)} bytes"

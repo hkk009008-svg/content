@@ -5,8 +5,11 @@ import os
 import ssl
 from pathlib import Path
 
+from packaging.requirements import Requirement
+from packaging.version import Version
 import pytest
 import requests
+from urllib3.response import HTTPResponse
 
 from performance import _net
 
@@ -38,6 +41,30 @@ class _FakeResponse:
             if isinstance(item, BaseException):
                 raise item
             yield item
+
+
+def test_requests_dependency_floor_matches_pinned_adapter_contract():
+    repo_root = Path(__file__).resolve().parents[2]
+    declared_line = next(
+        line.strip()
+        for line in (repo_root / "requirements.txt").read_text().splitlines()
+        if line.strip().lower().startswith("requests")
+    )
+    constrained_line = next(
+        line.strip()
+        for line in (repo_root / "constraints" / "ci-minimum.txt")
+        .read_text()
+        .splitlines()
+        if line.strip().lower().startswith("requests")
+    )
+    declared = Requirement(declared_line)
+    constrained = Requirement(constrained_line)
+
+    assert Version("2.32.3") in declared.specifier
+    assert Version("2.32.2") not in declared.specifier
+    assert Version("3.0.0") not in declared.specifier
+    assert constrained.specifier == Requirement("requests==2.32.3").specifier
+    assert _net._MIN_PINNED_ADAPTER_REQUESTS == (2, 32, 3)
 
 
 def _install_response(monkeypatch, response, *, expected_url="https://example.test/video.mp4"):
@@ -642,6 +669,114 @@ def test_pinned_pool_uses_validated_ip_but_original_tls_identity(monkeypatch):
     if context is not None:
         assert context.verify_mode != ssl.CERT_NONE
         assert context.check_hostname is True
+
+
+@pytest.mark.parametrize("version", ["2.31.0", "2.32.2", "3.0.0", "unknown"])
+def test_pinned_adapter_fails_closed_without_supported_requests_contract(
+    monkeypatch,
+    version,
+):
+    monkeypatch.setattr(_net.requests, "__version__", version)
+    target = _net._PinnedHTTPSTarget(
+        hostname="example.test",
+        port=443,
+        ip_address="93.184.216.34",
+        host_header="example.test",
+    )
+
+    with pytest.raises(RuntimeError, match=r"requests>=2\.32\.3,<3"):
+        _net._PinnedHTTPSAdapter(target)
+
+
+def test_pinned_adapter_fails_closed_when_requests_hook_is_missing(monkeypatch):
+    monkeypatch.setattr(_net.requests, "__version__", "2.32.3")
+    monkeypatch.setattr(
+        _net.requests.adapters.HTTPAdapter,
+        "get_connection_with_tls_context",
+        None,
+    )
+    target = _net._PinnedHTTPSTarget(
+        hostname="example.test",
+        port=443,
+        ip_address="93.184.216.34",
+        host_header="example.test",
+    )
+
+    with pytest.raises(RuntimeError, match="get_connection_with_tls_context"):
+        _net._PinnedHTTPSAdapter(target)
+
+
+def test_http_adapter_send_keeps_validated_ip_after_dns_change(monkeypatch):
+    """Exercise Requests' real send dispatcher, not a fake Session.get."""
+
+    current_address = ["93.184.216.34"]
+    dns_calls = []
+
+    def changing_dns(hostname, port, *args, **kwargs):
+        dns_calls.append((hostname, port, current_address[0]))
+        return [(0, 0, 0, "", (current_address[0], port))]
+
+    monkeypatch.setattr(_net.socket, "getaddrinfo", changing_dns)
+    target, reason = _net._download_target(
+        "https://example.test/video.mp4",
+        allow_http=False,
+    )
+    assert reason is None
+    assert target is not None
+    assert target.ip_address == "93.184.216.34"
+
+    # DNS now points at loopback. HTTPAdapter.send must still select the pool
+    # created for the address that passed validation above.
+    current_address[0] = "127.0.0.1"
+    pool_calls = []
+    request_calls = []
+
+    class StubHTTPSPool:
+        def urlopen(self, method, url, **kwargs):
+            request_calls.append((method, url, kwargs))
+            return HTTPResponse(
+                body=b"pinned-public-response",
+                headers={},
+                status=200,
+                reason="OK",
+                preload_content=False,
+            )
+
+    class CapturingPoolManager:
+        def connection_from_host(self, **kwargs):
+            pool_calls.append(kwargs)
+            return StubHTTPSPool()
+
+        def clear(self):
+            return None
+
+    adapter = _net._PinnedHTTPSAdapter(target)
+    adapter.poolmanager = CapturingPoolManager()
+    prepared = requests.Request(
+        "GET",
+        "https://example.test/video.mp4",
+        headers={"Host": "attacker.invalid"},
+    ).prepare()
+
+    response = adapter.send(
+        prepared,
+        stream=True,
+        timeout=(1, 1),
+        verify=True,
+        cert=None,
+        proxies={},
+    )
+
+    assert response.status_code == 200
+    assert prepared.headers["Host"] == "example.test"
+    assert dns_calls == [("example.test", 443, "93.184.216.34")]
+    assert len(pool_calls) == 1
+    assert pool_calls[0]["host"] == "93.184.216.34"
+    assert pool_calls[0]["pool_kwargs"]["server_hostname"] == "example.test"
+    assert pool_calls[0]["pool_kwargs"]["assert_hostname"] == "example.test"
+    assert len(request_calls) == 1
+    response.close()
+    adapter.close()
 
 
 def test_pinned_adapter_refuses_proxy_and_disabled_certificate_verification():

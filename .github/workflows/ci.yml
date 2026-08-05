@@ -1,9 +1,10 @@
-# Landed per the 2026-05-24 handoff. Three independent verification jobs run
-# in parallel; all must pass for the workflow to succeed. A fourth manual-only
-# threeway signer job can emit ci_result after those jobs pass during go-live.
-# Mirrors the three local checks documented in ARCHITECTURE.md §15 +
-# OPERATIONS.md §7. Concurrency cancels older runs on the same branch (saves
-# minutes on rapid pushes).
+# Landed per the 2026-05-24 handoff. Five required verification jobs run in
+# parallel: smoke, unit, minimum dependency contract, dependency audit, and
+# frontend. All must pass before the manual-only threeway signer can emit a
+# ci_result during go-live. A weekly latest-compatible resolver job detects
+# upstream drift. The original three product checks still mirror
+# ARCHITECTURE.md §15 + OPERATIONS.md §7. Concurrency cancels older runs on the
+# same branch (saves minutes on rapid pushes).
 #
 # 2026-06-10 (STRATEGIC_REVIEW-2026-06-10 P0-1 / NF-1): the pytest job was
 # 0-for-289 since landing — bare `pytest` cannot import root modules
@@ -82,6 +83,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # A fresh resolver run detects newly incompatible latest releases even
+    # when main has no commits. Times are UTC (Monday 12:30 KST).
+    - cron: '30 3 * * 1'
   workflow_dispatch:
     inputs:
       integration_sha:
@@ -97,6 +102,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Candidate code receives no write-capable token. The signer job below opts
+# into contents:write explicitly after all required checks pass.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: ARCHITECTURE.md §15 smoke
@@ -105,7 +115,7 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.integration_ref || github.sha }}
 
@@ -123,7 +133,7 @@ jobs:
           test "${#INTEGRATION_SHA}" -eq 40
           test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
           cache: 'pip'
@@ -132,7 +142,7 @@ jobs:
       # validator construction. Cache them across runs so first run is slow
       # but subsequent runs are fast.
       - name: Cache DeepFace weights
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.deepface
           key: deepface-weights-v1
@@ -234,7 +244,7 @@ jobs:
       GEMINI_API_KEY: ci-dummy-not-a-real-key
       ANTHROPIC_API_KEY: ci-dummy-not-a-real-key
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.integration_ref || github.sha }}
 
@@ -252,19 +262,22 @@ jobs:
           test "${#INTEGRATION_SHA}" -eq 40
           test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
           cache: 'pip'
 
       - name: Cache DeepFace weights
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/.deepface
           key: deepface-weights-v1
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Verify installed Python dependency graph
+        run: python -m pip check
 
       # Node/npm in a Python job is deliberate, not cruft — do not delete.
       # tests/unit/test_product_surface_inventory.py shells out to
@@ -282,7 +295,7 @@ jobs:
       # source. Deliberately NOT a skipif guard: an honest skip would leave the
       # artifact-currency gate unenforced, which is the failure mode that let
       # the drift go unnoticed in the first place. Fail closed instead.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -302,6 +315,17 @@ jobs:
         # pythonpath in pyproject.toml — bare `pytest` here relies on it.
         run: pytest tests/unit/ --tb=short -q --cov=. --cov-report=xml --cov-report=term
 
+      - name: Enforce repository SQLite connection lifecycle
+        # Keep ResourceWarning strictness scoped to the repo-owned DB lifecycle
+        # suite so unrelated third-party import warnings cannot disarm the gate.
+        run: >-
+          python -m pytest
+          tests/unit/test_cost_tracker.py
+          tests/unit/test_cost_tracker_lifecycle.py
+          -q
+          -W error::ResourceWarning
+          -W error::pytest.PytestUnraisableExceptionWarning
+
       - name: Run executable Wave 1 pin gate
         # ADR-027: the wave gate executes inventory selectors via pytest --runxfail.
         # A red result here is an honest gate failure, not a status-column failure.
@@ -312,12 +336,96 @@ jobs:
       - name: Run no-ceremony detector
         run: python scripts/check_no_ceremony.py
 
+  dependency-minimum:
+    name: Python 3.11 + minimum dependency contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install executable minimum contracts
+        run: >-
+          python -m pip install
+          --constraint constraints/ci-minimum.txt
+          'pytest>=8,<9'
+          requests
+
+      - name: Verify minimum dependency graph
+        run: python -m pip check
+
+      - name: Exercise pinned HTTPS through Requests minimum
+        run: python -m pytest tests/unit/test_performance_net.py -q
+
+  dependency-security:
+    name: Python dependency audit + SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install pinned audit tool
+        run: python -m pip install 'pip-audit==2.9.0'
+
+      - name: Audit requirements and emit CycloneDX SBOM
+        run: >-
+          pip-audit
+          --requirement requirements.txt
+          --progress-spinner off
+          --format cyclonedx-json
+          --output python-sbom.cdx.json
+
+      - name: Upload Python SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-sbom
+          path: python-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  dependency-latest:
+    name: Scheduled latest-compatible Python dependencies
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Resolve latest compatible dependencies from declared ranges
+        run: python -m pip install --upgrade -r requirements.txt
+
+      - name: Verify latest dependency graph
+        run: python -m pip check
+
+      - name: Exercise security-sensitive network path
+        run: python -m pytest tests/unit/test_performance_net.py -q
+
   tsc:
     name: TypeScript --noEmit
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.integration_ref || github.sha }}
 
@@ -335,7 +443,7 @@ jobs:
           test "${#INTEGRATION_SHA}" -eq 40
           test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -345,6 +453,10 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Audit frontend dependency graph
+        working-directory: web
+        run: npm audit --audit-level=high
+
       - name: TypeScript noEmit check
         working-directory: web
         run: npx tsc --noEmit
@@ -353,11 +465,15 @@ jobs:
         working-directory: web
         run: npm test
 
+      - name: Build production frontend
+        working-directory: web
+        run: npm run build
+
   threeway-ci-result:
     name: Emit threeway ci_result
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [smoke, pytest-unit, tsc]
+    needs: [smoke, pytest-unit, dependency-minimum, dependency-security, tsc]
     if: github.event_name == 'workflow_dispatch' && vars.THREEWAY_BUS_LIVE == 'true' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
@@ -367,12 +483,12 @@ jobs:
     steps:
       # Signing runs from trusted main after the integration SHA has passed all
       # test jobs above. The ci private key never runs candidate-controlled code.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
           cache: 'pip'

@@ -78,7 +78,11 @@ cryptography>=42.0
 rfc8785>=0.1.4
 
 # --- HTTP + general ---
-requests>=2.31
+# performance._net._PinnedHTTPSAdapter relies on HTTPAdapter's public
+# get_connection_with_tls_context hook (Requests 2.32.2+) and on the custom
+# SSLContext fix released in 2.32.3.  Older Requests silently bypasses the
+# validated-IP pool during HTTPAdapter.send(), reopening DNS rebinding.
+requests>=2.32.3,<3
 httpx>=0.27
 websockets>=15.0,<17
 
