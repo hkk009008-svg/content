@@ -957,7 +957,7 @@ class TestThresholdZeroInconsistency:
         # With the BUG: th = get_threshold_for_shot(...) ≈ 0.7, vision path uses th,
         #   so threshold_used would NOT be 0.0 → this assertion fails.
         # With the FIX: threshold = 0.0 throughout, threshold_used == 0.0.
-        def fake_vision_fallback(ref_img, frame_path):
+        def fake_vision_fallback(ref_img, frame_path, **_kwargs):
             return {"confidence": 0.3, "matched": True}
 
         mock_cap = _make_mock_cap(total_frames=30, fps=24.0)
@@ -1001,7 +1001,7 @@ class TestThresholdZeroInconsistency:
         """
         captured_threshold = []
 
-        def fake_vision_fallback(ref_img, frame_path):
+        def fake_vision_fallback(ref_img, frame_path, **_kwargs):
             return {"confidence": 0.3, "matched": True}
 
         with patch("identity.validator.DEEPFACE_AVAILABLE", False), \
@@ -1010,10 +1010,10 @@ class TestThresholdZeroInconsistency:
             # Spy on _vision_llm_validate_image to capture the threshold argument
             original_method = validator._vision_llm_validate_image
             def spy_vision(image_path, reference_path, character_id, character_name,
-                           shot_type, threshold):
+                           shot_type, threshold, **kwargs):
                 captured_threshold.append(threshold)
                 return original_method(image_path, reference_path, character_id,
-                                       character_name, shot_type, threshold)
+                                       character_name, shot_type, threshold, **kwargs)
             validator._vision_llm_validate_image = spy_vision
 
             result = validator.validate_image(
@@ -1297,9 +1297,13 @@ class TestVisionFallbackMarkerMapping:
         assert any("image encode failed" in r.message for r in caplog.records)
         mock_client.messages.create.assert_not_called()
 
-    def test_provider_error_phase_fallback_fails_identity_gate(self, caplog):
-        """Provider/API failure in the actual phase fallback returns passed=False."""
+    def test_provider_error_phase_fallback_fails_identity_gate(self, caplog, tmp_path, monkeypatch):
+        """Ambiguous provider failure fails closed without duplicate paid work."""
         import phase_c_vision
+
+        monkeypatch.setenv(
+            "EXPERIMENTS_DB_PATH", str(tmp_path / "identity-attempts.db")
+        )
 
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = RuntimeError("anthropic API down")
@@ -1312,7 +1316,6 @@ class TestVisionFallbackMarkerMapping:
              patch("identity.validator.os.path.exists", return_value=True), \
              patch("identity.validator.DEEPFACE_AVAILABLE", False), \
              patch.object(phase_c_vision, "encode_image_for_llm", return_value="b64"), \
-             patch.object(phase_c_vision, "_IDENTITY_API_RETRY_BACKOFF_SECONDS", 0), \
              patch("anthropic.Anthropic", return_value=mock_client), \
              caplog.at_level("WARNING"):
             validator = IdentityValidator(vision_fallback=phase_c_vision.validate_identity_vision)
@@ -1323,8 +1326,8 @@ class TestVisionFallbackMarkerMapping:
                 threshold=0.65,
             )
 
-        assert mock_client.messages.create.call_count == 3
+        assert mock_client.messages.create.call_count == 1
         assert result.passed is False
         assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
-        assert result.metadata["error_reason"] == "provider_error"
-        assert any("failing closed" in r.message for r in caplog.records)
+        assert result.metadata["error_reason"] == "paid_work_reconciliation_required"
+        assert any("reconciliation" in r.message for r in caplog.records)

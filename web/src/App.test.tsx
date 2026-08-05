@@ -123,6 +123,7 @@ interface RouteOverrides {
   generate?: { ok: boolean; status?: number; body?: unknown }
   cancel?: { ok: boolean; status?: number; body?: unknown }
   motion?: { ok: boolean; status?: number; body?: unknown }
+  initialRunning?: boolean
 }
 
 function stubFetch(overrides: RouteOverrides = {}) {
@@ -131,7 +132,7 @@ function stubFetch(overrides: RouteOverrides = {}) {
   // running=true -- a stateless "always idle" mock would falsely fail a
   // "generating flips true after a successful generate" assertion for a
   // reason that has nothing to do with App.tsx's own logic.
-  let hasStarted = false
+  let hasStarted = overrides.initialRunning ?? false
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = init?.method ?? 'GET'
@@ -198,6 +199,24 @@ describe('App -- PID boundary reset on project switch', () => {
 
     // Project B must not inherit A's halt.
     expect(screen.getByTestId('budget-halt')).toHaveTextContent('none')
+  })
+})
+
+describe('App -- existing run stream attachment', () => {
+  it('selecting a project already running attaches SSE without POSTing a fresh generate', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    const fetchMock = stubFetch({ initialRunning: true })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+
+    await waitFor(() => expect(screen.getByTestId('generating')).toHaveTextContent('true'))
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    expect(MockEventSource.instances[0].url).toBe('/api/projects/proj-A/stream')
+    expect(fetchMock.mock.calls.some(([input, init]) => (
+      (init as RequestInit | undefined)?.method === 'POST'
+      && String(input).endsWith('/generate')
+    ))).toBe(false)
   })
 })
 
@@ -500,7 +519,7 @@ describe('App -- truthful generate/cancel (never paint optimistic success)', () 
     expect(sessionStorage.getItem('cinema.deferred-provider-job.proj-A')).toBeNull()
   })
 
-  it('presents a non-LTX ambiguous job as recovery, not an automatic resume', async () => {
+  it('presents a native Veo ambiguity as manual recovery, not automatic resume', async () => {
     stubFetch({
       motion: {
         ok: false,
@@ -526,6 +545,37 @@ describe('App -- truthful generate/cancel (never paint optimistic success)', () 
     expect(notice).toHaveTextContent('Provider recovery required')
     expect(notice).toHaveTextContent('Manual recovery required in the provider console')
     expect(screen.queryByRole('button', { name: 'Check / Resume LTX Job' })).toBeNull()
+  })
+
+  it('offers the same saved-job recovery action for Runway as shot review', async () => {
+    stubFetch({
+      motion: {
+        ok: false,
+        status: 409,
+        body: {
+          code: 'provider_job_deferred',
+          error: 'Runway accepted the task. Check / Resume will continue the saved job.',
+          deferred_job: {
+            engine: 'RUNWAY_GEN4',
+            status: 'recovery_required',
+            job_id: 'runway-task-safe-1',
+          },
+        },
+      },
+    })
+
+    render(<App />)
+    fireEvent.click(screen.getByText('select-A'))
+    await waitFor(() => expect(screen.getByTestId('project-id')).toHaveTextContent('proj-A'))
+    fireEvent.click(screen.getByText('do-generate-motion'))
+
+    const notice = await screen.findByRole('status')
+    expect(notice).toHaveTextContent('RUNWAY_GEN4 · recovery_required · runway-task-safe-1')
+    expect(notice).toHaveTextContent('Check / Resume will continue the saved job')
+    expect(
+      screen.getByRole('button', { name: 'Check / Resume RUNWAY_GEN4 Job' }),
+    ).toBeInTheDocument()
+    expect(notice).not.toHaveTextContent('Manual recovery required')
   })
 
   it('a successful generate clears a prior error and switches the shell into a generating state', async () => {

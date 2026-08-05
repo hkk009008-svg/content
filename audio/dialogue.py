@@ -39,6 +39,8 @@ from audio._client import client
 from audio.voiceover import get_voice_direction
 from cinema.context import get_project_setting
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import has_paid_attempt_authority
 from performance._net import (
     atomic_publish_bytes,
     publish_validated_file,
@@ -141,6 +143,11 @@ def generate_cartesia(
     output_path: str,
     language: str = "en",
     model_id: str = "sonic-3.5",
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    scope_id: str = "",
+    _recovery_out: Optional[dict] = None,
 ) -> bool:
     """Generate TTS via the Cartesia REST API. Returns True on success.
 
@@ -228,24 +235,73 @@ def generate_cartesia(
             "language": language,
         }
 
-        print(f"   [CARTESIA] Generating [language={language}] voice={voice_id[:8]}...")
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-        r.raise_for_status()
+        def _request_and_publish_cartesia():
+            print(f"   [CARTESIA] Generating [language={language}] voice={voice_id[:8]}...")
+            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            r.raise_for_status()
 
-        response_content_type = r.headers.get("content-type", "")
-        if not isinstance(response_content_type, str):
-            response_content_type = ""
-        if atomic_publish_bytes(
-            r.content,
-            output_path,
-            max_bytes=64 * 1024 * 1024,
-            content_type=response_content_type,
-            allowed_content_types=("audio/mpeg", "audio/mp3"),
-            content_validator=validate_audio_artifact,
-        ) is None:
-            raise RuntimeError("Cartesia response failed audio validation")
+            response_content_type = r.headers.get("content-type", "")
+            if not isinstance(response_content_type, str):
+                response_content_type = ""
+            if atomic_publish_bytes(
+                r.content,
+                output_path,
+                max_bytes=64 * 1024 * 1024,
+                content_type=response_content_type,
+                allowed_content_types=("audio/mpeg", "audio/mp3"),
+                content_validator=validate_audio_artifact,
+            ) is None:
+                raise RuntimeError("Cartesia response failed audio validation")
+            return True
+
+        if not has_paid_attempt_authority(cost_tracker):
+            result = _request_and_publish_cartesia()
+        else:
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                paid_attempt_id,
+                request_fingerprint,
+                run_nonresumable_paid_call,
+            )
+
+            stable_request = request_fingerprint(
+                "cartesia-tts",
+                payload,
+                os.path.abspath(output_path),
+            )
+            try:
+                result = run_nonresumable_paid_call(
+                    call=_request_and_publish_cartesia,
+                    attempt_id=paid_attempt_id(
+                        "cartesia-tts",
+                        video_id,
+                        scope_id,
+                        os.path.abspath(output_path),
+                    ),
+                    provider="cartesia",
+                    engine="CARTESIA_SONIC_2",
+                    operation="dialogue_tts",
+                    estimated_cost_usd=API_COST_USD["CARTESIA_SONIC_2"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=scope_id,
+                    video_id=video_id,
+                )
+            except PaidCallUnbilled:
+                return False
+            except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                if _recovery_out is not None:
+                    _recovery_out["paid_deferred"] = True
+                    _recovery_out["paid_attempt"] = dict(paid_error.snapshot.attempt)
+                print("   [CARTESIA] paid outcome requires recovery; ElevenLabs fallback blocked")
+                return False
+            if _recovery_out is not None:
+                _recovery_out["paid_cost_recorded"] = True
         print(f"   ✅ Cartesia output: {output_path}")
-        return True
+        return bool(result)
 
     except Exception as e:
         print(f"   ⚠️ [CARTESIA] failed: {e}")
@@ -382,6 +438,11 @@ def _try_dialogue_mode(
     characters: list,
     output_filename: str,
     ctx: "Optional[PipelineContext]" = None,
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    scope_id: str = "",
+    _recovery_out: Optional[dict] = None,
 ) -> Optional[str]:
     """ElevenLabs v3 Dialogue Mode — single-call multi-speaker generation.
 
@@ -433,15 +494,66 @@ def _try_dialogue_mode(
 
     print(f"🎙️ [DIALOGUE-MODE] Trying ElevenLabs v3 Dialogue Mode ({len(inputs)} turns)...")
 
+    dialogue_endpoint = getattr(client, "text_to_dialogue", None)
+    dialogue_convert = getattr(dialogue_endpoint, "convert", None)
+    if not callable(dialogue_convert):
+        print("   [DIALOGUE-MODE] text_to_dialogue endpoint not in installed SDK; using per-line path.")
+        return None
+
     # Defensively try the dialogue endpoint. SDK field names can drift across
     # versions; we attempt the most likely names and fall through on any miss.
     try:
-        # Preferred (eleven_v3 dialogue endpoint)
-        audio = client.text_to_dialogue.convert(
-            inputs=inputs,
-            model_id="eleven_v3",
-            output_format="mp3_44100_128",
-        )
+        def _convert_dialogue():
+            return dialogue_convert(
+                inputs=inputs,
+                model_id="eleven_v3",
+                output_format="mp3_44100_128",
+            )
+
+        if not has_paid_attempt_authority(cost_tracker):
+            audio = _convert_dialogue()
+        else:
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                paid_attempt_id,
+                request_fingerprint,
+                run_nonresumable_paid_call,
+            )
+
+            stable_request = request_fingerprint(
+                "eleven-dialogue-v3",
+                inputs,
+                os.path.abspath(output_filename),
+            )
+            try:
+                audio = run_nonresumable_paid_call(
+                    call=_convert_dialogue,
+                    attempt_id=paid_attempt_id(
+                        "eleven-dialogue",
+                        video_id,
+                        scope_id,
+                        os.path.abspath(output_filename),
+                    ),
+                    provider="elevenlabs",
+                    engine="ELEVENLABS",
+                    operation="dialogue_tts",
+                    estimated_cost_usd=API_COST_USD["ELEVENLABS"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=scope_id,
+                    video_id=video_id,
+                )
+            except PaidCallUnbilled:
+                return None
+            except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                if _recovery_out is not None:
+                    _recovery_out["paid_deferred"] = True
+                    _recovery_out["paid_attempt"] = dict(paid_error.snapshot.attempt)
+                print("   [DIALOGUE-MODE] paid outcome requires recovery; per-line replay blocked")
+                return None
     except (AttributeError, TypeError):
         # Older SDK shape — fall through to legacy per-line generation
         print("   [DIALOGUE-MODE] text_to_dialogue endpoint not in installed SDK; using per-line path.")
@@ -467,6 +579,8 @@ def _try_dialogue_mode(
         except OSError:
             pass
         print(f"   [DIALOGUE-MODE] save failed: {e}")
+        if has_paid_attempt_authority(cost_tracker) and _recovery_out is not None:
+            _recovery_out["paid_deferred"] = True
         return None
 
     print(f"   ✅ Dialogue Mode output: {output_filename}")
@@ -620,6 +734,8 @@ def generate_dialogue_voiceover(
     pause_between_lines: float = 0.3,
     ctx: "Optional[PipelineContext]" = None,
     cost_tracker: Optional[object] = None,
+    video_id: str = "",
+    scope_id: str = "",
 ) -> Optional[str]:
     """
     Multi-character dialogue voiceover for cinema production.
@@ -654,12 +770,24 @@ def generate_dialogue_voiceover(
         target_wpm = 145
 
     # PATH 1: try ElevenLabs Dialogue Mode first
-    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename, ctx=ctx)
+    dialogue_recovery: dict = {}
+    dm_result = _try_dialogue_mode(
+        dialogue_lines,
+        characters,
+        output_filename,
+        ctx=ctx,
+        cost_tracker=cost_tracker,
+        video_id=video_id,
+        scope_id=scope_id,
+        _recovery_out=dialogue_recovery,
+    )
     if dm_result:
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
         dm_result = _apply_target_pace(dm_result, transcript_hint, target_wpm)
         _maybe_save_alignment(dm_result, transcript_hint=transcript_hint, ctx=ctx)
         return dm_result
+    if dialogue_recovery.get("paid_deferred"):
+        return None
 
     # PATH 2: legacy per-line generation
     from elevenlabs import VoiceSettings
@@ -782,12 +910,27 @@ def generate_dialogue_voiceover(
                 # lowercased. The dispatcher already routed correctly upstream
                 # so this is just the API param shape.
                 lang_for_api = "ko" if str(project_lang).lower().startswith("ko") else str(project_lang).lower()[:2] or "en"
-                cartesia_ok = generate_cartesia(
-                    text=directed_text,
-                    voice_id=cartesia_voice,
-                    output_path=temp_path,
-                    language=lang_for_api,
-                )
+                cartesia_recovery: dict = {}
+                if not has_paid_attempt_authority(cost_tracker):
+                    cartesia_ok = generate_cartesia(
+                        text=directed_text,
+                        voice_id=cartesia_voice,
+                        output_path=temp_path,
+                        language=lang_for_api,
+                    )
+                else:
+                    cartesia_ok = generate_cartesia(
+                        text=directed_text,
+                        voice_id=cartesia_voice,
+                        output_path=temp_path,
+                        language=lang_for_api,
+                        cost_tracker=cost_tracker,
+                        video_id=video_id,
+                        scope_id=scope_id,
+                        _recovery_out=cartesia_recovery,
+                    )
+                if cartesia_recovery.get("paid_deferred"):
+                    return None
             if cartesia_ok:
                 # Best-effort cost tracking — Cartesia call succeeded; record
                 # spend so cycle-16 Tier C budget reflects Korean dialogue
@@ -797,19 +940,26 @@ def generate_dialogue_voiceover(
                 # ElevenLabs path remains pre-existing untracked (no entry in
                 # `API_COST_USD`; no callers across codebase) — adding ElevenLabs
                 # tracking is symmetric improvement deferred to v0.9.X+.
-                try:
-                    from cost_tracker import CostTracker
-                    # T5: use caller-supplied tracker when provided so spend accumulates
-                    # on the pipeline's budget-aware tracker (cross-process persistence
-                    # deferred).
-                    _tracker = cost_tracker or CostTracker()
-                    _tracker.record_api_call(
-                        "CARTESIA_SONIC_2",
-                        operation="dialogue_tts",
-                    )
-                except Exception:
-                    # Cost tracking is best-effort; the TTS itself succeeded.
-                    print(f"   [CARTESIA] cost record skipped for line {i+1} (non-critical)")
+                if not cartesia_recovery.get("paid_cost_recorded"):
+                    owned_tracker = None
+                    try:
+                        if cost_tracker is None:
+                            from cost_tracker import CostTracker
+                            owned_tracker = CostTracker()
+                            tracker = owned_tracker
+                        else:
+                            tracker = cost_tracker
+                        tracker.record_api_call(
+                            "CARTESIA_SONIC_2",
+                            operation="dialogue_tts",
+                            shot_id=scope_id,
+                            video_id=video_id,
+                        )
+                    except Exception:
+                        print(f"   [CARTESIA] cost record skipped for line {i+1} (non-critical)")
+                    finally:
+                        if owned_tracker is not None:
+                            owned_tracker.close()
                 temp_files.append(temp_path)
                 print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path} [Cartesia]")
                 continue
@@ -827,40 +977,95 @@ def generate_dialogue_voiceover(
             continue
         _part = temp_path + ".part"
         try:
-            audio = client.text_to_speech.convert(
-                voice_id=voice_id,
-                output_format="mp3_44100_128",
-                text=directed_text,
-                model_id="eleven_v3",
-                voice_settings=VoiceSettings(
-                    stability=voice_profile["stability"],
-                    similarity_boost=voice_profile["similarity"],
-                    style=voice_profile["style"],
-                    use_speaker_boost=voice_profile.get("speaker_boost", True),
-                ),
+            voice_settings = VoiceSettings(
+                stability=voice_profile["stability"],
+                similarity_boost=voice_profile["similarity"],
+                style=voice_profile["style"],
+                use_speaker_boost=voice_profile.get("speaker_boost", True),
             )
-            save(audio, _part)
-            if publish_validated_file(
-                _part,
-                temp_path,
-                content_validator=validate_audio_artifact,
-            ) is None:
-                raise RuntimeError("ElevenLabs response failed audio validation")
+
+            def _convert_and_publish_elevenlabs():
+                audio = client.text_to_speech.convert(
+                    voice_id=voice_id,
+                    output_format="mp3_44100_128",
+                    text=directed_text,
+                    model_id="eleven_v3",
+                    voice_settings=voice_settings,
+                )
+                save(audio, _part)
+                if publish_validated_file(
+                    _part,
+                    temp_path,
+                    content_validator=validate_audio_artifact,
+                ) is None:
+                    raise RuntimeError("ElevenLabs response failed audio validation")
+                return True
+
+            durable_cost_recorded = False
+            if not has_paid_attempt_authority(cost_tracker):
+                _convert_and_publish_elevenlabs()
+            else:
+                from cost_tracker import API_COST_USD
+                from paid_provider import (
+                    PaidCallBudgetBlocked,
+                    PaidCallDeferred,
+                    PaidCallUnbilled,
+                    paid_attempt_id,
+                    request_fingerprint,
+                    run_nonresumable_paid_call,
+                )
+
+                stable_request = request_fingerprint(
+                    "eleven-line-v3",
+                    directed_text,
+                    voice_id,
+                    voice_profile,
+                    os.path.abspath(temp_path),
+                )
+                try:
+                    run_nonresumable_paid_call(
+                        call=_convert_and_publish_elevenlabs,
+                        attempt_id=paid_attempt_id(
+                            "eleven-line",
+                            video_id,
+                            scope_id,
+                            os.path.abspath(temp_path),
+                        ),
+                        provider="elevenlabs",
+                        engine="ELEVENLABS",
+                        operation="dialogue_tts",
+                        estimated_cost_usd=API_COST_USD["ELEVENLABS"],
+                        request_fingerprint_value=stable_request,
+                        cost_tracker=cost_tracker,
+                        shot_id=scope_id,
+                        video_id=video_id,
+                    )
+                    durable_cost_recorded = True
+                except PaidCallUnbilled:
+                    continue
+                except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                    print(
+                        "   [ELEVENLABS] paid line requires recovery; "
+                        "automatic line replay blocked"
+                    )
+                    return None
             temp_files.append(temp_path)
             # Best-effort cost tracking — M-B2 closure (cycle-16). Symmetric
             # to Cartesia tracking above; closes the asymmetry noted at
             # cycle-15 v0.9.7 ("ElevenLabs path remains pre-existing
             # untracked... symmetric ElevenLabs tracking deferred to v0.9.X+")
             # by adding the tracking at this version (a la deferred → done).
-            try:
-                from cost_tracker import CostTracker
-                # T5: use caller-supplied tracker when provided so spend accumulates
-                # on the pipeline's budget-aware tracker (cross-process persistence
-                # deferred).
-                _tracker = cost_tracker or CostTracker()
-                _tracker.record_api_call("ELEVENLABS", operation="dialogue_tts")
-            except Exception:
-                print(f"   [ELEVENLABS] cost record skipped for line {i+1} (non-critical)")
+            if not durable_cost_recorded:
+                try:
+                    with cost_tracker_scope(cost_tracker) as tracker:
+                        tracker.record_api_call(
+                            "ELEVENLABS",
+                            operation="dialogue_tts",
+                            shot_id=scope_id,
+                            video_id=video_id,
+                        )
+                except Exception:
+                    print(f"   [ELEVENLABS] cost record skipped for line {i+1} (non-critical)")
             print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path}")
         except Exception as e:
             try:

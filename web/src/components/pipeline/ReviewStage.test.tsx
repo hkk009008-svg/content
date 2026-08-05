@@ -199,7 +199,7 @@ describe('ReviewStage deferred provider recovery', () => {
     expect(screen.queryByRole('button', { name: 'Generate Motion' })).toBeNull()
   })
 
-  it('labels non-LTX provider ambiguity as a recovery check rather than claiming automatic resume', async () => {
+  it('labels native Veo ambiguity as manual recovery rather than claiming automatic resume', async () => {
     const project = makeProject()
     project.scenes[0].shots[0].deferred_motion_job = {
       engine: 'VEO_NATIVE',
@@ -216,6 +216,34 @@ describe('ReviewStage deferred provider recovery', () => {
     expect(recovery).toHaveTextContent('Automatic recovery is unavailable')
     expect(screen.getByText('Manual Recovery Required')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Check / Resume LTX Job' })).toBeNull()
+    await expectNoAxeViolations(document.body)
+  })
+
+  it('resumes a persisted Runway task by ID without exposing a fresh-provider action', async () => {
+    const project = makeProject()
+    project.scenes[0].shots[0].approved_keyframe_take_id = 'keyframe-1'
+    project.scenes[0].shots[0].deferred_motion_job = {
+      engine: 'RUNWAY_GEN4',
+      status: 'recovery_required',
+      reason: 'Runway polling timed out while the paid task remained active.',
+      job_id: 'runway-task-123',
+      provider_status: 'RUNNING',
+      billed: false,
+    }
+    const onGenerateMotion = vi.fn(async () => ({
+      code: 'provider_job_deferred',
+      error: 'Still running',
+    }))
+    render(stage(project, onGenerateMotion))
+
+    const recovery = screen.getByRole('alert', { name: 'RUNWAY_GEN4 Job Recovery Required' })
+    expect(recovery).toHaveTextContent('runway-task-123')
+    expect(recovery).toHaveTextContent('uses this saved RUNWAY_GEN4 job')
+    const resume = screen.getByRole('button', { name: 'Check / Resume RUNWAY_GEN4 Job' })
+    fireEvent.click(resume)
+
+    await waitFor(() => expect(onGenerateMotion).toHaveBeenCalledWith('shot-1'))
+    expect(screen.queryByRole('button', { name: 'Generate Motion' })).toBeNull()
     await expectNoAxeViolations(document.body)
   })
 })

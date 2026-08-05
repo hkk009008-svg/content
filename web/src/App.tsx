@@ -6,6 +6,7 @@ import { PageProvider, usePage } from './context/PageContext'
 import ProjectSelector from './components/ProjectSelector'
 import AppShell from './components/AppShell'
 import { apiGet, apiPost } from './lib/api'
+import { canResumeDeferredProviderJob } from './lib/providerRecovery'
 
 const API = '/api'
 const DEFERRED_JOB_STORAGE_PREFIX = 'cinema.deferred-provider-job.'
@@ -79,7 +80,7 @@ function deferredNoticeFromResult(
   if (!isRecord(result.deferred_job)) return null
   const job = result.deferred_job
   if (typeof job.engine !== 'string' || typeof job.status !== 'string') return null
-  const canResume = job.engine.toUpperCase() === 'LTX' && typeof job.job_id === 'string'
+  const canResume = canResumeDeferredProviderJob(job.engine, job.job_id)
   return {
     projectId,
     shotId,
@@ -141,7 +142,7 @@ function AppInner() {
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
     stages, activeStage, shotStates, directorReview, processEvent,
-    isPaused, failedShots, running, allowedActions, checkpoint, refreshPipelineState,
+    isPaused, failedShots, running, allowedActions, checkpoint, queue, refreshPipelineState,
     pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
@@ -311,6 +312,21 @@ function AppInner() {
     await refreshPipelineState() // authoritative truth either way
   }
 
+  const handleAbandonQueueJob = async (jobId: string) => {
+    if (!project) return
+    const acknowledged = window.confirm(
+      'The previous worker cannot be verified. Abandon only after confirming it is stopped; paid provider work may still exist. Continue?',
+    )
+    if (!acknowledged) return
+    setActionError(null)
+    const result = await apiPost(
+      `${API}/projects/${project.id}/queue/abandon`,
+      { job_id: jobId, acknowledge_paid_work_risk: true },
+    )
+    if (!result.ok) setActionError(result.error)
+    await refreshPipelineState()
+  }
+
   const handleBackToSetup = () => {
     setPage('setup')
   }
@@ -454,7 +470,10 @@ function AppInner() {
             {deferredProviderJob.jobId && ` · ${deferredProviderJob.jobId}`}
           </div>
           <p className="mt-2 text-xs leading-relaxed text-mut">{deferredProviderJob.message}</p>
-          {deferredProviderJob.engine.toUpperCase() === 'LTX' ? (
+          {canResumeDeferredProviderJob(
+            deferredProviderJob.engine,
+            deferredProviderJob.jobId,
+          ) ? (
             <button
               type="button"
               onClick={() => { void resumeDeferredProviderJob() }}
@@ -462,7 +481,9 @@ function AppInner() {
               aria-busy={resumingDeferredJob}
               className="mt-3 rounded border border-warn/50 px-3 py-1.5 text-xs font-medium text-warn hover:bg-warn/10 disabled:opacity-50"
             >
-              {resumingDeferredJob ? 'Checking / resuming…' : 'Check / Resume LTX Job'}
+              {resumingDeferredJob
+                ? 'Checking / resuming…'
+                : `Check / Resume ${deferredProviderJob.engine} Job`}
             </button>
           ) : (
             <p className="mt-3 text-xs font-medium text-fail">
@@ -482,6 +503,7 @@ function AppInner() {
         onBackToProjects={handleBackToProjects}
         onGenerate={handleGenerate}
         onCancel={handleCancel}
+        onAbandonQueueJob={handleAbandonQueueJob}
         onRefreshProject={refreshProject}
         onOpenConsole={() => setPage('run')}
         onOpenCapability={() => setPage('capability')}
@@ -497,6 +519,7 @@ function AppInner() {
         failedShots={failedShots}
         allowedActions={allowedActions}
         checkpoint={checkpoint}
+        queue={queue}
         pipelineError={pipelineError}
         pipelineLoadingLabel={pipelineLoadingLabel}
         // ── Pipeline callbacks (withRefresh-wrapped except onDiagnoseShot / onReassemble) ──

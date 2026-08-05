@@ -16,12 +16,24 @@ Falls back to GPT-4o if Anthropic unavailable.
 
 import os
 import json
-from typing import Optional, List, Dict, Tuple
+import logging
+import sys
+import time
+from typing import Any, Optional, List, Dict, Tuple
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from llm.ensemble import build_anthropic_system_blocks
 from llm.negative_prompts import get_negative_prompt_for_failure
 from llm.image_encoding import encode_image_for_llm
+from paid_provider import (
+    PaidCallDeferred,
+    has_paid_attempt_authority,
+    openai_output_limit_kwargs,
+    run_fenced_llm_call,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_json_fences(raw: object) -> str:
@@ -51,8 +63,16 @@ class ChiefDirector:
     autonomous decisions about quality gates.
     """
 
-    def __init__(self, project: dict):
+    def __init__(
+        self,
+        project: dict,
+        cost_tracker: Any | None = None,
+        video_id: str = "",
+    ):
         self.project = project
+        self.cost_tracker = cost_tracker
+        project_id = project.get("id", "") if isinstance(project, dict) else ""
+        self.video_id = str(video_id or project_id or "")[:128]
         self.diagnostic_log: List[Dict] = []
         self.client = self._init_client()
 
@@ -84,7 +104,157 @@ class ChiefDirector:
         self.provider = None
         return None
 
-    def _call_llm(self, system_prompt: str, user_prompt: str, *, image_b64s: Optional[List[str]] = None) -> str:
+    @staticmethod
+    def _usage_count(usage: object, *names: str) -> int:
+        for name in names:
+            if isinstance(usage, dict):
+                value = usage.get(name)
+            else:
+                value = getattr(usage, name, None)
+            if value is None:
+                continue
+            try:
+                count = int(value or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if count >= 0:
+                return count
+        return 0
+
+    def _record_llm_usage(self, response: object, model: str, operation: str) -> None:
+        """Persist token/cost evidence exposed by a successful SDK response."""
+        if self.cost_tracker is None or has_paid_attempt_authority(self.cost_tracker):
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        if self.provider == "anthropic":
+            input_tokens = self._usage_count(usage, "input_tokens")
+            output_tokens = self._usage_count(usage, "output_tokens")
+        else:
+            input_tokens = self._usage_count(usage, "prompt_tokens", "input_tokens")
+            output_tokens = self._usage_count(
+                usage, "completion_tokens", "output_tokens"
+            )
+        if input_tokens <= 0 and output_tokens <= 0:
+            return
+        try:
+            self.cost_tracker.log_llm(
+                model=model,
+                operation=operation,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                video_id=self.video_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # The provider response remains usable, but an operator-visible
+            # diagnostic is mandatory because the budget ledger is now short.
+            message = (
+                f"[ChiefDirector] Failed to record LLM usage for {model!r}: {exc}"
+            )
+            print(message, file=sys.stderr)
+            logger.error(
+                "Chief Director LLM usage recording failed",
+                extra={
+                    "provider": self.provider or "unknown",
+                    "engine": model,
+                    "code": operation,
+                    "status": "usage_unrecorded",
+                    "video_id": self.video_id,
+                },
+            )
+
+    def _call_with_observation(
+        self,
+        *,
+        model: str,
+        operation: str,
+        call: Any,
+        request_payload: Any,
+        max_output_tokens: int,
+    ) -> object:
+        """Run one provider request under durable authority when available."""
+        started = time.perf_counter()
+
+        def persist(status: str, latency_ms: int) -> None:
+            tracker = getattr(self, "cost_tracker", None)
+            if has_paid_attempt_authority(tracker):
+                return
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if not callable(recorder):
+                return
+            try:
+                recorder(
+                    provider=self.provider or "unknown",
+                    engine=model,
+                    operation=operation,
+                    status=status,
+                    latency_ms=latency_ms,
+                    video_id=self.video_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Chief Director LLM observation recording failed",
+                    extra={
+                        "provider": self.provider or "unknown",
+                        "engine": model,
+                        "code": operation,
+                        "status": "observation_unrecorded",
+                        "video_id": self.video_id,
+                    },
+                    exc_info=exc,
+                )
+
+        try:
+            response = run_fenced_llm_call(
+                call=call,
+                provider=self.provider or "unknown",
+                model=model,
+                operation=operation,
+                request_payload=request_payload,
+                max_output_tokens=max_output_tokens,
+                cost_tracker=self.cost_tracker,
+                video_id=self.video_id,
+            )
+        except Exception:
+            latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+            persist("failed", latency_ms)
+            logger.warning(
+                "Chief Director LLM request failed",
+                extra={
+                    "provider": self.provider or "unknown",
+                    "engine": model,
+                    "code": operation,
+                    "latency_ms": latency_ms,
+                    "status": "failed",
+                    "video_id": self.video_id,
+                },
+            )
+            raise
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        persist("succeeded", latency_ms)
+        logger.info(
+            "Chief Director LLM request completed",
+            extra={
+                "provider": self.provider or "unknown",
+                "engine": model,
+                "code": operation,
+                "latency_ms": latency_ms,
+                "status": "succeeded",
+                "video_id": self.video_id,
+            },
+        )
+        self._record_llm_usage(response, model, operation)
+        return response
+
+    def _call_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        image_b64s: Optional[List[str]] = None,
+        operation: str = "chief_director_call",
+    ) -> str:
         """Call the LLM with the Chief Director system prompt.
 
         Respects the ``creative_llm`` per-project UI knob. When set, the
@@ -132,22 +302,41 @@ class ChiefDirector:
                 )
             else:
                 user_content = user_prompt
+            request_kwargs = {
+                "model": model_id,
+                "max_tokens": 4096,
+                "system": build_anthropic_system_blocks(system_prompt),
+                "messages": [{"role": "user", "content": user_content}],
+            }
             try:
-                response = self.client.messages.create(
+                response = self._call_with_observation(
                     model=model_id,
-                    max_tokens=4096,
-                    system=build_anthropic_system_blocks(system_prompt),
-                    messages=[{"role": "user", "content": user_content}],
+                    operation=operation,
+                    call=lambda: self.client.messages.create(**request_kwargs),
+                    request_payload=request_kwargs,
+                    max_output_tokens=4096,
                 )
+            except PaidCallDeferred:
+                # A real ledger cannot prove an SDK exception was unbilled.
+                # Do not convert an ambiguous vision attempt into a second
+                # text-only paid request.
+                raise
             except Exception as e:
                 if encoded:
                     print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
                     try:
-                        response = self.client.messages.create(
+                        retry_kwargs = {
+                            "model": model_id,
+                            "max_tokens": 4096,
+                            "system": build_anthropic_system_blocks(system_prompt),
+                            "messages": [{"role": "user", "content": user_prompt}],
+                        }
+                        response = self._call_with_observation(
                             model=model_id,
-                            max_tokens=4096,
-                            system=build_anthropic_system_blocks(system_prompt),
-                            messages=[{"role": "user", "content": user_prompt}],
+                            operation=operation,
+                            call=lambda: self.client.messages.create(**retry_kwargs),
+                            request_payload=retry_kwargs,
+                            max_output_tokens=4096,
                         )
                     except Exception as e2:
                         print(f"   [DIRECTOR] LLM call failed: {e2}")
@@ -181,26 +370,46 @@ class ChiefDirector:
                 openai_user_msg: object = {"role": "user", "content": user_content_list}
             else:
                 openai_user_msg = {"role": "user", "content": user_prompt}
+            request_kwargs = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    openai_user_msg,
+                ],
+                "response_format": {"type": "json_object"},
+            }
+            request_kwargs.update(openai_output_limit_kwargs(model_id, 4096))
             try:
-                response = self.client.chat.completions.create(
+                response = self._call_with_observation(
                     model=model_id,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        openai_user_msg,
-                    ],
-                    response_format={"type": "json_object"},
+                    operation=operation,
+                    call=lambda: self.client.chat.completions.create(**request_kwargs),
+                    request_payload=request_kwargs,
+                    max_output_tokens=4096,
                 )
+            except PaidCallDeferred:
+                raise
             except Exception as e:
                 if encoded:
                     print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
                     try:
-                        response = self.client.chat.completions.create(
-                            model=model_id,
-                            messages=[
+                        retry_kwargs = {
+                            "model": model_id,
+                            "messages": [
                                 {"role": "system", "content": system_prompt},
                                 {"role": "user", "content": user_prompt},
                             ],
-                            response_format={"type": "json_object"},
+                            "response_format": {"type": "json_object"},
+                        }
+                        retry_kwargs.update(
+                            openai_output_limit_kwargs(model_id, 4096)
+                        )
+                        response = self._call_with_observation(
+                            model=model_id,
+                            operation=operation,
+                            call=lambda: self.client.chat.completions.create(**retry_kwargs),
+                            request_payload=retry_kwargs,
+                            max_output_tokens=4096,
                         )
                     except Exception as e2:
                         print(f"   [DIRECTOR] LLM call failed: {e2}")
@@ -330,7 +539,11 @@ When suggesting prompt_mutation for failures:
             "character_ids": scene.get("characters_present", []),
         }, indent=2)
 
-        raw = self._call_llm(self.SYSTEM_PROMPT, user_prompt)
+        raw = self._call_llm(
+            self.SYSTEM_PROMPT,
+            user_prompt,
+            operation="chief_director_validate_shots",
+        )
 
         # ── fence-tolerant parse with ≤1 retry-with-correction ──────────────
         # Scope: only the json.loads is guarded for retry; post-parse logic
@@ -347,7 +560,11 @@ When suggesting prompt_mutation for failures:
                         "\n\nYour previous response was not valid JSON. "
                         "Output ONLY a valid JSON object — no markdown, no prose."
                     )
-                    raw = self._call_llm(self.SYSTEM_PROMPT, user_prompt + correction)
+                    raw = self._call_llm(
+                        self.SYSTEM_PROMPT,
+                        user_prompt + correction,
+                        operation="chief_director_validate_shots",
+                    )
                 # second attempt: fall through to result=None
 
         if result is None or not isinstance(result, dict):
@@ -682,7 +899,12 @@ When suggesting prompt_mutation for failures:
                 "a FACE_ANGLE_EXTREME false negative), say so in \"diagnosis\"."
             )
 
-        raw = self._call_llm(diagnosis_system, eval_prompt, image_b64s=attach or None)
+        raw = self._call_llm(
+            diagnosis_system,
+            eval_prompt,
+            image_b64s=attach or None,
+            operation="chief_director_quality_review",
+        )
 
         try:
             result = json.loads(_strip_json_fences(raw))

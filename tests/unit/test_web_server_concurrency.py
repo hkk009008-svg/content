@@ -111,12 +111,13 @@ def _fake_get_or_build_core(pid):
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — Exactly one concurrent POST /generate wins; the other gets 409
+# Test 1 — Concurrent POSTs resolve to one durable idempotency record
 # ---------------------------------------------------------------------------
 
-def test_concurrent_generate_only_one_wins():
+def test_concurrent_generate_requests_are_both_idempotently_accepted():
     """Spin 2 threads that call api_generate() for the same pid simultaneously.
-    The sentinel-pattern lock guarantees exactly one 200 and one 409.
+    Both receive 202 while SQLite's active-project uniqueness guarantees one
+    underlying paid run.
 
     Uses threading.Barrier(2) to maximize race overlap. Patches
     CinemaPipeline with a fake that has a blocking init so the race
@@ -147,7 +148,7 @@ def test_concurrent_generate_only_one_wins():
 
     with (
         patch("web_server.CinemaPipeline", SlowFake),
-        patch("web_server.load_project", side_effect=lambda p: _fake_load_project(p)),
+        patch("web_server.load_existing_project_readonly", side_effect=lambda p: _fake_load_project(p)),
         patch("web_server._get_or_build_core", side_effect=lambda p: MagicMock()),
     ):
         def do_generate():
@@ -169,26 +170,20 @@ def test_concurrent_generate_only_one_wins():
         t1.start()
         t2.start()
 
-        # Wait for the winning bg thread to enter SlowFake.__init__
+        # Wait for the bounded queue worker to enter SlowFake.__init__
         # (sentinel installed, ctor blocked on ctor_release).
         ctor_entered.wait(timeout=3.0)
 
-        # Join test threads BEFORE releasing the bg thread. With the bg
-        # thread still blocked, the sentinel stays in _running_pipelines,
-        # so the loser thread MUST see it and return 409. Without this
-        # ordering, in cold runs (no prior warm-up of Flask's request
-        # context) the winning bg-thread could complete generate() and
-        # pop the sentinel before the losing thread arrives at the lock,
-        # letting it also become a winner.
+        # Join request threads while the one queue worker remains blocked;
+        # request acceptance itself must never wait for provider work.
         t1.join(timeout=5)
         t2.join(timeout=5)
 
-        # Both test threads have recorded their lock-race result. Now
-        # release the bg thread so its finally-block cleanup runs.
+        # Both acceptances are recorded; release the worker for cleanup.
         ctor_release.set()
 
-    assert sorted(results) == [200, 409], (
-        f"Expected exactly one 200 and one 409, got {results}"
+    assert sorted(results) == [202, 202], (
+        f"Expected both idempotent requests to be accepted, got {results}"
     )
 
 
@@ -219,11 +214,11 @@ def test_pending_sentinel_visible_during_construction(client):
 
     with (
         patch("web_server.CinemaPipeline", BlockingFake),
-        patch("web_server.load_project", side_effect=lambda p: _fake_load_project(p)),
+        patch("web_server.load_existing_project_readonly", side_effect=lambda p: _fake_load_project(p)),
         patch("web_server._get_or_build_core", side_effect=lambda p: MagicMock()),
     ):
         resp = client.post(f"/api/projects/{pid}/generate", json={})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
 
         # Background thread is now inside the blocking ctor
         ctor_entered.wait(timeout=2.0)
@@ -334,9 +329,9 @@ def test_concurrent_ensure_progress_queue_returns_same_queue():
 # Test 6 — Four-thread pressure test (bonus: maximizes race window coverage)
 # ---------------------------------------------------------------------------
 
-def test_four_concurrent_generate_only_one_wins():
+def test_four_concurrent_generate_requests_share_one_durable_run():
     """Four threads race on the same pid via direct api_generate() calls.
-    Exactly one must get 200; the rest must all get 409.
+    Every caller receives 202 for the same idempotent active job.
     Uses Barrier(4) for maximum overlap.
 
     NOTE: Flask test_client is not thread-safe. Direct api_generate()
@@ -351,7 +346,7 @@ def test_four_concurrent_generate_only_one_wins():
     class SlowFake:
         def __init__(self, _pid, core=None, progress_callback=None):
             ctor_entered.set()
-            # See test_concurrent_generate_only_one_wins above for why
+            # See the two-request idempotency test above for why
             # we wait longer than t.join(5). Same ordering invariant.
             ctor_release.wait(timeout=10.0)
 
@@ -363,7 +358,7 @@ def test_four_concurrent_generate_only_one_wins():
 
     with (
         patch("web_server.CinemaPipeline", SlowFake),
-        patch("web_server.load_project", side_effect=lambda p: _fake_load_project(p)),
+        patch("web_server.load_existing_project_readonly", side_effect=lambda p: _fake_load_project(p)),
         patch("web_server._get_or_build_core", side_effect=lambda p: MagicMock()),
     ):
         def do_generate():
@@ -383,27 +378,18 @@ def test_four_concurrent_generate_only_one_wins():
         for t in threads:
             t.start()
 
-        # Wait for the winning bg thread to enter SlowFake.__init__
+        # Wait for the bounded queue worker to enter SlowFake.__init__
         # (sentinel installed, ctor blocked on ctor_release).
         ctor_entered.wait(timeout=3.0)
 
-        # Join all 4 test threads BEFORE releasing the bg thread. With
-        # the bg thread still blocked, the sentinel stays in
-        # _running_pipelines, so threads B/C/D MUST see it and return
-        # 409. Without this ordering, in cold runs (no prior warm-up
-        # of Flask's request context) the winning bg-thread could
-        # complete generate() and pop the sentinel before the slower
-        # test threads arrived at the lock, letting them also become
-        # winners (observed: [200,409,200,200] instead of one 200).
+        # Acceptance remains non-blocking while the sole worker is held.
         for t in threads:
             t.join(timeout=5)
 
-        # All 4 lock-race verdicts recorded; release the bg thread so
-        # its finally-block cleanup runs.
+        # All four acceptances recorded; release the worker for cleanup.
         ctor_release.set()
 
-    assert results.count(200) == 1, f"Expected exactly 1 success, got {results}"
-    assert results.count(409) == 3, f"Expected exactly 3 conflicts, got {results}"
+    assert results.count(202) == 4, f"Expected four idempotent accepts, got {results}"
 
 
 # ---------------------------------------------------------------------------
@@ -429,11 +415,11 @@ def test_pipeline_slot_cleaned_after_completion(client):
 
     with (
         patch("web_server.CinemaPipeline", FastFake),
-        patch("web_server.load_project", side_effect=lambda p: _fake_load_project(p)),
+        patch("web_server.load_existing_project_readonly", side_effect=lambda p: _fake_load_project(p)),
         patch("web_server._get_or_build_core", side_effect=lambda p: MagicMock()),
     ):
         resp = client.post(f"/api/projects/{pid}/generate", json={})
-        assert resp.status_code == 200
+        assert resp.status_code == 202
 
         # Wait for the pipeline to finish and clean up
         done.wait(timeout=3.0)

@@ -22,7 +22,7 @@ export function BudgetSection({ s, update }: Props) {
           step={1}
           placeholder="0 = unlimited"
           onChange={(v) => update('budget_limit_usd', v)}
-          hint="Max spend per video. 0 = unlimited. Pipeline pauses at this cap (CostTracker gate)."
+          hint="Hard cap for charged spend plus active paid-job reservations. 0 = unlimited. Blocked submissions do not call the provider."
         />
 
         <CostEstimatorSection s={s} />

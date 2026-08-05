@@ -4245,3 +4245,117 @@ Viggle just went through in ADR-082 — so carrying this saved no future work.
 verified via $ pytest tests/unit/test_ltx_native.py -q  -> 43 passed
 Cross-ref: ADR-081 (the sibling deletion this session); plan slice 15b;
 docs/AUDIT-product-unification-2026-07-30.md.
+
+## ADR-084 — Durable production control plane with explicit paid-media boundaries
+
+Date: 2026-08-05
+
+Status: Accepted.
+
+Context. Full-project generation was accepted directly into process-local
+threads. A server crash could lose scheduling truth, while a checkpoint resume
+could re-enter a provider call whose billing outcome was not represented by
+the checkpoint. Cost rows described successful calls but did not provide one
+legal-transition authority for reserved, acknowledged, ambiguous, billed, and
+unbilled work. Generated outputs were published to mutable paths without an
+independent immutable history. Operators had no project-scoped success/latency
+view, automatic health avoidance, searchable trace index, historical artifact
+selector, or verified one-click client package. One RunPod canary label also
+risked treating a PuLID-ready image as proof of a different LivePortrait node
+contract.
+
+Decision. Adopt a local durable production control plane, but do not describe
+its guarantees beyond the evidence each layer owns.
+
+1. Full-project scheduling truth lives in a filesystem-backed SQLite/WAL queue
+   (`pipeline_jobs.py`). There is one active job per project, FIFO claiming, a
+   fixed 1..8 global worker pool, leases/heartbeats, and a process-held POSIX
+   fence. An expired row is requeued for checkpoint resume only when its exact
+   prior fence is provably stopped. An expired but unverifiable owner may be
+   abandoned only by exact project/job ID plus explicit paid-work-risk
+   acknowledgement; a live or safely stopped owner is refused.
+2. Provider-work truth lives separately in `CostTracker.paid_attempts` and is
+   opt-in through the versioned `paid_attempt_authority_version` contract.
+   Adapters with durable FAL request IDs, ComfyUI prompt IDs, or a native Kling
+   task ID resume/poll that exact job. Native Sora has no safely persisted job
+   ID at its synchronous `create_and_poll` boundary; uncertainty there becomes
+   `accepted_unknown`. Any provider without a durable ID/idempotency contract
+   uses the same no-replay fence: ambiguity blocks automatic fallback and
+   resubmission. This is not a universal exactly-once claim.
+3. Provider analytics aggregate paid-media terminal success, latency,
+   billed/unbilled failure, unresolved accepted work, active reservation, and
+   reconciled cost. The API/UI call the cost basis `reconciled_estimate`;
+   invoices remain authoritative. Deterministic health scoring uses this
+   evidence. Only the base-video `AUTO` dispatcher removes `unhealthy`
+   candidates; `unknown`/`degraded` remain eligible, and pinned video, image,
+   lipsync, performance, and LLM routes are not silently changed.
+4. Shared `LLMEnsemble`, Chief Director, Cinema Director, style, and scene-
+   decomposition paths receive one project-scoped tracker. Each actual SDK
+   request first reserves a deterministic no-replay paid attempt and a
+   conservative token-cost upper bound. Success reconciles exactly once from
+   returned usage, including differential Anthropic cache-write/read rates;
+   an ambiguous outcome becomes `accepted_unknown`, and a repeated logical
+   request never reaches the SDK. Tool-loop helpers carry the same fence across
+   rounds so a swallowed first error cannot trigger a replacement final call.
+   These synchronous APIs still expose no provider job ID to poll: the durable
+   guarantee is crash-safe *no replay*, not recovery of the missing provider
+   response. Planning health evidence does not participate in automatic
+   routing.
+5. Accepted take, auxiliary, and final outputs are retained in a
+   content-addressed object store with append-only hash-chained provenance.
+   Records capture output/source/dependency hashes and available
+   provider/model/seed/recipe data, but state `bit_exact=false`; nondeterministic
+   providers and codec/platform behavior prevent a general byte-identical
+   reproduction promise.
+6. Client packages are deterministic allowlisted ZIPs built from current or
+   explicit historical client-deliverable IDs. They include a manifest and
+   checksums and publish under the ZIP content hash, so a later build cannot
+   change an existing download URL. Internal/runtime/hidden/credential-like
+   paths are excluded.
+7. JSON stdout remains the deployment log stream. A bounded redacted SQLite
+   trace index supplies project-scoped query/level/trace-ID search in the UI;
+   indexing failure never changes production flow. It is a central local index,
+   not a distributed logging service.
+8. The protected live canary keeps `runpod-pulid-production` and
+   `runpod-liveportrait-performance` as different fixed targets with different
+   endpoint/token secrets and node preflights. The pinned PuLID image does not
+   certify LivePortrait.
+9. Character creation claims one project-level pending reservation before paid
+   dispatch and stores fingerprinted private recovery inputs under the exact
+   32-hex `creation_request_id`. An identical retry resumes the same provider
+   work or completes artifact indexing; a different token/input is refused.
+   Manual clearing requires the exact token plus an explicit confirmation that
+   no resumable paid work remains.
+10. Web mutations/direct stages and generation admission use a per-project
+    sibling operation `FileLock` in addition to in-process admin/stage sets and
+    active SQLite job checks. This closes the cross-process delete/mutate/admit
+    race while preserving the project manager's separate JSON RMW lock.
+11. SSE remains process-local transport. Each subscriber owns a bounded inbox
+    and replay window. After restart, `/stream` may hydrate a fresh bus from an
+    active durable queue row and wake the dispatcher, but it cannot replay the
+    prior process's event buffer; `pipeline-state` is the hydration authority.
+12. Remove the unscoped `POST /api/cleanup-all` surface. Cleanup and deletion
+    remain explicit, project-scoped operations so the UI cannot trigger a
+    repository-wide destructive action.
+
+Consequences.
+
+- A request accepted before a crash remains visible and resumable; repeated
+  starts converge on one active job ID instead of creating another run.
+- Preventing duplicate *provider* spend depends on the paid adapter's durable
+  ID/no-replay implementation, not merely on queue/checkpoint persistence.
+- A planning request can be safely refused on repeat without being resumable;
+  operators reconcile an `accepted_unknown` LLM attempt instead of treating no
+  replay as a recovered provider response.
+- Operators can inspect queue state, provider analytics/health and traces on
+  the Run page, then select artifact versions and build a verified client ZIP
+  under Preview. These are supported UI paths, not forensic-only APIs.
+- The queue database, cost database, trace database, artifact ledger/objects,
+  and project checkpoint have distinct ownership and cleanup boundaries. A
+  fresh-start cleanup must wait for workers/tests, preserve source/tracked
+  sentinels, and remove only the resolved runtime-owned data.
+
+Cross-ref: `pipeline_jobs.py`; `paid_provider.py`; `cost_tracker.py`;
+`domain/provider_health.py`; `cinema/artifact_versions.py`;
+`cinema/artifact_indexing.py`; `cinema/trace_store.py`; `web_observability.py`;
+`web_artifacts.py`; `docs/LIVE_CONTRACT_CANARY.md`; ARCHITECTURE §2A.

@@ -223,6 +223,9 @@ def generate_ai_video(
     duration: str = "8s",
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
 ) -> str:
     """Filter a complete dispatch seed before entering provider execution.
 
@@ -271,12 +274,62 @@ def generate_ai_video(
             if rejection not in existing_rejections:
                 existing_rejections.append(rejection)
 
+    try:
+        from cost_tracker import CostTracker
+    except Exception:
+        CostTracker = None  # type: ignore[assignment,misc]
+    _has_paid_authority = (
+        CostTracker is not None and isinstance(cost_tracker, CostTracker)
+    )
+    _recovery_owner: dict | None = None
+    if _has_paid_authority and video_id and shot_id:
+        paid_snapshot = cost_tracker.get_paid_attempts_snapshot(video_id)
+        durable_motion_owners = {
+            ("fal", "VEO"),
+            ("fal", "KLING_3_0"),
+            ("fal", "SEEDANCE"),
+            ("fal", "LTX"),
+            ("fal", "FAL_SVD"),
+            ("kling", "KLING_NATIVE"),
+            ("openai", "SORA_NATIVE"),
+        }
+        active_motion = [
+            attempt
+            for attempt in paid_snapshot.get("attempts", ())
+            if attempt.get("active")
+            and attempt.get("shot_id") == shot_id
+            and attempt.get("operation") == "motion_generation"
+            and (attempt.get("provider"), attempt.get("engine"))
+            in durable_motion_owners
+        ]
+        if len(active_motion) > 1:
+            if _cascade_out is not None:
+                _cascade_out["policy_error"] = {
+                    "error": "Multiple paid motion requests claim this shot",
+                    "error_kind": "paid_attempt_authority",
+                    "code": "multiple_active_paid_attempts",
+                    "target_api": requested_upper,
+                    "reason": "operator_reconciliation_required",
+                    "retryable": False,
+                }
+            return None
+        if active_motion:
+            _recovery_owner = active_motion[0]
+            if _cascade_out is not None:
+                _cascade_out["recovery_owner"] = {
+                    "attempt_id": _recovery_owner.get("attempt_id"),
+                    "engine": _recovery_owner.get("engine"),
+                    "state": _recovery_owner.get("state"),
+                    "provider_job_id": _recovery_owner.get("provider_job_id") or None,
+                }
+
     primary_rejected = any(
         rejection.key == requested_upper
         for rejection in dispatch_policy.rejections
     )
-    if not dispatch_policy.candidates or (
-        requested_upper != "AUTO" and primary_rejected
+    if _recovery_owner is None and (
+        not dispatch_policy.candidates
+        or (requested_upper != "AUTO" and primary_rejected)
     ):
         if _cascade_out is not None:
             _cascade_out["policy_error"] = _dispatch_policy_error(
@@ -285,7 +338,49 @@ def generate_ai_video(
             )
         return None
 
-    admitted_candidates = dispatch_policy.candidates
+    admitted_candidates = (
+        (str(_recovery_owner["engine"]),)
+        if _recovery_owner is not None
+        else dispatch_policy.candidates
+    )
+    if requested_upper == "AUTO" and _recovery_owner is None:
+        if _has_paid_authority:
+            analytics = cost_tracker.get_provider_usage_analytics(
+                "",
+                terminal_limit=200,
+            )
+            engine_metrics = analytics.get("by_engine", {})
+            health_decisions: list[dict[str, object]] = []
+            healthy_candidates: list[str] = []
+            for candidate in admitted_candidates:
+                metric = engine_metrics.get(candidate, {})
+                health = metric.get("health", {}) if isinstance(metric, dict) else {}
+                status = str(health.get("status") or "unknown")
+                reasons = list(health.get("reasons") or ())
+                health_decisions.append({
+                    "engine": candidate,
+                    "status": status,
+                    "reasons": reasons[:8],
+                })
+                # Unknown history is intentionally neutral. Degraded providers
+                # remain usable; only deterministically unhealthy history is
+                # removed from automatic paid routing.
+                if status != "unhealthy":
+                    healthy_candidates.append(candidate)
+            admitted_candidates = tuple(healthy_candidates)
+            if _cascade_out is not None:
+                _cascade_out["provider_health"] = health_decisions
+            if not admitted_candidates:
+                if _cascade_out is not None:
+                    _cascade_out["policy_error"] = {
+                        "error": "No automatically eligible healthy video provider",
+                        "error_kind": "provider_health",
+                        "code": "no_eligible_provider",
+                        "target_api": "AUTO",
+                        "reason": "all_candidates_unhealthy",
+                        "retryable": False,
+                    }
+                return None
     admitted_primary = (
         admitted_candidates[0]
         if requested_upper == "AUTO"
@@ -309,9 +404,17 @@ def generate_ai_video(
         duration=duration,
         ctx=ctx,
         _cascade_out=_cascade_out,
+        cost_tracker=cost_tracker,
+        shot_id=shot_id,
+        video_id=video_id,
         admitted_candidates=admitted_candidates,
         aspect=aspect,
         _attempt_history=list(attempted_apis or ()),
+        _expected_paid_attempt_id=(
+            str(_recovery_owner["attempt_id"])
+            if _recovery_owner is not None
+            else None
+        ),
     )
 
 
@@ -333,10 +436,14 @@ def _execute_admitted_video_chain(
     duration: str = "8s",
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
     *,
     admitted_candidates: tuple[str, ...],
     aspect: str,
     _attempt_history: list[str],
+    _expected_paid_attempt_id: str | None = None,
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -363,11 +470,11 @@ def _execute_admitted_video_chain(
         for all callers that haven't been updated yet.
 
     Budget gate:
-        This function does NOT check the budget. The caller (generate_motion_take
-        in cinema/shots/controller.py, ADR-022) calls cost_tracker.would_exceed()
-        before invoking this — all per-take motion spend is gated there. New
-        engines must therefore carry an API_COST_USD entry (cost_tracker.py) or
-        would_exceed() reads 0.0 and the gate silently admits them.
+        The controller performs an early UX precheck, then this dispatcher
+        atomically reserves each provider attempt in SQLite immediately before
+        submission. Every fallback obtains its own reservation. Calls without
+        the PipelineCore's real CostTracker are compatibility/test-only and do
+        not gain paid-submission authority from the earlier soft check.
     """
     from cinema.aspect import fal_aspect_ratio, runway_ratio
 
@@ -386,6 +493,371 @@ def _execute_admitted_video_chain(
     if _cascade_out is not None:
         _cascade_out["attempt_history"] = list(_attempt_history)
 
+    # Every real motion attempt receives a deterministic, transaction-backed
+    # budget reservation before provider code can submit.  Direct utility/test
+    # calls that do not carry the PipelineCore's real CostTracker retain the
+    # historical adapter-only behavior.
+    _paid_attempt: dict | None = None
+    _paid_resume_job_id: str | None = None
+    _paid_existing_terminal_skip = False
+    _paid_billed = False
+    _paid_reconciliation_needed = False
+    _paid_attempt_id = ""
+    _paid_request_fingerprint = ""
+    _paid_estimated_cost = 0.0
+    _durable_fal_attempt = False
+
+    def _publish_paid_attempt(snapshot: object) -> None:
+        if _cascade_out is None or not isinstance(snapshot, dict):
+            return
+        public = {
+            key: snapshot.get(key)
+            for key in (
+                "attempt_id", "provider", "engine", "operation", "state",
+                "reserved_cost_usd", "reconciled_cost_usd", "billed",
+                "provider_job_id", "provider_status", "failure_code",
+                "detail", "active",
+            )
+            if key in snapshot
+        }
+        attempts = _cascade_out.setdefault("paid_attempts", [])
+        for index, prior in enumerate(attempts):
+            if prior.get("attempt_id") == public.get("attempt_id"):
+                attempts[index] = public
+                break
+        else:
+            attempts.append(public)
+
+    try:
+        from cost_tracker import CostTracker
+    except Exception:
+        CostTracker = None  # type: ignore[assignment,misc]
+    if CostTracker is not None and isinstance(cost_tracker, CostTracker):
+        from performance.runway_tasks import build_attempt_id
+        from paid_provider import file_fingerprint
+
+        try:
+            _image_identity = file_fingerprint(image_path)
+            _reference_identities = [
+                {
+                    "position": index,
+                    "content": (
+                        file_fingerprint(ref)
+                        if os.path.exists(ref)
+                        else "missing"
+                    ),
+                }
+                for index, ref in enumerate(multi_angle_refs or ())
+                if isinstance(ref, str) and ref
+            ]
+        except (OSError, ValueError) as exc:
+            if _cascade_out is not None:
+                _cascade_out["policy_error"] = {
+                    "error": "Paid motion input could not be fingerprinted safely",
+                    "error_kind": "paid_attempt_authority",
+                    "code": "input_fingerprint_unavailable",
+                    "target_api": _api_upper,
+                    "reason": type(exc).__name__,
+                    "retryable": False,
+                }
+            return None
+
+        _estimate_duration: float | None = None
+        _estimate_kwargs: dict[str, object] = {}
+        if _api_upper == "LTX":
+            try:
+                _requested = int(str(duration).strip().lower().rstrip("s"))
+            except (TypeError, ValueError):
+                _requested = _LTX_DURATION_ENUM_S[0]
+            _estimate_duration = float(next(
+                (seconds for seconds in _LTX_DURATION_ENUM_S if _requested <= seconds),
+                _LTX_DURATION_ENUM_S[-1],
+            ))
+            if getattr(settings, "ltx_api_key", ""):
+                _estimate_kwargs = {
+                    "backend": "native",
+                    "operation": "image_to_video",
+                    "model": "ltx-2-3-pro",
+                    "resolution": (
+                        "4k" if shot_type in ("landscape", "wide") else "1080p"
+                    ),
+                    "audio": False,
+                }
+        elif _api_upper == "SEEDANCE":
+            _estimate_duration = float(SEEDANCE_DURATIONS.get(shot_type, 4))
+        elif _api_upper == "RUNWAY_GEN4":
+            _estimate_duration = 10.0
+
+        _estimated_cost = CostTracker.estimate_call_cost_usd(
+            _api_upper,
+            _estimate_duration,
+            **_estimate_kwargs,
+        )
+        _provider_by_engine = {
+            "RUNWAY_GEN4": "runway",
+            "LTX": "ltx" if getattr(settings, "ltx_api_key", "") else "fal",
+            "VEO_NATIVE": "google",
+            "SORA_NATIVE": "openai",
+            "KLING_NATIVE": "kling",
+            "GEMINI_OMNI": "google",
+        }
+        _provider = _provider_by_engine.get(_api_upper, "fal")
+        _attempt_ordinal = sum(
+            1 for attempted in _attempt_history if attempted == _api_upper
+        )
+        _attempt_id, _request_fingerprint = build_attempt_id(
+            provider=_provider,
+            engine=_api_upper,
+            operation="motion_generation",
+            video_id=video_id,
+            shot_id=shot_id,
+            ordinal=_attempt_ordinal,
+            request={
+                "image": _image_identity,
+                "camera_motion": camera_motion,
+                "engine": _api_upper,
+                "pacing": pacing,
+                "character_id": character_id or "",
+                "multi_angle_refs": _reference_identities,
+                "negative_prompt": negative_prompt or "",
+                "shot_type": shot_type or "",
+                "duration": str(duration),
+                "aspect": str(aspect),
+                "driving_video_path": os.path.abspath(driving_video_path)
+                if driving_video_path
+                else "",
+            },
+        )
+        if _expected_paid_attempt_id is not None:
+            _owned_attempt = cost_tracker.get_paid_attempt(_expected_paid_attempt_id)
+            if (
+                not isinstance(_owned_attempt, dict)
+                or not _owned_attempt.get("active")
+                or str(_owned_attempt.get("request_fingerprint") or "")
+                != _request_fingerprint
+            ):
+                if isinstance(_owned_attempt, dict):
+                    _paid_attempt = _owned_attempt
+                    _publish_paid_attempt(_paid_attempt)
+                if _cascade_out is not None:
+                    _cascade_out["deferred_job"] = {
+                        "engine": _api_upper,
+                        "status": "recovery_required",
+                        "reason": "request_changed_during_recovery",
+                        "attempt_id": _expected_paid_attempt_id,
+                        "job_id": (
+                            _owned_attempt.get("provider_job_id")
+                            if isinstance(_owned_attempt, dict)
+                            else None
+                        ),
+                        "billed": (
+                            _owned_attempt.get("billed") is True
+                            if isinstance(_owned_attempt, dict)
+                            else False
+                        ),
+                    }
+                return None
+            # Attempt ordinals are historical metadata. The durable row and its
+            # matching request fingerprint are the authority for exact resume.
+            _attempt_id = _expected_paid_attempt_id
+        _paid_attempt_id = _attempt_id
+        _paid_request_fingerprint = _request_fingerprint
+        _paid_estimated_cost = _estimated_cost
+        _durable_fal_attempt = (
+            _provider == "fal"
+            and _api_upper in {
+                "VEO", "KLING_3_0", "SEEDANCE", "LTX", "FAL_SVD",
+            }
+        )
+        # Queue-backed FAL providers must let run_durable_fal_job own the
+        # atomic reservation and the first submit. Reserving here as well would
+        # leave a ``submitting`` row with no request ID, causing the helper to
+        # (correctly) block what looks like a duplicate submission.
+        if not _durable_fal_attempt:
+            _paid_attempt = cost_tracker.reserve_paid_attempt(
+                attempt_id=_attempt_id,
+                provider=_provider,
+                engine=_api_upper,
+                operation="motion_generation",
+                estimated_cost_usd=_estimated_cost,
+                shot_id=shot_id,
+                video_id=video_id,
+                request_fingerprint=_request_fingerprint,
+            )
+            _publish_paid_attempt(_paid_attempt)
+            if not _paid_attempt.get("acquired"):
+                _existing_state = str(_paid_attempt.get("state") or "")
+                _existing_job = _paid_attempt.get("provider_job_id")
+                if isinstance(_existing_job, str) and _existing_job:
+                    _paid_resume_job_id = _existing_job
+                if _existing_state == "blocked_budget":
+                    if _cascade_out is not None:
+                        _cascade_out["budget_blocked_attempt"] = dict(_paid_attempt)
+                    return None
+                if _existing_state in {"failed_unbilled", "cancelled"}:
+                    _paid_existing_terminal_skip = True
+                elif _existing_state == "failed_billed":
+                    if _cascade_out is not None:
+                        _cascade_out["terminal_paid_attempt"] = dict(_paid_attempt)
+                    return None
+                elif (
+                    _api_upper not in {"RUNWAY_GEN4", "LTX", "KLING_NATIVE"}
+                    or not _paid_resume_job_id
+                ):
+                    _paid_attempt = cost_tracker.update_paid_attempt(
+                        _attempt_id,
+                        state="accepted_unknown",
+                        detail=(
+                            "A prior worker claimed submission; no provider task ID "
+                            "is available, so duplicate submission is blocked"
+                        ),
+                    )
+                    _publish_paid_attempt(_paid_attempt)
+                    if _cascade_out is not None:
+                        _cascade_out["deferred_job"] = {
+                            "engine": _api_upper,
+                            "status": "recovery_required",
+                            "reason": "submission_outcome_unknown",
+                            "attempt_id": _attempt_id,
+                            "billed": False,
+                        }
+                    return None
+
+    def _update_paid_attempt(state: str, **kwargs: object) -> None:
+        nonlocal _paid_attempt
+        if _paid_attempt is None or not isinstance(cost_tracker, CostTracker):
+            return
+        _paid_attempt = cost_tracker.update_paid_attempt(
+            str(_paid_attempt["attempt_id"]),
+            state=state,
+            **kwargs,
+        )
+        _publish_paid_attempt(_paid_attempt)
+
+    def _reconcile_paid_attempt(state: str, **kwargs: object) -> None:
+        nonlocal _paid_attempt, _paid_reconciliation_needed
+        if _paid_attempt is None or not isinstance(cost_tracker, CostTracker):
+            return
+        try:
+            _paid_attempt = cost_tracker.reconcile_paid_attempt(
+                str(_paid_attempt["attempt_id"]),
+                state=state,
+                **kwargs,
+            )
+        except Exception as exc:
+            _paid_reconciliation_needed = True
+            try:
+                _paid_attempt = cost_tracker.update_paid_attempt(
+                    str(_paid_attempt["attempt_id"]),
+                    state="accepted_unknown",
+                    provider_job_id=_paid_attempt.get("provider_job_id"),
+                    provider_status=str(kwargs.get("provider_status") or ""),
+                    detail=(
+                        "Provider result exists but financial ledger reconciliation "
+                        f"failed: {type(exc).__name__}"
+                    ),
+                    billed=True if state in {"succeeded", "failed_billed"} else None,
+                )
+            except Exception:
+                _paid_attempt = {
+                    **_paid_attempt,
+                    "state": "accepted_unknown",
+                    "active": True,
+                    "detail": "Provider result exists but ledger reconciliation failed",
+                }
+            if _cascade_out is not None:
+                _cascade_out["deferred_financial_reconciliation"] = {
+                    "attempt_id": _paid_attempt.get("attempt_id"),
+                    "engine": _api_upper,
+                    "state": "accepted_unknown",
+                }
+        _publish_paid_attempt(_paid_attempt)
+
+    def _run_motion_fal_job(
+        application: str,
+        arguments: dict[str, object],
+        *,
+        with_logs: bool = True,
+    ) -> tuple[dict | None, str]:
+        """Run one FAL motion request and report its fallback disposition.
+
+        Real pipeline calls use the queue-backed submit/status/result helper.
+        Calls without paid-attempt authority retain ``subscribe`` solely as a
+        compatibility seam for offline adapter tests and one-off utilities.
+        """
+        nonlocal _paid_attempt, _paid_billed
+        if not _durable_fal_attempt:
+            return (
+                fal_client.subscribe(
+                    application,
+                    client_timeout=FAL_TIMEOUT_VIDEO_S,
+                    arguments=arguments,
+                    with_logs=with_logs,
+                ),
+                "legacy",
+            )
+
+        from paid_provider import (
+            PaidCallBudgetBlocked,
+            PaidCallDeferred,
+            PaidCallUnbilled,
+            run_durable_fal_job,
+        )
+
+        try:
+            result = run_durable_fal_job(
+                application=application,
+                arguments=arguments,
+                attempt_id=_paid_attempt_id,
+                engine=_api_upper,
+                operation="motion_generation",
+                estimated_cost_usd=_paid_estimated_cost,
+                request_fingerprint_value=_paid_request_fingerprint,
+                cost_tracker=cost_tracker,
+                shot_id=shot_id,
+                video_id=video_id,
+                poll_timeout_s=FAL_TIMEOUT_VIDEO_S,
+                with_logs=with_logs,
+            )
+        except PaidCallBudgetBlocked as exc:
+            _paid_attempt = dict(exc.snapshot.attempt)
+            _publish_paid_attempt(_paid_attempt)
+            if _cascade_out is not None:
+                _cascade_out["budget_blocked_attempt"] = dict(_paid_attempt)
+            return None, "blocked_budget"
+        except PaidCallUnbilled as exc:
+            _paid_attempt = dict(exc.attempt)
+            _publish_paid_attempt(_paid_attempt)
+            return None, "failed_unbilled"
+        except PaidCallDeferred as exc:
+            _paid_attempt = dict(exc.snapshot.attempt)
+            _publish_paid_attempt(_paid_attempt)
+            state = str(_paid_attempt.get("state") or "accepted_unknown")
+            billed = _paid_attempt.get("billed") is True or state == "failed_billed"
+            if _cascade_out is not None:
+                if state == "failed_billed":
+                    _cascade_out["terminal_paid_attempt"] = dict(_paid_attempt)
+                _cascade_out["deferred_job"] = {
+                    "engine": _api_upper,
+                    "status": "recovery_required",
+                    "reason": (
+                        "provider_failed_billed"
+                        if state == "failed_billed"
+                        else "provider_request_pending"
+                        if _paid_attempt.get("provider_job_id")
+                        else "submission_outcome_unknown"
+                    ),
+                    "job_id": _paid_attempt.get("provider_job_id") or None,
+                    "attempt_id": _paid_attempt.get("attempt_id"),
+                    "billed": billed,
+                }
+            return None, "deferred"
+
+        _paid_attempt = cost_tracker.get_paid_attempt(_paid_attempt_id)
+        _publish_paid_attempt(_paid_attempt)
+        _paid_billed = True
+        return result, "succeeded"
+
     def _record_video_cascade(
         winning_engine: str,
         **verified_capabilities: object,
@@ -395,15 +867,46 @@ def _execute_admitted_video_chain(
         order, including repeated engines across cooldown cycles.  The separate
         ``attempted_apis`` list remains the current cycle's dedupe guard.
         """
+        _actual_cost: float | None = None
+        if _paid_attempt is not None and winning_engine.upper() == "LTX":
+            _duration_value = verified_capabilities.get("duration_s")
+            _backend_value = str(verified_capabilities.get("backend") or "").lower()
+            if _backend_value == "native":
+                _actual_cost = CostTracker.estimate_call_cost_usd(
+                    "LTX",
+                    _duration_value,
+                    backend="native",
+                    operation=str(
+                        verified_capabilities.get("pricing_operation")
+                        or "image_to_video"
+                    ),
+                    model=str(
+                        verified_capabilities.get("model") or "ltx-2-3-pro"
+                    ),
+                    resolution=str(
+                        verified_capabilities.get("resolution") or "1080p"
+                    ),
+                    audio=bool(verified_capabilities.get("audio", False)),
+                )
+            elif _backend_value == "fal":
+                _actual_cost = CostTracker.estimate_call_cost_usd(
+                    "LTX", _duration_value
+                )
+        _reconcile_paid_attempt("succeeded", actual_cost_usd=_actual_cost)
         if _cascade_out is not None:
             metadata = {
                 "engine": winning_engine,
                 "attempts": list(_attempt_history),
             }
+            if _paid_attempt is not None:
+                metadata["paid_attempt_id"] = _paid_attempt.get("attempt_id")
+                metadata["financial_state"] = _paid_attempt.get("state")
             metadata.update(verified_capabilities)
             _cascade_out["cascade_metadata"] = metadata
 
     def _note_billed_attempt(engine: str) -> None:
+        nonlocal _paid_billed
+        _paid_billed = True
         # A provider that RETURNED a video is billed regardless of what
         # happens next (download failure, aspect reject). Note every billed
         # attempt so the caller records spend for billed-but-rejected ones too
@@ -413,7 +916,7 @@ def _execute_admitted_video_chain(
         # helper); fal/URL branches note through _download_video_or_cascade.
         # _cascade_out threads through the cascade recursion so attempts
         # accumulate across hops; the winner is subtracted caller-side.
-        if _cascade_out is not None:
+        if _cascade_out is not None and _paid_attempt is None:
             _cascade_out.setdefault("billed_attempts", []).append(engine.upper())
 
     def _safe_deferred_job_id(value: object) -> str | None:
@@ -439,6 +942,13 @@ def _execute_admitted_video_chain(
     ) -> None:
         """Publish one bounded accepted-job descriptor for the controller."""
         if _cascade_out is None:
+            _update_paid_attempt(
+                "accepted_unknown",
+                provider_job_id=getattr(exc, "job_id", None),
+                provider_status=str(getattr(exc, "provider_status", "") or ""),
+                detail=str(exc),
+                billed=billed,
+            )
             return
 
         raw_status = getattr(exc, "status", None)
@@ -487,8 +997,55 @@ def _execute_admitted_video_chain(
         ):
             deferred["duration_s"] = float(duration_s)
         _cascade_out["deferred_job"] = deferred
+        _update_paid_attempt(
+            "accepted_unknown",
+            provider_job_id=job_id,
+            provider_status=provider_status or "",
+            detail=str(exc),
+            billed=billed,
+        )
+
+    def _record_native_submission_ambiguity(
+        engine: str,
+        *,
+        reason: str,
+        detail: str,
+        job_id: object = None,
+        provider_status: str = "outcome_unknown",
+        billed: bool = False,
+    ) -> None:
+        """Fence a native call once its non-idempotent boundary was entered.
+
+        Native SDK convenience methods may collapse submit, poll, and download
+        into one nullable return.  After the submit boundary, ``None`` or an
+        exception is not proof that the provider rejected the request.  Keep
+        the paid row active and publish recovery metadata instead of cascading
+        to a second paid engine.
+        """
+        safe_job_id = _safe_deferred_job_id(job_id)
+        _update_paid_attempt(
+            "accepted_unknown",
+            provider_job_id=safe_job_id,
+            provider_status=provider_status,
+            detail=detail,
+            billed=billed,
+        )
+        if _cascade_out is not None:
+            deferred = {
+                "engine": engine,
+                "status": "recovery_required",
+                "reason": reason,
+                "attempts": list(_attempt_history),
+                "billed": bool(billed),
+            }
+            if safe_job_id is not None:
+                deferred["job_id"] = safe_job_id
+            if _paid_attempt is not None:
+                deferred["attempt_id"] = _paid_attempt.get("attempt_id")
+            _cascade_out["deferred_job"] = deferred
 
     def _download_video_or_cascade(video_url: str, engine: str) -> bool:
+        nonlocal _paid_reconciliation_needed
         _note_billed_attempt(engine)
         if safe_download(
             video_url,
@@ -500,6 +1057,7 @@ def _execute_admitted_video_chain(
                 "Generated video download failed — cascading (spend still billed)",
                 extra={"engine": engine, "output_mp4": output_mp4},
             )
+            _paid_reconciliation_needed = True
             return False
         return True
 
@@ -529,6 +1087,53 @@ def _execute_admitted_video_chain(
     )
 
     def try_next_api():
+        if _paid_reconciliation_needed and _paid_attempt is not None:
+            # A durable FAL helper may already have atomically settled the
+            # provider request as succeeded before the local download/aspect
+            # check fails. Terminal money rows are immutable; retain that truth
+            # and surface an artifact-recovery action instead of attempting an
+            # illegal succeeded -> accepted_unknown transition.
+            if str(_paid_attempt.get("state") or "") != "succeeded":
+                _update_paid_attempt(
+                    "accepted_unknown",
+                    provider_job_id=_paid_attempt.get("provider_job_id"),
+                    provider_status="SUCCEEDED",
+                    detail=(
+                        "Provider succeeded but local output reconciliation failed; "
+                        "the same task must be retrieved instead of cascading"
+                    ),
+                    billed=True,
+                )
+            if _cascade_out is not None:
+                _cascade_out["deferred_job"] = {
+                    "engine": _api_upper,
+                    "status": "recovery_required",
+                    "reason": "local_reconciliation_failed",
+                    "job_id": _paid_attempt.get("provider_job_id"),
+                    "attempt_id": _paid_attempt.get("attempt_id"),
+                    "billed": True,
+                }
+            return None
+        if _paid_attempt is not None:
+            _paid_state = str(_paid_attempt.get("state") or "")
+            if _paid_state in {"succeeded", "failed_billed"}:
+                # Terminal billed work can be retrieved/reviewed, but it can
+                # never authorize a replacement provider submission.
+                if _cascade_out is not None:
+                    _cascade_out["terminal_paid_attempt"] = dict(_paid_attempt)
+                return None
+            if _paid_state not in {"failed_unbilled", "cancelled"}:
+                _reconcile_paid_attempt(
+                    "failed_billed" if _paid_billed else "failed_unbilled",
+                    provider_job_id=_paid_attempt.get("provider_job_id"),
+                    detail=(
+                        "Paid output rejected before fallback"
+                        if _paid_billed
+                        else "Attempt ended before billable provider output"
+                    ),
+                )
+            if _paid_reconciliation_needed:
+                return None
         # This tuple was filtered once at the true entry boundary.  Never read
         # raw fallbacks/defaults here: doing so could revive a retired,
         # disabled, unavailable, or aspect-incompatible engine.
@@ -562,6 +1167,9 @@ def _execute_admitted_video_chain(
                     driving_video_path=driving_video_path,
                     negative_prompt=negative_prompt,
                     ctx=ctx, _cascade_out=_cascade_out,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
                     admitted_candidates=admitted_candidates,
                     aspect=aspect,
                     _attempt_history=_attempt_history,
@@ -570,6 +1178,16 @@ def _execute_admitted_video_chain(
         # All APIs failed — try the cascade once more after a quota cooldown.
         # Counts: initial pass + 1 retry = 2 total attempts. Operator may raise
         # this limit via the cascade_retry_limit UI knob.
+        # Transaction-owned paid work never replays the whole chain. Each
+        # transient operation already has bounded provider-local backoff, and
+        # replaying every paid engine after a fixed sleep defeats attempt
+        # idempotency and can multiply invoices after permanent failures.
+        if _paid_attempt is not None:
+            logger.warning(
+                "Paid video cascade exhausted; whole-chain replay disabled",
+                extra={"attempt_id": _paid_attempt.get("attempt_id")},
+            )
+            return None
         MAX_CASCADE_RETRIES = 1
         if ctx is not None:
             from cinema.context import get_project_setting
@@ -602,10 +1220,16 @@ def _execute_admitted_video_chain(
             driving_video_path=driving_video_path,
             negative_prompt=negative_prompt,
             ctx=ctx, _cascade_out=_cascade_out,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
             admitted_candidates=admitted_candidates,
             aspect=aspect,
             _attempt_history=_attempt_history,
         )
+
+    if _paid_existing_terminal_skip:
+        return try_next_api()
 
     # Provider imports are deliberately delayed until after the entry fence.
     _load_fal_client()
@@ -631,6 +1255,8 @@ def _execute_admitted_video_chain(
         # winner-subtraction in controller._record_billed_rejects and get
         # double-billed as a reject.
         _kling_billed_noted = False
+        _kling_submission_started = _paid_resume_job_id is not None
+        _kling_job_id = _paid_resume_job_id
 
         def _note_kling_billed() -> None:
             nonlocal _kling_billed_noted
@@ -638,6 +1264,26 @@ def _execute_admitted_video_chain(
                 return
             _kling_billed_noted = True
             _note_billed_attempt(target_api.upper())
+
+        def _note_kling_submission_started() -> None:
+            nonlocal _kling_submission_started
+            _kling_submission_started = True
+            _update_paid_attempt(
+                "submitting",
+                provider_status="submitting",
+                detail="Entered Kling native non-idempotent submit boundary",
+            )
+
+        def _note_kling_submitted(task_id: str) -> None:
+            nonlocal _kling_submission_started, _kling_job_id
+            _kling_submission_started = True
+            _kling_job_id = task_id
+            _update_paid_attempt(
+                "running",
+                provider_job_id=task_id,
+                provider_status="queued",
+                detail="Kling native task acknowledged; exact-ID recovery enabled",
+            )
 
         try:
             from kling_native import KlingNativeAPI
@@ -659,6 +1305,9 @@ def _execute_admitted_video_chain(
                 duration="5",
                 mode="pro",
                 on_billed=_note_kling_billed,
+                on_submission_started=_note_kling_submission_started,
+                on_submitted=_note_kling_submitted,
+                expected_job_id=_paid_resume_job_id,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
@@ -676,12 +1325,45 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
-            # result is None here whether or not the provider billed before
-            # failing (on_billed already noted it in the billed case) —
-            # cascade to the next engine either way.
+            if _kling_submission_started:
+                _record_native_submission_ambiguity(
+                    "KLING_NATIVE",
+                    reason=(
+                        "provider_job_pending"
+                        if _kling_job_id
+                        else "submission_outcome_unknown"
+                    ),
+                    detail=(
+                        "Kling native returned no verified local output after "
+                        "entering its paid submission boundary"
+                    ),
+                    job_id=_kling_job_id,
+                    provider_status=("queued" if _kling_job_id else "outcome_unknown"),
+                    billed=_paid_billed,
+                )
+                return None
+            # Adapter validation failed before its HTTP submission callback.
+            # This is the only safe native-Kling fallback boundary.
             return try_next_api()
         except Exception as e:
             logger.warning("Kling Native error", extra={"engine": "KLING_NATIVE", "error": str(e)})
+            if _kling_submission_started:
+                _record_native_submission_ambiguity(
+                    "KLING_NATIVE",
+                    reason=(
+                        "provider_job_pending"
+                        if _kling_job_id
+                        else "submission_outcome_unknown"
+                    ),
+                    detail=(
+                        "Kling native raised after entering its paid submission "
+                        f"boundary ({type(e).__name__})"
+                    ),
+                    job_id=_kling_job_id,
+                    provider_status=("queued" if _kling_job_id else "outcome_unknown"),
+                    billed=_paid_billed,
+                )
+                return None
             return try_next_api()
 
     elif target_api.upper() == "SORA_NATIVE":
@@ -697,6 +1379,7 @@ def _execute_admitted_video_chain(
         # Whichever fires first wins; the guard stops a real success from
         # appending "SORA_NATIVE" to billed_attempts twice.
         _sora_billed_noted = False
+        _sora_submission_started = False
 
         def _note_sora_billed() -> None:
             nonlocal _sora_billed_noted
@@ -704,6 +1387,15 @@ def _execute_admitted_video_chain(
                 return
             _sora_billed_noted = True
             _note_billed_attempt(target_api.upper())
+
+        def _note_sora_submission_started() -> None:
+            nonlocal _sora_submission_started
+            _sora_submission_started = True
+            _update_paid_attempt(
+                "submitting",
+                provider_status="submitting",
+                detail="Entered Sora native non-idempotent submit boundary",
+            )
 
         try:
             from sora_native import SoraNativeAPI
@@ -735,6 +1427,7 @@ def _execute_admitted_video_chain(
                 driving_video_path=driving_video_path,
                 aspect_ratio=fal_aspect_ratio(_aspect),
                 on_billed=_note_sora_billed,
+                on_submission_started=_note_sora_submission_started,
             )
             if result:
                 # Native branch wrote output_mp4 directly (billed) — note it
@@ -749,12 +1442,35 @@ def _execute_admitted_video_chain(
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
-            # result is None here whether or not the provider billed before
-            # failing (on_billed already noted it in the billed case) —
-            # cascade to the next engine either way.
+            if _sora_submission_started:
+                _record_native_submission_ambiguity(
+                    "SORA_NATIVE",
+                    reason="submission_outcome_unknown",
+                    detail=(
+                        "Sora native returned no verified local output after "
+                        "entering create_and_poll"
+                    ),
+                    provider_status="outcome_unknown",
+                    billed=_paid_billed,
+                )
+                return None
+            # Rejected adapter inputs and preprocessing failures occur before
+            # the submission callback and remain proven pre-submit fallbacks.
             return try_next_api()
         except Exception as e:
             logger.warning("Sora Native error", extra={"engine": "SORA_NATIVE", "error": str(e)})
+            if _sora_submission_started:
+                _record_native_submission_ambiguity(
+                    "SORA_NATIVE",
+                    reason="submission_outcome_unknown",
+                    detail=(
+                        "Sora native raised after entering create_and_poll "
+                        f"({type(e).__name__})"
+                    ),
+                    provider_status="outcome_unknown",
+                    billed=_paid_billed,
+                )
+                return None
             return try_next_api()
 
     elif target_api.upper() == "VEO_NATIVE":
@@ -903,6 +1619,13 @@ def _execute_admitted_video_chain(
         ) -> None:
             """Expose a non-terminal/recovery result without naming a winner."""
             if _cascade_out is None:
+                _update_paid_attempt(
+                    "accepted_unknown",
+                    provider_job_id=job_id,
+                    provider_status=provider_status or "",
+                    detail=detail or reason,
+                    billed=_ltx_billed_noted,
+                )
                 return
             deferred = {
                 "engine": "LTX",
@@ -923,6 +1646,13 @@ def _execute_admitted_video_chain(
                 (key, value) for key, value in optional.items() if value is not None
             )
             _cascade_out["deferred_job"] = deferred
+            _update_paid_attempt(
+                "accepted_unknown",
+                provider_job_id=job_id,
+                provider_status=provider_status or "",
+                detail=detail or reason,
+                billed=_ltx_billed_noted,
+            )
 
         # Bind exception types BEFORE the main try below so the corresponding
         # except clauses always have real names to
@@ -1008,21 +1738,57 @@ def _execute_admitted_video_chain(
                     "expected_request_fingerprint": _expected_fingerprint,
                 }
 
-            result = ltx.generate_video(
-                image_path=image_path,
-                prompt=(
-                    f"MOTION: Smooth cinematic {camera_motion}, gradual acceleration. "
-                    f"PRESERVE: Maintain character appearance and environment consistency throughout. "
-                    f"QUALITY: Photorealistic cinematic footage, natural motion, architectural detail, "
-                    f"consistent volumetric lighting, no artifacts."
-                ),
-                output_path=output_mp4,
-                camera_motion=ltx_camera,
-                resolution=ltx_resolution,
-                duration=ltx_duration,
-                on_billed=_note_ltx_billed,
-                **_ltx_resume_kwargs,
+            ltx_prompt = (
+                f"MOTION: Smooth cinematic {camera_motion}, gradual acceleration. "
+                f"PRESERVE: Maintain character appearance and environment consistency throughout. "
+                f"QUALITY: Photorealistic cinematic footage, natural motion, architectural detail, "
+                f"consistent volumetric lighting, no artifacts."
             )
+            if _durable_fal_attempt and getattr(ltx, "mode", None) == "fal":
+                image_url = fal_client.upload_file(image_path)
+                folded_prompt = ltx._prompt_with_camera_motion(ltx_prompt, ltx_camera)
+                fal_arguments = {
+                    "prompt": folded_prompt,
+                    "image_url": image_url,
+                    "duration": ltx._fal_duration(ltx_duration * 24),
+                    "resolution": ltx._fal_resolution(ltx.RESOLUTION_MAP[ltx_resolution]),
+                    "generate_audio": False,
+                }
+                fal_result, fal_disposition = _run_motion_fal_job(
+                    ltx.FAL_MODEL_ID,
+                    fal_arguments,
+                    with_logs=True,
+                )
+                if fal_result is None:
+                    if fal_disposition == "failed_unbilled":
+                        return try_next_api()
+                    return None
+                ltx_job_id = _paid_attempt.get("provider_job_id") if _paid_attempt else None
+                if isinstance(ltx_job_id, str) and ltx_job_id:
+                    ltx.last_job_id = ltx_job_id
+                video_url = fal_result.get("video", {}).get("url")
+                if not isinstance(video_url, str) or not video_url:
+                    _paid_reconciliation_needed = True
+                    return try_next_api()
+                result = (
+                    output_mp4
+                    if _download_video_or_cascade(video_url, "LTX")
+                    else None
+                )
+                if result is None:
+                    return try_next_api()
+            else:
+                # Preserve the existing native LTX sidecar/recovery contract.
+                result = ltx.generate_video(
+                    image_path=image_path,
+                    prompt=ltx_prompt,
+                    output_path=output_mp4,
+                    camera_motion=ltx_camera,
+                    resolution=ltx_resolution,
+                    duration=ltx_duration,
+                    on_billed=_note_ltx_billed,
+                    **_ltx_resume_kwargs,
+                )
             _ltx_job_id = getattr(ltx, "last_job_id", None)
             if not isinstance(_ltx_job_id, str) or not _ltx_job_id:
                 _ltx_job_id = None
@@ -1053,6 +1819,19 @@ def _execute_admitted_video_chain(
                 _ltx_success_metadata: dict[str, object] = {
                     "duration_s": ltx_duration,
                 }
+                if _paid_attempt is not None:
+                    _ltx_backend = getattr(ltx, "mode", "")
+                    if _ltx_backend not in {"native", "fal"}:
+                        _ltx_backend = (
+                            "native" if getattr(settings, "ltx_api_key", "") else "fal"
+                        )
+                    _ltx_success_metadata.update({
+                        "backend": _ltx_backend,
+                        "model": "ltx-2-3-pro",
+                        "resolution": ltx_resolution,
+                        "audio": False,
+                        "pricing_operation": "image_to_video",
+                    })
                 if _ltx_job_id is not None:
                     _ltx_success_metadata["job_id"] = _ltx_job_id
                 _record_video_cascade(
@@ -1123,12 +1902,42 @@ def _execute_admitted_video_chain(
             return try_next_api()
         except Exception as e:
             logger.warning("LTX error", extra={"engine": "LTX", "error": str(e)})
+            if _durable_fal_attempt and _paid_attempt is not None:
+                _paid_reconciliation_needed = True
             return try_next_api()
 
     elif target_api.upper() == "RUNWAY_GEN4":
         # Runway Gen-4 Turbo (image_to_video, model="gen4_turbo") — single
         # reference image (prompt_image accepts ONE image here; there is no
         # multi-reference style-lock on this endpoint), best prompt adherence.
+        from performance.runway_tasks import (
+            call_with_backoff,
+            classify_task_failure,
+            error_status_code,
+            retry_delay_seconds,
+        )
+
+        def _defer_runway(reason: str, detail: str, *, status: str = "") -> None:
+            _update_paid_attempt(
+                "accepted_unknown",
+                provider_job_id=_paid_resume_job_id,
+                provider_status=status,
+                detail=detail,
+                billed=_paid_billed,
+            )
+            if _cascade_out is not None:
+                _cascade_out["deferred_job"] = {
+                    "engine": "RUNWAY_GEN4",
+                    "status": "recovery_required",
+                    "reason": reason,
+                    "job_id": _paid_resume_job_id,
+                    "attempt_id": (
+                        _paid_attempt.get("attempt_id") if _paid_attempt else None
+                    ),
+                    "duration_s": 10,
+                    "billed": _paid_billed,
+                }
+
         try:
             # Validate content and build the correctly typed data URI before
             # constructing the SDK client or submitting a paid request.
@@ -1138,31 +1947,122 @@ def _execute_admitted_video_chain(
             client = RunwayML(api_key=settings.runwayml_api_secret)
 
             logger.info("Runway Gen-4 I2V with style lock", extra={"engine": "RUNWAY_GEN4"})
+            task_id = _paid_resume_job_id
+            if not task_id:
+                # A 429 is an explicit refusal and safe to retry; transport and
+                # 5xx submit outcomes are ambiguous and must not submit again.
+                create_attempt = 0
+                while True:
+                    try:
+                        submitted = client.image_to_video.create(
+                            model="gen4_turbo",
+                            prompt_image=data_uri,
+                            prompt_text=(
+                                f"Smooth cinematic {camera_motion}. "
+                                f"Maintain exact character appearance throughout. "
+                                f"Natural body movement, consistent lighting, photorealistic quality."
+                            ),
+                            duration=10,
+                            ratio=runway_ratio(_aspect, "gen4_turbo"),
+                        )
+                        break
+                    except Exception as exc:
+                        create_attempt += 1
+                        if error_status_code(exc) == 429 and create_attempt < 4:
+                            time.sleep(
+                                retry_delay_seconds(exc, create_attempt - 1)
+                            )
+                            continue
+                        if error_status_code(exc) in {401, 403, 400, 422}:
+                            logger.warning(
+                                "Runway Gen-4 permanently rejected submission",
+                                extra={"engine": "RUNWAY_GEN4", "status": error_status_code(exc)},
+                            )
+                            return try_next_api()
+                        _defer_runway(
+                            "submission_outcome_unknown",
+                            f"Runway submit outcome ambiguous: {type(exc).__name__}",
+                        )
+                        return None
+                task_id = getattr(submitted, "id", None)
+                if not isinstance(task_id, str) or not task_id:
+                    _defer_runway(
+                        "submission_outcome_unknown",
+                        "Runway accepted response did not contain a usable task ID",
+                    )
+                    return None
+                _paid_resume_job_id = task_id
+                _update_paid_attempt(
+                    "running",
+                    provider_job_id=task_id,
+                    provider_status="PENDING",
+                    detail="Runway task accepted; polling durable task identity",
+                )
 
-            task = client.image_to_video.create(
-                model="gen4_turbo",
-                prompt_image=data_uri,
-                prompt_text=(
-                    f"Smooth cinematic {camera_motion}. "
-                    f"Maintain exact character appearance throughout. "
-                    f"Natural body movement, consistent lighting, photorealistic quality."
-                ),
-                duration=10,
-                ratio=runway_ratio(_aspect, "gen4_turbo"),
-            )
-            # Poll
-            task = client.tasks.retrieve(id=task.id)
             max_wait = 300
             elapsed = 0
-            while task.status not in ("SUCCEEDED", "FAILED") and elapsed < max_wait:
+            while True:
+                try:
+                    task = call_with_backoff(
+                        lambda: client.tasks.retrieve(id=task_id),
+                        attempts=4,
+                        base_delay_s=0.5,
+                    )
+                except Exception as exc:
+                    _defer_runway(
+                        "retrieval_ambiguous",
+                        f"Runway task retrieval remained unavailable: {type(exc).__name__}",
+                    )
+                    return None
+                task_status = str(getattr(task, "status", "") or "").upper()
+                if task_status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+                    break
+                if elapsed >= max_wait:
+                    _defer_runway(
+                        "poll_timeout",
+                        "Runway task still owns the shot after the local poll timeout",
+                        status=task_status or "UNKNOWN",
+                    )
+                    return None
+                _update_paid_attempt(
+                    "running",
+                    provider_job_id=task_id,
+                    provider_status=task_status or "PENDING",
+                    detail="Runway task is still running",
+                )
                 time.sleep(10)
                 elapsed += 10
-                task = client.tasks.retrieve(id=task.id)
                 if elapsed % 30 == 0:
                     logger.debug("Runway Gen-4 polling", extra={"engine": "RUNWAY_GEN4", "elapsed_s": elapsed})
 
-            if task.status == "SUCCEEDED" and task.output:
-                video_url = task.output[0] if isinstance(task.output, list) else task.output
+            if task_status == "CANCELLED":
+                _reconcile_paid_attempt(
+                    "cancelled",
+                    provider_job_id=task_id,
+                    provider_status=task_status,
+                    detail="Runway reported terminal cancellation",
+                )
+                return None
+
+            if task_status == "FAILED":
+                failure = classify_task_failure(task)
+                terminal_state = "failed_billed" if failure["billed"] else "failed_unbilled"
+                _reconcile_paid_attempt(
+                    terminal_state,
+                    provider_job_id=task_id,
+                    provider_status=task_status,
+                    failure_code=str(failure["code"]),
+                    detail="Runway reported a terminal task failure",
+                )
+                if failure["billed"] or failure["permanent"]:
+                    if _cascade_out is not None:
+                        _cascade_out["terminal_paid_attempt"] = dict(_paid_attempt or {})
+                    return None
+                return try_next_api()
+
+            output = getattr(task, "output", None)
+            if task_status == "SUCCEEDED" and output:
+                video_url = output[0] if isinstance(output, list) else output
                 if not _download_video_or_cascade(video_url, "RUNWAY_GEN4"):
                     return try_next_api()
                 logger.info("Runway Gen-4 success", extra={"engine": "RUNWAY_GEN4", "output_mp4": output_mp4})
@@ -1172,14 +2072,28 @@ def _execute_admitted_video_chain(
                         extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
                     )
                     return try_next_api()
-                _record_video_cascade(target_api.upper())
+                _record_video_cascade(
+                    target_api.upper(),
+                    job_id=task_id,
+                    duration_s=10,
+                )
                 return output_mp4
 
-            logger.warning("Runway Gen-4 task not succeeded", extra={"engine": "RUNWAY_GEN4", "task_status": task.status})
-            return try_next_api()
+            _defer_runway(
+                "provider_output_missing",
+                "Runway reported success without a usable output URL",
+                status=task_status,
+            )
+            return None
 
         except Exception as e:
             logger.warning("Runway Gen-4 error", extra={"engine": "RUNWAY_GEN4", "error": str(e)})
+            if _paid_resume_job_id:
+                _defer_runway(
+                    "retrieval_ambiguous",
+                    f"Runway accepted task hit a local error: {type(e).__name__}",
+                )
+                return None
             return try_next_api()
 
     # ═══════════════════════════════════════════════════════════════
@@ -1231,10 +2145,9 @@ def _execute_admitted_video_chain(
                     f"consistent volumetric lighting throughout, no visual artifacts."
                 )
 
-                result = fal_client.subscribe(
+                result, fal_disposition = _run_motion_fal_job(
                     "fal-ai/veo3.1/reference-to-video",
-                    client_timeout=FAL_TIMEOUT_VIDEO_S,
-                    arguments={
+                    {
                         "prompt": veo_prompt,
                         "image_urls": image_urls,
                         "aspect_ratio": fal_aspect_ratio(_aspect),
@@ -1244,6 +2157,10 @@ def _execute_admitted_video_chain(
                     },
                     with_logs=True,
                 )
+                if result is None:
+                    if fal_disposition == "failed_unbilled":
+                        return try_next_api()
+                    return None
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
@@ -1259,6 +2176,9 @@ def _execute_admitted_video_chain(
                     _record_video_cascade(target_api.upper())
                     return output_mp4
 
+                if fal_disposition == "succeeded":
+                    _paid_reconciliation_needed = True
+                    return try_next_api()
                 return try_next_api()
 
             except Exception as e:
@@ -1270,6 +2190,9 @@ def _execute_admitted_video_chain(
                         extra={"engine": "VEO", "block_duration_s": _VEO_QUOTA_TTL_S},
                     )
                 logger.warning("Veo 3.1 error", extra={"engine": "VEO", "error": str(e)})
+                if _durable_fal_attempt and _paid_attempt is not None:
+                    _paid_reconciliation_needed = True
+                    return try_next_api()
                 return try_next_api()
         else:
             logger.warning("FAL_KEY missing for Veo — cascading", extra={"engine": "VEO"})
@@ -1283,104 +2206,104 @@ def _execute_admitted_video_chain(
         # (kling-v1-6) remains explicit-only compatibility.
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
-            max_attempts = 2
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    logger.info(
-                        "fal.ai Kling 3.0 Pro I2V",
-                        extra={"engine": "KLING_3_0", "attempt": attempt, "max_attempts": max_attempts},
-                    )
+            try:
+                logger.info("fal.ai Kling 3.0 Pro I2V", extra={"engine": "KLING_3_0"})
 
-                    # Upload the source keyframe
-                    start_image_url = fal_client.upload_file(image_path)
+                # Uploads are non-generation preparation. The transaction-backed
+                # reservation happens immediately before the one queue submit.
+                start_image_url = fal_client.upload_file(image_path)
+                has_elements = bool(
+                    multi_angle_refs
+                    and any(os.path.exists(ref) for ref in multi_angle_refs)
+                )
+                subject_ref = "@Element1" if has_elements else "The character"
+                kling_prompt = (
+                    f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration. "
+                    f"SUBJECT: {subject_ref} maintains rigid facial bone structure — zero face deformation between frames. "
+                    f"Same hair, skin tone, clothing pattern in every frame. "
+                    f"PRESERVE: Do not morph, distort, or alter facial features, eyes, teeth, or hair at any frame. "
+                    f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
+                    f"consistent gravity, cloth physics responding to movement. "
+                    f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, no flickering. "
+                    f"QUALITY: Photorealistic cinematic footage, high definition, consistent volumetric lighting."
+                )
+                args = {
+                    "start_image_url": start_image_url,
+                    "prompt": kling_prompt,
+                    "duration": "5",
+                    "generate_audio": False,
+                    "cfg_scale": 0.5,
+                    "negative_prompt": (
+                        "blur, distortion, deformed face, identity change, face morph, extra limbs, "
+                        "floating objects, flickering, temporal inconsistency, plastic skin, "
+                        "over-smoothed texture, unnatural eye movement, teeth distortion, "
+                        "clothing pattern change, sudden lighting shift, smearing motion blur"
+                    ),
+                }
 
-                    # Build arguments with structured prompt
-                    # Use @Element1 only if we have multi_angle_refs to bind, otherwise generic subject reference
-                    has_elements = multi_angle_refs and len([r for r in multi_angle_refs if os.path.exists(r)]) > 0
-                    subject_ref = "@Element1" if has_elements else "The character"
-                    kling_prompt = (
-                        f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration. "
-                        f"SUBJECT: {subject_ref} maintains rigid facial bone structure — zero face deformation between frames. "
-                        f"Same hair, skin tone, clothing pattern in every frame. "
-                        f"PRESERVE: Do not morph, distort, or alter facial features, eyes, teeth, or hair at any frame. "
-                        f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
-                        f"consistent gravity, cloth physics responding to movement. "
-                        f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, no flickering. "
-                        f"QUALITY: Photorealistic cinematic footage, high definition, consistent volumetric lighting."
-                    )
-                    args = {
-                        "start_image_url": start_image_url,
-                        "prompt": kling_prompt,
-                        "duration": "5",
-                        "generate_audio": False,
-                        "cfg_scale": 0.5,
-                        "negative_prompt": (
-                            "blur, distortion, deformed face, identity change, face morph, extra limbs, "
-                            "floating objects, flickering, temporal inconsistency, plastic skin, "
-                            "over-smoothed texture, unnatural eye movement, teeth distortion, "
-                            "clothing pattern change, sudden lighting shift, smearing motion blur"
-                        ),
-                    }
+                if multi_angle_refs:
+                    valid_refs = [ref for ref in multi_angle_refs if os.path.exists(ref)]
+                    if valid_refs:
+                        frontal_url = fal_client.upload_file(valid_refs[0])
+                        extra_urls = []
+                        for ref_path in valid_refs[1:4]:
+                            try:
+                                extra_urls.append(fal_client.upload_file(ref_path))
+                            except (OSError, RuntimeError) as exc:
+                                logger.warning(
+                                    "Failed to upload ref image",
+                                    extra={
+                                        "engine": "KLING_3_0",
+                                        "ref_path": ref_path,
+                                        "error": str(exc),
+                                    },
+                                )
+                        args["elements"] = [{
+                            "frontal_image_url": frontal_url,
+                            "reference_image_urls": extra_urls,
+                        }]
+                        logger.info(
+                            "Kling subject bound",
+                            extra={"engine": "KLING_3_0", "extra_angle_refs": len(extra_urls)},
+                        )
 
-                    # Subject binding — upload multi-angle character references
-                    if multi_angle_refs and len(multi_angle_refs) > 0:
-                        valid_refs = [r for r in multi_angle_refs if os.path.exists(r)]
-                        if valid_refs:
-                            frontal_url = fal_client.upload_file(valid_refs[0])
-                            extra_urls = []
-                            # Kling image elements take 2-4 images each (native
-                            # schema mirror, 2026-07-11): frontal + <=3 refs.
-                            for ref_path in valid_refs[1:4]:
-                                try:
-                                    extra_urls.append(fal_client.upload_file(ref_path))
-                                except (OSError, RuntimeError) as e:
-                                    logger.warning(
-                                        "Failed to upload ref image",
-                                        extra={"engine": "KLING_3_0", "ref_path": ref_path, "error": str(e)},
-                                    )
+                result, fal_disposition = _run_motion_fal_job(
+                    "fal-ai/kling-video/v3/pro/image-to-video",
+                    args,
+                    with_logs=True,
+                )
+                if result is None:
+                    if fal_disposition == "failed_unbilled":
+                        return try_next_api()
+                    return None
 
-                            args["elements"] = [{
-                                "frontal_image_url": frontal_url,
-                                "reference_image_urls": extra_urls,
-                            }]
-                            logger.info(
-                                "Kling subject bound",
-                                extra={"engine": "KLING_3_0", "extra_angle_refs": len(extra_urls)},
-                            )
+                video_url = result.get("video", {}).get("url")
+                if video_url:
+                    if not _download_video_or_cascade(video_url, "KLING_3_0"):
+                        return try_next_api()
+                    logger.info("Kling success", extra={"engine": "KLING_3_0", "output_mp4": output_mp4})
+                    if not _accept_or_reject(output_mp4, _aspect):
+                        logger.warning(
+                            "Aspect backstop: wrong orientation — rejecting → recovery",
+                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                        )
+                        return try_next_api()
+                    _record_video_cascade(target_api.upper())
+                    return output_mp4
 
-                    result = fal_client.subscribe(
-                        "fal-ai/kling-video/v3/pro/image-to-video",
-                        client_timeout=FAL_TIMEOUT_VIDEO_S,
-                        arguments=args,
-                        with_logs=True,
-                    )
+                logger.warning("Kling returned no video URL", extra={"engine": "KLING_3_0"})
+                if fal_disposition == "succeeded":
+                    _paid_reconciliation_needed = True
+                return try_next_api()
 
-                    video_url = result.get("video", {}).get("url")
-                    if video_url:
-                        if not _download_video_or_cascade(video_url, "KLING_3_0"):
-                            return try_next_api()
-                        logger.info("Kling success", extra={"engine": "KLING_3_0", "output_mp4": output_mp4})
-                        if not _accept_or_reject(output_mp4, _aspect):
-                            logger.warning(
-                                "Aspect backstop: wrong orientation — rejecting → cascade",
-                                extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
-                            )
-                            return try_next_api()
-                        _record_video_cascade(target_api.upper())
-                        return output_mp4
-
-                    logger.warning("Kling returned no video URL", extra={"engine": "KLING_3_0"})
-                    return try_next_api()
-
-                except Exception as e:
-                    logger.warning(
-                        "Kling 3.0 Pro fal.ai error",
-                        extra={"engine": "KLING_3_0", "attempt": attempt, "error": str(e)},
-                    )
-                    if attempt < max_attempts:
-                        time.sleep(5)
-                        continue
-                    return try_next_api()
+            except Exception as e:
+                logger.warning(
+                    "Kling 3.0 Pro fal.ai error",
+                    extra={"engine": "KLING_3_0", "error": str(e)},
+                )
+                if _durable_fal_attempt and _paid_attempt is not None:
+                    _paid_reconciliation_needed = True
+                return try_next_api()
         else:
             global _FAL_MISSING_WARNED
             if not _FAL_MISSING_WARNED:
@@ -1440,15 +2363,19 @@ def _execute_admitted_video_chain(
                     )
                     return try_next_api()
 
-                result = fal_client.subscribe(
+                result, fal_disposition = _run_motion_fal_job(
                     "fal-ai/fast-svd",
-                    client_timeout=FAL_TIMEOUT_VIDEO_S,
-                    arguments={
+                    {
                         "image_url": base_img_url,
                         "motion_bucket_id": 127,
-                        "cond_aug": 0.02
-                    }
+                        "cond_aug": 0.02,
+                    },
+                    with_logs=False,
                 )
+                if result is None:
+                    if fal_disposition == "failed_unbilled":
+                        return try_next_api()
+                    return None
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
@@ -1462,12 +2389,17 @@ def _execute_admitted_video_chain(
                         return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
+                if fal_disposition == "succeeded":
+                    _paid_reconciliation_needed = True
                 return try_next_api()
             except Exception as e:
                 logger.warning(
                     "FAL_SVD serverless error — re-routing",
                     extra={"engine": "FAL_SVD", "error": str(e)},
                 )
+                if _durable_fal_attempt and _paid_attempt is not None:
+                    _paid_reconciliation_needed = True
+                    return None
                 return try_next_api()
         else:
             logger.warning("FAL_KEY missing — re-routing", extra={"engine": "FAL_SVD"})
@@ -1535,12 +2467,15 @@ def _execute_admitted_video_chain(
                     "fal.ai Seedance 2.0 %s" % ("reference-to-video" if ref_urls else "image-to-video"),
                     extra={"engine": "SEEDANCE", "ref_count": len(ref_urls), "duration_s": seedance_duration},
                 )
-                result = fal_client.subscribe(
+                result, fal_disposition = _run_motion_fal_job(
                     endpoint,
-                    client_timeout=FAL_TIMEOUT_VIDEO_S,
-                    arguments=arguments,
+                    arguments,
                     with_logs=True,
                 )
+                if result is None:
+                    if fal_disposition == "failed_unbilled":
+                        return try_next_api()
+                    return None
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
@@ -1556,10 +2491,14 @@ def _execute_admitted_video_chain(
                     _record_video_cascade(target_api.upper())
                     return output_mp4
 
+                if fal_disposition == "succeeded":
+                    _paid_reconciliation_needed = True
                 return try_next_api()
 
             except Exception as e:
                 logger.warning("Seedance API error", extra={"engine": "SEEDANCE", "error": str(e)})
+                if _durable_fal_attempt and _paid_attempt is not None:
+                    _paid_reconciliation_needed = True
                 return try_next_api()
         else:
             # (global _FAL_MISSING_WARNED is declared once in the KLING_3_0

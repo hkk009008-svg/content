@@ -121,6 +121,7 @@ def create_location_with_images(
     weather: str = "clear",
     commit_timeout: float = 10,
     auto_research: bool = False,
+    cost_tracker=None,
 ) -> dict:
     """
     Creates a location, copies reference images, and generates
@@ -161,7 +162,10 @@ def create_location_with_images(
     if auto_research:
         try:
             from research_engine import research_location_visual
-            urls = research_location_visual(description)
+            urls = research_location_visual(
+                description,
+                cost_tracker=cost_tracker,
+            )
         except (ImportError, Exception) as exc:
             print(f"   [RESEARCH] Location visual research unavailable: {exc}")
             urls = []

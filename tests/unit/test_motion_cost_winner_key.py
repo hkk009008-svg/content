@@ -31,6 +31,11 @@ def _run_finalize(
     mock_self.cost_tracker.is_over_budget.return_value = False
     mock_self.project = {"id": "vid-test"}
     mock_self._maybe_auto_rife.return_value = video_path
+    # Artifact indexing has its own focused suite. This cost-only fixture must
+    # still implement the current two-value finalization contract.
+    mock_self._finalize_take_artifact_version.side_effect = (
+        lambda _shot_id, _kind, stored_take: (stored_take, None)
+    )
     # Bind the REAL cost helpers — a MagicMock _motion_cost_kwargs unpacks
     # as empty kwargs and silently drops the duration-aware cost under test.
     mock_self._motion_cost_kwargs = (

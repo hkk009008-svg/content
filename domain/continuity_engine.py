@@ -622,6 +622,10 @@ class ContinuityEngine:
         mode: str = "standard",
         attempt: int = 0,
         max_attempts: int = 3,
+        *,
+        cost_tracker=None,
+        video_id: str = "",
+        shot_id: str = "",
     ):
         """
         Validate character identity in generated video.
@@ -649,6 +653,9 @@ class ContinuityEngine:
             mode=mode,
             attempt=attempt,
             max_attempts=max_attempts,
+            cost_tracker=cost_tracker,
+            video_id=video_id,
+            shot_id=shot_id,
         )
 
 

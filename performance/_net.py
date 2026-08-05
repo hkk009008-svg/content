@@ -35,6 +35,7 @@ import ipaddress
 import json
 import math
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -54,6 +55,7 @@ DEFAULT_CONNECT_TIMEOUT = 20
 DEFAULT_READ_TIMEOUT = 300
 _TEMP_CREATE_ATTEMPTS = 10
 _MAX_REDIRECTS = 5
+_MIN_PINNED_ADAPTER_REQUESTS = (2, 32, 3)
 # Well-known cloud metadata endpoints (AWS / GCP / Azure IMDS).
 _BLOCKED_LITERAL_HOSTS = frozenset(
     {
@@ -595,6 +597,32 @@ def _validate_download_url(url: str, *, allow_http: bool) -> Optional[str]:
     return reason
 
 
+def _require_pinned_https_adapter_contract() -> None:
+    """Fail closed unless Requests honors the validated-IP adapter hook.
+
+    ``HTTPAdapter.send`` only began dispatching connection selection through
+    ``get_connection_with_tls_context`` in Requests 2.32.2.  Requests 2.32.3
+    then fixed that hook's custom-SSL-context behavior.  A dependency resolver
+    or stale runtime that supplies anything older would otherwise leave this
+    adapter defined but silently bypass its pinned pool.
+    """
+
+    raw_version = str(getattr(requests, "__version__", ""))
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", raw_version)
+    parsed_version = tuple(int(part) for part in match.groups()) if match else None
+    hook = getattr(requests.adapters.HTTPAdapter, "get_connection_with_tls_context", None)
+    if (
+        parsed_version is None
+        or parsed_version[0] != 2
+        or parsed_version < _MIN_PINNED_ADAPTER_REQUESTS
+        or not callable(hook)
+    ):
+        raise RuntimeError(
+            "secure pinned HTTPS downloads require requests>=2.32.3,<3 "
+            "with HTTPAdapter.get_connection_with_tls_context"
+        )
+
+
 class _PinnedHTTPSAdapter(requests.adapters.HTTPAdapter):
     """Connect one HTTPS request to a validated IP without weakening TLS.
 
@@ -605,6 +633,7 @@ class _PinnedHTTPSAdapter(requests.adapters.HTTPAdapter):
     """
 
     def __init__(self, target: _PinnedHTTPSTarget):
+        _require_pinned_https_adapter_contract()
         self._target = target
         super().__init__(max_retries=0)
 

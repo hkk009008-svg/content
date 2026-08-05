@@ -329,7 +329,15 @@ class TestRegenerateWithIntentHappyPath:
 
         captured = {}
 
-        def _capture_scene_context(intent_arg, take_context, scene_context, *, project=None):
+        def _capture_scene_context(
+            intent_arg,
+            take_context,
+            scene_context,
+            *,
+            project=None,
+            cost_tracker=None,
+            video_id="",
+        ):
             captured["scene_context"] = scene_context
             return {"revised_prompt": "x", "params_delta": {}, "anchor_refs": []}
 

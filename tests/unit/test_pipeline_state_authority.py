@@ -390,7 +390,8 @@ def test_http_idle_project_reports_start_only_and_keeps_legacy_fields(client, re
         "allowed_actions": ["start"],
         # Slice 11c: additive on the idle branch -- no checkpoint file
         # exists yet for a freshly created project.
-        "checkpoint": {"resumable": False},
+            "checkpoint": {"resumable": False},
+            "queue": None,
     }
 
 
@@ -529,7 +530,8 @@ def test_http_running_pipeline_reports_cancel_and_pause(client, real_project, in
             "finals_approved": 0,
         },
         "running": True,
-        "allowed_actions": ["cancel", "pause"],
+            "allowed_actions": ["cancel", "pause"],
+            "queue": None,
     }
 
 

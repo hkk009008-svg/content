@@ -14,6 +14,7 @@ from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.provider_catalog import RuntimeSnapshot, project_legacy_registry
 from domain.project_manager import make_shot
+from paid_provider import PaidCallDeferred, fence_openai_tools_client
 from domain.video_engine_policy import (
     VideoPolicyReason,
     VideoTargetPolicyError,
@@ -897,7 +898,12 @@ def decompose_scene(
         from research_engine import research_cinematography
         mood = scene.get("mood", "cinematic")
         action = scene.get("action", "")
-        reference = research_cinematography(mood, loc_description, action)
+        reference = research_cinematography(
+            mood,
+            loc_description,
+            action,
+            cost_tracker=cost_tracker,
+        )
         if reference:
             research_ctx = f"\n{reference}\n"
     except (ImportError, RuntimeError) as e:
@@ -951,13 +957,18 @@ Use them when you need to research:
 - How real films shoot similar scenes
 Only use tools if they would genuinely improve shot quality. Skip if the scene is straightforward."""
 
+        tools_client, tools_tracker = fence_openai_tools_client(
+            client,
+            cost_tracker=cost_tracker,
+            operation_prefix="scene_decomposer",
+        )
         raw = run_with_tools(
-            client, "gpt-4o",
+            tools_client, "gpt-4o",
             system_prompt=full_system_with_tools,
             user_prompt=user_prompt,
             max_tool_rounds=2,
             response_format={"type": "json_object"},
-            cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
+            cost_tracker=tools_tracker,
         )
         shots = _parse_decomposition_payload(raw)
         api_engines, aspect_ratio = _project_video_engine_context(global_settings)
@@ -975,6 +986,8 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
         print(f"   ✅ Decomposed scene '{scene.get('title')}' into {len(validated)} shots")
         return validated
 
+    except PaidCallDeferred:
+        raise
     except Exception as e:
         import traceback
         print(f"   [ERROR] GPT-4o decomposition failed: {e}")
@@ -1048,7 +1061,12 @@ def competitive_decompose_scene(
         from research_engine import research_cinematography
         mood = scene.get("mood", "cinematic")
         action = scene.get("action", "")
-        reference = research_cinematography(mood, loc_description, action)
+        reference = research_cinematography(
+            mood,
+            loc_description,
+            action,
+            cost_tracker=cost_tracker,
+        )
         if reference:
             research_ctx = f"\n{reference}\n"
     except (ImportError, RuntimeError) as e:
@@ -1156,6 +1174,11 @@ Output ONLY a JSON object {{"shots": [ ... ]}} with exactly {target_shots} shot 
         )
         return validated
 
+    except PaidCallDeferred:
+        # An ensemble SDK call may have been accepted and billed. Replacing it
+        # with the single-model paid path would duplicate work, so leave the job
+        # blocked for operator/provider-history reconciliation.
+        raise
     except Exception as e:
         import traceback
         print(f"   [Ensemble] Competitive decomposition failed: {e}")

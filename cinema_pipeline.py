@@ -33,6 +33,7 @@ from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
 from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO, is_supported
+from paid_provider import has_paid_attempt_authority
 
 logger = logging.getLogger(__name__)
 
@@ -510,10 +511,41 @@ class CinemaPipeline:
 
 
 
+    def _record_auxiliary_artifact(
+        self,
+        asset_kind: str,
+        asset_id: str,
+        path: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        parameters: Optional[dict] = None,
+        source_paths: Optional[dict] = None,
+    ) -> dict:
+        """Retain one accepted non-take output before publishing success."""
 
+        from cinema.artifact_indexing import record_auxiliary_version
 
-
-
+        record = record_auxiliary_version(
+            self.project["id"],
+            asset_kind,
+            asset_id,
+            path,
+            provider=provider,
+            model=model,
+            parameters=parameters or {},
+            source_paths=source_paths or {},
+            project_snapshot=self.project,
+        )
+        logger.info(
+            "Generated auxiliary artifact versioned",
+            extra={
+                "project_id": self.project["id"],
+                "state": "versioned",
+                "take_id": record["artifact_id"],
+            },
+        )
+        return record
 
     def _ensure_scene_audio(self, scene: dict, characters: list[dict]) -> Optional[str]:
         scene_id = scene.get("id", "")
@@ -552,6 +584,25 @@ class CinemaPipeline:
         output_path = os.path.join(self.temp_dir, f"audio_{scene_id}_{key}.mp3")
         if os.path.exists(output_path):
             print(f"   [SCENE-AUDIO] Cache hit (key={key}): {output_path}")
+            self._record_auxiliary_artifact(
+                "dialogue",
+                scene_id,
+                output_path,
+                model="dialogue-voiceover",
+                parameters={
+                    "scope": "scene",
+                    "language": lang,
+                    "cache_key": key,
+                    "dialogue_lines": dialogue_lines,
+                    "character_voices": [
+                        {
+                            "id": character.get("id"),
+                            "voice_id": character.get("voice_id"),
+                        }
+                        for character in characters
+                    ],
+                },
+            )
             self.scene_audio[scene_id] = output_path
             self._save_checkpoint()
             return output_path
@@ -563,14 +614,41 @@ class CinemaPipeline:
         dialogue_ctx = PipelineContext(
             global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
         )
+        voiceover_kwargs = {
+            "ctx": dialogue_ctx,
+            "cost_tracker": self.cost_tracker,
+        }
+        if has_paid_attempt_authority(self.cost_tracker):
+            voiceover_kwargs.update({
+                "video_id": str((self.project or {}).get("id", "")),
+                "scope_id": scene_id,
+            })
         result = generate_dialogue_voiceover(
             dialogue_lines,
             characters,
             output_path,
-            ctx=dialogue_ctx,
-            cost_tracker=self.cost_tracker,  # T5: gate audio spend on pipeline budget
+            **voiceover_kwargs,
         )
         if result and os.path.exists(output_path):
+            self._record_auxiliary_artifact(
+                "dialogue",
+                scene_id,
+                output_path,
+                model="dialogue-voiceover",
+                parameters={
+                    "scope": "scene",
+                    "language": lang,
+                    "cache_key": key,
+                    "dialogue_lines": dialogue_lines,
+                    "character_voices": [
+                        {
+                            "id": character.get("id"),
+                            "voice_id": character.get("voice_id"),
+                        }
+                        for character in characters
+                    ],
+                },
+            )
             self.scene_audio[scene_id] = output_path
             self._save_checkpoint()
             return output_path
@@ -625,20 +703,66 @@ class CinemaPipeline:
         output_path = os.path.join(self.temp_dir, f"audio_{shot_id}_{key}.mp3")
         if os.path.exists(output_path):
             print(f"   [SHOT-AUDIO] Cache hit (key={key}): {output_path}")
+            self._record_auxiliary_artifact(
+                "dialogue",
+                shot_id,
+                output_path,
+                model="dialogue-voiceover",
+                parameters={
+                    "scope": "shot",
+                    "language": lang,
+                    "cache_key": key,
+                    "dialogue_lines": dialogue_lines,
+                    "character_voices": [
+                        {
+                            "id": character.get("id"),
+                            "voice_id": character.get("voice_id"),
+                        }
+                        for character in characters
+                    ],
+                },
+            )
             self.shot_audio[shot_id] = output_path
             return output_path
 
         dialogue_ctx = PipelineContext(
             global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
         )
+        voiceover_kwargs = {
+            "ctx": dialogue_ctx,
+            "cost_tracker": self.cost_tracker,
+        }
+        if has_paid_attempt_authority(self.cost_tracker):
+            voiceover_kwargs.update({
+                "video_id": str((self.project or {}).get("id", "")),
+                "scope_id": shot_id,
+            })
         result = generate_dialogue_voiceover(
             dialogue_lines,
             characters,
             output_path,
-            ctx=dialogue_ctx,
-            cost_tracker=self.cost_tracker,  # T5: gate audio spend on pipeline budget
+            **voiceover_kwargs,
         )
         if result and os.path.exists(output_path):
+            self._record_auxiliary_artifact(
+                "dialogue",
+                shot_id,
+                output_path,
+                model="dialogue-voiceover",
+                parameters={
+                    "scope": "shot",
+                    "language": lang,
+                    "cache_key": key,
+                    "dialogue_lines": dialogue_lines,
+                    "character_voices": [
+                        {
+                            "id": character.get("id"),
+                            "voice_id": character.get("voice_id"),
+                        }
+                        for character in characters
+                    ],
+                },
+            )
             self.shot_audio[shot_id] = output_path
             return output_path
         return None
@@ -646,24 +770,75 @@ class CinemaPipeline:
     def _ensure_bgm(self, settings: dict) -> str:
         self.progress("AUDIO", "Generating background music...", 5)
         music_mood = settings.get("music_mood", "suspense")
-        bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
-        if not os.path.exists(bgm_path):
-            generate_bgm(music_mood, bgm_path, duration=SUNO_BGM_DURATION_DEFAULT, prefer_provider="AUTO", cost_tracker=self.cost_tracker)  # T5: gate audio spend; AUTO = Suno V5 → FAL fallback
+        raw_bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
+        if not os.path.exists(raw_bgm_path):
+            generate_bgm(
+                music_mood,
+                raw_bgm_path,
+                duration=SUNO_BGM_DURATION_DEFAULT,
+                prefer_provider="AUTO",
+                cost_tracker=self.cost_tracker,
+                video_id=str((self.project or {}).get("id", "")),
+            )
 
-        if os.path.exists(bgm_path):
+        if not os.path.exists(raw_bgm_path):
+            return raw_bgm_path
+
+        self._record_auxiliary_artifact(
+            "background_music",
+            "bgm_raw",
+            raw_bgm_path,
+            parameters={
+                "music_mood": music_mood,
+                "duration": SUNO_BGM_DURATION_DEFAULT,
+                "routing_policy": "AUTO",
+            },
+        )
+
+        mastered: Optional[str] = None
+        mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
+        mastering_preset = (
+            self.project.get("global_settings", {}) if self.project else {}
+        ).get("music_mastering", "cinema_master")
+        if os.path.exists(mastered_path):
+            mastered = mastered_path
+        else:
             try:
                 from audio.music import master_music
-                mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
-                _ms_preset = (self.project.get("global_settings", {}) if self.project else {}).get("music_mastering", "cinema_master")
-                mastered = master_music(bgm_path, mastered_path, preset=_ms_preset)
-                if mastered and os.path.exists(mastered):
-                    bgm_path = mastered
-                    self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
+
+                mastered = master_music(
+                    raw_bgm_path,
+                    mastered_path,
+                    preset=mastering_preset,
+                )
             except Exception:
                 # Non-critical: BGM mix degrades gracefully; emit at WARNING
                 # so log monitors that alert on ERROR don't false-positive.
                 logger.warning("BGM mastering skipped (non-critical)", exc_info=True)
-        return bgm_path
+
+        if (
+            mastered
+            and os.path.exists(mastered)
+            and os.path.abspath(mastered) != os.path.abspath(raw_bgm_path)
+        ):
+            self._record_auxiliary_artifact(
+                "background_music",
+                "bgm_mastered",
+                mastered,
+                model="music-mastering",
+                parameters={
+                    "music_mood": music_mood,
+                    "preset": mastering_preset,
+                },
+                source_paths={"raw_bgm": raw_bgm_path},
+            )
+            self.progress(
+                "AUDIO",
+                f"BGM mastered ({mastering_preset} preset)",
+                6,
+            )
+            return mastered
+        return raw_bgm_path
 
     def _ensure_scene_foley(self, scene: dict) -> str:
         """Generate (and cache) environmental foley for a single scene.
@@ -677,10 +852,6 @@ class CinemaPipeline:
         The tri-mix consumption of the returned path is T3 scope.
         """
         scene_id = scene.get("id", "")
-        existing = self.scene_foley.get(scene_id)
-        if existing and os.path.exists(existing):
-            return existing
-
         # Aggregate unique non-empty scene_foley descriptors across the scene's shots
         descriptors: list[str] = []
         for shot in scene.get("shots", []):
@@ -695,18 +866,64 @@ class CinemaPipeline:
 
         foley_path = os.path.join(self.temp_dir, f"foley_{scene_id}.mp3")
 
+        from audio.foley import _build_foley_prompt, generate_stability_foley
+
+        prompt = _build_foley_prompt(scene_foley_descriptor)
+        existing = self.scene_foley.get(scene_id)
+        cached_path = existing if existing and os.path.exists(existing) else foley_path
+        if os.path.exists(cached_path):
+            self._record_auxiliary_artifact(
+                "foley",
+                scene_id,
+                cached_path,
+                provider="stability",
+                model="stable-audio-2",
+                parameters={
+                    "prompt": prompt,
+                    "duration": scene_duration,
+                    "steps": 50,
+                    "cfg_scale": 7.0,
+                },
+            )
+            self.scene_foley[scene_id] = cached_path
+            return cached_path
+
         self.progress("AUDIO", f"Generating foley for scene {scene_id}...", 5)
         try:
-            from audio.foley import _build_foley_prompt, generate_stability_foley
-            prompt = _build_foley_prompt(scene_foley_descriptor)
-            result = generate_stability_foley(prompt, foley_path, duration=scene_duration, cost_tracker=self.cost_tracker)  # T5: gate audio spend on pipeline budget
-            if result and os.path.exists(result):
-                self.scene_foley[scene_id] = result
-                self._runstate.foley_audio_paths.append(result)
-                self._save_checkpoint()
-                return result
+            result = generate_stability_foley(
+                prompt,
+                foley_path,
+                duration=scene_duration,
+                cost_tracker=self.cost_tracker,
+                video_id=str((self.project or {}).get("id", "")),
+                scope_id=scene_id,
+            )
         except Exception:
             logger.warning("Foley generation skipped for scene %s (non-critical)", scene_id, exc_info=True)
+            return ""
+
+        if result and os.path.exists(result):
+            # Artifact retention is part of accepting the paid output.  Keep
+            # it outside the provider's graceful-degradation handler so a
+            # ledger failure cannot be mislabeled as a provider failure and
+            # trigger another paid submission.
+            self._record_auxiliary_artifact(
+                "foley",
+                scene_id,
+                result,
+                provider="stability",
+                model="stable-audio-2",
+                parameters={
+                    "prompt": prompt,
+                    "duration": scene_duration,
+                    "steps": 50,
+                    "cfg_scale": 7.0,
+                },
+            )
+            self.scene_foley[scene_id] = result
+            self._runstate.foley_audio_paths.append(result)
+            self._save_checkpoint()
+            return result
         return ""
 
     @staticmethod
@@ -900,7 +1117,40 @@ class CinemaPipeline:
         if not final_path or not os.path.exists(final_path):
             return {"success": False, "error": "Final assembly failed"}
 
-        return {"success": True, "final_path": final_path}
+        try:
+            from cinema.artifact_indexing import record_final_version
+
+            artifact = record_final_version(
+                project["id"],
+                final_path,
+                scene_data,
+                bgm_path,
+                settings,
+                project_snapshot=project,
+            )
+        except Exception:
+            # The media exists, so replaying cloud generation would be wrong.
+            # Refuse to call the run complete until the accepted bytes have a
+            # durable provenance record; an operator may retry local assembly
+            # or package the visible export after investigating the ledger.
+            logger.exception(
+                "Final export exists but artifact versioning failed",
+                extra={"project_id": project.get("id"), "stage": "ASSEMBLY"},
+            )
+            return {
+                "success": False,
+                "error": "Final export exists but artifact versioning failed",
+                "error_kind": "artifact_versioning",
+                "retryable": False,
+                "final_path": final_path,
+            }
+
+        return {
+            "success": True,
+            "final_path": final_path,
+            "artifact_id": artifact["artifact_id"],
+            "artifact_version": artifact["version"],
+        }
 
     def assemble_approved_takes(self) -> dict:
         """Full-pipeline assembly path: core re-stitch + SCREENING gate + cleanup.

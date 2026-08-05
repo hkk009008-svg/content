@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { usePipelineState, STAGE_RAIL_MAP, resolveStageBucket } from './usePipelineState'
-import type { PipelineAction, ProgressEvent, CheckpointInfo } from '../types/project'
+import type { PipelineAction, ProgressEvent, CheckpointInfo, PipelineQueueSnapshot } from '../types/project'
 
 /**
  * Slice 8b (2026-07-30 comprehensive-unification plan, plan slice 8) --
@@ -31,6 +31,7 @@ interface PipelineStateBody {
   running: boolean
   allowed_actions: PipelineAction[]
   checkpoint?: CheckpointInfo
+  queue?: PipelineQueueSnapshot | null
 }
 
 function pipelineStateBody(overrides: Partial<PipelineStateBody> = {}): PipelineStateBody {
@@ -68,6 +69,24 @@ function deferred<T>() {
   const promise = new Promise<T>((res) => { resolve = res })
   return { promise, resolve }
 }
+
+class HydrationEventSource {
+  static instances: HydrationEventSource[] = []
+  readonly url: string
+  onmessage: ((event: MessageEvent<string>) => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  close = vi.fn()
+
+  constructor(url: string | URL) {
+    this.url = String(url)
+    HydrationEventSource.instances.push(this)
+  }
+}
+
+beforeEach(() => {
+  HydrationEventSource.instances = []
+  vi.stubGlobal('EventSource', HydrationEventSource)
+})
 
 afterEach(() => {
   cleanup()
@@ -156,6 +175,52 @@ describe('usePipelineState -- PID boundary (project switch)', () => {
 })
 
 describe('usePipelineState -- server-derived action authority', () => {
+  it('auto-attaches one stream to hydrated running truth without clearing the snapshot', async () => {
+    const fetchMock = vi.fn(async () => response(pipelineStateBody({
+      current_stage: 'MOTION',
+      failed_shots: ['shot-existing-failure'],
+      running: true,
+      allowed_actions: ['cancel', 'pause'],
+    })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => usePipelineState('proj-existing-run'))
+
+    await waitFor(() => expect(HydrationEventSource.instances).toHaveLength(1))
+    expect(HydrationEventSource.instances[0].url).toBe('/api/projects/proj-existing-run/stream')
+    expect(result.current.isStreaming).toBe(true)
+    expect(result.current.running).toBe(true)
+    expect(result.current.activeStage).toBe('MOTION')
+    expect(result.current.failedShots).toEqual(['shot-existing-failure'])
+    expect(result.current.allowedActions).toEqual(['cancel', 'pause'])
+
+    await act(async () => { await result.current.refreshPipelineState() })
+    expect(HydrationEventSource.instances).toHaveLength(1)
+  })
+
+  it('hydrates durable queued position without synthesizing a second start action', async () => {
+    const queue: PipelineQueueSnapshot = {
+      job_id: 'job-1', project_id: 'proj-queued', state: 'queued', position: 2,
+      requested_resume: false, resume_required: false, effective_resume: false,
+      attempt_count: 0, created_at: '2026-08-05T00:00:00Z', updated_at: '2026-08-05T00:00:00Z',
+      started_at: null, finished_at: null, lease_expires_at: null,
+      cancel_requested: false, error: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => response(pipelineStateBody({
+      running: true, allowed_actions: ['cancel'], queue,
+    }))))
+
+    const { result } = renderHook(() => usePipelineState('proj-queued'))
+
+    await waitFor(() => expect(result.current.queue?.job_id).toBe('job-1'))
+    await waitFor(() => expect(HydrationEventSource.instances).toHaveLength(1))
+    expect(HydrationEventSource.instances[0].url).toBe('/api/projects/proj-queued/stream')
+    expect(result.current.isStreaming).toBe(true)
+    expect(result.current.queue?.position).toBe(2)
+    expect(result.current.allowedActions).toEqual(['cancel'])
+    expect(result.current.allowedActions).not.toContain('start')
+  })
+
   it('an idle backend reports running=false and allows only "start" -- no cancel/pause/resume', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(pipelineStateBody({ running: false, allowed_actions: ['start'] }))))
 

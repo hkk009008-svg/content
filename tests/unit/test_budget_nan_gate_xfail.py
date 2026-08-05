@@ -103,9 +103,8 @@ def test_negative_budget_still_blocks():
 def test_garbage_string_budget_blocks():
     """A non-coercible cap reaching the constructor directly blocks (chokepoint defense).
 
-    core.py pre-handles non-numeric strings upstream (-> None); this guards the
-    direct/fresh-instance construction paths so garbage can't silently disable
-    the gate there either.
+    cinema/core.py passes persisted values through to this chokepoint, so the
+    same fail-closed rule applies to both core construction and direct use.
     """
     tracker = _tracker("not-a-number")
     assert tracker.would_exceed("UNKNOWN_API") is True

@@ -31,14 +31,25 @@ class TestModuleLoggerSetup:
         assert isinstance(phase_c_ffmpeg.logger, logging.Logger)
 
     def test_no_print_calls_at_import(self):
-        """Source file must contain zero print( calls (verified via grep at task time).
+        """Source file must contain zero direct ``print(...)`` calls.
 
-        This test guards against future regressions by re-importing the module
-        and confirming the module-level source has no print( pattern.
+        Parse the source rather than searching for the substring ``print(``,
+        which also appears inside valid helper names such as
+        ``file_fingerprint(...)``.
         """
+        import ast
         import inspect
+
         source = inspect.getsource(phase_c_ffmpeg)
-        assert "print(" not in source, (
+        tree = ast.parse(source)
+        print_calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ]
+        assert not print_calls, (
             "phase_c_ffmpeg.py still contains print() calls — convert them to logger"
         )
 

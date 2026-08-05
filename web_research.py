@@ -6,8 +6,10 @@ Reused from phase_0_director.py pattern, extracted for shared use.
 
 import os
 import json
+import time
 import firecrawl_adapter
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
 # Initialize clients once
 _tavily_client = None
 
@@ -15,6 +17,34 @@ _tavily_client = None
 # When lazy Tavily import / construction fails, cache the reason so subsequent
 # callers do not misreport a configured key as missing.
 _tavily_init_error: str = ""
+
+
+def _record_research_observation(
+    cost_tracker,
+    *,
+    provider: str,
+    engine: str,
+    operation: str,
+    status: str,
+    started: float,
+) -> None:
+    """Best-effort durable outcome evidence for one research request."""
+    latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+    try:
+        with cost_tracker_scope(cost_tracker) as tracker:
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if callable(recorder):
+                recorder(
+                    provider=provider,
+                    engine=engine,
+                    operation=operation,
+                    status=status,
+                    latency_ms=latency_ms,
+                )
+    except Exception:
+        # Optional research must not fail because observability storage is
+        # unavailable. The provider result remains the source of truth.
+        pass
 
 
 def _get_tavily():
@@ -29,7 +59,7 @@ def _get_tavily():
     return _tavily_client
 
 
-def search_web(query: str) -> str:
+def search_web(query: str, cost_tracker=None) -> str:
     """Search the web via Tavily for reference material."""
     print(f"   🔍 [WEB] Searching: {query}")
     client = _get_tavily()
@@ -37,23 +67,49 @@ def search_web(query: str) -> str:
         if _tavily_init_error:
             return f"Tavily client failed to initialize: {_tavily_init_error}"
         return "Tavily API not configured (TAVILY_API_KEY missing)."
+    started = time.perf_counter()
     try:
         res = client.search(query=query, search_depth="advanced", max_results=3)
+        _record_research_observation(
+            cost_tracker,
+            provider="tavily",
+            engine="TAVILY_SEARCH",
+            operation="web_research_search",
+            status="succeeded",
+            started=started,
+        )
         parts = []
         for r in res.get("results", []):
             parts.append(f"Title: {r['title']}\nContent: {r['content'][:500]}")
         return "\n\n".join(parts) if parts else "No results found."
     except Exception as e:
+        _record_research_observation(
+            cost_tracker,
+            provider="tavily",
+            engine="TAVILY_SEARCH",
+            operation="web_research_search",
+            status="failed",
+            started=started,
+        )
         return f"Search failed: {e}"
 
 
-def scrape_url(url: str) -> str:
+def scrape_url(url: str, cost_tracker=None) -> str:
     """Scrape a URL via Firecrawl for detailed content."""
     print("   🕷️ [WEB] Scraping URL")
+    started = time.perf_counter()
     try:
         content = firecrawl_adapter.scrape_markdown(
             url,
             api_key=settings.firecrawl_api_key,
+        )
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="web_research_scrape",
+            status="succeeded",
+            started=started,
         )
         return content[:4000]
     except firecrawl_adapter.FirecrawlConfigurationError:
@@ -74,13 +130,37 @@ def scrape_url(url: str) -> str:
             "credentials."
         )
     except firecrawl_adapter.FirecrawlResultError:
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="web_research_scrape",
+            status="failed",
+            started=started,
+        )
         return "Scrape failed: Firecrawl returned no usable markdown content."
     except firecrawl_adapter.FirecrawlScrapeError:
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="web_research_scrape",
+            status="failed",
+            started=started,
+        )
         return (
             "Scrape failed: Firecrawl request failed. Check the URL and "
             "Firecrawl service status."
         )
     except Exception:
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="web_research_scrape",
+            status="failed",
+            started=started,
+        )
         return (
             "Scrape failed: Firecrawl is unavailable. Check the SDK, API key, "
             "and service status."
@@ -120,12 +200,12 @@ TOOLS_SCHEMA = [
 ]
 
 
-def handle_tool_call(tool_name: str, arguments: dict) -> str:
+def handle_tool_call(tool_name: str, arguments: dict, cost_tracker=None) -> str:
     """Execute a tool call and return the result string."""
     if tool_name == "tavily_search":
-        return search_web(arguments.get("query", ""))
+        return search_web(arguments.get("query", ""), cost_tracker=cost_tracker)
     elif tool_name == "firecrawl_scrape_url":
-        return scrape_url(arguments.get("url", ""))
+        return scrape_url(arguments.get("url", ""), cost_tracker=cost_tracker)
     return f"Unknown tool: {tool_name}"
 
 
@@ -173,25 +253,42 @@ def run_with_tools(
                 "tool_choice": "auto",
             }
 
+            started = time.perf_counter()
+            provider_returned = False
             try:
                 response = client.chat.completions.create(**kwargs)
+                provider_returned = True
+                latency_ms = max(
+                    0, round((time.perf_counter() - started) * 1000)
+                )
                 # F-F.5 closure (cycle-16 max-quality audit a79c59): web
                 # research LLM calls were untracked. Best-effort log; non-
                 # fatal if cost_tracker import fails. Tool-round calls
                 # tracked separately from final-response call (Phase 2).
                 try:
-                    from cost_tracker import CostTracker
                     usage = getattr(response, "usage", None)
-                    if usage is not None:
-                        # T5 pattern: route onto the caller-supplied gate-connected
-                        # tracker so planning spend counts toward the budget; fall
-                        # back to a throwaway only when no tracker was threaded in.
-                        (cost_tracker or CostTracker()).log_llm(
-                            model=model,
-                            operation=f"web_research_tool_round_{round_num + 1}",
-                            input_tokens=getattr(usage, "prompt_tokens", 0),
-                            output_tokens=getattr(usage, "completion_tokens", 0),
+                    # T5 pattern: route onto the caller-supplied gate-connected
+                    # tracker so planning spend counts toward the budget; fall
+                    # back to a throwaway only when no tracker was threaded in.
+                    with cost_tracker_scope(cost_tracker) as tracker:
+                        recorder = getattr(
+                            tracker, "record_provider_observation", None
                         )
+                        if callable(recorder):
+                            recorder(
+                                provider="openai",
+                                engine=model,
+                                operation=f"web_research_tool_round_{round_num + 1}",
+                                status="succeeded",
+                                latency_ms=latency_ms,
+                            )
+                        if usage is not None:
+                            tracker.log_llm(
+                                model=model,
+                                operation=f"web_research_tool_round_{round_num + 1}",
+                                input_tokens=getattr(usage, "prompt_tokens", 0),
+                                output_tokens=getattr(usage, "completion_tokens", 0),
+                            )
                 except Exception:
                     pass  # Cost tracking is best-effort — import or write failure doesn't fail the research call
                 msg = response.choices[0].message
@@ -200,7 +297,11 @@ def run_with_tools(
                     messages.append(msg)
                     for tc in msg.tool_calls:
                         args = json.loads(tc.function.arguments)
-                        result = handle_tool_call(tc.function.name, args)
+                        result = handle_tool_call(
+                            tc.function.name,
+                            args,
+                            cost_tracker=cost_tracker,
+                        )
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
@@ -212,6 +313,25 @@ def run_with_tools(
                     # Model chose not to use tools — proceed to final call
                     break
             except Exception as e:
+                latency_ms = max(
+                    0, round((time.perf_counter() - started) * 1000)
+                )
+                if not provider_returned:
+                    try:
+                        with cost_tracker_scope(cost_tracker) as tracker:
+                            recorder = getattr(
+                                tracker, "record_provider_observation", None
+                            )
+                            if callable(recorder):
+                                recorder(
+                                    provider="openai",
+                                    engine=model,
+                                    operation=f"web_research_tool_round_{round_num + 1}",
+                                    status="failed",
+                                    latency_ms=latency_ms,
+                                )
+                    except Exception:
+                        pass
                 print(f"   ⚠️ Tool round failed: {e}")
                 break
 
@@ -220,20 +340,48 @@ def run_with_tools(
     if response_format:
         kwargs["response_format"] = response_format
 
-    response = client.chat.completions.create(**kwargs)
+    started = time.perf_counter()
+    try:
+        response = client.chat.completions.create(**kwargs)
+    except Exception:
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        try:
+            with cost_tracker_scope(cost_tracker) as tracker:
+                recorder = getattr(tracker, "record_provider_observation", None)
+                if callable(recorder):
+                    recorder(
+                        provider="openai",
+                        engine=model,
+                        operation="web_research_final",
+                        status="failed",
+                        latency_ms=latency_ms,
+                    )
+        except Exception:
+            pass
+        raise
+    latency_ms = max(0, round((time.perf_counter() - started) * 1000))
     # F-F.5 closure: track Phase 2 final-response LLM call.
     try:
-        from cost_tracker import CostTracker
         usage = getattr(response, "usage", None)
-        if usage is not None:
-            # T5 pattern: route Phase-2 final-response spend onto the caller's
-            # gate-connected tracker (throwaway fallback only when unthreaded).
-            (cost_tracker or CostTracker()).log_llm(
-                model=model,
-                operation="web_research_final",
-                input_tokens=getattr(usage, "prompt_tokens", 0),
-                output_tokens=getattr(usage, "completion_tokens", 0),
-            )
+        # T5 pattern: route Phase-2 final-response spend onto the caller's
+        # gate-connected tracker (throwaway fallback only when unthreaded).
+        with cost_tracker_scope(cost_tracker) as tracker:
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if callable(recorder):
+                recorder(
+                    provider="openai",
+                    engine=model,
+                    operation="web_research_final",
+                    status="succeeded",
+                    latency_ms=latency_ms,
+                )
+            if usage is not None:
+                tracker.log_llm(
+                    model=model,
+                    operation="web_research_final",
+                    input_tokens=getattr(usage, "prompt_tokens", 0),
+                    output_tokens=getattr(usage, "completion_tokens", 0),
+                )
     except Exception:
         pass  # Cost tracking is best-effort — import or write failure doesn't fail the research call
     content = response.choices[0].message.content

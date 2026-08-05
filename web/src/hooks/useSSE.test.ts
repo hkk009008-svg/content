@@ -221,6 +221,68 @@ describe('useSSE project lifecycle', () => {
     expect(result.current.isStreaming).toBe(true)
   })
 
+  it('attach observes an existing run without clearing history and is idempotent', () => {
+    const { result } = renderHook(() => useSSE('A'))
+
+    act(() => result.current.attach())
+    const first = MockEventSource.instances[0]
+    act(() => first.emit({ ...progressEvent, id: 12 }))
+    act(() => result.current.attach())
+
+    expect(MockEventSource.instances).toHaveLength(1)
+    expect(result.current.events).toEqual([{ ...progressEvent, id: 12 }])
+    expect(result.current.latest).toEqual({ ...progressEvent, id: 12 })
+
+    act(() => result.current.stop())
+    act(() => result.current.attach())
+
+    expect(MockEventSource.instances).toHaveLength(2)
+    expect(MockEventSource.instances[1].url).toBe('/api/projects/A/stream?last_event_id=12')
+    expect(result.current.events).toEqual([{ ...progressEvent, id: 12 }])
+    expect(result.current.latest).toEqual({ ...progressEvent, id: 12 })
+  })
+
+  it('repeated attach calls leave a scheduled reconnect in sole control', () => {
+    const { result } = renderHook(() => useSSE('A'))
+
+    act(() => result.current.attach())
+    const first = MockEventSource.instances[0]
+    act(() => first.emit({ ...progressEvent, id: 5 }))
+    act(() => first.fail())
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => {
+      result.current.attach()
+      result.current.attach()
+    })
+    expect(MockEventSource.instances).toHaveLength(1)
+    expect(vi.getTimerCount()).toBe(1)
+
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(MockEventSource.instances).toHaveLength(2)
+    expect(MockEventSource.instances[1].url).toBe('/api/projects/A/stream?last_event_id=5')
+  })
+
+  it('attach treats a project switch as a hard last-id boundary', () => {
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useSSE(projectId),
+      { initialProps: { projectId: 'A' } },
+    )
+
+    act(() => result.current.attach())
+    const sourceA = MockEventSource.instances[0]
+    act(() => sourceA.emit({ ...progressEvent, id: 21 }))
+
+    rerender({ projectId: 'B' })
+    expect(sourceA.close).toHaveBeenCalledTimes(1)
+    expect(result.current.events).toEqual([])
+    expect(result.current.latest).toBeNull()
+
+    act(() => result.current.attach())
+    expect(MockEventSource.instances).toHaveLength(2)
+    expect(MockEventSource.instances[1].url).toBe('/api/projects/B/stream')
+  })
+
   it('an interrupted B render cannot poison the committed A connection', () => {
     type SSEState = ReturnType<typeof useSSE>
     let committedState: SSEState | null = null

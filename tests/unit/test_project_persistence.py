@@ -352,7 +352,11 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
                 "character",
                 "post",
                 f"/api/projects/{project['id']}/characters",
-                {"data": {"name": "Alice", "description": "Hero"}},
+                {"data": {
+                    "name": "Alice",
+                    "description": "Hero",
+                    "creation_request_id": "a" * 32,
+                }},
                 mock.patch.object(
                     self.web_server,
                     "create_character_with_images",

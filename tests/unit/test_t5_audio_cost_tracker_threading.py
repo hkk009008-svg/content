@@ -128,6 +128,11 @@ class TestFalBgmCostTrackerThreading:
             return {"audio_file": {"url": url}}
 
         fal_mod.subscribe = _fake_subscribe
+        fal_mod.submit = lambda endpoint, arguments=None, **kwargs: types.SimpleNamespace(
+            request_id="fal-bgm-task"
+        )
+        fal_mod.status = lambda endpoint, request_id, **kwargs: {"status": "COMPLETED"}
+        fal_mod.result = lambda endpoint, request_id: {"audio_file": {"url": url}}
 
         def _fake_download(url, out, **_kwargs):
             with open(out, "wb") as f:

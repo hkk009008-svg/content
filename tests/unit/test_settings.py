@@ -55,6 +55,38 @@ class TestNewSettingsFields:
         assert s.motion_gate_samples == 16
         assert isinstance(s.motion_gate_samples, int)
 
+    def test_durable_queue_and_trace_defaults_are_typed(self, monkeypatch):
+        for name in (
+            "PIPELINE_JOB_DB_PATH",
+            "PIPELINE_QUEUE_CONCURRENCY",
+            "CINEMA_TRACE_DB_PATH",
+            "CINEMA_TRACE_RETENTION_DAYS",
+            "CINEMA_TRACE_MAX_EVENTS",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        s = Settings.from_env()
+        assert s.pipeline_job_db_path == "data/pipeline_jobs.db"
+        assert s.pipeline_queue_concurrency == 1
+        assert s.cinema_trace_db_path == "data/telemetry.db"
+        assert s.cinema_trace_retention_days == 30
+        assert s.cinema_trace_max_events == 50_000
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("PIPELINE_QUEUE_CONCURRENCY", "0"),
+            ("PIPELINE_QUEUE_CONCURRENCY", "9"),
+            ("CINEMA_TRACE_RETENTION_DAYS", "0"),
+            ("CINEMA_TRACE_MAX_EVENTS", "999"),
+        ],
+    )
+    def test_invalid_queue_and_trace_bounds_fail_at_configuration(
+        self, monkeypatch, name, value
+    ):
+        monkeypatch.setenv(name, value)
+        with pytest.raises(ConfigurationError, match=name):
+            Settings.from_env()
+
     @pytest.mark.parametrize("value", ["not-an-int", "0", "241"])
     def test_invalid_motion_gate_samples_is_named_configuration_error(
         self, monkeypatch, value

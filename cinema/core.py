@@ -96,18 +96,19 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
 
     settings = project.get("global_settings", {})
 
-    budget_usd = settings.get("budget_limit_usd")
-    if budget_usd is not None:
-        try:
-            budget_usd = float(budget_usd)
-        except (TypeError, ValueError):
-            budget_usd = None
-
-    cost_tracker = CostTracker(budget_usd=budget_usd)
+    # CostTracker is the fail-closed budget-normalization chokepoint. Passing
+    # the persisted value through unchanged is intentional: coercing malformed
+    # historical data to None here would turn corruption into "unlimited".
+    cost_tracker = CostTracker(budget_usd=settings.get("budget_limit_usd"))
     # A core can be rebuilt after restart or after a settings mutation without
     # passing through checkpoint restore. Durable project spend must therefore
     # seed the budget gate at construction, before any new paid call is admitted.
     cost_tracker.rehydrate_spent_usd_from_video(project_id)
+    # Planning helpers constructed below and within downstream decomposition /
+    # prompt-optimization functions share this tracker. Give those helpers a
+    # project scope without changing the CostTracker ledger API or persisting a
+    # runtime object into the project document.
+    cost_tracker.default_video_id = project_id
 
     return PipelineCore(
         project=project,
@@ -115,7 +116,15 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         temp_dir=temp_dir,
         export_dir=export_dir,
         continuity=ContinuityEngine(project),
-        director=ChiefDirector(project),
+        director=ChiefDirector(
+            project,
+            cost_tracker=cost_tracker,
+            video_id=project_id,
+        ),
         cost_tracker=cost_tracker,
-        ensemble=LLMEnsemble(settings=settings),
+        ensemble=LLMEnsemble(
+            settings=settings,
+            cost_tracker=cost_tracker,
+            video_id=project_id,
+        ),
     )

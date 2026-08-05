@@ -25,9 +25,13 @@ from performance._net import (
 # Mirrors the naming convention of ltx_native.RESOLUTION_MAP (sora uses flat
 # "WxH" strings; ltx uses {"width": N, "height": N} dicts).
 RESOLUTION_MAP: dict[str, str] = {
-    "480p": "480x270",
     "720p": "1280x720",
     "1080p": "1920x1080",
+}
+
+SORA_MODEL_RESOLUTIONS: dict[str, frozenset[str]] = {
+    "sora-2": frozenset({"720p"}),
+    "sora-2-pro": frozenset({"720p", "1080p"}),
 }
 
 SORA_DURATION_SECONDS = (4, 8, 12)
@@ -63,6 +67,7 @@ class SoraNativeAPI:
         driving_video_path: str = "",
         aspect_ratio: str = "16:9",
         on_billed: Callable[[], None] | None = None,
+        on_submission_started: Callable[[], None] | None = None,
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Sora 2.
@@ -72,8 +77,10 @@ class SoraNativeAPI:
             prompt: Text prompt describing the desired motion/scene.
             output_path: Where to save the generated video.
             duration: Video duration in seconds — 4, 8, or 12 (integer).
-            model: Model name — "sora-2" (default).
-            resolution: Output resolution — "480p", "720p", or "1080p".
+            model: Model name — "sora-2" (default) or "sora-2-pro".
+            resolution: Output resolution — "720p", or "1080p" for
+                ``sora-2-pro``. Generic resolution labels are validated before
+                submission; the adapter never invents unsupported dimensions.
             driving_video_path: Interface-compatible performance-capture path.
                 Sora's ``input_reference`` accepts images, not video. Any
                 non-empty value is rejected before preprocessing or submission.
@@ -94,6 +101,9 @@ class SoraNativeAPI:
                 Exceptions raised by the callback are logged and swallowed —
                 a broken accounting hook must never abort a download that
                 would otherwise succeed.
+            on_submission_started: Callback invoked immediately before the
+                non-idempotent ``create_and_poll`` call.  Once it fires, a
+                missing SDK result is not proof that no paid job was created.
 
         Returns:
             output_path on success, None on failure — either pre-billing
@@ -119,13 +129,26 @@ class SoraNativeAPI:
             print(f"[SORA-NATIVE] Start frame not found: {image_path}")
             return None
 
-        # sora-2 supports ONLY the 720p tier (1280x720 / 720x1280 per the API); 1080p and
-        # 480p requests 400 ("Invalid size for sora-2 model"). Clamp to 720p so the call can't
-        # fail on size — assembly normalize upscales the 720p clip to the project container
-        # (e.g. 1080x1920) at render. sora-2-pro is left unclamped. See plan U6 + T9 preflight.
+        if model not in SORA_MODEL_RESOLUTIONS:
+            print(
+                f"[SORA-NATIVE] Unsupported model {model!r}; "
+                f"expected one of {sorted(SORA_MODEL_RESOLUTIONS)}."
+            )
+            return None
+
+        # sora-2 supports only the 720p tier. Preserve the product's existing
+        # generic-resolution behavior by normalizing that model to 720p, which
+        # assembly can upscale. The Pro adapter is stricter: invalid labels such
+        # as the former 480p -> 480x270 mapping are rejected before submission.
         if model == "sora-2" and resolution != "720p":
             print(f"[SORA-NATIVE] {model} supports only 720p sizes; clamping {resolution}→720p (assembly upscales).")
             resolution = "720p"
+        elif resolution not in SORA_MODEL_RESOLUTIONS[model]:
+            print(
+                f"[SORA-NATIVE] Unsupported resolution {resolution!r} for {model}; "
+                f"expected one of {sorted(SORA_MODEL_RESOLUTIONS[model])}."
+            )
+            return None
 
         try:
             print(f"[SORA-NATIVE] Generating video — {duration}s, {resolution}, model={model}")
@@ -134,7 +157,7 @@ class SoraNativeAPI:
             # Resolve resolution to the API size string, then parse W×H for resize.
             # Apply portrait_swap once: this drives BOTH the PIL resize target
             # (below) and the API size= param — one swap covers both surfaces.
-            size = RESOLUTION_MAP.get(resolution, RESOLUTION_MAP["720p"])
+            size = RESOLUTION_MAP[resolution]
             w_str, h_str = size.split("x")
             target_w, target_h = portrait_swap(int(w_str), int(h_str), aspect_ratio)
             size = f"{target_w}x{target_h}"
@@ -167,6 +190,8 @@ class SoraNativeAPI:
                     f"{temp_still_path}"
                 )
 
+                if on_submission_started is not None:
+                    on_submission_started()
                 video = self.client.videos.create_and_poll(
                     model=model,
                     prompt=prompt,

@@ -22,16 +22,18 @@ MODE 2: GENERATION (Omnihuman v1.5) — For dedicated dialogue shots
 FALLBACK CHAIN: MuseTalk → Sync Lipsync v2 → LatentSync → Omnihuman (last resort)
 """
 
+import json
 import logging
 import os
 import subprocess
 import urllib.request  # retained for legacy code paths; new downloads use performance._net.safe_download
 from performance._net import safe_download, validate_video_artifact
-from typing import Optional, Dict, List
+from typing import Any, Callable, Mapping, Optional, Dict, List
 from dataclasses import dataclass
 from config.settings import settings as ENV_SETTINGS
 from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S, FAL_TIMEOUT_VIDEO_S
 from cinema.context import _finite_or
+from paid_provider import has_paid_attempt_authority
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,215 @@ try:
     FAL_AVAILABLE = True
 except ImportError:
     FAL_AVAILABLE = False
+
+
+class _PaidCascadeStop(RuntimeError):
+    """Internal signal: an acknowledged/ambiguous paid job blocks fallback."""
+
+
+RejectedCandidateHandler = Callable[[dict[str, Any]], Mapping[str, Any]]
+
+
+def _retain_rejected_paid_candidate(
+    *,
+    output_path: str,
+    engine_name: str,
+    rejection_stage: str,
+    score: Optional[float],
+    validation_state: str,
+    threshold: Optional[float],
+    aspect_ratio: Optional[str],
+    cost_tracker,
+    cascade_out: Optional[dict],
+    handler: Optional[RejectedCandidateHandler],
+) -> None:
+    """Retain one locally rejected paid output before any fallback overwrites it.
+
+    Legacy callers without durable paid-attempt authority keep their historical
+    behavior.  Durable callers must provide a controller-scoped handler which
+    copies the exact candidate into immutable artifact history.  A missing or
+    failed handler stops the cascade while ``output_path`` still contains the
+    provider bytes, leaving an operator-recoverable file instead of silently
+    replacing or deleting paid work.
+    """
+
+    if not has_paid_attempt_authority(cost_tracker):
+        return
+
+    active_attempt = (
+        cascade_out.get("_active_paid_attempt")
+        if isinstance(cascade_out, dict)
+        else None
+    )
+    attempt = dict(active_attempt) if isinstance(active_attempt, Mapping) else {}
+    numeric_score = _finite_or(score, None)
+    numeric_threshold = _finite_or(threshold, None)
+    evidence: dict[str, Any] = {
+        "engine": str(attempt.get("engine") or engine_name),
+        "provider": str(attempt.get("provider") or "fal"),
+        "model": str(attempt.get("model") or ""),
+        "path": os.path.abspath(output_path),
+        "score": None if numeric_score is None else round(numeric_score, 4),
+        "validation_state": str(validation_state),
+        "threshold": numeric_threshold,
+        "rejection_stage": str(rejection_stage),
+        "aspect_ratio": aspect_ratio,
+        "attempt_id": str(attempt.get("attempt_id") or ""),
+        "provider_job_id": str(attempt.get("provider_job_id") or ""),
+        "request_fingerprint": str(attempt.get("request_fingerprint") or ""),
+        "provider_status": str(attempt.get("provider_status") or ""),
+        "attempt_state": str(attempt.get("state") or ""),
+        "paid_attempt": attempt,
+        "retained": False,
+    }
+    rejected = None
+    if isinstance(cascade_out, dict):
+        rejected = cascade_out.setdefault("rejected_candidates", [])
+        if isinstance(rejected, list):
+            rejected.append(evidence)
+
+    try:
+        if not attempt.get("attempt_id"):
+            raise RuntimeError("completed paid candidate has no durable attempt evidence")
+        if handler is None:
+            raise RuntimeError("paid candidate has no immutable retention handler")
+        artifact = handler(dict(evidence))
+        if not isinstance(artifact, Mapping):
+            raise RuntimeError("immutable retention handler returned no artifact record")
+        required = ("artifact_id", "sha256", "object_path")
+        if any(
+            not isinstance(artifact.get(key), str) or not artifact.get(key)
+            for key in required
+        ):
+            raise RuntimeError("immutable retention record is incomplete")
+    except Exception as exc:
+        evidence["retention_error"] = str(exc)[:512]
+        if isinstance(cascade_out, dict):
+            cascade_out["rejected_candidate_retention_failed"] = True
+            cascade_out["recovery_candidate"] = evidence
+        logger.exception(
+            "paid lip-sync candidate could not be retained; stopping fallback",
+            extra={
+                "engine": evidence["engine"],
+                "attempt_id": evidence["attempt_id"],
+                "candidate_path": evidence["path"],
+                "rejection_stage": evidence["rejection_stage"],
+            },
+        )
+        raise _PaidCascadeStop(
+            "paid lip-sync candidate retention failed; fallback blocked"
+        ) from exc
+
+    evidence["retained"] = True
+    evidence["artifact"] = {
+        key: artifact.get(key)
+        for key in ("artifact_id", "logical_name", "version", "sha256", "object_path")
+        if artifact.get(key) is not None
+    }
+    evidence["retained_path"] = artifact["object_path"]
+
+
+def _run_lipsync_fal_job(
+    *,
+    application: str,
+    arguments: dict,
+    engine_key: str,
+    stable_request_base: str,
+    cost_tracker,
+    shot_id: str,
+    video_id: str,
+    timeout_s: float,
+    cascade_out: Optional[dict],
+) -> dict:
+    """Run one lip-sync FAL attempt under durable request-id authority."""
+    if cascade_out is not None:
+        cascade_out.pop("_active_paid_attempt", None)
+    if not has_paid_attempt_authority(cost_tracker):
+        if timeout_s == FAL_TIMEOUT_VIDEO_S:
+            return fal_client.subscribe(
+                application,
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
+                arguments=arguments,
+                with_logs=True,
+            )
+        if timeout_s == FAL_TIMEOUT_TALKING_HEAD_S:
+            return fal_client.subscribe(
+                application,
+                client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
+                arguments=arguments,
+                with_logs=True,
+            )
+        raise ValueError("unsupported FAL lip-sync timeout class")
+
+    from cost_tracker import API_COST_USD
+    from paid_provider import (
+        PaidCallBudgetBlocked,
+        PaidCallDeferred,
+        PaidCallUnbilled,
+        paid_attempt_id,
+        request_fingerprint,
+        run_durable_fal_job,
+    )
+
+    stable_request = request_fingerprint(
+        stable_request_base,
+        application,
+        engine_key,
+    )
+    attempt_id = paid_attempt_id(
+        "fal-lipsync",
+        video_id,
+        shot_id,
+        stable_request,
+    )
+    try:
+        result = run_durable_fal_job(
+            application=application,
+            arguments=arguments,
+            attempt_id=attempt_id,
+            engine=engine_key,
+            operation="lipsync",
+            estimated_cost_usd=API_COST_USD[engine_key],
+            request_fingerprint_value=stable_request,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            poll_timeout_s=timeout_s,
+            with_logs=True,
+        )
+    except PaidCallUnbilled:
+        # Definitive no-charge terminal evidence permits the intentionally
+        # configured next engine, but the same attempt is never POSTed again.
+        return {}
+    except (PaidCallBudgetBlocked, PaidCallDeferred) as exc:
+        if cascade_out is not None:
+            cascade_out["paid_attempt"] = dict(exc.snapshot.attempt)
+            cascade_out["paid_deferred"] = True
+        raise _PaidCascadeStop(str(exc)) from exc
+    if cascade_out is not None:
+        # Every completed provider attempt, including a quality-rejected one,
+        # has already been reconciled by provider request ID.  The controller
+        # must not add a second winner-only cost row.
+        cascade_out["paid_cost_recorded"] = True
+        try:
+            paid_attempt = cost_tracker.get_paid_attempt(attempt_id)
+        except Exception:
+            paid_attempt = None
+        exact_attempt = dict(paid_attempt) if isinstance(paid_attempt, Mapping) else {}
+        # Preserve the adapter-known identity even if a custom tracker cannot
+        # re-read its row after reconciliation.  The local quality gate runs
+        # immediately after this function and must bind rejected bytes to the
+        # exact paid request that produced them.
+        exact_attempt.update({
+            "attempt_id": attempt_id,
+            "provider": "fal",
+            "engine": engine_key,
+            "model": application,
+            "request_fingerprint": stable_request,
+        })
+        cascade_out["paid_attempt"] = dict(exact_attempt)
+        cascade_out["_active_paid_attempt"] = exact_attempt
+    return result
 
 
 # ─────────────────────────────────────────────────────────────
@@ -377,6 +588,11 @@ def lipsync_overlay(
     output_path: str,
     settings: Optional[dict] = None,
     _cascade_out: Optional[dict] = None,
+    *,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
+    _retain_rejected_candidate: Optional[RejectedCandidateHandler] = None,
 ) -> Optional[str]:
     """
     OVERLAY MODE: Apply lip sync to an EXISTING video using MuseTalk.
@@ -386,7 +602,9 @@ def lipsync_overlay(
     Fallback chain: MuseTalk → LatentSync → Sync Lipsync v2
 
     _cascade_out: optional mutable dict — if provided, caller receives
-        cascade_metadata written into it on return (both success and fallback).
+        cascade_metadata written into it on return (both success and fallback),
+        plus ``rejected_candidates`` with immutable artifact evidence for each
+        paid output rejected by the local gate.
         Key: "cascade_metadata" →
             {engine, score?, validation_state?, threshold?, fallback, attempts}
     """
@@ -405,6 +623,16 @@ def lipsync_overlay(
 
     video_url = fal_client.upload_file(video_path)
     audio_url = fal_client.upload_file(audio_path)
+
+    stable_request_base = ""
+    if has_paid_attempt_authority(cost_tracker):
+        from paid_provider import file_fingerprint, request_fingerprint
+
+        stable_request_base = request_fingerprint(
+            "overlay",
+            file_fingerprint(video_path),
+            file_fingerprint(audio_path),
+        )
 
     # Gate setup for sync-validated escalation across overlay engines.
     # Bundle-A 1.2 (2026-05-24): thread project settings through so
@@ -451,6 +679,18 @@ def lipsync_overlay(
                     "attempts": list(overlay_attempts),
                 }
             return True
+        _retain_rejected_paid_candidate(
+            output_path=output_path,
+            engine_name=engine_name,
+            rejection_stage="quality_gate",
+            score=score,
+            validation_state=validation_state,
+            threshold=overlay_threshold,
+            aspect_ratio=(settings or {}).get("aspect_ratio"),
+            cost_tracker=cost_tracker,
+            cascade_out=_cascade_out,
+            handler=_retain_rejected_candidate,
+        )
         stash = f"{output_path}.{engine_name}.tmp"
         try:
             _shutil_overlay.copyfile(output_path, stash)
@@ -467,22 +707,33 @@ def lipsync_overlay(
     # Slightly more expensive but better baseline quality on hard inputs.
     try:
         logger.info("overlay attempt: sync.so v3 (best generalist)", extra={"engine": "syncSoV3"})
-        result = fal_client.subscribe(
-            "fal-ai/sync-lipsync/v3",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/sync-lipsync/v3",
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
             },
-            with_logs=True,
+            engine_key="LIPSYNC_SYNCSOV3",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_VIDEO_S,
+            cascade_out=_cascade_out,
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("sync.so v3 download failed", extra={"engine": "syncSoV3"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _overlay_gate_or_stash("syncSoV3"):
                 logger.info("overlay success", extra={"engine": "syncSoV3", "output_path": output_path})
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         # sync.so v3 endpoint might be named differently or not yet on FAL.
         # Falls through to MuseTalk silently — no user-visible regression.
@@ -491,66 +742,99 @@ def lipsync_overlay(
     # ATTEMPT 1: MuseTalk (mouth-only overlay, cheapest)
     try:
         logger.info("overlay attempt: MuseTalk (mouth-only)", extra={"engine": "MuseTalk"})
-        result = fal_client.subscribe(
-            "fal-ai/musetalk",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/musetalk",
             arguments={
                 "source_video_url": video_url,
                 "audio_url": audio_url,
             },
-            with_logs=True,
+            engine_key="LIPSYNC_MUSETALK",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_VIDEO_S,
+            cascade_out=_cascade_out,
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("MuseTalk download failed", extra={"engine": "MuseTalk"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _overlay_gate_or_stash("MuseTalk"):
                 logger.info("overlay success", extra={"engine": "MuseTalk", "output_path": output_path})
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         logger.warning("MuseTalk overlay attempt failed", extra={"engine": "MuseTalk", "error": str(e)})
 
     # ATTEMPT 2: LatentSync (ByteDance, no intermediate representations)
     try:
         logger.info("overlay attempt: LatentSync fallback", extra={"engine": "LatentSync"})
-        result = fal_client.subscribe(
-            "fal-ai/latentsync",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/latentsync",
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
             },
-            with_logs=True,
+            engine_key="LIPSYNC_LATENTSYNC",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_VIDEO_S,
+            cascade_out=_cascade_out,
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("LatentSync download failed", extra={"engine": "LatentSync"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _overlay_gate_or_stash("LatentSync"):
                 logger.info("overlay success", extra={"engine": "LatentSync", "output_path": output_path})
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         logger.warning("LatentSync overlay attempt failed", extra={"engine": "LatentSync", "error": str(e)})
 
     # ATTEMPT 3: Sync Lipsync v2 (premium fallback for hard cases)
     try:
         logger.info("overlay attempt: Sync Lipsync v2 fallback (premium)", extra={"engine": "SyncV2"})
-        result = fal_client.subscribe(
-            "fal-ai/sync-lipsync/v2",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/sync-lipsync/v2",
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
             },
-            with_logs=True,
+            engine_key="LIPSYNC_SYNCV2",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_VIDEO_S,
+            cascade_out=_cascade_out,
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Sync v2 download failed", extra={"engine": "SyncV2"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _overlay_gate_or_stash("SyncV2"):
                 logger.info("overlay success", extra={"engine": "SyncV2", "output_path": output_path})
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         logger.warning("Sync v2 overlay attempt failed", extra={"engine": "SyncV2", "error": str(e)})
 
@@ -934,6 +1218,11 @@ def lipsync_generation(
     turbo: bool = False,
     settings: Optional[dict] = None,
     _cascade_out: Optional[dict] = None,
+    *,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
+    _retain_rejected_candidate: Optional[RejectedCandidateHandler] = None,
 ) -> Optional[str]:
     """
     GENERATION MODE: Create a full-body talking video from a STILL IMAGE.
@@ -943,7 +1232,9 @@ def lipsync_generation(
     Fallback chain: Omnihuman v1.5 → Creatify Aurora
 
     _cascade_out: optional mutable dict — if provided, caller receives
-        cascade_metadata written into it on return (both success and fallback).
+        cascade_metadata written into it on return (both success and fallback),
+        plus ``rejected_candidates`` with immutable artifact evidence for each
+        paid output rejected by orientation or sync quality.
         Key: "cascade_metadata" →
             {engine, score?, validation_state?, threshold?, fallback, attempts}
     """
@@ -962,6 +1253,18 @@ def lipsync_generation(
 
     image_url = fal_client.upload_file(character_image_path)
     audio_url = fal_client.upload_file(audio_path)
+
+    stable_request_base = ""
+    if has_paid_attempt_authority(cost_tracker):
+        from paid_provider import file_fingerprint, request_fingerprint
+
+        stable_request_base = request_fingerprint(
+            "generation",
+            file_fingerprint(character_image_path),
+            file_fingerprint(audio_path),
+            resolution,
+            bool(turbo),
+        )
 
     # SyncNet gate — score each engine's output, fall through if below threshold.
     # Track candidates so we can return the best-scored even if none clears the bar.
@@ -993,6 +1296,18 @@ def lipsync_generation(
         # clip must never win the best-of-failed fallback for a portrait deliverable.
         from phase_c_ffmpeg import _accept_or_reject
         if not _accept_or_reject(output_path, _aspect):
+            _retain_rejected_paid_candidate(
+                output_path=output_path,
+                engine_name=engine_name,
+                rejection_stage="orientation_gate",
+                score=None,
+                validation_state=LIPSYNC_QUALITY_FAIL,
+                threshold=None,
+                aspect_ratio=_aspect,
+                cost_tracker=cost_tracker,
+                cascade_out=_cascade_out,
+                handler=_retain_rejected_candidate,
+            )
             logger.warning(
                 "engine produced wrong orientation — rejecting, trying next",
                 extra={"engine": engine_name, "aspect": _aspect},
@@ -1031,6 +1346,18 @@ def lipsync_generation(
                     "attempts": list(gen_attempts),
                 }
             return True
+        _retain_rejected_paid_candidate(
+            output_path=output_path,
+            engine_name=engine_name,
+            rejection_stage="quality_gate",
+            score=score,
+            validation_state=validation_state,
+            threshold=gate_threshold,
+            aspect_ratio=_aspect,
+            cost_tracker=cost_tracker,
+            cascade_out=_cascade_out,
+            handler=_retain_rejected_candidate,
+        )
         # Stash this candidate before the next engine overwrites output_path
         stash = f"{output_path}.{engine_name}.tmp"
         try:
@@ -1049,51 +1376,73 @@ def lipsync_generation(
             "generation attempt: Omnihuman v1.5 full-body",
             extra={"engine": "omnihuman", "resolution": resolution},
         )
-        result = fal_client.subscribe(
-            "fal-ai/bytedance/omnihuman/v1.5",
-            client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/bytedance/omnihuman/v1.5",
             arguments={
                 "image_url": image_url,
                 "audio_url": audio_url,
                 "resolution": resolution,
                 "turbo_mode": turbo,
             },
-            with_logs=True,
+            engine_key="LIPSYNC_OMNIHUMAN",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_TALKING_HEAD_S,
+            cascade_out=_cascade_out,
         )
         video_url = result.get("video", {}).get("url")
         duration = result.get("duration", 0)
         if video_url:
             if safe_download(video_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Omnihuman download failed", extra={"engine": "omnihuman"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _gate_or_stash("Omnihuman"):
                 logger.info(
                     "generation success",
                     extra={"engine": "omnihuman", "output_path": output_path, "video_duration_s": round(duration, 3)},
                 )
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         logger.warning("Omnihuman failed", extra={"engine": "omnihuman", "error": str(e)})
 
     # ATTEMPT 1: Creatify Aurora (studio-grade avatar)
     try:
         logger.info("generation attempt: Creatify Aurora fallback", extra={"engine": "aurora"})
-        result = fal_client.subscribe(
-            "fal-ai/creatify/aurora",
-            client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
+        result = _run_lipsync_fal_job(
+            application="fal-ai/creatify/aurora",
             arguments={
                 "image_url": image_url,
                 "audio_url": audio_url,
                 "resolution": "720p",
             },
-            with_logs=True,
+            engine_key="LIPSYNC_AURORA",
+            stable_request_base=stable_request_base,
+            cost_tracker=cost_tracker,
+            shot_id=shot_id,
+            video_id=video_id,
+            timeout_s=FAL_TIMEOUT_TALKING_HEAD_S,
+            cascade_out=_cascade_out,
         )
         video_url = result.get("video", {}).get("url")
         if video_url:
             if safe_download(video_url, output_path, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact) is None:
                 logger.warning("Aurora download failed", extra={"engine": "aurora"})
+                if has_paid_attempt_authority(cost_tracker):
+                    if _cascade_out is not None:
+                        _cascade_out["paid_deferred"] = True
+                    return None
             elif _gate_or_stash("Aurora"):
                 logger.info("generation success", extra={"engine": "aurora", "output_path": output_path})
                 return output_path
+    except _PaidCascadeStop:
+        return None
     except Exception as e:
         logger.warning("Aurora failed", extra={"engine": "aurora", "error": str(e)})
 
@@ -1125,6 +1474,11 @@ def generate_lip_sync_video(
     turbo: bool = False,
     settings: Optional[dict] = None,
     _cascade_out: Optional[dict] = None,
+    *,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
+    _retain_rejected_candidate: Optional[RejectedCandidateHandler] = None,
 ) -> Optional[str]:
     """
     Smart lip sync router — selects the optimal mode based on inputs.
@@ -1137,7 +1491,8 @@ def generate_lip_sync_video(
         mode: "auto" | "overlay" | "generation" | "skip"
         resolution: "720p" or "1080p"
         turbo: Faster but lower quality
-        _cascade_out: optional mutable dict — receives cascade_metadata on return.
+        _cascade_out: optional mutable dict — receives cascade metadata and
+            rejected-candidate artifact evidence on return.
 
     Auto-selection logic:
     - If existing_video_path is provided → OVERLAY (preserve the cinematic video)
@@ -1172,12 +1527,17 @@ def generate_lip_sync_video(
 
     if selected_mode == "overlay" and existing_video_path:
         return lipsync_overlay(existing_video_path, audio_path, output_path,
-                               settings=settings, _cascade_out=_cascade_out)
+                               settings=settings, _cascade_out=_cascade_out,
+                               cost_tracker=cost_tracker, shot_id=shot_id,
+                               video_id=video_id,
+                               _retain_rejected_candidate=_retain_rejected_candidate)
     else:
         return lipsync_generation(
             character_image_path, audio_path, output_path,
             resolution=resolution, turbo=turbo, settings=settings,
-            _cascade_out=_cascade_out,
+            _cascade_out=_cascade_out, cost_tracker=cost_tracker,
+            shot_id=shot_id, video_id=video_id,
+            _retain_rejected_candidate=_retain_rejected_candidate,
         )
 
 
@@ -1286,6 +1646,10 @@ def generate_rife_interpolation(
     output_path: str,
     num_frames: int = 2,
     use_scene_detection: bool = True,
+    *,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
 ) -> Optional[str]:
     """
     Cloud-based frame interpolation via RIFE on fal.ai.
@@ -1315,17 +1679,85 @@ def generate_rife_interpolation(
             extra={"engine": "rife", "num_frames": num_frames},
         )
 
-        result = fal_client.subscribe(
-            "fal-ai/rife/video",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
-            arguments={
-                "video_url": video_url,
-                "num_frames": num_frames,
-                "use_scene_detection": use_scene_detection,
-                "use_calculated_fps": True,
-            },
-            with_logs=True,
-        )
+        arguments = {
+            "video_url": video_url,
+            "num_frames": num_frames,
+            "use_scene_detection": use_scene_detection,
+            "use_calculated_fps": True,
+        }
+        if not has_paid_attempt_authority(cost_tracker):
+            # Backward-compatible standalone/test path. Pipeline-owned calls
+            # inject their shared tracker below and therefore use the durable
+            # FAL request-id state machine. Standalone callers have no project
+            # budget/recovery authority to bind and remain a documented
+            # limitation instead of writing into an unrelated project ledger.
+            result = fal_client.subscribe(
+                "fal-ai/rife/video",
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
+                arguments=arguments,
+                with_logs=True,
+            )
+        else:
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_fal_job,
+            )
+
+            stable_request = request_fingerprint(
+                "fal-ai/rife/video",
+                file_fingerprint(video_path),
+                int(num_frames),
+                bool(use_scene_detection),
+            )
+            attempt_id = paid_attempt_id(
+                "fal-rife",
+                video_id,
+                shot_id,
+                stable_request,
+            )
+            try:
+                result = run_durable_fal_job(
+                    application="fal-ai/rife/video",
+                    arguments=arguments,
+                    attempt_id=attempt_id,
+                    engine="FAL_RIFE",
+                    operation="rife_interpolation",
+                    estimated_cost_usd=API_COST_USD["FAL_RIFE"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
+                    poll_timeout_s=FAL_TIMEOUT_VIDEO_S,
+                    with_logs=True,
+                )
+            except PaidCallBudgetBlocked as exc:
+                logger.warning(
+                    "RIFE atomic budget reservation refused; provider not started",
+                    extra={"engine": "rife", "attempt_id": exc.snapshot.attempt.get("attempt_id")},
+                )
+                return None
+            except PaidCallDeferred as exc:
+                logger.warning(
+                    "RIFE provider request requires recovery; no replacement request started",
+                    extra={
+                        "engine": "rife",
+                        "attempt_id": exc.snapshot.attempt.get("attempt_id"),
+                        "provider_job_id": exc.snapshot.attempt.get("provider_job_id"),
+                    },
+                )
+                return None
+            except PaidCallUnbilled:
+                logger.warning(
+                    "RIFE attempt is terminal and unbilled; a new operator-owned attempt is required",
+                    extra={"engine": "rife"},
+                )
+                return None
 
         out_url = result.get("video", {}).get("url")
         if out_url:
@@ -1361,10 +1793,80 @@ def generate_rife_interpolation(
         return None
 
 
+_SEEDVR2_RESOLUTION_PIXELS = {
+    "720p": 1280 * 720,
+    "1080p": 1920 * 1080,
+    "1440p": 2560 * 1440,
+    "2160p": 3840 * 2160,
+}
+
+
+def _seedvr2_frame_count(video_path: str) -> int:
+    """Probe source frames without decoding; use a conservative fallback."""
+
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=nb_frames,duration,avg_frame_rate",
+                "-of", "json",
+                video_path,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        payload = json.loads(completed.stdout.decode("utf-8"))
+        streams = payload.get("streams") if isinstance(payload, dict) else None
+        stream = streams[0] if isinstance(streams, list) and streams else {}
+        raw_frames = stream.get("nb_frames") if isinstance(stream, dict) else None
+        frames = int(raw_frames) if str(raw_frames or "").isdigit() else 0
+        if frames <= 0 and isinstance(stream, dict):
+            duration = float(stream.get("duration") or 0.0)
+            rate_text = str(stream.get("avg_frame_rate") or "")
+            numerator, separator, denominator = rate_text.partition("/")
+            if separator and float(denominator) > 0:
+                frames = int(round(duration * float(numerator) / float(denominator)))
+        if frames > 0:
+            return frames
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        UnicodeError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ):
+        pass
+    # A missing/malformed probe must not turn the budget reservation into a
+    # tiny nominal charge. Ten seconds at 30fps is conservative for the
+    # pipeline's usual 5-8 second takes.
+    return 300
+
+
+def _seedvr2_estimated_cost(video_path: str, target_resolution: str) -> float:
+    """Estimate fal's $0.001 per output-megapixel-frame price."""
+
+    pixels = _SEEDVR2_RESOLUTION_PIXELS.get(target_resolution)
+    if pixels is None:
+        raise ValueError(
+            "target_resolution must be one of "
+            f"{sorted(_SEEDVR2_RESOLUTION_PIXELS)}"
+        )
+    frame_count = _seedvr2_frame_count(video_path)
+    return round(0.001 * (pixels * frame_count / 1_000_000.0), 6)
+
+
 def upscale_video_seedvr2(
     video_path: str,
     output_path: str,
     target_resolution: str = "1080p",
+    *,
+    cost_tracker=None,
+    shot_id: str = "",
+    video_id: str = "",
 ) -> Optional[str]:
     """
     Cloud-based video upscaling via SeedVR2 on fal.ai.
@@ -1386,6 +1888,15 @@ def upscale_video_seedvr2(
         return None
 
     try:
+        estimated_cost = _seedvr2_estimated_cost(video_path, target_resolution)
+    except ValueError as exc:
+        logger.warning(
+            "SeedVR2 request rejected before upload",
+            extra={"engine": "seedvr2", "error": str(exc)},
+        )
+        return None
+
+    try:
         video_url = fal_client.upload_file(video_path)
 
         logger.info(
@@ -1393,19 +1904,86 @@ def upscale_video_seedvr2(
             extra={"engine": "seedvr2", "target_resolution": target_resolution},
         )
 
-        result = fal_client.subscribe(
-            "fal-ai/seedvr/upscale/video",
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
-            arguments={
-                "video_url": video_url,
-                "upscale_mode": "target",
-                "target_resolution": target_resolution,
-                "noise_scale": 0.1,
-                "output_format": "X264 (.mp4)",
-                "output_quality": "high",
-            },
-            with_logs=True,
-        )
+        arguments = {
+            "video_url": video_url,
+            "upscale_mode": "target",
+            "target_resolution": target_resolution,
+            "noise_scale": 0.1,
+            "output_format": "X264 (.mp4)",
+            "output_quality": "high",
+        }
+        if not has_paid_attempt_authority(cost_tracker):
+            result = fal_client.subscribe(
+                "fal-ai/seedvr/upscale/video",
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
+                arguments=arguments,
+                with_logs=True,
+            )
+        else:
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_fal_job,
+            )
+
+            stable_request = request_fingerprint(
+                "fal-ai/seedvr/upscale/video",
+                file_fingerprint(video_path),
+                target_resolution,
+                0.1,
+                "X264 (.mp4)",
+                "high",
+            )
+            attempt_id = paid_attempt_id(
+                "fal-seedvr2",
+                video_id,
+                shot_id,
+                stable_request,
+            )
+            try:
+                result = run_durable_fal_job(
+                    application="fal-ai/seedvr/upscale/video",
+                    arguments=arguments,
+                    attempt_id=attempt_id,
+                    engine="FAL_SEEDVR2",
+                    operation="video_upscale",
+                    estimated_cost_usd=estimated_cost,
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
+                    poll_timeout_s=FAL_TIMEOUT_VIDEO_S,
+                    with_logs=True,
+                )
+            except PaidCallBudgetBlocked as exc:
+                logger.warning(
+                    "SeedVR2 atomic budget reservation refused; provider not started",
+                    extra={
+                        "engine": "seedvr2",
+                        "attempt_id": exc.snapshot.attempt.get("attempt_id"),
+                    },
+                )
+                return None
+            except PaidCallDeferred as exc:
+                logger.warning(
+                    "SeedVR2 provider request requires recovery; no replacement started",
+                    extra={
+                        "engine": "seedvr2",
+                        "attempt_id": exc.snapshot.attempt.get("attempt_id"),
+                        "provider_job_id": exc.snapshot.attempt.get("provider_job_id"),
+                    },
+                )
+                return None
+            except PaidCallUnbilled:
+                logger.warning(
+                    "SeedVR2 attempt is terminal and unbilled; operator retry required",
+                    extra={"engine": "seedvr2"},
+                )
+                return None
 
         out_url = result.get("video", {}).get("url")
         if out_url:

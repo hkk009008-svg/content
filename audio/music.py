@@ -25,6 +25,8 @@ from audio.effects import (
 from typing import Optional
 
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import has_paid_attempt_authority
 from performance._net import safe_download, validate_audio_artifact
 
 
@@ -147,6 +149,8 @@ def generate_suno_v5(
     custom_lyrics: str = "",
     poll_timeout_s: int = 240,
     cost_tracker: Optional = None,
+    _recovery_out: Optional[dict] = None,
+    video_id: str = "",
 ) -> bool:
     """Generate a song via Suno V5 (the SOTA music model with vocals).
 
@@ -193,6 +197,20 @@ def generate_suno_v5(
 
     _FAILED = {"CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED",
                "CALLBACK_EXCEPTION", "SENSITIVE_WORD_ERROR"}
+
+    if has_paid_attempt_authority(cost_tracker):
+        return _generate_suno_v5_durable(
+            requests_module=requests,
+            base=base,
+            headers=headers,
+            payload=payload,
+            output_filename=output_filename,
+            poll_timeout_s=poll_timeout_s,
+            failed_states=_FAILED,
+            cost_tracker=cost_tracker,
+            recovery_out=_recovery_out,
+            video_id=video_id,
+        )
 
     try:
         print(f"   [SUNO V5] Generating [{music_vibe.upper()}] (model={_SUNO_MODEL}, instrumental={instrumental})...")
@@ -259,9 +277,8 @@ def generate_suno_v5(
         # T5: use caller-supplied tracker when provided so spend accumulates on
         # the pipeline's budget-aware tracker (cross-process persistence deferred).
         try:
-            from cost_tracker import CostTracker
-            _tracker = cost_tracker or CostTracker()
-            _tracker.record_api_call("SUNO_V5", operation="bgm")
+            with cost_tracker_scope(cost_tracker) as tracker:
+                tracker.record_api_call("SUNO_V5", operation="bgm")
         except Exception:
             print(f"   [SUNO V5] cost record skipped (non-critical)")
         return True
@@ -273,6 +290,211 @@ def generate_suno_v5(
         return False
 
 
+def _generate_suno_v5_durable(
+    *,
+    requests_module,
+    base: str,
+    headers: dict,
+    payload: dict,
+    output_filename: str,
+    poll_timeout_s: int,
+    failed_states: set[str],
+    cost_tracker,
+    recovery_out: Optional[dict],
+    video_id: str,
+) -> bool:
+    """Submit or resume one Suno task ID under paid-attempt authority."""
+    from cost_tracker import API_COST_USD
+    from paid_provider import paid_attempt_id, request_fingerprint
+
+    stable_request = request_fingerprint(
+        "suno-v5",
+        payload,
+        os.path.abspath(output_filename),
+    )
+    attempt_id = paid_attempt_id("suno-bgm", stable_request)
+
+    def _defer(attempt: dict, detail: str) -> bool:
+        try:
+            current = cost_tracker.get_paid_attempt(attempt_id) or attempt
+        except Exception:
+            current = attempt
+        if current.get("state") not in {"succeeded", "failed_billed"}:
+            try:
+                attempt = cost_tracker.update_paid_attempt(
+                    attempt_id,
+                    state="accepted_unknown",
+                    provider_job_id=current.get("provider_job_id") or None,
+                    provider_status="outcome_unknown",
+                    detail=detail,
+                )
+            except Exception:
+                attempt = current
+        else:
+            attempt = current
+        if recovery_out is not None:
+            recovery_out["paid_deferred"] = True
+            recovery_out["paid_attempt"] = dict(attempt)
+        print(f"   [SUNO V5] {detail}; automatic FAL fallback blocked")
+        return False
+
+    attempt = cost_tracker.reserve_paid_attempt(
+        attempt_id=attempt_id,
+        provider="suno",
+        engine="SUNO_V5",
+        operation="bgm",
+        estimated_cost_usd=API_COST_USD["SUNO_V5"],
+        request_fingerprint=stable_request,
+        video_id=video_id,
+    )
+    state = str(attempt.get("state") or "")
+    task_id = str(attempt.get("provider_job_id") or "")
+    if not attempt.get("acquired"):
+        if state == "blocked_budget":
+            if recovery_out is not None:
+                recovery_out["budget_blocked"] = True
+                recovery_out["paid_attempt"] = dict(attempt)
+            print("   [SUNO V5] atomic budget reservation refused; provider not started")
+            return False
+        if state in {"failed_unbilled", "cancelled"}:
+            return False
+        if state == "failed_billed":
+            return _defer(attempt, "previous Suno attempt failed after billing")
+        if not task_id:
+            return _defer(
+                attempt,
+                "Suno submission may have been accepted without a durable task ID",
+            )
+    else:
+        print(f"   [SUNO V5] Generating (model={_SUNO_MODEL})...")
+        try:
+            response = requests_module.post(
+                f"{base}/api/v1/generate",
+                json=payload,
+                headers=headers,
+                timeout=30,
+            )
+        except requests_module.RequestException as exc:
+            return _defer(
+                attempt,
+                f"Suno submit acknowledgement was lost ({type(exc).__name__})",
+            )
+        if response.status_code not in (200, 201, 202):
+            # A provider-authored non-retryable 4xx is evidence that no task
+            # was accepted. Timeouts/rate limits remain ambiguous because an
+            # intermediary can return them after forwarding the request.
+            if response.status_code in {400, 401, 403, 404, 422}:
+                cost_tracker.reconcile_paid_attempt(
+                    attempt_id,
+                    state="failed_unbilled",
+                    provider_status=f"http_{response.status_code}",
+                    detail="Suno rejected submission before returning a task ID",
+                )
+                return False
+            return _defer(
+                attempt,
+                f"Suno submit returned ambiguous HTTP {response.status_code}",
+            )
+        try:
+            body = response.json() or {}
+        except ValueError:
+            return _defer(attempt, "Suno submit response was not valid JSON")
+        if body.get("code") != 200:
+            cost_tracker.reconcile_paid_attempt(
+                attempt_id,
+                state="failed_unbilled",
+                provider_status=f"code_{body.get('code')}",
+                detail="Suno explicitly rejected submission before task creation",
+            )
+            return False
+        task_id = str((body.get("data") or {}).get("taskId") or "")
+        if not task_id:
+            return _defer(attempt, "Suno accepted submission but omitted taskId")
+        attempt = cost_tracker.update_paid_attempt(
+            attempt_id,
+            state="running",
+            provider_job_id=task_id,
+            provider_status="queued",
+            detail="Suno task acknowledged; polling durable task ID",
+        )
+
+    audio_url = ""
+    start = time.monotonic()
+    while (time.monotonic() - start) < max(0, poll_timeout_s):
+        time.sleep(_SUNO_POLL_INTERVAL_S)
+        try:
+            status_response = requests_module.get(
+                f"{base}/api/v1/generate/record-info",
+                params={"taskId": task_id},
+                headers=headers,
+                timeout=15,
+            )
+        except requests_module.RequestException:
+            continue
+        if not status_response.ok:
+            continue
+        try:
+            data = (status_response.json() or {}).get("data") or {}
+        except ValueError:
+            continue
+        status = str(data.get("status") or "").upper()
+        if status == "SUCCESS":
+            tracks = ((data.get("response") or {}).get("sunoData")) or []
+            if tracks:
+                audio_url = tracks[0].get("audioUrl") or tracks[0].get("streamAudioUrl") or ""
+            break
+        if status in failed_states:
+            return _defer(
+                attempt,
+                f"Suno task ended as {status} with billing unknown",
+            )
+
+    if not audio_url:
+        return _defer(
+            attempt,
+            f"Suno task {task_id} has no retrievable audio at the local deadline",
+        )
+
+    if state != "succeeded":
+        try:
+            cost_tracker.reconcile_paid_attempt(
+                attempt_id,
+                state="succeeded",
+                actual_cost_usd=API_COST_USD["SUNO_V5"],
+                provider_job_id=task_id,
+                provider_status="SUCCESS",
+                detail="Suno provider task completed",
+            )
+        except Exception:
+            return _defer(
+                attempt,
+                "Suno completed but cost reconciliation failed",
+            )
+
+    downloaded = safe_download(
+        audio_url,
+        output_filename,
+        max_bytes=256 * 1024 * 1024,
+        read_timeout=60,
+        request_headers={"User-Agent": _SUNO_DOWNLOAD_UA},
+        allowed_content_types=(
+            "audio/mpeg",
+            "audio/mp3",
+            "audio/wav",
+            "audio/x-wav",
+            "application/octet-stream",
+        ),
+        content_validator=validate_audio_artifact,
+    )
+    if downloaded is None:
+        return _defer(
+            cost_tracker.get_paid_attempt(attempt_id) or attempt,
+            "Suno completed and was charged, but its audio artifact was not publishable",
+        )
+    print(f"   ✅ Suno V5 song saved: {output_filename}")
+    return True
+
+
 def generate_bgm(
     music_vibe: str,
     output_filename: str,
@@ -280,6 +502,7 @@ def generate_bgm(
     prefer_provider: Optional[str] = None,
     custom_lyrics: str = "",
     cost_tracker: Optional = None,
+    video_id: str = "",
 ) -> bool:
     """Smart router: Suno V5 → FAL Stable Audio. Returns True on success.
 
@@ -290,17 +513,33 @@ def generate_bgm(
     provider = prefer_provider or "AUTO"
 
     if provider in ("SUNO_V5", "AUTO"):
+        recovery: dict = {}
         if generate_suno_v5(music_vibe, output_filename, duration=duration,
-                            custom_lyrics=custom_lyrics, cost_tracker=cost_tracker):
+                            custom_lyrics=custom_lyrics, cost_tracker=cost_tracker,
+                            _recovery_out=recovery, video_id=video_id):
             return True
+        if recovery.get("paid_deferred") or recovery.get("budget_blocked"):
+            return False
         # Fall through to FAL on Suno failure
 
-    return generate_fal_bgm(music_vibe, output_filename, duration=duration, cost_tracker=cost_tracker)
+    return generate_fal_bgm(
+        music_vibe,
+        output_filename,
+        duration=duration,
+        cost_tracker=cost_tracker,
+        video_id=video_id,
+    )
 
 
 import time  # used by Suno polling — placed here to keep the import surface stable
 
-def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, cost_tracker: Optional = None):
+def generate_fal_bgm(
+    music_vibe: str,
+    output_filename: str,
+    duration: int = 42,
+    cost_tracker: Optional = None,
+    video_id: str = "",
+):
     """Uses Fal.ai's text-to-audio engine to generate custom background music."""
 
     print(f"   [BGM] Generating [{music_vibe.upper()}] via Fal.ai Stable Audio...")
@@ -354,21 +593,74 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, 
         # Enhance prompt with real film score references via Tavily
         try:
             from research_engine import research_music_reference
-            music_ref = research_music_reference(music_vibe, "")
+            music_ref = research_music_reference(
+                music_vibe,
+                "",
+                cost_tracker=cost_tracker,
+            )
             if music_ref:
                 prompt = f"{prompt}. Reference: {music_ref[:200]}"
                 print(f"   [BGM] Enhanced with research reference")
         except Exception:
             pass  # Research is optional
 
-        result = fal_client.subscribe(
-            "fal-ai/stable-audio", # Top tier ambient/music generation
-            client_timeout=FAL_TIMEOUT_VIDEO_S,
-            arguments={
-                "prompt": prompt,
-                "seconds_total": duration
-            }
-        )
+        arguments = {
+            "prompt": prompt,
+            "seconds_total": duration,
+        }
+        durable_cost_recorded = False
+        if not has_paid_attempt_authority(cost_tracker):
+            result = fal_client.subscribe(
+                "fal-ai/stable-audio",  # Top tier ambient/music generation
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
+                arguments=arguments,
+            )
+        else:
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_fal_job,
+            )
+
+            stable_request = request_fingerprint(
+                "fal-stable-audio",
+                prompt,
+                int(duration),
+                os.path.abspath(output_filename),
+            )
+            try:
+                result = run_durable_fal_job(
+                    application="fal-ai/stable-audio",
+                    arguments=arguments,
+                    attempt_id=paid_attempt_id(
+                        "fal-bgm",
+                        video_id,
+                        music_vibe,
+                        int(duration),
+                        os.path.abspath(output_filename),
+                    ),
+                    engine="FAL_STABLE_AUDIO",
+                    operation="bgm",
+                    estimated_cost_usd=API_COST_USD["FAL_STABLE_AUDIO"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    video_id=video_id,
+                    poll_timeout_s=FAL_TIMEOUT_VIDEO_S,
+                )
+                durable_cost_recorded = True
+            except PaidCallBudgetBlocked:
+                print("   [FAL] Stable Audio atomic budget reservation refused")
+                return False
+            except PaidCallDeferred:
+                print("   [FAL] Stable Audio request requires recovery; no replay started")
+                return False
+            except PaidCallUnbilled:
+                print("   [FAL] Stable Audio attempt is terminal and unbilled")
+                return False
 
         audio_url = None
         if 'audio_file' in result:
@@ -399,12 +691,12 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, 
             # Cartesia pattern at audio/dialogue.py:419-427.
             # T5: use caller-supplied tracker when provided so spend accumulates on
             # the pipeline's budget-aware tracker (cross-process persistence deferred).
-            try:
-                from cost_tracker import CostTracker
-                _tracker = cost_tracker or CostTracker()
-                _tracker.record_api_call("FAL_STABLE_AUDIO", operation="bgm")
-            except Exception:
-                print(f"   [FAL] cost record skipped (non-critical)")
+            if not durable_cost_recorded:
+                try:
+                    with cost_tracker_scope(cost_tracker) as tracker:
+                        tracker.record_api_call("FAL_STABLE_AUDIO", operation="bgm")
+                except Exception:
+                    print(f"   [FAL] cost record skipped (non-critical)")
             return True
 
         print("⚠️ Fal.ai BGM Warning: No audio URL returned.")

@@ -25,9 +25,9 @@ FAL_TIMEOUT_VIDEO_S = 600
 
 # Talking-head GENERATION engines (Kling lipsync audio-to-video, Omnihuman
 # 1.5, Creatify Aurora): runtime scales with AUDIO length,
-# and lip_sync_mode="generation" feeds scene-level audio. Measured ~40x
-# realtime locally (logs/_lipsync_gen_test.log: 3.84s audio -> 156s wall,
-# 720p, turbo off), so a contract-legal 60s job extrapolates well past 600s
+# and lip_sync_mode="generation" feeds scene-level audio. A prior live timing
+# measured roughly 40x realtime (3.84s audio -> 156s wall, 720p, turbo off),
+# so a contract-legal 60s job extrapolates well past 600s
 # — and client_timeout CANCELS the in-flight job on expiry, which would
 # silently downgrade Omnihuman -> Aurora 720p on the capability-maximized
 # path (review wf_e0d1765b, adversarially confirmed). 1800 covers 60s audio

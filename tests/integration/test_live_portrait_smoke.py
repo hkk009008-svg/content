@@ -2,7 +2,9 @@
 
 Calls the existing ComfyUI pod's LivePortrait workflow with a synthetic
 keyframe + a 2s driving video (a tiny generated mp4). Gated behind
-COMFYUI_SERVER_URL.
+an explicit `runpod-liveportrait-performance` selection. The canary runner
+maps that target's dedicated performance endpoint into the application
+adapter's canonical COMFYUI_SERVER_URL and COMFYUI_API_KEY variables.
 """
 
 from __future__ import annotations
@@ -16,11 +18,21 @@ import pytest
 from config.settings import settings
 
 
-HAS_COMFYUI = bool(getattr(settings, "comfyui_server_url", ""))
+SELECTED = (
+    os.environ.get("LIVE_CONTRACT_CANARY_TARGET", "")
+    == "runpod-liveportrait-performance"
+)
+HAS_COMFYUI = bool(
+    getattr(settings, "comfyui_server_url", "")
+    and getattr(settings, "comfyui_api_key", "")
+)
 
 pytestmark = [
     pytest.mark.e2e,
-    pytest.mark.skipif(not HAS_COMFYUI, reason="COMFYUI_SERVER_URL not set; LivePortrait smoke skipped"),
+    pytest.mark.skipif(
+        not SELECTED or not HAS_COMFYUI,
+        reason="RunPod/ComfyUI was not selected or configured",
+    ),
 ]
 
 
@@ -55,7 +67,7 @@ def test_live_portrait_pod_round_trip():
     try:
         subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
     except (subprocess.SubprocessError, FileNotFoundError):
-        pytest.skip("ffmpeg not on PATH; cannot synth test driving video")
+        pytest.fail("ffmpeg not on PATH; selected RunPod canary cannot create its fixture")
 
     with tempfile.TemporaryDirectory() as td:
         kf = os.path.join(td, "kf.jpg")
@@ -71,12 +83,8 @@ def test_live_portrait_pod_round_trip():
             duration_s=2.0,
             poll_timeout_s=120,  # tighter for smoke
         )
-        # Acceptable outcomes:
-        #   - result == out + file exists → pod is configured correctly
-        #   - result is None → LivePortrait node not installed / pod busy
-        # The test is informative, not a fail signal for missing node installs.
         if result is None:
-            pytest.skip("LivePortrait returned None (node likely not installed on pod)")
+            pytest.fail("configured RunPod/ComfyUI LivePortrait returned no result")
         assert result == out
         assert os.path.exists(out)
         assert os.path.getsize(out) > 1024

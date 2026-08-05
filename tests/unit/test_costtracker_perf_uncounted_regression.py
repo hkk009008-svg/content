@@ -37,11 +37,12 @@ from domain.performance import ENGINE_ACT_ONE
 # (a) log_api / log_llm now increment the shared accumulator via the log() chokepoint
 # ---------------------------------------------------------------------------
 
-def test_log_api_increments_spent_usd(tmp_path):
+def test_log_api_increments_spent_usd(tmp_path, request):
     """log_api() must update spent_usd so the budget gate sees the spend."""
     from cost_tracker import CostTracker
 
     tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=10.0)
+    request.addfinalizer(tracker.close)
     assert tracker.spent_usd == 0.0
 
     tracker.log_api(
@@ -51,11 +52,12 @@ def test_log_api_increments_spent_usd(tmp_path):
     assert tracker.spent_usd == pytest.approx(0.04)
 
 
-def test_log_llm_increments_spent_usd(tmp_path):
+def test_log_llm_increments_spent_usd(tmp_path, request):
     """log_llm() must update spent_usd so the budget gate sees LLM spend."""
     from cost_tracker import CostTracker
 
     tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=10.0)
+    request.addfinalizer(tracker.close)
     assert tracker.spent_usd == 0.0
 
     # claude-sonnet-4-6: $3.00/M input -> 100k input tokens == $0.30
@@ -66,11 +68,12 @@ def test_log_llm_increments_spent_usd(tmp_path):
     assert tracker.spent_usd > 0.0
 
 
-def test_bare_log_increments_spent_usd(tmp_path):
+def test_bare_log_increments_spent_usd(tmp_path, request):
     """The chokepoint itself: log() accumulates, so spent_usd == sum of logged costs."""
     from cost_tracker import CostTracker
 
     tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=10.0)
+    request.addfinalizer(tracker.close)
     tracker.log(provider="a", model="m", operation="o", cost_usd=0.10)
     tracker.log(provider="b", model="m", operation="o", cost_usd=0.05)
     assert tracker.spent_usd == pytest.approx(0.15)
@@ -82,12 +85,13 @@ def test_bare_log_increments_spent_usd(tmp_path):
 # (b) record_api_call increments EXACTLY once — no double-count after the :407 removal
 # ---------------------------------------------------------------------------
 
-def test_record_api_call_single_increment_no_double_count(tmp_path):
+def test_record_api_call_single_increment_no_double_count(tmp_path, request):
     """record_api_call() calls log_api() (-> log(), which now increments). It must
     NOT also increment separately, or every recorded call double-counts."""
     from cost_tracker import CostTracker, API_COST_USD
 
     tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=100.0)
+    request.addfinalizer(tracker.close)
     cost = tracker.record_api_call("VEO")
     assert cost > 0.0, "precondition: VEO must be priced"
     # spent_usd reflects exactly ONE increment of the recorded cost (not 2x).
@@ -102,13 +106,14 @@ def test_record_api_call_single_increment_no_double_count(tmp_path):
 #         lands where the budget gate reads it
 # ---------------------------------------------------------------------------
 
-def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch):
+def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch, request):
     """dispatch() -> _dispatch_inner -> phase adapter must forward the SAME shared
     cost_tracker instance, so spend accumulates on it rather than on a throwaway."""
     from cost_tracker import CostTracker
     from performance import _router
 
     shared = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=100.0)
+    request.addfinalizer(shared.close)
     received = {}
 
     def _stub(keyframe_path, audio_path, output_mp4, *, driving_video_path=None,
@@ -141,28 +146,32 @@ def test_dispatch_forwards_shared_cost_tracker(tmp_path, monkeypatch):
     assert shared.spent_usd > before, "spend did not accumulate on the shared tracker"
 
 
-def test_perf_cost_log_uses_passed_tracker(tmp_path):
+def test_perf_cost_log_uses_passed_tracker(tmp_path, request):
     """Each phase's _cost_log must log onto the passed shared tracker, not a throwaway."""
     from cost_tracker import CostTracker
     from performance import live_portrait, viggle, act_two, driving_video
 
     # live_portrait._cost_log(duration_s, shot_id, video_id, cost_tracker=...)
     t1 = CostTracker(db_path=str(tmp_path / "c1.db"), budget_usd=100.0)
+    request.addfinalizer(t1.close)
     live_portrait._cost_log(5.0, "", "", cost_tracker=t1)
     assert t1.spent_usd > 0.0
 
     # viggle._cost_log(shot_id, video_id, cost_tracker=...)
     t2 = CostTracker(db_path=str(tmp_path / "c2.db"), budget_usd=100.0)
+    request.addfinalizer(t2.close)
     viggle._cost_log("", "", cost_tracker=t2)
     assert t2.spent_usd > 0.0
 
     # act_two._cost_log(operation, duration_s, shot_id, video_id, cost_tracker=...)
     t3 = CostTracker(db_path=str(tmp_path / "c3.db"), budget_usd=100.0)
+    request.addfinalizer(t3.close)
     act_two._cost_log("performance_capture", 5.0, "", "", cost_tracker=t3)
     assert t3.spent_usd > 0.0
 
     # driving_video._cost_log(provider, duration_s, shot_id, video_id, cost_tracker=...)
     t4 = CostTracker(db_path=str(tmp_path / "c4.db"), budget_usd=100.0)
+    request.addfinalizer(t4.close)
     driving_video._cost_log("sadtalker", 5.0, "", "", cost_tracker=t4)
     assert t4.spent_usd > 0.0
 

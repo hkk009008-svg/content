@@ -238,6 +238,41 @@ def test_clamp_is_sora2_specific_other_models_unclamped(monkeypatch, tmp_path):
     )
 
 
+def test_sora2_pro_rejects_invalid_480p_before_submission(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="pro",
+        output_path=out,
+        resolution="480p",
+        model="sora-2-pro",
+    )
+
+    assert result is None
+    api.client.videos.create_and_poll.assert_not_called()
+
+
+def test_unknown_sora_model_is_rejected_before_submission(monkeypatch, tmp_path):
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    result = api.generate_video(
+        image_path=img_path,
+        prompt="future",
+        output_path=out,
+        model="sora-future",
+    )
+
+    assert result is None
+    api.client.videos.create_and_poll.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # generate_video — happy path writes bytes, returns output_path
 # ---------------------------------------------------------------------------
@@ -541,19 +576,19 @@ def test_still_reference_preserves_lanczos_resize_and_jpeg_quality_90(tmp_path):
         prompt="motion",
         output_path=str(tmp_path / "out.mp4"),
         model="sora-2-pro",
-        resolution="480p",
+        resolution="720p",
     )
 
     expected_bytes = BytesIO()
     with Image.open(source) as source_image:
-        expected_image = source_image.resize((480, 270), Image.LANCZOS)
+        expected_image = source_image.resize((1280, 720), Image.LANCZOS)
         try:
             expected_image.save(expected_bytes, format="JPEG", quality=90)
         finally:
             expected_image.close()
 
     assert result == str(tmp_path / "out.mp4")
-    assert captured["size"] == (480, 270)
+    assert captured["size"] == (1280, 720)
     assert captured["format"] == "JPEG"
     assert captured["bytes"] == expected_bytes.getvalue()
     assert not captured["reference"].exists()

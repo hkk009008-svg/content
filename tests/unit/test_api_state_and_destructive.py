@@ -13,6 +13,8 @@ from web_server import (
     _cores_lock,
     _pipelines_lock,
     _project_admin_in_flight,
+    _project_queue_accept_events,
+    _project_queue_accept_in_flight,
     _progress_queues,
     _running_cores,
     _running_pipelines,
@@ -26,6 +28,8 @@ def clean_pipeline_state():
         _running_pipelines.clear()
         _progress_queues.clear()
         _project_admin_in_flight.clear()
+        _project_queue_accept_in_flight.clear()
+        _project_queue_accept_events.clear()
     with _cores_lock:
         _running_cores.clear()
     yield
@@ -33,6 +37,8 @@ def clean_pipeline_state():
         _running_pipelines.clear()
         _progress_queues.clear()
         _project_admin_in_flight.clear()
+        _project_queue_accept_in_flight.clear()
+        _project_queue_accept_events.clear()
     with _cores_lock:
         _running_cores.clear()
 
@@ -123,16 +129,17 @@ def test_api_delete_project_reservation_blocks_generation_start(
     assert "test_pid" not in _project_admin_in_flight
 
 
-@patch("web_server.threading.Thread")
 @patch("web_server.delete_project")
-@patch("web_server.load_project")
+@patch("web_server.load_existing_project_readonly")
 def test_api_generation_reserves_before_project_load_blocks_delete(
     mock_load,
     mock_delete,
-    mock_thread,
     client,
+    tmp_path,
 ):
-    """A delete interleaving inside load_project cannot win then start stale."""
+    """A delete interleaving inside the existence read cannot orphan a job."""
+    from pipeline_jobs import PipelineJobStore
+
     nested_status = {}
 
     def load_while_probing_delete(_pid):
@@ -142,15 +149,20 @@ def test_api_generation_reserves_before_project_load_blocks_delete(
         return {"id": "test_pid"}
 
     mock_load.side_effect = load_while_probing_delete
+    isolated_store = PipelineJobStore(tmp_path / "pipeline-jobs.db")
 
-    response = client.post("/api/projects/test_pid/generate")
+    with patch("web_server._pipeline_job_store", isolated_store), patch(
+        "web_server._ensure_pipeline_dispatcher", return_value=MagicMock()
+    ):
+        response = client.post("/api/projects/test_pid/generate")
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert nested_status["status"] == 409
     assert nested_status["body"]["code"] == "project_busy"
     mock_delete.assert_not_called()
-    assert _running_pipelines["test_pid"] is not None
-    mock_thread.return_value.start.assert_called_once_with()
+    assert "test_pid" not in _running_pipelines
+    assert "test_pid" not in _project_queue_accept_in_flight
+    assert isolated_store.get(response.get_json()["job_id"]) is not None
 
 
 # ---------------------------------------------------------------------------

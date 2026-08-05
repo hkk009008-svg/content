@@ -33,6 +33,7 @@ from prep.lora_policy import (  # noqa: E402
     LoraTrainingDormantError,
     lora_training_dormant_error,
 )
+from cost_tracker_lifecycle import cost_tracker_scope  # noqa: E402
 
 CANONICAL = "logs/p12_fresh_face_man.jpg"
 REF_DIR = "logs/man_lora_refs"
@@ -78,8 +79,8 @@ def _load_fal_client():
 
 def _record_kontext_cost(op):
     try:
-        from cost_tracker import CostTracker
-        CostTracker().record_api_call("FLUX_KONTEXT", operation=op)
+        with cost_tracker_scope() as tracker:
+            tracker.record_api_call("FLUX_KONTEXT", operation=op)
     except Exception:
         print(f"  cost record skipped for {op} (non-critical)", flush=True)
 

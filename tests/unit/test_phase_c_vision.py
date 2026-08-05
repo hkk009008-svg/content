@@ -19,6 +19,7 @@ import sys
 import dataclasses
 import json
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -33,6 +34,11 @@ from config.settings import settings as _real_settings
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _isolated_paid_ledger(monkeypatch, tmp_path):
+    """Keep non-resumable provider attempts isolated between unit tests."""
+    monkeypatch.setenv("EXPERIMENTS_DB_PATH", str(tmp_path / "experiments.db"))
 
 def _no_fal_settings():
     """Settings with fal_key cleared (forces FaceFusion path in face_swap)."""
@@ -184,20 +190,42 @@ class TestExtractFrameAt:
 
 class TestFaceSwapVideoFrames:
 
-    def test_fal_success_uploads_and_downloads_safely(self):
-        """fal_key set, subscribe returns URL → validated download, path returned."""
+    def test_fal_success_uploads_and_downloads_safely(self, tmp_path):
+        """Durable FAL completion is downloaded and reconciled exactly once."""
+        from cost_tracker import CostTracker
+
+        video = tmp_path / "vid.mp4"
+        reference = tmp_path / "ref.jpg"
+        output = tmp_path / "out.mp4"
+        video.write_bytes(b"video")
+        reference.write_bytes(b"reference")
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
-        mock_fal.subscribe.return_value = {"video": {"url": "http://fal/video.mp4"}}
+        mock_fal.submit.return_value = SimpleNamespace(request_id="pixverse-request-1")
+        mock_fal.status.return_value = {"status": "COMPLETED"}
+        mock_fal.result.return_value = {"video": {"url": "http://fal/video.mp4"}}
 
-        with patch.object(pcv, "settings", _fal_settings()), \
-             patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(pcv, "safe_download", return_value="/out.mp4") as download:
-            result = pcv.face_swap_video_frames("/vid.mp4", "/ref.jpg", "/out.mp4")
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.0)
+        try:
+            with patch.object(pcv, "settings", _fal_settings()), \
+                 patch.dict(sys.modules, {"fal_client": mock_fal}), \
+                 patch.object(pcv, "safe_download", return_value=str(output)) as download:
+                result = pcv.face_swap_video_frames(
+                    str(video),
+                    str(reference),
+                    str(output),
+                    cost_tracker=tracker,
+                    shot_id="shot-1",
+                    video_id="project-1",
+                )
+        finally:
+            tracker.close()
 
-        assert result == "/out.mp4"
-        assert download.call_args.args == ("http://fal/video.mp4", "/out.mp4")
+        assert result == str(output)
+        assert download.call_args.args == ("http://fal/video.mp4", str(output))
         assert download.call_args.kwargs["allowed_content_types"] == ("video/mp4",)
+        mock_fal.submit.assert_called_once()
+        mock_fal.subscribe.assert_not_called()
 
     def test_fal_no_key_skips_to_facefusion(self):
         """fal_key absent → fal path skipped, falls through to FaceFusion."""
@@ -211,31 +239,84 @@ class TestFaceSwapVideoFrames:
         assert result is None
         mock_fal.subscribe.assert_not_called()
 
-    def test_fal_no_url_in_result_falls_through(self):
-        """subscribe returns dict without 'url' → no download, falls to FaceFusion."""
+    def test_fal_no_url_after_paid_completion_blocks_local_fallback(self, tmp_path):
+        """A billed completion without retained output must not trigger FaceFusion."""
+        from cost_tracker import CostTracker
+        from paid_provider import PaidCallDeferred
+
+        video = tmp_path / "vid.mp4"
+        reference = tmp_path / "ref.jpg"
+        video.write_bytes(b"video")
+        reference.write_bytes(b"reference")
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
-        mock_fal.subscribe.return_value = {"video": {}}  # no 'url' key
+        mock_fal.submit.return_value = SimpleNamespace(request_id="pixverse-no-output")
+        mock_fal.status.return_value = {"status": "COMPLETED"}
+        mock_fal.result.return_value = {"video": {}}
 
-        with patch.object(pcv, "settings", _fal_settings()), \
-             patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch("subprocess.run", side_effect=FileNotFoundError):
-            result = pcv.face_swap_video_frames("/vid.mp4", "/ref.jpg", "/out.mp4")
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.0)
+        try:
+            with patch.object(pcv, "settings", _fal_settings()), \
+                 patch.dict(sys.modules, {"fal_client": mock_fal}), \
+                 patch("subprocess.run") as local_run, \
+                 pytest.raises(PaidCallDeferred):
+                pcv.face_swap_video_frames(
+                    str(video),
+                    str(reference),
+                    str(tmp_path / "out.mp4"),
+                    cost_tracker=tracker,
+                    shot_id="shot-1",
+                    video_id="project-1",
+                )
+            local_run.assert_not_called()
+            attempt = tracker.get_latest_paid_attempt(
+                video_id="project-1",
+                shot_id="shot-1",
+                engine="FAL_PIXVERSE_SWAP",
+                operation="face_swap",
+            )
+            assert attempt["state"] == "succeeded"
+        finally:
+            tracker.close()
 
-        assert result is None
+    def test_lost_fal_submit_ack_blocks_facefusion(self, tmp_path):
+        """A lost submit acknowledgement is accepted_unknown and never falls back."""
+        from cost_tracker import CostTracker
+        from paid_provider import PaidCallDeferred
 
-    def test_fal_exception_falls_through_to_facefusion(self):
-        """fal_client.subscribe raises Exception → caught, falls to FaceFusion."""
+        video = tmp_path / "vid.mp4"
+        reference = tmp_path / "ref.jpg"
+        video.write_bytes(b"video")
+        reference.write_bytes(b"reference")
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
-        mock_fal.subscribe.side_effect = RuntimeError("fal api error")
+        mock_fal.submit.side_effect = TimeoutError("lost submit acknowledgement")
 
-        with patch.object(pcv, "settings", _fal_settings()), \
-             patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch("subprocess.run", side_effect=FileNotFoundError):
-            result = pcv.face_swap_video_frames("/vid.mp4", "/ref.jpg", "/out.mp4")
-
-        assert result is None
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.0)
+        try:
+            with patch.object(pcv, "settings", _fal_settings()), \
+                 patch.dict(sys.modules, {"fal_client": mock_fal}), \
+                 patch("subprocess.run") as local_run, \
+                 pytest.raises(PaidCallDeferred):
+                pcv.face_swap_video_frames(
+                    str(video),
+                    str(reference),
+                    str(tmp_path / "out.mp4"),
+                    cost_tracker=tracker,
+                    shot_id="shot-1",
+                    video_id="project-1",
+                )
+            local_run.assert_not_called()
+            attempt = tracker.get_latest_paid_attempt(
+                video_id="project-1",
+                shot_id="shot-1",
+                engine="FAL_PIXVERSE_SWAP",
+                operation="face_swap",
+            )
+            assert attempt["state"] == "accepted_unknown"
+            assert attempt["provider_job_id"] == ""
+        finally:
+            tracker.close()
 
     def test_facefusion_success_returncode_zero_file_exists(self):
         """returncode=0 AND output file exists → returns output_path."""
@@ -527,6 +608,41 @@ class TestValidateIdentityVision:
         assert result["match"] is False
         assert result["confidence"] == pytest.approx(0.5)
 
+    def test_success_reconciles_actual_token_cost_into_provider_analytics(self, tmp_path):
+        """Successful Claude identity work records its token-derived cost."""
+        from cost_tracker import CostTracker
+
+        mock_client = MagicMock()
+        mock_resp = SimpleNamespace(
+            content=[SimpleNamespace(text=json.dumps({"confidence": 0.9, "issues": []}))],
+            usage=SimpleNamespace(input_tokens=1_000, output_tokens=200),
+        )
+        mock_client.messages.create.return_value = mock_resp
+
+        with CostTracker(db_path=str(tmp_path / "claude-cost.db")) as tracker, \
+             patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = pcv.validate_identity_vision(
+                "/ref.jpg",
+                "/gen.jpg",
+                cost_tracker=tracker,
+                video_id="project-identity",
+                shot_id="shot-1",
+            )
+            metric = tracker.get_provider_usage_analytics(
+                video_id="project-identity"
+            )["by_engine"]["CLAUDE_VISION_IDENTITY"]
+            attempts = tracker.get_paid_attempts_snapshot("project-identity")["attempts"]
+
+        assert result["match"] is True
+        assert mock_client.messages.create.call_count == 1
+        assert attempts[0]["state"] == "succeeded"
+        assert attempts[0]["reconciled_cost_usd"] == pytest.approx(0.006)
+        assert metric["charged_cost_usd"] == pytest.approx(0.006)
+        assert metric["succeeded"] == 1
+
     def test_g5_threshold_boundary_07_is_match_true(self):
         """G5: threshold is hardcoded 0.7 (no param); confidence=0.7 → match=True (>=).
 
@@ -572,26 +688,27 @@ class TestValidateIdentityVision:
         # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds (validator re-computes matched)
         assert result["match"] is False
 
-    def test_api_exception_retries_then_fails_closed(self, caplog):
-        """Exception during Anthropic call -> retry, then fail-closed marker."""
+    def test_api_exception_is_not_replayed_and_fails_closed(self, caplog):
+        """An ambiguous Anthropic failure is fenced from automatic replay."""
         mock_client = MagicMock()
         mock_client.messages.create.side_effect = RuntimeError("api error")
 
         with patch.object(pcv, "settings", _anthropic_settings()), \
              patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
-             patch.object(pcv.time, "sleep", return_value=None), \
              patch("anthropic.Anthropic", return_value=mock_client), \
              caplog.at_level("WARNING"):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
+            retried = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        assert mock_client.messages.create.call_count == 3
+        assert mock_client.messages.create.call_count == 1
         assert result["match"] is False
         assert result["confidence"] == 0.0
         assert result["error"] is True
-        assert result["error_reason"] == "provider_error"
+        assert result["error_reason"] == "paid_work_reconciliation_required"
         assert result["source"] == "error"
-        assert any("failing closed" in r.message for r in caplog.records)
+        assert retried["error_reason"] == "paid_work_reconciliation_required"
+        assert any("reconciliation" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------

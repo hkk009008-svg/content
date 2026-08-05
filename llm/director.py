@@ -36,12 +36,23 @@ lets future verbs land without a schema migration.
 from __future__ import annotations
 
 import json
+import logging
+import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from config.settings import settings as env_settings
 from llm.ensemble import build_anthropic_system_blocks
+from paid_provider import (
+    PaidCallDeferred,
+    has_paid_attempt_authority,
+    openai_output_limit_kwargs,
+    run_fenced_llm_call,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """<SYSTEM_PERSONA>
@@ -201,8 +212,16 @@ class CinemaDirector:
        APPROVED/REJECTED/MODIFIED decision shape)
     """
 
-    def __init__(self, project: Optional[dict] = None):
+    def __init__(
+        self,
+        project: Optional[dict] = None,
+        cost_tracker: Any | None = None,
+        video_id: str = "",
+    ):
         self.project = project or {}
+        self.cost_tracker = cost_tracker
+        project_id = self.project.get("id", "") if isinstance(self.project, dict) else ""
+        self.video_id = str(video_id or project_id or "")[:128]
         self.client = self._init_client()
         self._log_root = Path("data/intent_log")
 
@@ -227,6 +246,145 @@ class CinemaDirector:
         self.provider = None
         return None
 
+    @staticmethod
+    def _usage_count(usage: object, *names: str) -> int:
+        for name in names:
+            if isinstance(usage, dict):
+                value = usage.get(name)
+            else:
+                value = getattr(usage, name, None)
+            if value is None:
+                continue
+            try:
+                count = int(value or 0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if count >= 0:
+                return count
+        return 0
+
+    def _record_llm_usage(self, response: object, model: str, operation: str) -> None:
+        if self.cost_tracker is None or has_paid_attempt_authority(self.cost_tracker):
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        if self.provider == "anthropic":
+            input_tokens = self._usage_count(usage, "input_tokens")
+            output_tokens = self._usage_count(usage, "output_tokens")
+        else:
+            input_tokens = self._usage_count(usage, "prompt_tokens", "input_tokens")
+            output_tokens = self._usage_count(
+                usage, "completion_tokens", "output_tokens"
+            )
+        if input_tokens <= 0 and output_tokens <= 0:
+            return
+        try:
+            self.cost_tracker.log_llm(
+                model=model,
+                operation=operation,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                video_id=self.video_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[CinemaDirector] Failed to record LLM usage for {model!r}: {exc}",
+                file=sys.stderr,
+            )
+            logger.error(
+                "Cinema Director LLM usage recording failed",
+                extra={
+                    "provider": self.provider or "unknown",
+                    "engine": model,
+                    "code": operation,
+                    "status": "usage_unrecorded",
+                    "video_id": self.video_id,
+                },
+            )
+
+    def _call_with_observation(
+        self,
+        *,
+        model: str,
+        operation: str,
+        call: Any,
+        request_payload: Any,
+        max_output_tokens: int,
+    ) -> object:
+        started = time.perf_counter()
+
+        def persist(status: str, latency_ms: int) -> None:
+            tracker = getattr(self, "cost_tracker", None)
+            if has_paid_attempt_authority(tracker):
+                return
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if not callable(recorder):
+                return
+            try:
+                recorder(
+                    provider=self.provider or "unknown",
+                    engine=model,
+                    operation=operation,
+                    status=status,
+                    latency_ms=latency_ms,
+                    video_id=self.video_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Cinema Director LLM observation recording failed",
+                    extra={
+                        "provider": self.provider or "unknown",
+                        "engine": model,
+                        "code": operation,
+                        "status": "observation_unrecorded",
+                        "video_id": self.video_id,
+                    },
+                    exc_info=exc,
+                )
+
+        try:
+            response = run_fenced_llm_call(
+                call=call,
+                provider=self.provider or "unknown",
+                model=model,
+                operation=operation,
+                request_payload=request_payload,
+                max_output_tokens=max_output_tokens,
+                cost_tracker=self.cost_tracker,
+                video_id=self.video_id,
+            )
+        except Exception:
+            latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+            persist("failed", latency_ms)
+            logger.warning(
+                "Cinema Director LLM request failed",
+                extra={
+                    "provider": self.provider or "unknown",
+                    "engine": model,
+                    "code": operation,
+                    "latency_ms": latency_ms,
+                    "status": "failed",
+                    "video_id": self.video_id,
+                },
+            )
+            raise
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        persist("succeeded", latency_ms)
+        logger.info(
+            "Cinema Director LLM request completed",
+            extra={
+                "provider": self.provider or "unknown",
+                "engine": model,
+                "code": operation,
+                "latency_ms": latency_ms,
+                "status": "succeeded",
+                "video_id": self.video_id,
+            },
+        )
+        self._record_llm_usage(response, model, operation)
+        return response
+
     def _call_llm(self, user_prompt: str) -> str:
         """Invoke the configured LLM provider. Returns raw text or "" on failure.
 
@@ -246,11 +404,18 @@ class CinemaDirector:
                 model_id = "claude-sonnet-4-6"
                 if override and override.startswith("claude-"):
                     model_id = override
-                response = self.client.messages.create(
+                request_kwargs = {
+                    "model": model_id,
+                    "max_tokens": 2048,
+                    "system": build_anthropic_system_blocks(SYSTEM_PROMPT),
+                    "messages": [{"role": "user", "content": user_prompt}],
+                }
+                response = self._call_with_observation(
                     model=model_id,
-                    max_tokens=2048,
-                    system=build_anthropic_system_blocks(SYSTEM_PROMPT),
-                    messages=[{"role": "user", "content": user_prompt}],
+                    operation="cinema_director_translate_intent",
+                    call=lambda: self.client.messages.create(**request_kwargs),
+                    request_payload=request_kwargs,
+                    max_output_tokens=2048,
                 )
                 return response.content[0].text
             else:
@@ -259,15 +424,25 @@ class CinemaDirector:
                     override.startswith(p) for p in ("gpt-", "o1-", "o3-", "o4-")
                 ):
                     model_id = override
-                response = self.client.chat.completions.create(
-                    model=model_id,
-                    messages=[
+                request_kwargs = {
+                    "model": model_id,
+                    "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt},
                     ],
-                    response_format={"type": "json_object"},
+                    "response_format": {"type": "json_object"},
+                }
+                request_kwargs.update(openai_output_limit_kwargs(model_id, 2048))
+                response = self._call_with_observation(
+                    model=model_id,
+                    operation="cinema_director_translate_intent",
+                    call=lambda: self.client.chat.completions.create(**request_kwargs),
+                    request_payload=request_kwargs,
+                    max_output_tokens=2048,
                 )
                 return response.choices[0].message.content
+        except PaidCallDeferred:
+            raise
         except Exception as e:
             print(f"   [CINEMA-DIRECTOR] LLM call failed: {e}")
             return ""
@@ -421,6 +596,8 @@ def intent_translator(
     scene_context: dict,
     *,
     project: Optional[dict] = None,
+    cost_tracker: Any | None = None,
+    video_id: str = "",
 ) -> dict:
     """Functional API per S15 acceptance signature.
 
@@ -428,5 +605,9 @@ def intent_translator(
     callers that don't manage a director instance lifecycle. Tests can
     patch ``llm.director.CinemaDirector`` to inject mocks.
     """
-    director = CinemaDirector(project=project)
+    director = CinemaDirector(
+        project=project,
+        cost_tracker=cost_tracker,
+        video_id=video_id,
+    )
     return director.translate_intent(intent, take_context, scene_context)
