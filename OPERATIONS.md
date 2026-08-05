@@ -13,12 +13,13 @@ How to install, run, configure, and troubleshoot the Content cinema pipeline.
 - §2 [First-time setup](#2-first-time-setup)
 - §3 [Environment variables](#3-environment-variables)
 - §4 [Running the system](#4-running-the-system)
-- §5 [Pod setup — RunPod / Railway ComfyUI](#5-pod-setup--runpod--railway-comfyui)
+- §5 [Pod setup — RunPod ComfyUI](#5-pod-setup--runpod-comfyui)
 - §6 [ComfyUI workflows & models](#6-comfyui-workflows--models)
 - §7 [Verification — smoke + tests](#7-verification--smoke--tests)
 - §8 [Common operational tasks](#8-common-operational-tasks)
 - §9 [Troubleshooting](#9-troubleshooting)
 - §10 [Costs at a glance](#10-costs-at-a-glance)
+- §11 [Durable production controls](#11-durable-production-controls)
 
 ---
 
@@ -30,7 +31,7 @@ How to install, run, configure, and troubleshoot the Content cinema pipeline.
 | **Node 20+ / npm** | Vite 6 dev server + TypeScript 5.7 |
 | **macOS or Linux** | `audio/effects.py` uses macOS AU plugins where available; Linux falls back to FFmpeg. Pedalboard works on both. |
 | **ffmpeg** in PATH | Stitching, color grade, two-pass loudnorm, frame extraction. `brew install ffmpeg`. |
-| **RunPod or Railway ComfyUI pod** | Image-generation FALLBACK — Gemini 3.1 Flash Image ("Nano Banana 2") is the default primary; ComfyUI + PuLID (`pulid.json`, single production tier — the old max tier was retired) is the reference-conditioned fallback. Also runs LivePortrait + SadTalker performance-capture paths. Not strictly required for a Gemini/FAL-only happy path (see §3 "Minimal viable config"), but recommended for the strongest face-lock fallback. |
+| **RunPod ComfyUI pod** | Optional image-generation fallback — Gemini 3.1 Flash Image is primary; the immutable RunPod image certifies the `pulid.json` PuLID graph. It does not currently certify LivePortrait/SadTalker. See §5. |
 | **Cloud API keys** (~17 providers) | See §3 |
 | **Disk space** | ~50GB for cache + projects + exports. DeepFace auto-downloads the identity model's weights on first run — currently **GhostFaceNet** (~16MB measured locally; everything in the codebase that says "ArcFace" — including the historical estimate this line used to carry — actually runs GhostFaceNet, see ARCHITECTURE.md §11.1). |
 
@@ -137,9 +138,14 @@ Authoritative list (every variable consumed by the pipeline):
 
 | Var | Default | Purpose |
 |---|---|---|
-| `COMFYUI_SERVER_URL` | unset | Pod address. Set explicitly to your RunPod/Railway URL; unset is distinct from an unavailable configured pod. |
-| `COMFYUI_API_KEY` | unset | Optional bearer token for a ComfyUI reverse proxy; leave empty for an unauthenticated local/pod endpoint. |
+| `COMFYUI_SERVER_URL` | unset | Authenticated gateway address. Production RunPod uses private `http://<pod-id>.runpod.internal:8189` or public `https://<pod-id>-8189.proxy.runpod.net`; raw `:8188` is loopback-only. |
+| `COMFYUI_API_KEY` | unset | Bearer token for remote ComfyUI. Mandatory for the production image and injected with RunPod Secrets; empty is allowed only for an explicitly local development endpoint. |
 | `EXPERIMENTS_DB_PATH` | `data/experiments.db` | SQLite cost tracker DB |
+| `PIPELINE_JOB_DB_PATH` | `data/pipeline_jobs.db` | Filesystem-backed SQLite/WAL queue for full-project jobs. Relative paths are repository-rooted; `:memory:` and SQLite URI forms are rejected. |
+| `PIPELINE_QUEUE_CONCURRENCY` | `1` | Global fixed worker-pool size, validated from 1 through 8. Raise only after provider quotas, local capacity, and aggregate budget have been reviewed. |
+| `CINEMA_TRACE_DB_PATH` | `data/telemetry.db` | Local searchable structured trace index used by the Run UI. JSON stdout remains the deployment log stream. |
+| `CINEMA_TRACE_RETENTION_DAYS` | `30` | Age retention for indexed traces, validated from 1 through 365 days. |
+| `CINEMA_TRACE_MAX_EVENTS` | `50000` | Global row cap for the trace index, validated from 1,000 through 1,000,000 events. |
 | `PERFORMANCE_CACHE_DIR` | `data/cache/driving` | Content-hash cache for Mode-B driving videos |
 | `MOTION_GATE_SAMPLES` | `8` | Number of frame pairs sampled by `motion_gate.score_motion_fidelity` |
 | `IDENTITY_EMBED_MODEL` | `GhostFaceNet` | DeepFace embedding backbone for identity QC (single chokepoint: `identity.validator.EMBED_MODEL`). ⚠️ All calibrated identity thresholds assume GhostFaceNet scores — non-default values (e.g. `Buffalo_L`, non-commercial license) fire a structural warning and need a pod re-calibration pass before the gates are meaningful. `AdaFace` selects the vendored adapter (`identity/adaface.py`, ADR-078) — UNCALIBRATED until P5 item 2. |
@@ -160,9 +166,10 @@ A ComfyUI pod is no longer strictly required for a happy-path run — Gemini
 image is the default primary for character shots and `phase_c_assembly.py`
 falls through to the FAL FLUX chain (and, worst case, the free Pollinations
 last resort) on any pod error or absent `COMFYUI_SERVER_URL`/`pulid.json`; the
-pod remains the strongest identity-lock fallback and is still needed for
-LivePortrait/SadTalker performance-capture paths. Everything else expands
-capability or adds fallback paths.
+pod remains the strongest identity-lock fallback. The certified production
+image does not currently include LivePortrait/SadTalker; those paths need a
+separately locked deployment. Everything else expands capability or adds
+fallback paths.
 
 ---
 
@@ -191,11 +198,22 @@ Visit `http://localhost:3000`. Vite proxies `/api/*` to `:8080`.
 
 ### Stopping
 
-`Ctrl+C` the Flask process. Daemon threads die with the process. Any
-in-flight cloud API call will complete (FAL/cloud APIs are sync-poll
-servers), but the local state won't persist past the `None` sentinel to
-the SSE queue. If a pipeline is mid-run, the checkpoint may not reflect
-the latest progress — resume will replay the last completed scene.
+`Ctrl+C` the Flask process. The dispatcher stops claiming new work and asks
+its local pipelines to cancel, but intentionally leaves any still-running
+queue row under its current lease instead of manufacturing success. After the
+process fence is released and that lease expires, the next server process
+requeues the row with `resume_required=1` and enters the ordinary checkpoint
+resume path (`pipeline_jobs.py:769`, `web_server.py:3270`).
+
+That durable full-run queue is only one half of paid-work safety. Paid-media
+adapters that own the versioned `CostTracker` attempt ledger resume an exact
+FAL request, ComfyUI prompt, or native Kling task when a durable job ID was
+recorded. Native Sora and other synchronous no-ID providers become
+`accepted_unknown` if submission may have succeeded; automatic replay and
+fallback are blocked. Planning LLM calls now reserve their own deterministic
+no-replay paid attempts before the SDK boundary and reconcile successful token
+usage once. They still cannot poll/resume a provider job after a crash because
+those synchronous APIs expose no durable job ID.
 
 To cancel a single project's run without killing the server:
 ```bash
@@ -204,112 +222,48 @@ curl -X POST http://localhost:8080/api/projects/<pid>/cancel
 
 ---
 
-## 5. Pod setup — RunPod / Railway ComfyUI
+## 5. Pod setup — RunPod ComfyUI
 
-A ComfyUI pod is the reference-conditioned **fallback** for image generation
-(production tier, `pulid.json` — Gemini 3.1 Flash Image is the default
-primary, see §3) and is used for certain performance-capture paths
-(LivePortrait, SadTalker). Set it up for the strongest face-lock path and for
-LivePortrait/SadTalker; a Gemini+FAL-only config runs without it.
+A ComfyUI pod is the reference-conditioned fallback for image generation
+(`pulid.json`; Gemini 3.1 Flash Image remains primary). A Gemini+FAL-only
+configuration can run without it.
 
-### Recommended pod spec
+### Production path
 
-- **GPU:** RTX 4090 (24GB) recommended. The production `pulid.json` graph is
-  all-fp8 (FLUX-dev-fp8 ~12GB + t5xxl-fp8 ~5GB + PuLID) and fits comfortably
-  in 24GB. The max tier (SUPIR/48GB+) that used to justify a bigger card
-  (A40/A100/RTX 6000 Ada) was retired in WS1, so a big card is no longer needed.
-- **Disk:** models ~21GB + Python env (torch/CUDA/insightface) ~10-12GB +
-  ComfyUI+nodes ~1GB + working/output ~5-10GB. Use an **80GB network volume
-  mounted at `/workspace`** for full-setup persistence (ComfyUI + nodes +
-  models all survive a pod restart, no re-download) — or 40GB if you only
-  want to persist the models and reinstall the rest per-pod.
-- **Network:** ComfyUI listens on `:8188` by default. Expose this port.
+Production uses the digest-pinned image under
+[`deploy/runpod-comfyui/`](deploy/runpod-comfyui/README.md). That deployment
+pins the CUDA/PyTorch base, ComfyUI, both required PuLID repositories and every
+Python package; verifies every large model against byte-count and SHA-256
+metadata; and refuses readiness until dependency, GPU, node, model-choice and
+execution-canary checks pass.
 
-### Bootstrap script
+Use an 80 GB or larger network volume mounted at `/workspace`. Raw ComfyUI is
+loopback-only on `127.0.0.1:8188`. The only service eligible for exposure is the
+authenticated gateway on `:8189`; `COMFYUI_API_KEY` is mandatory and must be
+injected from a RunPod Secret. Prefer RunPod global networking with no public
+ports. If public access is unavoidable, expose only `8189/http`, never `8188`.
 
-`scripts/setup_runpod.sh` installs ComfyUI + the custom node packs the
-workflows depend on (incl. `ComfyUI-PuLID-Flux`), the InsightFace runtime
-stack + `antelopev2` model that `PulidInsightFaceLoader` needs to register,
-and runs a post-start `/object_info` check that the PuLID nodes are
-available (C-D4 guard). Run it on the pod after first boot; it targets
-`$WORKSPACE` (default `/workspace`, RunPod's persistent network volume) so
-a restarted pod doesn't re-download anything already there.
+The production image currently certifies the active `pulid.json` image graph
+only. It does not contain or advertise LivePortrait/SadTalker. Those performance
+paths require a separately locked image and model manifest before production
+use; provider preflight will fail instead of silently claiming the node exists.
 
-The script is production-only — the max tier (`--max`/`--max-fp16`: SUPIR,
-Impact-Pack + Subpack, Detail-Daemon, fp16/Redux gated downloads, ReActor)
-was retired in WS1 and those flags no longer exist.
-[docs/RUNBOOK-max-tier-test.md](docs/RUNBOOK-max-tier-test.md) documents that
-retired tier's provisioning steps; treat it as historical.
+### Development/E2E bootstrap
 
-### torch / CUDA build (driver-dependent)
+[`scripts/setup_runpod.sh`](scripts/setup_runpod.sh) remains available for a
+disposable development or E2E pod. It uses mutable downloads and dynamically
+selects/reinstalls torch, so it is explicitly **not a production deployment**.
+It now exits nonzero for missing required PuLID nodes or model files and never
+prints a success summary after a required check fails.
 
-The pod's torch build must match the **host NVIDIA driver's max CUDA**, not just
-the GPU model. A `cuXYZ` wheel only uses the GPU if the driver supports CUDA ≥ X.Y —
-e.g. cu130 wheels need a CUDA-13.0 driver, but common Novita/RunPod hosts cap at
-CUDA 12.4 (driver 550.x on an RTX 6000 Ada), where cu130 silently can't see the GPU.
-ComfyUI also **hard-imports torchaudio** at startup, so torch / torchvision /
-torchaudio must be installed as **one matched set per channel** or ComfyUI crashes
-with `undefined symbol ..._ZNK5torch8autograd4Node4nameEv` (the lesson from `3fe8299`).
-
-`setup_runpod.sh` (step 5) handles this automatically: it reads the driver's max
-CUDA from `nvidia-smi`'s `CUDA Version: X.Y` header and installs the matched stack:
-
-| Driver max CUDA | Channel | torch / torchvision / torchaudio | Verified on |
-|---|---|---|---|
-| ≥ 13.0 | `cu130` | 2.11.0 / 0.26.0 / 2.11.0 | H100 sm_90 |
-| ≥ 12.4 | `cu124` | 2.6.0 / 0.21.0 / 2.6.0 | RTX 6000 Ada (Novita) |
-| ≥ 11.8 | `cu118` | 2.4.1 / 0.19.1 / 2.4.1 | — |
-
-If detection fails (no `nvidia-smi`, or a driver older than CUDA 11.8) the script
-warns and defaults to `cu124`. **Check the driver first** — `nvidia-smi` top-right
-shows `CUDA Version`. If a build still fails with a torch/CUDA error, override the
-pin in `setup_runpod.sh` step 5 to the channel matching that driver, keeping torch /
-torchvision / torchaudio as one matched set (note: cu124's highest torch is 2.6.0 —
-torch 2.11.0 is cu130-only).
-
-### Required custom nodes
-
-`quality_max.py` (the node-pruning driver referenced by older docs/handoffs)
-was **deleted** in WS1 Task 4 along with `pulid_max.json` — there is no
-max-tier node-availability probe anymore. `scripts/setup_runpod.sh` installs
-what the single production tier (`pulid.json` plus its contained FLUX-compatible
-img2img injection in `phase_c_assembly.py`) actually consumes:
-
-- **ComfyUI-PuLID-Flux** (balazik) — `ApplyPulidFlux`, `PulidFluxModelLoader`,
-  `PulidFluxEvaClipLoader` (the production identity nodes `pulid.json` uses).
-- **ComfyUI-PuLID** (cubiq) — kept specifically for its `PulidInsightFaceLoader`
-  class, which `pulid.json`'s face loader node names (balazik's own loader is
-  the differently-named `PulidFluxInsightFaceLoader`, which `pulid.json` does
-  NOT use); dropping this pack breaks the face-loader node.
-- **ComfyUI_IPAdapter_plus** (cubiq) — installed for compatibility with older
-  persistent workflows, but no node from this pack is injected by the current
-  production `pulid.json` path.
-- **InsightFace runtime** (`insightface`, `onnxruntime-gpu`, `facexlib` — pip,
-  not a ComfyUI node pack) — required for either PuLID pack's nodes to
-  register at all; ComfyUI silently drops every node in a pack that fails to
-  import.
-- `DepthAnythingV2Preprocessor` / the old SD1.5 depth ControlNet are **not a
-  production requirement**. The incompatible dynamic depth branch was removed;
-  do not add these to a fresh pod contract for `pulid.json`.
-- `LivePortraitProcess` (Kijai's port, for LivePortrait performance capture)
-- `SadTalker` (for Mode-B driving-video synthesis)
-
-The former max-tier-only nodes (FLUX Union ControlNet Pro, FLUX Redux/
-`StyleModelApplyAdvanced`, `SkipLayerGuidanceDiT`, `FreeU_V2`,
-`DifferentialDiffusion`, `AlignYourStepsScheduler`, `DetailDaemonSamplerNode`,
-`LatentBlend`/`LatentUpscaleBy`, `DWPreprocessor`/`CannyEdgePreprocessor`,
-`FaceDetailer` (Impact Pack), and the three `SUPIR_*` nodes) have no
-production consumer anymore — `pulid_max.json` was deleted with them. The
-production init-image path now uses only `LoadImage → VAEEncode` plus the
-provisioned FLUX/PuLID graph.
+The retired max tier (`--max`/`--max-fp16`) is not accepted by the bootstrap.
+[`docs/RUNBOOK-max-tier-test.md`](docs/RUNBOOK-max-tier-test.md) is historical.
 
 ### Cost control
 
-ComfyUI pods bill by the second. Idle pods cost real money. Options:
-- Run on RunPod's autoscale tier
-- Manually stop the pod when not actively generating
-- For development, use the Gemini/FAL-only paths (bypass the ComfyUI/PuLID
-  workflow entirely — see §3 "Minimal viable config")
+ComfyUI pods bill while running. Stop idle pods or use RunPod autoscaling, and
+monitor readiness at `GET /health/ready` rather than treating a running
+container as usable. For development, the Gemini/FAL-only paths bypass the pod.
 
 ---
 
@@ -331,11 +285,13 @@ effect on next process restart.
 
 ### Model files required on the pod
 
-For production (`pulid.json`), installed by `scripts/setup_runpod.sh`:
+For production (`pulid.json`), fetched and verified from
+`deploy/runpod-comfyui/models.json`:
 - FLUX.1-dev fp8 checkpoint (`flux1-dev-fp8.safetensors`, ~12GB)
 - T5-XXL fp8 + CLIP-L text encoders (`t5xxl_fp8_e4m3fn.safetensors`, `clip_l.safetensors`)
 - FLUX VAE (`ae.safetensors`)
 - PuLID-FLUX face encoder weights (`pulid_flux_v0.9.1.safetensors`)
+- EVA02-CLIP-L-336 weights used by `PulidFluxEvaClipLoader`
 - antelopev2 InsightFace landmark model
 - Real-ESRGAN 4x upscaler (`RealESRGAN_x4plus.pth`)
 
@@ -404,6 +360,22 @@ Should exit silently (no output = no errors).
 
 Requires real API credentials. Run sparingly.
 
+For the protected paid release checks, dispatch the manual
+[`Live contract canary`](docs/LIVE_CONTRACT_CANARY.md). Select exactly one
+fixed target and obtain protected-environment approval. The RunPod targets are
+deliberately split:
+
+- `runpod-pulid-production` proves the shipping `pulid.json` graph on the
+  pinned production image using `COMFYUI_SERVER_URL` / `COMFYUI_API_KEY`.
+- `runpod-liveportrait-performance` proves LivePortrait only on a separately
+  configured performance image using `PERFORMANCE_COMFYUI_SERVER_URL` /
+  `PERFORMANCE_COMFYUI_API_KEY`.
+
+Do not use PuLID readiness as evidence that the performance node contract is
+installed. The workflow validates that separation before spending
+([scripts/live_contract_canary.py:59](scripts/live_contract_canary.py:59),
+[scripts/live_contract_canary.py:71](scripts/live_contract_canary.py:71)).
+
 ---
 
 ## 8. Common operational tasks
@@ -426,10 +398,52 @@ UI: click "Print this Reel" on the project page. Or:
 curl -X POST http://localhost:8080/api/projects/<pid>/generate
 ```
 
+The response is `202 Accepted`, not proof that provider work has started. It
+contains a stable `job_id` and queue snapshot. Repeating the request while the
+same project is queued or running returns that active job instead of creating
+a second full-project run. The Run page and
+`GET /api/projects/<pid>/pipeline-state` show queued position, attempt count,
+checkpoint-resume state, cancellation intent, and any exceptional operator
+action.
+
+Generation admission and decorated project mutation/direct-stage routes also
+hold the sibling `domain/projects/.<pid>.operation.lock`. This extends the
+active-job/admin/stage fences across server processes, so a second worker
+cannot delete or mutate the same project while another worker admits or runs a
+conflicting operation. A `409` with `code=project_locked` or `project_busy` is
+a retry signal, not permission to bypass the lock file.
+
 Subscribe to progress:
 ```bash
 curl -N http://localhost:8080/api/projects/<pid>/stream
 ```
+
+Each subscriber has its own bounded inbox and replay window. If the server
+restarts and only SQLite still knows the active job, `/stream` hydrates a fresh
+in-process event bus, wakes the dispatcher, and attaches normally. The old
+process's event buffer is not durable, so refresh `pipeline-state` for current
+queue/stage truth; only post-attachment events can stream from the new bus.
+
+Queued and running projects may be cancelled through the same endpoint:
+
+```bash
+curl -X POST http://localhost:8080/api/projects/<pid>/cancel
+```
+
+Never call the exceptional `/queue/abandon` route as routine cancellation.
+The UI offers **Abandon blocked job** only when an exact running lease is
+expired and the prior owner fence cannot be verified. The API also requires
+the displayed 32-hex job ID and an explicit paid-work-risk acknowledgement:
+
+```bash
+curl -X POST http://localhost:8080/api/projects/<pid>/queue/abandon \
+  -H 'Content-Type: application/json' \
+  -d '{"job_id":"<exact-32-hex-id>","acknowledge_paid_work_risk":true}'
+```
+
+It refuses an active lease, a live local owner, and a stopped owner that can be
+safely requeued. After a successful abandonment, inspect the project
+checkpoint and provider billing/history before starting new paid work.
 
 ### Approve a gate
 
@@ -450,19 +464,114 @@ curl -X POST .../shots/<sid>/final/<take_id>/approve
 ### Inspect cost
 
 ```bash
-curl http://localhost:8080/api/cost-live | jq
+curl http://localhost:8080/api/projects/<pid>/cost-live | jq
+curl 'http://localhost:8080/api/projects/<pid>/provider-analytics?scope=project&limit=200' | jq
 ```
 
 The cost DB is SQLite at `EXPERIMENTS_DB_PATH` — open with any sqlite
-client for forensic analysis.
+client for forensic analysis. Provider analytics report success rate, latency,
+active reservations, failures, and health from durable paid-media attempts plus
+planning, identity, and Tavily/Firecrawl request observations. The UI label **Estimated usage** and
+response `cost_basis: "reconciled_estimate"` are intentional: media prices are
+reconciled with observed terminal state and LLM costs use token-list pricing,
+but provider invoices remain the financial authority. Research APIs contribute
+outcome/latency without a fabricated dollar cost when their responses expose no
+authoritative usage value.
+
+Automatic health avoidance is narrower than the dashboard. Only the base-video
+`AUTO` route removes an engine classified `unhealthy`; `unknown` and
+`degraded` providers stay eligible. Pinned video engines, planning LLMs,
+image, lipsync, and performance dispatch are not silently rerouted by this
+score.
+
+### Search traces
+
+The Run page includes a project-scoped Trace console. The equivalent API is:
+
+```bash
+curl 'http://localhost:8080/api/projects/<pid>/traces?level=ERROR&q=timeout&limit=50' | jq
+```
+
+Filter by `q`, `level`, or `trace_id`; paginate with the returned
+`next_before_event_id`. The index is bounded by the `CINEMA_TRACE_*` settings,
+redacts credential-shaped fields and signed URL secrets, and never returns
+another project's rows. It is a central local SQLite index, not a replacement
+for deployment-wide log shipping; JSON stdout remains authoritative when the
+index is unavailable.
+
+### Inspect artifact history and package deliverables
+
+The Preview panel's **Client delivery** section lists current and archived
+versions for each logical deliverable. Select the desired version for each
+item, then click **Package selected versions**. It builds and immediately
+downloads a verified ZIP while leaving the raw MP4 download available.
+
+API equivalents:
+
+```bash
+# Current records plus newest-first immutable history.
+curl 'http://localhost:8080/api/projects/<pid>/artifacts?limit=50' | jq
+
+# Package current client deliverables.
+curl -X POST http://localhost:8080/api/projects/<pid>/deliverables/package | jq
+
+# Or package explicit historical artifact IDs from that same project.
+curl -X POST http://localhost:8080/api/projects/<pid>/deliverables/package \
+  -H 'Content-Type: application/json' \
+  -d '{"artifact_ids":["<artifact-id>"]}' | jq
+```
+
+Use the returned `download_url`; it includes the package SHA-256. Packages are
+content-addressed, so building a newer selection does not change an older URL.
+The ZIP contains allowlisted client media, `MANIFEST.json`, and
+`SHA256SUMS.txt`; internal artifacts and credential-like paths are refused.
+
+### Retry character creation safely
+
+The Character UI generates one 32-lowercase-hex `creation_request_id` and keeps
+it after a failed or lost response. API clients must do the same in the
+multipart `POST /api/projects/<pid>/characters` body. A `409` with
+`code=paid_work_pending` is retryable with that exact token and unchanged
+inputs. `code=paid_work_reconciliation_required` is not retryable: reconcile
+the provider/billing state first. `code=artifact_version_pending` is a safe
+same-token retry that repairs immutable reference indexing without another
+provider submission.
+
+The server saves the pending reservation in `project.json` and stages a
+fingerprinted private sidecar before paid dispatch. Inspect the operator-safe
+projection with:
+
+```bash
+curl http://localhost:8080/api/projects/<pid>/characters/pending-creation | jq
+```
+
+Do not invent a new token while this returns a pending request. If provider and
+billing history prove that no resumable paid work remains, clear only that
+exact reservation with the confirmation-gated `DELETE` body:
+
+```bash
+curl -X DELETE http://localhost:8080/api/projects/<pid>/characters/pending-creation \
+  -H 'Content-Type: application/json' \
+  -d '{"creation_request_id":"<exact-32-hex-id>","confirmation":"reconciled_no_resumable_paid_work"}'
+```
+
+That action records reconciliation and removes the private staging; it does not
+recover a provider result or authorize an uninvestigated replacement call.
+Artifact history retains output/source/dependency hashes and available recipe,
+provider, model, and seed evidence, but reports `bit_exact=false`. Provider
+nondeterminism and codec/platform differences mean replay evidence is not a
+promise of byte-identical regeneration.
 
 ### Clean up old projects
 
 ```bash
-curl -X POST http://localhost:8080/api/cleanup
+curl -X POST http://localhost:8080/api/projects/<pid>/cleanup
 ```
 
 Removes temp files / unreferenced shots. Doesn't delete projects themselves.
+There is no global `POST /api/cleanup-all` route. Use the confirmed per-project
+delete UI/API for deletion; never infer a repository-wide destructive action
+from the cleanup endpoint.
 
 ### Configure dialogue voice mode
 
@@ -532,11 +641,28 @@ reported immediately and history polling is used if WebSocket attachment is
 unavailable. If these probes fail, the pod is down, throttled, unauthorized, or
 its installed graph contract does not match `pulid.json`.
 
-### A native provider reports a deferred or recovery-required job
+### A paid provider reports a deferred or recovery-required job
 
-The dispatcher deliberately stops before the next provider whenever LTX,
-Gemini Omni, or native Veo may already have accepted billable work. The Review
-UI shows the durable recovery record instead of presenting a failed take.
+The dispatcher deliberately stops before the next provider whenever an
+adapter cannot prove that already-accepted billable work is terminal. FAL
+queue requests, ComfyUI prompts, LTX, Runway Gen-4, Viggle, Suno, and other
+durable-ID media paths resume/poll the recorded provider job instead of
+submitting another. Non-resumable media calls and lost acknowledgements remain
+`accepted_unknown`; automatic replay and paid fallback stop. The Review UI and
+live-cost attempt list show the recovery record instead of presenting an
+ordinary failed take.
+
+For the legacy explicit video pins, treat recovery by capability, not by the
+word "native":
+
+- `KLING_NATIVE` persists the acknowledged Kling task ID and an identical retry
+  polls/downloads that exact task. If the POST acknowledgement itself was lost,
+  it is `accepted_unknown` and cannot be resubmitted automatically.
+- `SORA_NATIVE` enters a synchronous `create_and_poll` boundary without a
+  durable application-owned job-ID callback. Any uncertainty after that point
+  is `accepted_unknown`; there is no automatic Sora retry or fallback.
+- `FAL_SVD` is queue-backed FAL work. It persists the fast-SVD request ID and
+  resumes status/result retrieval for that exact request.
 
 For LTX, do not delete the `.ltx-image-to-video-*.job.json` sidecar or manually
 reroute the shot while its state is `submitted`, `pending`, `processing`,
@@ -569,12 +695,38 @@ manual deletion: an identical retry supersedes it under a per-request file
 lock. Never delete or override pending, processing, submission-claimed, or
 unknown sidecars.
 
+This mechanism applies only where a caller explicitly owns the versioned
+paid-attempt authority. Shared ensemble, Chief Director, Cinema Director,
+style, and scene-decomposition LLM paths now reserve deterministic attempts and
+a conservative token-cost upper bound before each SDK request. Success settles
+the reservation once from returned token usage (including Anthropic cache
+rates); ambiguity becomes `accepted_unknown`, and the same logical request is
+blocked on restart. That is deterministic no-replay fencing, not provider-ID
+resume. Planning health remains observable only and does not change routing.
+
+### A queue job offers `Abandon blocked job`
+
+This means all ordinary recovery checks have already found a narrow ambiguous
+case: the row is still `running`, its lease is expired, no local pipeline owns
+it, and the prior process fence cannot be verified. It does **not** prove the
+provider work stopped.
+
+Before using the action, inspect the exact job ID, project checkpoint,
+`cost-live` attempts, trace ID (the queue job ID), and provider consoles. If
+the prior owner is live, stop it normally. If its fence is provably stopped,
+the queue will requeue it for checkpoint resume and the exceptional action is
+correctly refused. Use abandonment only after accepting that provider work may
+still exist outside local evidence; then reconcile that work before starting a
+replacement run.
+
 ### SSE connection drops repeatedly
 
 Bundle-C 3.1 added exponential-backoff reconnect (1s/2s/4s/.../30s, 10
 attempts). If you're seeing repeated drops in the browser console, check:
 - Network stability between client and `web_server.py`
-- Whether `web_server.py` daemon thread crashed (SSE generator emits END)
+- Whether the durable queue worker ended or the server process restarted (a
+  finished bus emits END; a restarted process hydrates a fresh bus from the
+  active queue row but cannot replay the prior process's buffered events)
 - Whether a corporate proxy is closing long-lived connections; keep the
   application loopback-only and configure the proxy to bypass localhost.
 
@@ -594,10 +746,12 @@ through to `generate_lip_sync_video(..., settings=_settings)`.
 
 ### Project lock timeout (`Project '<pid>' is locked by another operation`)
 
-Another process is holding the per-project filelock
-(`domain/projects/<pid>.lock` — a sibling of the project directory, removed
-automatically on release). Likely a previous `web_server.py` instance still
-alive. Check `ps aux | grep web_server` and kill stale processes.
+There are two distinct per-project locks. `domain/projects/<pid>.lock` protects
+the project-manager read-modify-write transaction; the web operation boundary
+uses `domain/projects/.<pid>.operation.lock` across a decorated route. Lock
+files may remain on disk after release and are not proof of a live owner. Check
+the 409 `code`, active queue state, and running server processes; stop a stale
+owner normally instead of deleting lock files underneath it.
 
 ---
 
@@ -632,6 +786,38 @@ anymore) plus pod time if you use the ComfyUI fallback. Budget control is via
 `global_settings.budget_limit_usd` on the project — when exceeded,
 `ShotController.generate_motion_take` calls `lifecycle.pause()` to halt at the
 next checkpoint.
+
+The Provider analytics panel does not upgrade these figures to invoice data.
+Its API states `cost_basis: "reconciled_estimate"`: media totals are repository
+estimates reconciled against terminal outcome evidence, while planning LLM
+totals are derived from returned token usage and repository model/list-price
+tables (including Anthropic cache rates). Provider invoices remain the
+financial authority. Planning SDK calls reserve deterministic no-replay paid
+attempts, but cannot poll/resume a provider job because no durable job ID
+exists. Tavily/Firecrawl requests record outcome/latency; their dollar cost
+stays unknown when the API provides no authoritative usage. Claude Vision
+identity also uses a nonresumable fence and blocks ambiguous submission from
+replay.
+
+---
+
+## 11. Durable production controls
+
+| Control | Operator surface | Operational boundary |
+|---|---|---|
+| Crash-resumable full runs | Run page queue banner and `pipeline-state.queue` | SQLite/WAL queue resumes the project checkpoint after a stopped owner and expired lease. One active job per project; stable retry ID. |
+| Safe multi-project queue | Queued position plus Cancel | Fixed global concurrency (`PIPELINE_QUEUE_CONCURRENCY`, 1..8); accepting a job is not the same as starting provider work. |
+| Paid-media recovery | Run/Review recovery states and `cost-live.attempts` | Durable-ID adapters resume the same task; ambiguous/nonresumable calls fail closed as `accepted_unknown`. This is the paid-media adapter boundary, not universal exactly-once execution. |
+| Provider analytics | Run page **Provider analytics** | Success, latency, reservations, failures and known estimated usage from durable paid attempts plus planning/research observations; unknown vendor cost remains unknown and invoices remain authoritative. |
+| Provider health | Health status/reasons in Provider analytics | Only `unhealthy` base-video engines are removed from `AUTO`. Unknown/degraded, pinned engines, LLM/image/lipsync/performance routes are not automatically removed. |
+| Immutable artifacts | Preview → **Client delivery** → version selectors | Content-addressed bytes and hash-chained history, including generated character assets and paid Gemini/motion/lip-sync outputs rejected locally; retention failure blocks overwriting fallback. `bit_exact=false` remains truthful. Acquired web refs and LLM JSON are project revision data. |
+| Client packaging | Preview → **Package selected versions** | Deterministic allowlisted ZIP; explicit historical IDs; hash-qualified immutable download URL. |
+| Searchable traces | Run page **Trace** console | Bounded, redacted, project-scoped local index; stdout remains the deployment log stream. |
+
+The protected live canary is separate validation evidence, not runtime health
+history. Keep `runpod-pulid-production` and
+`runpod-liveportrait-performance` on their distinct endpoints and secrets; one
+contract cannot certify the other.
 
 ---
 
