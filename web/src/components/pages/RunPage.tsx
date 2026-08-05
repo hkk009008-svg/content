@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import type { Project, ProgressEvent, ShotState, PipelineStage, DirectorReview, PipelineAction, CheckpointInfo } from '../../types/project'
+import type { Project, ProgressEvent, ShotState, PipelineStage, DirectorReview, PipelineAction, CheckpointInfo, PipelineQueueSnapshot } from '../../types/project'
 import PipelineStageRail from '../pipeline/PipelineStageRail'
 import ReviewStage from '../pipeline/ReviewStage'
 import ScreeningStage from '../pipeline/ScreeningStage'
@@ -9,6 +9,8 @@ import AssemblyGate from '../pipeline/AssemblyGate'
 import Monitor from '../console/Monitor'
 import Telemetry from '../console/Telemetry'
 import Notes from '../console/Notes'
+import ProviderAnalytics from '../console/ProviderAnalytics'
+import TraceConsole from '../console/TraceConsole'
 import Filmstrip from '../shared/Filmstrip'
 import { ErrorState, LoadingState, MICRO_LABEL } from '../ui'
 
@@ -84,8 +86,11 @@ export interface Props {
   /** Slice 11c: on-disk checkpoint summary (idle branch only); null while
    *  running/paused or before one exists. */
   checkpoint: CheckpointInfo | null
+  /** Durable queue truth; active rows suppress every second-start surface. */
+  queue: PipelineQueueSnapshot | null
   onBack: () => void
   onCancel: () => void
+  onAbandonQueueJob: (jobId: string) => Promise<void>
   onPause: () => void
   onResume: () => void
   /** Slice 11c: explicit "resume from checkpoint" — POSTs `{resume: true}`.
@@ -125,8 +130,8 @@ export interface Props {
 export default function RunPage({
   project, events, latest, stages, activeStage,
   shotStates, directorReview, isGenerating, isPaused, failedShots,
-  allowedActions, checkpoint,
-  onBack, onCancel, onPause, onResume, onResumeFromCheckpoint, onGenerate,
+  allowedActions, checkpoint, queue,
+  onBack, onCancel, onAbandonQueueJob, onPause, onResume, onResumeFromCheckpoint, onGenerate,
   onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
@@ -167,6 +172,16 @@ export default function RunPage({
         ? `, ${checkpoint.shots_failed} shot${checkpoint.shots_failed === 1 ? '' : 's'} failed`
         : '')
     : ''
+  const queueMessage = queue?.state === 'queued'
+    ? `Queued${queue.position ? ` — position ${queue.position}` : ''}. Job ${queue.job_id.slice(0, 8)}.`
+    : queue?.state === 'running'
+      ? `Running attempt ${queue.attempt_count}${queue.resume_required ? ' from the last durable checkpoint' : ''}. Job ${queue.job_id.slice(0, 8)}.` +
+        (queue.operator_action === 'abandon_unverifiable' && queue.error ? ` ${queue.error}` : '')
+      : queue?.state === 'failed'
+        ? `Generation failed${queue.error ? `: ${queue.error}` : '.'}`
+        : queue?.state === 'cancelled'
+          ? 'Generation cancelled.'
+          : null
 
   /* ── Center content — routed on activeStage EXACTLY as PipelineLayout ──
      Do not reorder or alter these branches: the approval/screening gates
@@ -271,6 +286,28 @@ export default function RunPage({
         </div>
       </div>
 
+      {queueMessage && (
+        <div
+          role={queue?.state === 'failed' || queue?.operator_action ? 'alert' : 'status'}
+          aria-live={queue?.state === 'failed' || queue?.operator_action ? 'assertive' : 'polite'}
+          className="flex flex-none items-center justify-between border-b border-line bg-panel px-4 py-2 font-mono text-[11px] text-mut"
+        >
+          <span>{queueMessage}</span>
+          {queue?.cancel_requested && queue.state === 'running' && (
+            <span className="text-warn">Cancellation requested; awaiting worker confirmation.</span>
+          )}
+          {queue?.operator_action === 'abandon_unverifiable' && (
+            <button
+              type="button"
+              onClick={() => { void onAbandonQueueJob(queue.job_id) }}
+              className="ml-3 rounded border border-fail/50 px-2 py-1 text-fail hover:bg-fail/10"
+            >
+              Abandon blocked job
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Canonical filmstrip — the single merged reel ──────────── */}
       <div className="flex-none">
         <Filmstrip
@@ -309,6 +346,8 @@ export default function RunPage({
             isStreaming={isGenerating}
             projectId={projectId}
           />
+          <ProviderAnalytics projectId={projectId} isStreaming={isGenerating} />
+          <TraceConsole projectId={projectId} isStreaming={isGenerating} />
           <Notes notesBuffer={notesBuffer} />
         </aside>
       </div>

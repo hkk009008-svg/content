@@ -1,5 +1,6 @@
 import type { Project } from '../types/project'
 import MediaAsset from './ui/MediaAsset'
+import DeliverablesPanel from './DeliverablesPanel'
 
 const API = '/api'
 
@@ -26,11 +27,13 @@ export default function PreviewPanel({ project }: Props) {
         <div className="flex justify-between items-center mt-2">
           <span className="text-eyebrow text-mut">Final Export</span>
           <a href={`${API}/projects/${project.id}/export`} download
-            className="text-eyebrow text-acc hover:text-acc">
-            Download MP4
+            className="text-eyebrow text-mut hover:text-tx">
+            Raw MP4
           </a>
         </div>
       </div>
+
+      <DeliverablesPanel projectId={project.id} />
 
       {/* Per-Scene Previews */}
       {project.scenes.length > 0 && (

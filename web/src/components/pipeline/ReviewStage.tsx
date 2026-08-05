@@ -5,6 +5,7 @@ import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 import IterationPanel from './IterationPanel'
 import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
+import { canResumeDeferredProviderJob } from '../../lib/providerRecovery'
 
 const API = '/api'
 
@@ -326,7 +327,10 @@ function ClipCard({
   const deferredJobIsRecovery = deferredMotionJob?.status === 'recovery_required'
   const deferredJobStatusLabel = deferredJobIsRecovery ? 'Recovery Required' : 'Pending'
   const deferredJobEngine = deferredMotionJob?.engine?.trim() || 'Provider'
-  const deferredJobCanResume = deferredJobEngine.toUpperCase() === 'LTX' && Boolean(deferredMotionJob?.job_id)
+  const deferredJobCanResume = canResumeDeferredProviderJob(
+    deferredJobEngine,
+    deferredMotionJob?.job_id,
+  )
 
   useEffect(() => {
     if (shot.approved_keyframe_take_id) {
@@ -849,13 +853,13 @@ function ClipCard({
                   disabled={(!shot.approved_keyframe_take_id && !deferredMotionJob) || loadingAction === 'motion'}
                   aria-busy={loadingAction === 'motion'}
                   title={deferredMotionJob
-                    ? 'Checks or resumes the saved LTX provider job; no new fallback provider is started.'
+                    ? `Checks or resumes the saved ${deferredJobEngine} provider job; no new fallback provider is started.`
                     : undefined}
                   className="rounded border border-acc/50 px-2 py-1 text-eyebrow-lg text-acc hover:bg-acc/10 disabled:opacity-40"
                 >
                   {loadingAction === 'motion'
                     ? deferredMotionJob ? 'Checking / resuming…' : 'Generating…'
-                    : deferredMotionJob ? 'Check / Resume LTX Job' : 'Generate Motion'}
+                    : deferredMotionJob ? `Check / Resume ${deferredJobEngine} Job` : 'Generate Motion'}
                 </button>
               )}
             </div>
@@ -927,7 +931,7 @@ function ClipCard({
                 </dl>
                 <p className="mt-2 leading-relaxed text-mut">
                   {deferredJobCanResume
-                    ? 'Check / Resume uses this saved LTX job. It does not start a fallback provider.'
+                    ? `Check / Resume uses this saved ${deferredJobEngine} job. It does not start a fallback provider.`
                     : 'Automatic recovery is unavailable. Use the saved job ID in the provider console; this record blocks fallback generation.'}
                 </p>
               </div>

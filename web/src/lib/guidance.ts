@@ -150,7 +150,7 @@ export function getSceneGuidance(scene: Scene): SceneGuidance {
           'Reserve close shots for aftermath, reaction, or detail inserts.',
         ],
         parameterTips: [
-          'Prefer Sora or Auto for body momentum and motion-heavy frames.',
+          'Prefer Seedance or Auto for body momentum and motion-heavy frames.',
           'Keep durations tighter and avoid stacking multiple actions into one shot.',
           'Raise motion quality threshold if the scene depends on fluid movement.',
         ],

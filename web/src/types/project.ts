@@ -75,6 +75,56 @@ export interface DeferredMotionJob {
   resolve_after?: string | null
 }
 
+export type PaidAttemptState =
+  | 'reserved'
+  | 'submitting'
+  | 'accepted_unknown'
+  | 'running'
+  | 'cancel_requested'
+  | 'succeeded'
+  | 'failed_billed'
+  | 'failed_unbilled'
+  | 'cancelled'
+  | 'blocked_budget'
+
+/** Operator-safe projection of a durable paid-provider attempt. Raw provider
+ * payloads, credentials, and media URLs are intentionally not part of this
+ * contract. */
+export interface PaidAttempt {
+  attempt_id: string
+  provider: string
+  engine: string
+  operation: string
+  shot_id: string
+  video_id: string
+  state: PaidAttemptState
+  reserved_cost_usd: number
+  reconciled_cost_usd: number
+  billed: boolean | null
+  provider_job_id: string | null
+  provider_status: string
+  failure_code: string
+  detail: string
+  created_at: string
+  updated_at: string
+  active: boolean
+}
+
+/** Authoritative cost and reservation snapshot returned by cost-live. */
+export interface CostLiveSnapshot {
+  total_usd: number
+  charged_usd: number
+  active_reservation_usd: number
+  committed_usd: number
+  budget_status: 'unlimited' | 'active' | 'invalid'
+  budget_limit_usd: number | null
+  remaining_usd: number | null
+  accepted_unknown_count: number
+  billed_failure_count: number
+  blocked_attempt_count: number
+  attempts: PaidAttempt[]
+}
+
 export interface Shot {
   id: string
   prompt: string
@@ -163,9 +213,6 @@ export interface ApiEngineConfig {
   storyboard_mode?: boolean
 }
 
-export type HaltRule = 'composite_only' | 'conjunctive' | 'budget_only'
-export type ReduxStrength = 'high' | 'medium' | 'low'
-
 export interface GlobalSettings {
   aspect_ratio: string
   language?: string           // Project dialogue language. English | Korean | Japanese | Mandarin | Spanish | French | German | Hindi | Arabic | Portuguese | Italian | Russian
@@ -210,43 +257,6 @@ export interface GlobalSettings {
   char_lora_paths?: Record<string, string>
   char_lora_strengths?: Record<string, number>
   char_lora_triggers?: Record<string, string>
-
-  // -----------------------------------------------------------------
-  // RETIRED MAX-QUALITY TIER — the selector + inspector UI were removed in the
-  // Setup redesign (Task 8). These keys are kept ONLY as type mirrors of
-  // backend-accepted global_settings fields (project_manager still round-trips
-  // them); no live UI reads or writes them.
-  // -----------------------------------------------------------------
-  max_candidate_count?: number              // N, 1-16, default 8
-  max_candidate_batch?: number              // batch size before halt check, default 4
-  max_halt_threshold_composite?: number     // 0.7-1.0, default 0.92
-  max_halt_threshold_arc?: number           // 0.5-1.0, default 0.85 (informational under composite_only rule)
-  max_halt_min_n?: number                   // 1-8, default 4
-  max_regenerate_floor_arc?: number         // 0.5-1.0, default 0.82
-  max_halt_rule?: HaltRule                  // composite_only (Option 2, current default), conjunctive, budget_only
-  max_quality_parallel_workers?: number     // 1-4, default 1 — per-batch candidate parallelism
-  style_reference_paths?: string[]          // FLUX Redux style board references
-
-  // -----------------------------------------------------------------
-  // ComfyUI Engine extensions — only meaningful in max tier.
-  // -----------------------------------------------------------------
-  slg_scale?: number                        // Skip Layer Guidance, 0-5, default 2.5
-  freeu_b1?: number                         // FreeU v2 backbone amplifier 1, default 1.3
-  freeu_b2?: number                         // FreeU v2 backbone amplifier 2, default 1.4
-  freeu_s1?: number                         // FreeU v2 skip dampener 1, default 0.9
-  freeu_s2?: number                         // FreeU v2 skip dampener 2, default 0.2
-  detail_daemon_amount?: number             // 0-1, default 0.5
-  controlnet_canny_strength?: number        // 0-0.5, default 0.15
-  controlnet_pose_strength?: number         // 0-0.5, default 0.35
-  controlnet_tile_strength?: number         // 0-0.5, default 0.25
-  redux_strength?: ReduxStrength            // FLUX Redux style strength, default 'high'
-  ays_steps?: number                        // Align Your Steps step count, 15-40, default 28
-  hires_fix_enabled?: boolean               // 1.5x latent upscale + 2nd pass, default true
-  hires_fix_denoise?: number                // 0.4-0.6, default 0.40 (backend floors at 0.40 — pod-proven 0.25 disintegrates)
-  supir_enabled?: boolean                   // SUPIR 4x upscale on hero shots, default true
-  supir_steps?: number                      // 20-100, default 40 (all 5 MAX_QUALITY_TEMPLATES ship 40)
-  face_detailer_enabled?: boolean           // default true for portrait/medium/action
-  face_detailer_guide_size?: number         // 512/1024/2048, default 1024
 
   // -----------------------------------------------------------------
   // AUDIO & SYNC — TTS provider + lipsync engine preferences.
@@ -342,52 +352,16 @@ export interface WorkflowTemplate {
   description: string
 }
 
-/** Optional max-tier override block the server may still send alongside
- *  WorkflowTemplate. Type mirror only — the max-tier selector/inspector UI was
- *  retired in the Setup redesign (Task 8); no live component reads this. */
-export interface MaxQualityTemplate {
-  candidate_count: number
-  candidate_batch: number
-  halt_threshold_composite: number
-  halt_threshold_arc: number
-  halt_min_n: number
-  regenerate_floor_arc: number
-  pulid_weight: number
-  pulid_start_at: number
-  pulid_end_at: number
-  lora_strength_model: number
-  lora_strength_clip: number
-  guidance: number
-  ays_steps: number
-  sampler: string
-  pag_scale: number
-  slg_scale: number
-  freeu_b1: number
-  freeu_b2: number
-  freeu_s1: number
-  freeu_s2: number
-  detail_daemon_amount: number
-  cn_depth_strength: number
-  cn_canny_strength: number
-  cn_pose_strength: number
-  cn_tile_strength: number
-  redux_strength: ReduxStrength
-  redux_end_at: number
-  latent_blend_ratio: number
-  hires_fix_enabled: boolean
-  hires_fix_scale: number
-  hires_fix_denoise: number
-  hires_fix_steps: number
-  face_detailer_enabled: boolean
-  face_detailer_guide_size: number
-  face_detailer_denoise: number
-  supir_enabled: boolean
-  supir_steps: number
-  supir_cfg_scale: number
-  final_resolution: [number, number]
-  target_api: string
-  video_fallbacks: string[]
-  description: string
+export interface PendingCharacterCreation {
+  creation_request_id: string
+  name: string
+  status: 'submitting' | 'retryable' | 'reconciliation_required'
+  retryable: boolean
+  message: string
+  provider_job_id: string | null
+  attempt_state: string | null
+  created_at: string | null
+  updated_at: string | null
 }
 
 export interface Project {
@@ -398,6 +372,8 @@ export interface Project {
   objects: ProductObject[]
   scenes: Scene[]
   global_settings: GlobalSettings
+  /** Safe server projection only. Private staged paths/files never cross the API. */
+  pending_character_creation?: PendingCharacterCreation | null
 }
 
 export type LipsyncValidationState = 'PASS' | 'FAIL' | 'UNKNOWN'
@@ -501,6 +477,32 @@ export interface CheckpointInfo {
   shots_failed?: number
 }
 
+export type PipelineQueueState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+/** Durable full-pipeline job authority returned by POST /generate and
+ * GET /pipeline-state. Position is one-based while queued, zero while
+ * running, and null after the job reaches a terminal state. */
+export interface PipelineQueueSnapshot {
+  job_id: string
+  project_id: string
+  state: PipelineQueueState
+  position: number | null
+  requested_resume: boolean
+  resume_required: boolean
+  effective_resume: boolean
+  attempt_count: number
+  created_at: string
+  updated_at: string
+  started_at: string | null
+  finished_at: string | null
+  lease_expires_at: string | null
+  cancel_requested: boolean
+  error: string | null
+  /** Exceptional recovery offered only after an expired worker fence cannot
+   * be verified. It always requires explicit paid-work risk acknowledgement. */
+  operator_action?: 'abandon_unverifiable' | null
+}
+
 export interface PipelineState {
   paused: boolean
   cancelled: boolean
@@ -521,6 +523,9 @@ export interface PipelineState {
    *  error shape, which this interface does not model. */
   running: boolean
   allowed_actions: PipelineAction[]
+  /** Latest durable queue row for this project (active rows take priority),
+   * or null before the project has ever been queued. */
+  queue: PipelineQueueSnapshot | null
   /** Slice 11c -- additive on the disk-snapshot (idle) branch ONLY; a
    *  live pipeline's response does not carry this key (see
    *  `web_server.py:api_pipeline_state`'s docstring). Optional here
@@ -621,12 +626,9 @@ export interface AppConfig {
   color_grade_presets?: string[]
   lip_sync_modes?: string[]
   api_engine_defaults?: Record<string, ApiEngineConfig>
-  // V11 config options
-  cost_optimization_levels?: { value: string; label: string }[]
+  // Model selection options
   creative_llm_options?: { value: string; label: string }[]
   quality_judge_options?: { value: string; label: string }[]
-  // Max-tier configuration surface (read from MAX_QUALITY_TEMPLATES on the server)
-  max_workflow_templates?: Record<string, MaxQualityTemplate>
   available_style_refs?: { path: string; label: string }[]          // style board references on disk
   // Purpose-based API routing (from PURPOSE_API_RANKING)
   purpose_tags?: PurposeTag[]

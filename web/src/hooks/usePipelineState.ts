@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import type { ProgressEvent, ShotState, ShotStatus, PipelineStage, DirectorReview, PipelineState, PipelineAction, CheckpointInfo } from '../types/project'
+import type { ProgressEvent, ShotState, ShotStatus, PipelineStage, DirectorReview, PipelineState, PipelineAction, CheckpointInfo, PipelineQueueSnapshot } from '../types/project'
 import { useSSE } from './useSSE'
 import { apiGet, apiPost } from '../lib/api'
 
@@ -292,6 +292,7 @@ export function usePipelineState(projectId: string | null) {
   // docstring) -- null while running/paused (the live-pipeline branch
   // never carries this key) or before the project has one at all.
   const [checkpoint, setCheckpoint] = useState<CheckpointInfo | null>(null)
+  const [queue, setQueue] = useState<PipelineQueueSnapshot | null>(null)
 
   // Guards every pipeline-state fetch (project-switch hydration AND
   // on-demand post-mutation refreshes) against an out-of-order arrival:
@@ -315,6 +316,7 @@ export function usePipelineState(projectId: string | null) {
     setRunning(false)
     setAllowedActions([])
     setCheckpoint(null)
+    setQueue(null)
   }, [])
 
   const hydrateFrom = useCallback((state: PipelineState) => {
@@ -323,6 +325,7 @@ export function usePipelineState(projectId: string | null) {
     setActiveStage(state.current_stage || null)
     setRunning(!!state.running)
     setAllowedActions(state.allowed_actions ?? [])
+    setQueue(state.queue ?? null)
     // Absent on the live-pipeline branch by design (Slice 11c) -- null
     // rather than a stale prior idle-branch value.
     setCheckpoint(state.checkpoint ?? null)
@@ -385,6 +388,26 @@ export function usePipelineState(projectId: string | null) {
     if (!projectId) return Promise.resolve()
     return fetchAndHydrate(projectId)
   }, [projectId, fetchAndHydrate])
+
+  // Queue position and cross-process lease state do not travel over this
+  // process's in-memory SSE bus. Poll the authoritative snapshot only while
+  // a durable job is active; terminal/idle projects stay request-free.
+  useEffect(() => {
+    if (!projectId || !queue || !['queued', 'running'].includes(queue.state)) return
+    const timer = window.setInterval(() => {
+      void refreshPipelineState()
+    }, 2_000)
+    return () => window.clearInterval(timer)
+  }, [projectId, queue?.state, queue?.job_id, refreshPipelineState])
+
+  // A reload/switch can hydrate a job that was already accepted by the
+  // backend. Observe that existing run without entering the fresh-run path:
+  // sse.attach() preserves the hydrated snapshot, stream history, and last
+  // event id, and is idempotent across the queue poll above.
+  useEffect(() => {
+    const queueIsActive = queue?.state === 'queued' || queue?.state === 'running'
+    if (projectId && (running || queueIsActive)) sse.attach()
+  }, [projectId, running, queue?.state, queue?.job_id, sse.attach])
 
   // Route incoming events to the right state buckets
   const processEvent = useCallback((event: ProgressEvent) => {
@@ -684,6 +707,7 @@ export function usePipelineState(projectId: string | null) {
     // Slice 11c: on-disk checkpoint summary (idle branch only -- see
     // hydrateFrom above).
     checkpoint,
+    queue,
     refreshPipelineState,
     // Pipeline controls
     pause,

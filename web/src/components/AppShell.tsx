@@ -42,8 +42,10 @@ interface AppShellProps
     // ── Slice 11c: server-derived action authority + checkpoint summary ──
     | 'allowedActions'
     | 'checkpoint'
+    | 'queue'
     // ── Run-page callbacks (wrapped in withRefresh up in App.tsx) ──
     | 'onBack'
+    | 'onAbandonQueueJob'
     | 'onPause'
     | 'onResume'
     | 'onResumeFromCheckpoint'
@@ -128,7 +130,9 @@ export default function AppShell({
   failedShots,
   allowedActions,
   checkpoint,
+  queue,
   onBack,
+  onAbandonQueueJob,
   onPause,
   onResume,
   onResumeFromCheckpoint,
@@ -246,8 +250,10 @@ export default function AppShell({
             failedShots={failedShots}
             allowedActions={allowedActions}
             checkpoint={checkpoint}
+            queue={queue}
             onBack={onBack}
             onCancel={onCancel}
+            onAbandonQueueJob={onAbandonQueueJob}
             onPause={onPause}
             onResume={onResume}
             onResumeFromCheckpoint={onResumeFromCheckpoint}
@@ -381,11 +387,12 @@ export default function AppShell({
         {/* Right: generate */}
         <button
           onClick={onGenerate}
-          disabled={project.scenes.length === 0}
+          disabled={project.scenes.length === 0 || !allowedActions.includes('start')}
+          aria-label={queue?.state === 'queued' ? 'Generation queued' : queue?.state === 'running' ? 'Generation running' : 'Generate'}
           className="flex items-center gap-1.5 rounded bg-acc px-4 py-1.5 font-mono text-[11px] uppercase tracking-wide text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           <span aria-hidden>▶</span>
-          Generate
+          {queue?.state === 'queued' ? 'Queued' : queue?.state === 'running' ? 'Running' : 'Generate'}
         </button>
       </footer>
 

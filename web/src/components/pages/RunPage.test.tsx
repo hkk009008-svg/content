@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import RunPage from './RunPage'
-import type { Project, PipelineAction, CheckpointInfo } from '../../types/project'
+import type { Project, PipelineAction, CheckpointInfo, PipelineQueueSnapshot } from '../../types/project'
 
 /**
  * Slice 11c -- Run-page header run controls.
@@ -30,6 +30,8 @@ vi.mock('../pipeline/DirectorReviewCard', () => ({ default: () => <div data-test
 vi.mock('../pipeline/AssemblyGate', () => ({ default: () => <div data-testid="mock-assembly-gate" /> }))
 vi.mock('../console/Monitor', () => ({ default: () => <div data-testid="mock-monitor" /> }))
 vi.mock('../console/Telemetry', () => ({ default: () => <div data-testid="mock-telemetry" /> }))
+vi.mock('../console/ProviderAnalytics', () => ({ default: () => <div data-testid="mock-provider-analytics" /> }))
+vi.mock('../console/TraceConsole', () => ({ default: () => <div data-testid="mock-trace-console" /> }))
 vi.mock('../console/Notes', () => ({ default: () => <div data-testid="mock-notes" /> }))
 vi.mock('../shared/Filmstrip', () => ({ default: () => <div data-testid="mock-filmstrip" /> }))
 
@@ -60,8 +62,10 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof RunPage>> = {}
     failedShots: [],
     allowedActions: [] as PipelineAction[],
     checkpoint: null as CheckpointInfo | null,
+    queue: null as PipelineQueueSnapshot | null,
     onBack: noop,
     onCancel: noop,
+    onAbandonQueueJob: asyncNoop,
     onPause: noop,
     onResume: noop,
     onResumeFromCheckpoint: noop,
@@ -84,6 +88,42 @@ function makeProps(overrides: Partial<React.ComponentProps<typeof RunPage>> = {}
 }
 
 describe('RunPage -- header run controls are server-authoritative (Slice 11c)', () => {
+  it('announces durable queue position and offers cancel without a second start', () => {
+    const queue: PipelineQueueSnapshot = {
+      job_id: '1234567890abcdef', project_id: project.id, state: 'queued', position: 3,
+      requested_resume: false, resume_required: false, effective_resume: false,
+      attempt_count: 0, created_at: '2026-08-05T00:00:00Z', updated_at: '2026-08-05T00:00:00Z',
+      started_at: null, finished_at: null, lease_expires_at: null,
+      cancel_requested: false, error: null,
+    }
+    render(<RunPage {...makeProps({ isGenerating: true, allowedActions: ['cancel'], queue })} />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('Queued — position 3')
+    expect(screen.getByRole('status')).toHaveTextContent('Job 12345678')
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start new' })).toBeNull()
+  })
+
+  it('surfaces the explicit abandonment action only for an unverifiable expired owner', () => {
+    const onAbandonQueueJob = vi.fn(async () => {})
+    const queue: PipelineQueueSnapshot = {
+      job_id: '1234567890abcdef1234567890abcdef', project_id: project.id,
+      state: 'running', position: 0,
+      requested_resume: false, resume_required: true, effective_resume: true,
+      attempt_count: 1, created_at: '2026-08-05T00:00:00Z', updated_at: '2026-08-05T00:01:00Z',
+      started_at: '2026-08-05T00:00:01Z', finished_at: null,
+      lease_expires_at: '2026-08-05T00:00:30Z', cancel_requested: false,
+      error: 'Worker heartbeat expired but owner fence is unverifiable; automatic recovery is blocked',
+      operator_action: 'abandon_unverifiable',
+    }
+
+    render(<RunPage {...makeProps({ queue, onAbandonQueueJob })} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Abandon blocked job' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('owner fence is unverifiable')
+    expect(onAbandonQueueJob).toHaveBeenCalledWith(queue.job_id)
+  })
+
   it('idle with no checkpoint renders none of Resume/Pause/Cancel -- only Back', () => {
     render(<RunPage {...makeProps({ allowedActions: ['start'] })} />)
 

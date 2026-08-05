@@ -205,6 +205,26 @@ export function useSSE(projectId: string | null) {
     connect()
   }, [projectId, connect, clearRetry, syncProject])
 
+  // Attach to a run the backend says already exists (page reload, or
+  // switching back to a queued/running project). Unlike start(), this does
+  // not clear events or lastEventId: both belong to the current project/run
+  // and are required for an exact reconnect suffix. Repeated authoritative
+  // hydrations are harmless -- an open source or a scheduled retry owns the
+  // connection until it succeeds, stops, or exhausts its backoff budget.
+  const attach = useCallback(() => {
+    if (
+      !mountedRef.current
+      || !projectId
+      || committedProjectRef.current !== projectId
+    ) return
+    syncProject(projectId)
+    if (sourceRef.current || retryTimerRef.current !== null) return
+    stoppedRef.current = false
+    attemptRef.current = 0
+    setIsStreaming(true)
+    connect()
+  }, [projectId, connect, syncProject])
+
   const stop = useCallback(() => {
     stoppedRef.current = true
     closeAndReset(false)
@@ -230,6 +250,7 @@ export function useSSE(projectId: string | null) {
     latest: projectStateIsCurrent ? latest : null,
     isStreaming: projectStateIsCurrent ? isStreaming : false,
     start,
+    attach,
     stop,
   }
 }
