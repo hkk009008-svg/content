@@ -66,9 +66,8 @@ def _write_checkpoint(pid: str, **state) -> None:
 
 class _RecordingFakePipeline:
     """Records the exact ``resume`` kwarg api_generate's background
-    thread calls ``.generate(resume=...)`` with, then signals ``done`` so
-    the test can synchronize on the REAL threading.Thread web_server
-    launches (no need to inspect internals or poll)."""
+    worker calls ``.generate(resume=...)`` with, then signals ``done`` so
+    the test can synchronize on the real bounded dispatcher."""
 
     def __init__(self, calls: list, done: threading.Event):
         self._calls = calls
@@ -103,9 +102,9 @@ def test_generate_with_no_body_threads_resume_false(client, real_project):
          mock.patch("web_server._get_or_build_core", return_value=mock.MagicMock()):
         resp = client.post(f"/api/projects/{pid}/generate")
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         assert resp.get_json()["resume"] is False
-        assert done.wait(timeout=3.0), "background thread never reached generate()"
+        assert done.wait(timeout=3.0), "queue worker never reached generate()"
 
     assert calls == [False]
 
@@ -122,8 +121,8 @@ def test_generate_with_resume_false_body_threads_resume_false(client, real_proje
          mock.patch("web_server._get_or_build_core", return_value=mock.MagicMock()):
         resp = client.post(f"/api/projects/{pid}/generate", json={"resume": False})
 
-        assert resp.status_code == 200
-        assert done.wait(timeout=3.0), "background thread never reached generate()"
+        assert resp.status_code == 202
+        assert done.wait(timeout=3.0), "queue worker never reached generate()"
 
     assert calls == [False]
 
@@ -142,9 +141,9 @@ def test_generate_with_resume_true_body_threads_resume_true(client, real_project
          mock.patch("web_server._get_or_build_core", return_value=mock.MagicMock()):
         resp = client.post(f"/api/projects/{pid}/generate", json={"resume": True})
 
-        assert resp.status_code == 200
+        assert resp.status_code == 202
         assert resp.get_json()["resume"] is True
-        assert done.wait(timeout=3.0), "background thread never reached generate()"
+        assert done.wait(timeout=3.0), "queue worker never reached generate()"
 
     assert calls == [True]
 

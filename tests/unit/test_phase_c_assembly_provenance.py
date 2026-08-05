@@ -15,6 +15,7 @@ import dataclasses
 import json
 import os
 import sys
+import types
 import urllib.parse
 import urllib.request
 from unittest.mock import MagicMock
@@ -49,6 +50,9 @@ def stub_fal(monkeypatch):
     fake = MagicMock()
     fake.upload_file.return_value = "https://fake/upload"
     fake.subscribe.return_value = {"images": [{"url": "https://fake/image.jpg"}]}
+    fake.submit.return_value = types.SimpleNamespace(request_id="fal-image-request")
+    fake.status.return_value = {"status": "COMPLETED"}
+    fake.result.return_value = {"images": [{"url": "https://fake/image.jpg"}]}
     monkeypatch.setitem(sys.modules, "fal_client", fake)
     # settings is a frozen dataclass — replace the whole object (preserving
     # every other field) rather than setattr-ing a field.
@@ -275,6 +279,7 @@ class TestGeminiImagePriorityZero:
                 calls["constructed"] = True
 
             def generate_image(self, prompt, output_path, **kwargs):
+                calls["count"] = calls.get("count", 0) + 1
                 calls["kwargs"] = kwargs
                 calls["output_path"] = output_path
                 with open(output_path, "wb") as fh:
@@ -337,12 +342,12 @@ class TestGeminiImagePriorityZero:
         assert stub_gemini_client["constructed"] is True
         assert os.path.exists(out)
 
-    def test_gemini_identity_fail_falls_through_to_pod_and_logs_comparison(
-        self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch
+    def test_gemini_identity_fail_falls_through_to_pod_and_traces_artifact(
+        self, gemini_enabled_settings, stub_gemini_client, stub_validator, tmp_path, monkeypatch, caplog
     ):
         """A failing identity check does NOT return GEMINI_IMAGE — it falls
         through to the pod (PRIORITY-1, mocked queue_prompt reached) and
-        appends one logs/gemini_image_arc_comparison.jsonl line."""
+        emits one central trace tied to the retained candidate."""
         from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path
 
         stub_validator["passed"] = False
@@ -355,26 +360,152 @@ class TestGeminiImagePriorityZero:
         # base already carries google_api_key="test-google-key" forward.
         captured_workflow = _stub_comfyui_path(monkeypatch, tmp_path)
 
-        monkeypatch.chdir(tmp_path)  # logs/gemini_image_arc_comparison.jsonl is CWD-relative
+        monkeypatch.chdir(tmp_path)
+        caplog.set_level("INFO", logger="phase_c_assembly")
 
         char = tmp_path / "face.jpg"
         char.write_bytes(b"face")
         out = str(tmp_path / "out.jpg")
+        retained = []
+
+        def _retain(*args, **kwargs):
+            take = args[3]
+            with open(take["path"], "rb") as handle:
+                assert handle.read() == b"gemini-image-bytes"
+            retained.append((args, kwargs))
+            return {"artifact_id": "av-rejected", "sha256": "a" * 64}
+
+        monkeypatch.setattr(
+            "cinema.artifact_indexing.record_take_version",
+            _retain,
+        )
+        project = {
+            "id": "project-artifacts",
+            "scenes": [{"id": "scene-1", "shots": [{"id": "shot-1"}]}],
+        }
 
         res = pca.generate_ai_broll(
             "a prompt", out, character_image=str(char),
             ctx=gemini_enabled_settings,
+            video_id="project-artifacts",
+            shot_id="shot-1",
+            take_id="take-1",
+            project_snapshot=project,
+            project_root=tmp_path,
         )
 
         # The pod path was reached: queue_prompt captured a real workflow dict.
         assert captured_workflow, "identity-score-fail must fall through to the pod, not return early"
         assert res.api_name != "GEMINI_IMAGE"
+        assert len(retained) == 1
+        rejected_take = retained[0][0][3]
+        assert rejected_take["id"] == "take-1"
+        assert rejected_take["status"] == "rejected"
+        assert rejected_take["metadata"]["rejection_stage"] == "identity_validation"
+        assert rejected_take["metadata"]["identity_score"] == pytest.approx(0.31)
 
-        comparison_log = tmp_path / "logs" / "gemini_image_arc_comparison.jsonl"
-        assert comparison_log.exists()
-        line = json.loads(comparison_log.read_text().strip().splitlines()[-1])
-        assert line["gemini_score"] == pytest.approx(0.31)
-        assert line["character_image"] == str(char)
+        trace = next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "Gemini identity candidate rejected"
+        )
+        assert trace.identity_score == pytest.approx(0.31)
+        assert trace.artifact_id == "av-rejected"
+
+    def test_gemini_reject_retention_failure_blocks_overwriting_fallback(
+        self,
+        gemini_enabled_settings,
+        stub_gemini_client,
+        stub_validator,
+        tmp_path,
+        monkeypatch,
+    ):
+        """The only paid frame remains recoverable when immutable copy fails."""
+        from tests.unit.test_phase_c_assembly_portrait import _stub_comfyui_path
+
+        stub_validator["passed"] = False
+        captured_workflow = _stub_comfyui_path(monkeypatch, tmp_path)
+        monkeypatch.setattr(
+            "cinema.artifact_indexing.record_take_version",
+            MagicMock(side_effect=OSError("artifact store unavailable")),
+        )
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+        recovery = {}
+        project = {
+            "id": "project-artifacts",
+            "scenes": [{"id": "scene-1", "shots": [{"id": "shot-1"}]}],
+        }
+
+        result = pca.generate_ai_broll(
+            "a prompt",
+            out,
+            character_image=str(char),
+            ctx=gemini_enabled_settings,
+            _recovery_out=recovery,
+            video_id="project-artifacts",
+            shot_id="shot-1",
+            take_id="take-1",
+            project_snapshot=project,
+            project_root=tmp_path,
+        )
+
+        assert result is None
+        assert not captured_workflow
+        with open(out, "rb") as handle:
+            assert handle.read() == b"gemini-image-bytes"
+        assert recovery["provider_status"] == "artifact_retention_failed"
+        assert "Fallback is blocked" in recovery["reason"]
+
+    def test_completed_gemini_candidate_resumes_from_immutable_bytes(
+        self,
+        gemini_enabled_settings,
+        stub_gemini_client,
+        stub_validator,
+        tmp_path,
+        monkeypatch,
+    ):
+        from cost_tracker import CostTracker
+
+        monkeypatch.setattr(pca, "validate_image_artifact", lambda *_a, **_k: True)
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+        project = {
+            "id": "project-artifacts",
+            "scenes": [{"id": "scene-1", "shots": [{"id": "shot-1"}]}],
+        }
+        call_kwargs = {
+            "character_image": str(char),
+            "ctx": gemini_enabled_settings,
+            "video_id": "project-artifacts",
+            "shot_id": "shot-1",
+            "take_id": "take-1",
+            "project_snapshot": project,
+            "project_root": tmp_path,
+        }
+
+        with CostTracker(db_path=str(tmp_path / "cost.db")) as tracker:
+            first = pca.generate_ai_broll(
+                "a prompt", out, cost_tracker=tracker, **call_kwargs
+            )
+            assert first.api_name == "GEMINI_IMAGE"
+            assert stub_gemini_client["count"] == 1
+            with open(out, "wb") as handle:
+                handle.write(b"stale-mutable-bytes")
+
+            resumed = pca.generate_ai_broll(
+                "a prompt", out, cost_tracker=tracker, **call_kwargs
+            )
+
+            assert resumed.api_name == "GEMINI_IMAGE"
+            assert stub_gemini_client["count"] == 1
+            with open(out, "rb") as handle:
+                assert handle.read() == b"gemini-image-bytes"
+            assert tracker.get_paid_attempts_snapshot("project-artifacts")[
+                "attempts"
+            ][0]["state"] == "succeeded"
 
     def test_gemini_exception_falls_through_gracefully(
         self, gemini_enabled_settings, tmp_path, monkeypatch
@@ -692,31 +823,26 @@ class TestGeminiImagePriorityZero:
             "prompt": "base prompt",
             "continuity_config": {"primary_reference": str(char)},
         }
-        core.cost_tracker = MagicMock()
-        # Pre-spend budget gate (FOLLOW-UP (a)): an unconfigured MagicMock's
-        # would_exceed(...) return value is itself a truthy MagicMock, which
-        # would spuriously trip the gate before this test's real seam (the
-        # Gemini-reject-then-FAL-winner cascade) is reached.
-        core.cost_tracker.would_exceed.return_value = False
+        from cost_tracker import CostTracker
+        core.cost_tracker = CostTracker(
+            db_path=str(tmp_path / "paid-image.db"),
+            budget_usd=2.0,
+        )
 
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
         ctrl._take_output_path = MagicMock(return_value=img_path)
         ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
         ctrl._mutate_shot = lambda shot_id, mutator: mutator(scene, shot).value
 
-        result = ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+        try:
+            result = ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
 
-        assert result.get("success") is True, f"expected success, got {result}"
-
-        calls = ctrl.cost_tracker.record_api_call.call_args_list
-        by_op = {c.kwargs.get("operation"): c for c in calls}
-        assert "keyframe_generation" in by_op and "image_generation_rejected" in by_op, (
-            f"expected winner + Gemini-reject records; got {calls}"
-        )
-        assert by_op["keyframe_generation"].args[0] == "FLUX_KONTEXT", (
-            f"expected the FAL Kontext fallback to win; got "
-            f"{by_op['keyframe_generation'].args[0]!r}"
-        )
-        assert by_op["image_generation_rejected"].args[0] == "GEMINI_IMAGE", (
-            f"expected the billed-but-rejected Gemini call recorded; got {calls}"
-        )
+            assert result.get("success") is True, f"expected success, got {result}"
+            attempts = ctrl.cost_tracker.get_paid_attempts_snapshot("proj_1")["attempts"]
+            succeeded = {row["engine"] for row in attempts if row["state"] == "succeeded"}
+            assert succeeded == {"GEMINI_IMAGE", "FLUX_KONTEXT"}
+            assert ctrl.cost_tracker.get_video_cost("proj_1")["total_usd"] == pytest.approx(
+                0.067 + 0.08
+            )
+        finally:
+            core.cost_tracker.close()

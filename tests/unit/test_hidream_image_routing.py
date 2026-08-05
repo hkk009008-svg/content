@@ -61,6 +61,12 @@ def _build_keyframe_controller():
     ctrl._take_output_path = MagicMock(return_value="/nonexistent/keyframe.jpg")
     ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
     ctrl._mutate_shot = MagicMock()
+    # Immutable artifact persistence is covered by test_artifact_indexing.py.
+    # Keep this routing fixture at its intended seam while honoring the current
+    # controller contract: finalization returns (stored_take, artifact_error).
+    ctrl._finalize_take_artifact_version = MagicMock(
+        side_effect=lambda _shot_id, _kind, stored_take: (stored_take, None)
+    )
     return ctrl, project
 
 

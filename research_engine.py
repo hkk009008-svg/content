@@ -12,11 +12,57 @@ Upgrades:
 
 import os
 import json
+import time
 from typing import Optional, Dict, List
 import firecrawl_adapter
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
 # Initialize clients
 _tavily_client = None
+
+
+def _record_research_observation(
+    cost_tracker,
+    *,
+    provider: str,
+    engine: str,
+    operation: str,
+    status: str,
+    started: float,
+) -> None:
+    """Best-effort durable outcome evidence for one research request."""
+    latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+    try:
+        with cost_tracker_scope(cost_tracker) as tracker:
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if callable(recorder):
+                recorder(
+                    provider=provider,
+                    engine=engine,
+                    operation=operation,
+                    status=status,
+                    latency_ms=latency_ms,
+                )
+    except Exception:
+        # Research is optional; an analytics write cannot change its result.
+        pass
+
+
+def _record_tavily_observation(
+    cost_tracker,
+    *,
+    operation: str,
+    status: str,
+    started: float,
+) -> None:
+    _record_research_observation(
+        cost_tracker,
+        provider="tavily",
+        engine="TAVILY_SEARCH",
+        operation=operation,
+        status=status,
+        started=started,
+    )
 
 
 def _get_tavily():
@@ -30,7 +76,12 @@ def _get_tavily():
     return _tavily_client
 
 
-def research_cinematography(mood: str, location: str, action: str) -> str:
+def research_cinematography(
+    mood: str,
+    location: str,
+    action: str,
+    cost_tracker=None,
+) -> str:
     """
     Search for real cinematography techniques matching the scene's mood and setting.
     Returns a reference string to inject into the scene decomposer for better shot design.
@@ -40,8 +91,15 @@ def research_cinematography(mood: str, location: str, action: str) -> str:
         return ""
 
     query = f"cinematography techniques for {mood} mood scene in {location}, {action}, camera angles lighting"
+    started = time.perf_counter()
     try:
         result = tavily.search(query=query, search_depth="basic", max_results=3)
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_cinematography",
+            status="succeeded",
+            started=started,
+        )
         insights = []
         for r in result.get("results", [])[:3]:
             content = r.get("content", "")[:200]
@@ -54,11 +112,20 @@ def research_cinematography(mood: str, location: str, action: str) -> str:
             return f"[RESEARCH REFERENCE]: {combined[:500]}"
         return ""
     except Exception as e:
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_cinematography",
+            status="failed",
+            started=started,
+        )
         print(f"   [RESEARCH] Cinematography search failed: {e}")
         return ""
 
 
-def research_location_visual(location_description: str) -> List[str]:
+def research_location_visual(
+    location_description: str,
+    cost_tracker=None,
+) -> List[str]:
     """
     Search for real photographs of the described location for visual grounding.
     Returns list of image URLs that can be used as reference for image generation.
@@ -68,19 +135,36 @@ def research_location_visual(location_description: str) -> List[str]:
         return []
 
     query = f"{location_description} photograph high quality"
+    started = time.perf_counter()
     try:
         result = tavily.search(query=query, search_depth="basic", max_results=5,
                                include_images=True)
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_location_visual",
+            status="succeeded",
+            started=started,
+        )
         images = result.get("images", [])
         if images:
             print(f"   [RESEARCH] Found {len(images)} reference images for location")
         return images[:5]
     except Exception as e:
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_location_visual",
+            status="failed",
+            started=started,
+        )
         print(f"   [RESEARCH] Location image search failed: {e}")
         return []
 
 
-def research_music_reference(mood: str, scene_description: str) -> str:
+def research_music_reference(
+    mood: str,
+    scene_description: str,
+    cost_tracker=None,
+) -> str:
     """
     Search for real film scores and music references matching the mood.
     Returns enhanced music prompt with real-world references.
@@ -90,8 +174,15 @@ def research_music_reference(mood: str, scene_description: str) -> str:
         return ""
 
     query = f"film score {mood} mood music similar to, soundtrack reference, instruments tempo"
+    started = time.perf_counter()
     try:
         result = tavily.search(query=query, search_depth="basic", max_results=3)
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_music_reference",
+            status="succeeded",
+            started=started,
+        )
         refs = []
         for r in result.get("results", [])[:3]:
             content = r.get("content", "")[:150]
@@ -103,29 +194,62 @@ def research_music_reference(mood: str, scene_description: str) -> str:
             return " | ".join(refs)[:300]
         return ""
     except Exception as e:
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_music_reference",
+            status="failed",
+            started=started,
+        )
         print(f"   [RESEARCH] Music search failed: {e}")
         return ""
 
 
-def scrape_technique_reference(url: str) -> str:
+def scrape_technique_reference(url: str, cost_tracker=None) -> str:
     """
     Scrape a specific URL (cinematography tutorial, film analysis) for technique details.
     Uses Firecrawl for clean markdown extraction.
     """
+    started = time.perf_counter()
     try:
         content = firecrawl_adapter.scrape_markdown(
             url,
             api_key=settings.firecrawl_api_key,
         )
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="scrape_technique_reference",
+            status="succeeded",
+            started=started,
+        )
         return content[:1000]
+    except (
+        firecrawl_adapter.FirecrawlConfigurationError,
+        firecrawl_adapter.FirecrawlDependencyError,
+        firecrawl_adapter.FirecrawlInitializationError,
+        firecrawl_adapter.FirecrawlURLValidationError,
+    ):
+        return ""
     except Exception:
+        _record_research_observation(
+            cost_tracker,
+            provider="firecrawl",
+            engine="FIRECRAWL_SCRAPE",
+            operation="scrape_technique_reference",
+            status="failed",
+            started=started,
+        )
         # Optional research stays silent when configuration, SDK, request, or
         # response validation fails.  The shared adapter removes secret-bearing
         # exception details before they can cross this boundary.
         return ""
 
 
-def research_trending_topics(category: str = "cinema") -> List[str]:
+def research_trending_topics(
+    category: str = "cinema",
+    cost_tracker=None,
+) -> List[str]:
     """
     Research trending topics for content generation.
     """
@@ -134,8 +258,15 @@ def research_trending_topics(category: str = "cinema") -> List[str]:
         return []
 
     query = f"trending {category} topics 2026, viral video ideas, popular themes"
+    started = time.perf_counter()
     try:
         result = tavily.search(query=query, search_depth="advanced", max_results=5)
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_trending_topics",
+            status="succeeded",
+            started=started,
+        )
         topics = []
         for r in result.get("results", [])[:5]:
             title = r.get("title", "")
@@ -143,4 +274,10 @@ def research_trending_topics(category: str = "cinema") -> List[str]:
                 topics.append(title)
         return topics
     except Exception:
+        _record_tavily_observation(
+            cost_tracker,
+            operation="research_trending_topics",
+            status="failed",
+            started=started,
+        )
         return []

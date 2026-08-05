@@ -91,7 +91,7 @@ def test_validate_identity_vision_fails_closed_on_api_failure(monkeypatch, tmp_p
     # frozen-dataclass setattr restriction.
     monkeypatch.setattr(phase_c_vision, "settings", types.SimpleNamespace(anthropic_api_key="k"))
     monkeypatch.setattr(phase_c_vision, "encode_image_for_llm", lambda p: "b64", raising=False)
-    monkeypatch.setattr(phase_c_vision, "_IDENTITY_API_RETRY_BACKOFF_SECONDS", 0)
+    monkeypatch.setenv("EXPERIMENTS_DB_PATH", str(tmp_path / "identity-attempts.db"))
 
     import anthropic
 
@@ -109,7 +109,7 @@ def test_validate_identity_vision_fails_closed_on_api_failure(monkeypatch, tmp_p
         result = phase_c_vision.validate_identity_vision(str(ref), str(gen))
 
     assert result.get("error") is True
-    assert result.get("error_reason") == "provider_error"
+    assert result.get("error_reason") == "paid_work_reconciliation_required"
     assert result.get("confidence") == 0.0
     assert result.get("match") is False
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]

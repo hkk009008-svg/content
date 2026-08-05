@@ -77,3 +77,7 @@ def test_run_with_tools_routes_spend_onto_shared_tracker(tmp_path):
         "run_with_tools did not route its LLM spend onto the supplied "
         "cost_tracker; spent_usd is still 0.0 (web-research-uncounted bug)"
     )
+    metric = shared_tracker.get_provider_usage_analytics()["by_engine"]["gpt-4o"]
+    assert metric["succeeded"] >= 1
+    assert metric["failed_observed"] == 0
+    assert metric["token_cost_usd"] > 0.0

@@ -107,3 +107,24 @@ def test_pipeline_core_rehydrates_before_first_generation(monkeypatch, tmp_path)
 
     tracker.rehydrate_spent_usd_from_video.assert_called_once_with("proj-1")
     assert core.cost_tracker is tracker
+
+
+def test_pipeline_core_passes_corrupt_budget_to_fail_closed_chokepoint(
+    monkeypatch, tmp_path
+):
+    """Core must not translate malformed historical caps into unlimited."""
+    import cinema.core as core_module
+
+    project = {"id": "proj-1", "global_settings": {"budget_limit_usd": "typo"}}
+    tracker = MagicMock()
+    constructor = MagicMock(return_value=tracker)
+    monkeypatch.setattr(core_module, "load_project", lambda _pid: project)
+    monkeypatch.setattr(core_module, "get_project_dir", lambda _pid: str(tmp_path))
+    monkeypatch.setattr(core_module, "CostTracker", constructor)
+    monkeypatch.setattr(core_module, "ContinuityEngine", MagicMock())
+    monkeypatch.setattr(core_module, "ChiefDirector", MagicMock())
+    monkeypatch.setattr(core_module, "LLMEnsemble", MagicMock())
+
+    core_module.build_pipeline_core("proj-1")
+
+    constructor.assert_called_once_with(budget_usd="typo")

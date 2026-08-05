@@ -489,6 +489,8 @@ class TestNoScreeningGateDeadlock:
                    return_value=True), \
              patch("cinema_pipeline.CinemaPipeline._ensure_bgm",
                    return_value=""), \
+             patch("cinema.artifact_indexing.record_final_version",
+                   return_value={"artifact_id": "av-test", "version": 1}), \
              patch("web_server._get_or_build_core", return_value=MagicMock()), \
              patch("web_server.load_project", return_value=project), \
              patch("cinema.screening.clear_needs_reassembly",

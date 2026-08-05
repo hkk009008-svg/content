@@ -149,6 +149,11 @@ class Settings:
     project_root: Path
     experiments_db_path: str
     performance_cache_dir: str   # SHA256-keyed driving-video cache (performance/_cache.py)
+    pipeline_job_db_path: str    # Durable full-project queue
+    pipeline_queue_concurrency: int
+    cinema_trace_db_path: str    # Searchable structured trace index
+    cinema_trace_retention_days: int
+    cinema_trace_max_events: int
 
     # Performance-capture tuning
     motion_gate_samples: int     # #frame-pair samples for optical-flow scoring (performance/motion_gate.py)
@@ -189,6 +194,23 @@ class Settings:
             project_root=_PROJECT_ROOT,
             experiments_db_path=_env("EXPERIMENTS_DB_PATH", "data/experiments.db"),
             performance_cache_dir=_env("PERFORMANCE_CACHE_DIR", "data/cache/driving"),
+            pipeline_job_db_path=(
+                _env("PIPELINE_JOB_DB_PATH", "data/pipeline_jobs.db").strip()
+                or "data/pipeline_jobs.db"
+            ),
+            pipeline_queue_concurrency=_parse_int(
+                "PIPELINE_QUEUE_CONCURRENCY", 1, minimum=1, maximum=8
+            ),
+            cinema_trace_db_path=(
+                _env("CINEMA_TRACE_DB_PATH", "data/telemetry.db").strip()
+                or "data/telemetry.db"
+            ),
+            cinema_trace_retention_days=_parse_int(
+                "CINEMA_TRACE_RETENTION_DAYS", 30, minimum=1, maximum=365
+            ),
+            cinema_trace_max_events=_parse_int(
+                "CINEMA_TRACE_MAX_EVENTS", 50_000, minimum=1_000, maximum=1_000_000
+            ),
             motion_gate_samples=_parse_int(
                 "MOTION_GATE_SAMPLES", 8, minimum=1, maximum=240
             ),

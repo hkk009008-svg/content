@@ -9,13 +9,23 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import logging
 import math
-import os
 import sys
+import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
+from paid_provider import (
+    PaidCallDeferred,
+    has_paid_attempt_authority,
+    openai_output_limit_kwargs,
+    run_fenced_llm_call,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -160,7 +170,12 @@ _DEFAULT_JUDGE = "claude-sonnet-4-6"
 class LLMEnsemble:
     """Orchestrates competitive generation across multiple LLM providers."""
 
-    def __init__(self, settings: dict | None = None, cost_tracker: Any | None = None) -> None:
+    def __init__(
+        self,
+        settings: dict | None = None,
+        cost_tracker: Any | None = None,
+        video_id: str = "",
+    ) -> None:
         # Keep the public client attributes available for caller/test injection,
         # but do not import or construct an SDK until its key is configured.
         anthropic_key = env_settings.anthropic_api_key
@@ -184,6 +199,11 @@ class LLMEnsemble:
             self.openai_client = None
 
         self.cost_tracker = cost_tracker
+        inherited_video_id = getattr(cost_tracker, "default_video_id", "")
+        self.video_id = str(
+            video_id
+            or (inherited_video_id if isinstance(inherited_video_id, str) else "")
+        )[:128]
 
         # Gemini is optional — only construct the client when a key is
         # configured. The judge_map below references "gemini-pro" which
@@ -231,7 +251,7 @@ class LLMEnsemble:
         output_tokens: Any,
     ) -> None:
         """Record LLM token usage on the shared budget tracker when present."""
-        if self.cost_tracker is None:
+        if self.cost_tracker is None or has_paid_attempt_authority(self.cost_tracker):
             return
 
         try:
@@ -249,6 +269,7 @@ class LLMEnsemble:
                 operation=operation,
                 input_tokens=input_count,
                 output_tokens=output_count,
+                video_id=getattr(self, "video_id", ""),
             )
         except Exception as exc:  # noqa: BLE001
             msg = f"[LLMEnsemble] Failed to record LLM usage for {model!r}: {exc}"
@@ -258,6 +279,99 @@ class LLMEnsemble:
             # gate for the rest of the run (llmensemble-cost-uncounted class).
             print(msg, file=sys.stderr)
             warnings.warn(msg, stacklevel=2)
+
+    def _call_with_observation(
+        self,
+        *,
+        provider: str,
+        model: str,
+        operation: str,
+        call: Any,
+        request_payload: Any,
+        max_output_tokens: int,
+        attempt_scope: str = "",
+    ) -> Any:
+        """Invoke one SDK request with durable authority when available.
+
+        Provider observations expose latency/outcome. A real project tracker
+        additionally owns the atomic budget reservation and no-replay fence;
+        narrow standalone trackers retain the legacy direct-call behavior.
+        """
+        started = time.perf_counter()
+
+        def persist(status: str, latency_ms: int) -> None:
+            tracker = getattr(self, "cost_tracker", None)
+            if has_paid_attempt_authority(tracker):
+                # The paid-attempt row already owns this exact outcome and
+                # terminal latency. A second provider_observation would double
+                # the analytics sample and cross health thresholds early.
+                return
+            recorder = getattr(tracker, "record_provider_observation", None)
+            if not callable(recorder):
+                return
+            try:
+                recorder(
+                    provider=provider,
+                    engine=model,
+                    operation=operation,
+                    status=status,
+                    latency_ms=latency_ms,
+                    video_id=getattr(self, "video_id", ""),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "Planning LLM observation recording failed",
+                    extra={
+                        "provider": provider,
+                        "engine": model,
+                        "code": operation,
+                        "status": "observation_unrecorded",
+                        "video_id": getattr(self, "video_id", ""),
+                    },
+                    exc_info=exc,
+                )
+
+        try:
+            response = run_fenced_llm_call(
+                call=call,
+                provider=provider,
+                model=model,
+                operation=operation,
+                request_payload=request_payload,
+                max_output_tokens=max_output_tokens,
+                cost_tracker=getattr(self, "cost_tracker", None),
+                video_id=getattr(self, "video_id", ""),
+                attempt_scope=attempt_scope,
+            )
+        except Exception:
+            latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+            persist("failed", latency_ms)
+            logger.warning(
+                "Planning LLM request failed",
+                extra={
+                    "provider": provider,
+                    "engine": model,
+                    "code": operation,
+                    "latency_ms": latency_ms,
+                    "status": "failed",
+                    "video_id": getattr(self, "video_id", ""),
+                },
+            )
+            raise
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        persist("succeeded", latency_ms)
+        logger.info(
+            "Planning LLM request completed",
+            extra={
+                "provider": provider,
+                "engine": model,
+                "code": operation,
+                "latency_ms": latency_ms,
+                "status": "succeeded",
+                "video_id": getattr(self, "video_id", ""),
+            },
+        )
+        return response
 
     # ------------------------------------------------------------------
     # Public API
@@ -360,6 +474,7 @@ class LLMEnsemble:
                     json_mode,
                     tool_schema,
                     operation="llm_ensemble_candidate",
+                    attempt_scope=f"candidate:{index}",
                 )
                 futures[future] = index
 
@@ -427,6 +542,7 @@ class LLMEnsemble:
         json_mode: bool = False,
         tool_schema: dict | None = None,
         operation: str = "llm_ensemble_call",
+        attempt_scope: str = "",
     ) -> tuple[str, Any]:
         """Route a generation request to the correct provider.
 
@@ -437,20 +553,26 @@ class LLMEnsemble:
             if model.startswith("claude"):
                 return self._generate_anthropic(
                     model, system_prompt, user_prompt, tool_schema, operation=operation,
+                    attempt_scope=attempt_scope,
                 )
             elif model.startswith("gpt") or model.startswith("o4"):
                 return self._generate_openai(
                     model, system_prompt, user_prompt, json_mode, operation=operation,
+                    attempt_scope=attempt_scope,
                 )
             elif model.startswith("gemini"):
                 return self._generate_gemini(
                     model, system_prompt, user_prompt, json_mode, operation=operation,
+                    attempt_scope=attempt_scope,
                 )
             else:
                 # Unknown provider -- attempt OpenAI-compatible call.
                 return self._generate_openai(
                     model, system_prompt, user_prompt, json_mode, operation=operation,
+                    attempt_scope=attempt_scope,
                 )
+        except PaidCallDeferred:
+            raise
         except Exception as exc:  # noqa: BLE001
             print(f"[LLMEnsemble] Generation failed for {model}: {exc}")
             return (model, None)
@@ -462,6 +584,7 @@ class LLMEnsemble:
         user_prompt: str,
         tool_schema: dict | None = None,
         operation: str = "llm_ensemble_call",
+        attempt_scope: str = "",
     ) -> tuple[str, Any]:
         """Call the Anthropic messages API."""
         if self.anthropic_client is None:
@@ -478,7 +601,15 @@ class LLMEnsemble:
         if tool_schema is not None:
             kwargs["tools"] = [tool_schema]
 
-        response = self.anthropic_client.messages.create(**kwargs)
+        response = self._call_with_observation(
+            provider="anthropic",
+            model=model,
+            operation=operation,
+            call=lambda: self.anthropic_client.messages.create(**kwargs),
+            request_payload=kwargs,
+            max_output_tokens=4096,
+            attempt_scope=attempt_scope,
+        )
 
         if hasattr(response, "usage"):
             cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
@@ -511,6 +642,7 @@ class LLMEnsemble:
         user_prompt: str,
         json_mode: bool = False,
         operation: str = "llm_ensemble_call",
+        attempt_scope: str = "",
     ) -> tuple[str, Any]:
         """Call the OpenAI chat completions API."""
         if self.openai_client is None:
@@ -527,8 +659,17 @@ class LLMEnsemble:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        kwargs.update(openai_output_limit_kwargs(model, 4096))
 
-        response = self.openai_client.chat.completions.create(**kwargs)
+        response = self._call_with_observation(
+            provider="openai",
+            model=model,
+            operation=operation,
+            call=lambda: self.openai_client.chat.completions.create(**kwargs),
+            request_payload=kwargs,
+            max_output_tokens=4096,
+            attempt_scope=attempt_scope,
+        )
         usage = getattr(response, "usage", None)
         if usage is not None:
             input_tokens = (
@@ -552,6 +693,7 @@ class LLMEnsemble:
         user_prompt: str,
         json_mode: bool = False,
         operation: str = "llm_ensemble_call",
+        attempt_scope: str = "",
     ) -> tuple[str, Any]:
         """Call the Google Gemini generateContent API.
 
@@ -566,14 +708,29 @@ class LLMEnsemble:
 
         from google.genai import types
 
-        config_kwargs: dict[str, Any] = {"system_instruction": system_prompt}
+        config_kwargs: dict[str, Any] = {
+            "system_instruction": system_prompt,
+            "max_output_tokens": 4096,
+        }
         if json_mode:
             config_kwargs["response_mime_type"] = "application/json"
 
-        response = self.gemini_client.models.generate_content(
+        response = self._call_with_observation(
+            provider="google",
             model=model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(**config_kwargs),
+            operation=operation,
+            call=lambda: self.gemini_client.models.generate_content(
+                model=model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(**config_kwargs),
+            ),
+            request_payload={
+                "model": model,
+                "contents": user_prompt,
+                "config": config_kwargs,
+            },
+            max_output_tokens=4096,
+            attempt_scope=attempt_scope,
         )
         usage = getattr(response, "usage_metadata", None)
         if usage is not None:
@@ -718,6 +875,8 @@ class LLMEnsemble:
             )
             return (winner_original_idx, full_scores, decision.reasoning)
 
+        except PaidCallDeferred:
+            raise
         except Exception as exc:  # noqa: BLE001
             # A judge failure is not evidence that roster position zero is best.
             # Preserve the inability to decide so callers can route to a manual or

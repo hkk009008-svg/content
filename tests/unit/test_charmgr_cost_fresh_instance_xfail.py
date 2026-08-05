@@ -7,7 +7,8 @@ BUG: _generate_multi_angle_refs used to construct a fresh CostTracker() and call
   on a throwaway accumulator instead of the caller/project tracker.
 
 FIX: create_character_with_images threads a tracker into _generate_multi_angle_refs,
-  and the write site mirrors the audio-T5 cost_tracker-or-fallback pattern.
+  and paid attempts require that caller-owned authority. No fallback tracker is
+  created inside the character flow.
 """
 
 import os
@@ -15,18 +16,24 @@ from unittest.mock import MagicMock, patch
 
 
 def test_create_character_with_images_threads_project_tracker_to_angles(tmp_path, monkeypatch):
-    import cost_tracker as cost_tracker_mod
     import domain.character_manager as cm
 
-    class FakeCostTracker:
-        def __init__(self, budget_usd=None):
-            self.budget_usd = budget_usd
+    shared_tracker = object()
 
     captured = {}
 
-    def fake_generate(canonical_path, char_path, description, cost_tracker=None, video_id=""):
+    def fake_generate(
+        canonical_path,
+        char_path,
+        description,
+        cost_tracker=None,
+        video_id="",
+        character_id="",
+        artifact_evidence_out=None,
+    ):
         captured["cost_tracker"] = cost_tracker
         captured["video_id"] = video_id
+        captured["character_id"] = character_id
         return [canonical_path]
 
     project_root = tmp_path / "projects"
@@ -39,7 +46,6 @@ def test_create_character_with_images_threads_project_tracker_to_angles(tmp_path
         "global_settings": {"budget_limit_usd": "12.5", "language": "en"},
     }
 
-    monkeypatch.setattr(cost_tracker_mod, "CostTracker", FakeCostTracker)
     monkeypatch.setattr(cm, "DEEPFACE_AVAILABLE", False)
     monkeypatch.setattr(cm, "get_project_dir", lambda pid: str(project_root / pid))
     monkeypatch.setattr(
@@ -64,37 +70,37 @@ def test_create_character_with_images_threads_project_tracker_to_angles(tmp_path
         name="Tracked Character",
         description="cost tracking caller path",
         reference_image_paths=[str(canonical_path)],
+        cost_tracker=shared_tracker,
     )
 
-    assert isinstance(captured["cost_tracker"], FakeCostTracker)
-    assert captured["cost_tracker"].budget_usd == 12.5
+    assert captured["cost_tracker"] is shared_tracker
     assert captured["video_id"] == "proj-charmgr"
+    assert captured["character_id"].startswith("char_")
 
 
-def test_project_budget_corruption_keeps_angle_tracker_gate_active(tmp_path, monkeypatch):
-    from domain.character_manager import _cost_tracker_from_project
+def test_multi_angle_refs_fail_closed_without_paid_attempt_authority(
+    tmp_path, monkeypatch,
+):
+    import pytest
+    import domain.character_manager as cm
 
-    monkeypatch.setenv("EXPERIMENTS_DB_PATH", str(tmp_path / "cost.db"))
-    project = {
-        "id": "proj-charmgr",
-        "global_settings": {"budget_limit_usd": "abc"},
-    }
+    canonical = tmp_path / "canonical.jpg"
+    canonical.write_bytes(b"jpeg")
+    monkeypatch.setattr(cm, "FAL_AVAILABLE", True)
+    monkeypatch.setattr(cm, "settings", MagicMock(fal_key="fake-key"))
 
-    tracker = None
-    try:
-        tracker = _cost_tracker_from_project(project)
-
-        assert tracker is not None
-        assert tracker.budget_usd is not None, (
-            "malformed project budget became an unlimited CostTracker"
+    with pytest.raises(TypeError, match="shared paid-attempt tracker"):
+        cm._generate_multi_angle_refs(
+            str(canonical),
+            str(tmp_path),
+            "description",
+            cost_tracker=None,
+            video_id="proj-charmgr",
+            character_id="char-test",
         )
-        assert tracker.would_exceed("FLUX_KONTEXT") is True
-    finally:
-        if tracker is not None:
-            tracker.close()
 
 
-def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
+def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path, request):
     """Spend from FLUX_KONTEXT multi-angle calls must land on a caller-supplied tracker.
 
     Passes cost_tracker=shared_tracker (the injection seam the fix adds) and patches
@@ -113,6 +119,7 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
         db_path=str(tmp_path / "shared.db"),
         budget_usd=100.0,
     )
+    request.addfinalizer(shared_tracker.close)
     assert shared_tracker.spent_usd == 0.0, "precondition: shared tracker starts at $0"
 
     # Set up a temporary char_path directory.
@@ -124,12 +131,19 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
     with open(canonical_path, "wb") as fh:
         fh.write(b"\xff\xd8\xff\xe0" + b"\x00" * 12)  # minimal JPEG header
 
-    # Fake FAL responses: upload returns a URL; subscribe returns one image URL.
+    # Fake FAL queue: upload returns a URL; submit exposes a durable request ID.
     fake_fal = MagicMock()
     fake_fal.upload_file.return_value = "https://fal.example/canonical.jpg"
-    fake_fal.subscribe.return_value = {
+    fake_fal.submit.return_value = MagicMock(request_id="fal-angle-request")
+    fake_fal.status.return_value = {"status": "COMPLETED"}
+    fake_fal.result.return_value = {
         "images": [{"url": "https://fal.example/angle.jpg"}]
     }
+
+    def fake_download(_url, output, **_kwargs):
+        with open(output, "wb") as handle:
+            handle.write(b"jpeg")
+        return output
 
     with (
         patch.dict(
@@ -150,7 +164,11 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
         ),
         patch(
             "domain.character_manager.safe_download",
-            side_effect=lambda _url, out, **_kwargs: out,
+            side_effect=fake_download,
+        ),
+        patch(
+            "domain.character_manager._ANGLE_CONFIGS",
+            ({"name": "angle_45", "prompt": "Turn 45 degrees."},),
         ),
     ):
         from domain.character_manager import _generate_multi_angle_refs
@@ -161,6 +179,8 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
             char_path=char_path,
             description="Test character for cost-tracking pin",
             cost_tracker=shared_tracker,
+            video_id="project-character",
+            character_id="char-character",
         )
 
     # FIXED behaviour: at least one FLUX_KONTEXT call's cost lands on shared_tracker.

@@ -191,7 +191,7 @@ def test_wraps_reference_images_into_config():
     # NOT as raw Image and NOT top-level (the TypeError bug).
     img = types.Image(gcs_uri="gs://x/y.png")
     cfg = _build_generate_videos_config(
-        generate_audio=False, duration="5s", resolution="720p", reference_images=[img]
+        generate_audio=False, duration="8s", resolution="720p", reference_images=[img]
     )
     assert cfg.reference_images is not None and len(cfg.reference_images) == 1
     ref = cfg.reference_images[0]
@@ -393,6 +393,98 @@ def test_build_config_clamps_invalid_duration():
         generate_audio=True, duration="5s", resolution="720p", reference_images=None
     )
     assert cfg.duration_seconds == 6
+
+
+@pytest.mark.parametrize("resolution", ["1080p", "4k", "2160p"])
+@pytest.mark.parametrize("duration", ["4s", "6s"])
+def test_high_resolution_requires_eight_seconds(resolution, duration):
+    with pytest.raises(ValueError, match="requires an 8-second duration"):
+        _build_generate_videos_config(
+            generate_audio=True,
+            duration=duration,
+            resolution=resolution,
+            reference_images=None,
+        )
+
+
+def test_reference_images_require_eight_seconds():
+    img = types.Image(gcs_uri="gs://x/y.png")
+    with pytest.raises(ValueError, match="reference images.*8-second"):
+        _build_generate_videos_config(
+            generate_audio=False,
+            duration="6s",
+            resolution="720p",
+            reference_images=[img],
+        )
+
+
+@pytest.mark.parametrize(
+    ("requested", "provider_value"),
+    [("720p", "720p"), ("1080p", "1080p"), ("4k", "4k"), ("2160p", "4k")],
+)
+def test_resolution_is_validated_and_normalized(requested, provider_value):
+    cfg = _build_generate_videos_config(
+        generate_audio=True,
+        duration="8s",
+        resolution=requested,
+        reference_images=None,
+    )
+    assert cfg.resolution == provider_value
+
+
+def test_unknown_resolution_is_rejected_before_sdk_config():
+    with pytest.raises(ValueError, match="Unsupported Veo resolution"):
+        _build_generate_videos_config(
+            generate_audio=False,
+            duration="8s",
+            resolution="480p",
+            reference_images=None,
+        )
+
+
+@pytest.mark.parametrize("aspect_ratio", ["1:1", "16:10", "portrait", ""])
+def test_unknown_aspect_ratio_is_rejected_before_sdk_config(aspect_ratio):
+    with pytest.raises(ValueError, match="Unsupported Veo aspect ratio"):
+        _build_generate_videos_config(
+            generate_audio=False,
+            duration="8s",
+            resolution="720p",
+            reference_images=None,
+            aspect_ratio=aspect_ratio,
+        )
+
+
+@pytest.mark.parametrize(
+    ("duration", "resolution", "aspect_ratio", "with_reference", "valid"),
+    [
+        ("4s", "720p", "16:9", False, True),
+        ("6s", "720p", "9:16", False, True),
+        ("8s", "1080p", "16:9", False, True),
+        ("8s", "4k", "9:16", False, True),
+        ("4s", "1080p", "16:9", False, False),
+        ("6s", "4k", "9:16", False, False),
+        ("6s", "720p", "16:9", True, False),
+        ("8s", "720p", "9:16", True, True),
+    ],
+)
+def test_veo_config_cross_field_matrix(
+    duration, resolution, aspect_ratio, with_reference, valid
+):
+    kwargs = {
+        "generate_audio": False,
+        "duration": duration,
+        "resolution": resolution,
+        "reference_images": [types.Image(gcs_uri="gs://x/ref.png")]
+        if with_reference else None,
+        "aspect_ratio": aspect_ratio,
+    }
+    if valid:
+        config = _build_generate_videos_config(**kwargs)
+        assert config.aspect_ratio == aspect_ratio
+        assert config.resolution == resolution
+    else:
+        with pytest.raises(ValueError, match="requires an 8-second duration"):
+            _build_generate_videos_config(**kwargs)
 
 
 # ---------------------------------------------------------------------------

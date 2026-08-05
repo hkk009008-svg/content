@@ -81,6 +81,7 @@ def _make_host(tmp_path):
     host._runstate = MagicMock()
     host._runstate.scene_audio = {}
     host._runstate.shot_audio = {}
+    host._record_auxiliary_artifact = MagicMock()
     return host
 
 

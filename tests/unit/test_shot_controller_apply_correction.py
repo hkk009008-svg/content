@@ -72,14 +72,15 @@ def _make_controller(tmp_path, *, settings=None, in_frame=None, scene_chars=None
     )
 
     captured = {}
+    fake_shot = {"postprocess_variants": []}
 
     def _capture_mutate(shot_id, mutator):
-        fake_shot = {"postprocess_variants": []}
         result = mutator({}, fake_shot)
         captured["shot_id"] = shot_id
         captured["mutation_result"] = result
-        captured["variant"] = fake_shot["postprocess_variants"][-1]
-        return captured["variant"]
+        if fake_shot["postprocess_variants"]:
+            captured["variant"] = fake_shot["postprocess_variants"][-1]
+        return result.value
 
     controller._mutate_shot = MagicMock(side_effect=_capture_mutate)
     return controller, project, base_take, captured
@@ -134,9 +135,18 @@ def test_face_swap_success_uses_in_frame_character_and_records_postprocess_varia
         assert character_id == "char_frame"
         return ref_path
 
-    def _fake_face_swap(video_path, primary_ref, out_path):
+    def _fake_face_swap(video_path, primary_ref, out_path, **kwargs):
         assert video_path == base_take["path"]
         assert primary_ref == ref_path
+        assert kwargs["cost_tracker"] is controller.cost_tracker
+        assert kwargs["shot_id"] == "shot_1_0"
+        assert kwargs["video_id"] == "proj_apply"
+        kwargs["_cascade_out"].update({
+            "engine": "FAL_PIXVERSE_SWAP",
+            "model": "fal-ai/pixverse/swap",
+            "provider_job_id": "pixverse-request-1",
+            "paid_cost_recorded": True,
+        })
         return _touch(Path(out_path))
 
     with patch("cinema.shots.controller.get_reference_image", side_effect=_fake_ref) as mock_ref, \
@@ -153,7 +163,14 @@ def test_face_swap_success_uses_in_frame_character_and_records_postprocess_varia
     assert result["take"] is captured["variant"]
     assert result["take"]["kind"] == "postprocess"
     assert result["take"]["source_take_id"] == "take_base"
-    assert result["take"]["metadata"] == {"action": "face_swap", "params": {"strength": 0.8}}
+    assert result["take"]["metadata"]["action"] == "face_swap"
+    assert result["take"]["metadata"]["params"] == {"strength": 0.8}
+    assert result["take"]["metadata"]["identity_character_id"] == "char_frame"
+    assert result["take"]["metadata"]["identity_reference_path"] == "frame-ref.jpg"
+    assert result["take"]["cascade_metadata"]["engine"] == "FAL_PIXVERSE_SWAP"
+    assert result["take"]["cascade_metadata"]["model"] == "fal-ai/pixverse/swap"
+    assert result["take"]["metadata"]["artifact_version"] == 1
+    assert result["take"]["metadata"]["artifact_version_id"].startswith("av-")
     # result["take"]["path"] is the PERSISTED postprocess variant path --
     # project-relative (slice 10, Product invariant #6). result["video"] is
     # the same value (apply_correction returns the persisted variant's own
@@ -176,6 +193,139 @@ def test_face_swap_success_uses_in_frame_character_and_records_postprocess_varia
     assert ready_kwargs["shot_id"] == "shot_1_0"
     assert ready_kwargs["take_id"] == result["take"]["id"]
     assert ready_kwargs["take_kind"] == "postprocess"
+
+    from cinema.artifact_versions import ArtifactVersionStore
+
+    artifact = ArtifactVersionStore("proj_apply", tmp_path).history()[-1]
+    assert artifact["provider"] == "FAL_PIXVERSE_SWAP"
+    assert artifact["model"] == "fal-ai/pixverse/swap"
+    assert "face_swap_identity_reference" in artifact["source_hashes"]
+
+
+def test_face_swap_ambiguous_paid_attempt_surfaces_recovery_without_mutation(tmp_path):
+    from paid_provider import PaidCallDeferred
+
+    controller, _project, _base_take, _captured = _make_controller(tmp_path)
+    reference = _touch(tmp_path / "frame-ref.jpg")
+    attempt = {
+        "attempt_id": "fal-pixverse-swap:ambiguous",
+        "state": "accepted_unknown",
+        "provider_job_id": "pixverse-request-1",
+        "provider_status": "outcome_unknown",
+    }
+
+    with patch(
+        "cinema.shots.controller.get_reference_image",
+        return_value=reference,
+    ), patch(
+        "cinema.shots.controller.face_swap_video_frames",
+        side_effect=PaidCallDeferred(
+            "PixVerse request requires request-ID recovery",
+            attempt=attempt,
+        ),
+    ):
+        result = controller.apply_correction(
+            "shot_1_0",
+            "face_swap",
+            take_id="take_base",
+        )
+
+    assert result == {
+        "success": False,
+        "error": "PixVerse request requires request-ID recovery",
+        "code": "paid_face_swap_recovery_required",
+        "retryable": True,
+        "provider_recovery_required": True,
+        "paid_attempt": attempt,
+    }
+    controller._mutate_shot.assert_not_called()
+    controller._host._rebuild_review_clips.assert_not_called()
+    controller._host._save_checkpoint.assert_not_called()
+
+
+def test_lip_sync_correction_wires_project_scoped_rejected_artifact_recorder(tmp_path):
+    controller, project, _base_take, _captured = _make_controller(tmp_path)
+    reference = _touch(tmp_path / "frame-ref.jpg")
+    audio = _touch(tmp_path / "scene-dialogue.wav")
+    controller._host._ensure_scene_audio.return_value = audio
+    retained = {}
+
+    def fake_lipsync(**kwargs):
+        output = _touch(Path(kwargs["output_path"]))
+        evidence = {
+            "engine": "LIPSYNC_OMNIHUMAN",
+            "provider": "fal",
+            "model": "fal-ai/bytedance/omnihuman/v1.5",
+            "path": output,
+            "score": 0.31,
+            "validation_state": "FAIL",
+            "threshold": 0.65,
+            "rejection_stage": "quality_gate",
+            "aspect_ratio": "16:9",
+            "attempt_id": "fal-lipsync:reject-one",
+            "provider_job_id": "request-reject-one",
+            "request_fingerprint": "fingerprint-reject-one",
+            "provider_status": "completed",
+            "attempt_state": "succeeded",
+            "paid_attempt": {
+                "attempt_id": "fal-lipsync:reject-one",
+                "provider_job_id": "request-reject-one",
+                "request_fingerprint": "fingerprint-reject-one",
+                "provider_status": "completed",
+                "state": "succeeded",
+            },
+        }
+        retained.update(kwargs["_retain_rejected_candidate"](evidence))
+        kwargs["_cascade_out"].update({
+            "paid_cost_recorded": True,
+            "cascade_metadata": {
+                "engine": "LIPSYNC_AURORA",
+                "model": "fal-ai/creatify/aurora",
+                "score": 0.91,
+                "validation_state": "PASS",
+                "threshold": 0.65,
+                "fallback": False,
+                "attempts": ["Aurora"],
+            },
+        })
+        return output
+
+    with patch(
+        "cinema.shots.controller.get_reference_image",
+        return_value=reference,
+    ), patch(
+        "cinema.shots.controller.generate_lip_sync_video",
+        side_effect=fake_lipsync,
+    ) as generate:
+        result = controller.apply_correction(
+            "shot_1_0",
+            "lip_sync",
+            take_id="take_base",
+        )
+
+    assert result["success"] is True, result
+    assert retained["artifact_id"].startswith("av-")
+    assert callable(generate.call_args.kwargs["_retain_rejected_candidate"])
+
+    from cinema.artifact_versions import ArtifactVersionStore
+
+    history = ArtifactVersionStore("proj_apply", tmp_path).history()
+    rejected = next(
+        record
+        for record in history
+        if record["parameters"].get("status") == "rejected"
+    )
+    assert rejected["provider"] == "LIPSYNC_OMNIHUMAN"
+    assert rejected["model"] == "fal-ai/bytedance/omnihuman/v1.5"
+    assert rejected["parameters"]["provider_recipe"]["attempt_id"] == (
+        "fal-lipsync:reject-one"
+    )
+    assert rejected["parameters"]["provider_recipe"]["score"] == 0.31
+    assert "source_take" in rejected["source_hashes"]
+    assert "lip_sync_audio" in rejected["source_hashes"]
+    assert "lip_sync_character_reference" in rejected["source_hashes"]
+    assert "lip_sync_video_input" in rejected["source_hashes"]
+    assert project["id"] == "proj_apply"
 
 
 def test_face_swap_defaults_disabled_when_setting_absent(tmp_path):

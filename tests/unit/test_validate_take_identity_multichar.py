@@ -30,6 +30,9 @@ from cinema.shots.controller import ShotController
 # Scaffold
 # ---------------------------------------------------------------------------
 
+_COST_TRACKER = object()
+
+
 class _BareController(ShotController):
     """Mixin host stub: only what _validate_take_identity touches.
 
@@ -39,6 +42,14 @@ class _BareController(ShotController):
 
     def __init__(self, continuity):
         self._test_continuity = continuity
+        # `_validate_take_identity` now threads the production core's durable
+        # paid-attempt authority and exact project/shot scope into the vision
+        # fallback. Keep this unit scaffold honest instead of bypassing those
+        # newly load-bearing property proxies.
+        self._core = SimpleNamespace(
+            cost_tracker=_COST_TRACKER,
+            project={"id": "project-test"},
+        )
 
     @property
     def continuity(self):
@@ -60,7 +71,7 @@ def _run(chars, *, primary_ref="ref.png", result=None, settings=None):
     take = {"metadata": {}}
     score = ctl._validate_take_identity(
         "video.mp4",
-        {"characters_in_frame": chars},
+        {"id": "shot-test", "characters_in_frame": chars},
         {"primary_reference": primary_ref},
         settings if settings is not None else {},
         "medium",
@@ -93,6 +104,9 @@ class TestFullCharacterListValidated:
         assert kwargs["mode"] == "standard"
         assert kwargs["attempt"] == 0
         assert kwargs["max_attempts"] == 5
+        assert kwargs["cost_tracker"] is _COST_TRACKER
+        assert kwargs["video_id"] == "project-test"
+        assert kwargs["shot_id"] == "shot-test"
 
 
 # ---------------------------------------------------------------------------

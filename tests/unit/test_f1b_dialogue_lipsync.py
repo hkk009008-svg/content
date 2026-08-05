@@ -857,14 +857,52 @@ class TestGenerateMotionTakeOverlayWiring:
             return {"success": True, "take": dict(take), "video": video_path, "identity_score": 0.0}
 
         ctrl._finalize_motion_take = MagicMock(side_effect=_fake_finalize)
+        _retained_reject = {}
+
+        def _fake_lipsync(**kwargs):
+            evidence = {
+                "engine": "LIPSYNC_SYNCSOV3",
+                "provider": "fal",
+                "model": "fal-ai/sync-lipsync/v3",
+                "path": ls_clip,
+                "score": 0.3,
+                "validation_state": "FAIL",
+                "threshold": 0.65,
+                "rejection_stage": "quality_gate",
+                "aspect_ratio": "16:9",
+                "attempt_id": "fal-lipsync:f1b-reject",
+                "provider_job_id": "request-f1b-reject",
+                "request_fingerprint": "fingerprint-f1b-reject",
+                "provider_status": "completed",
+                "attempt_state": "succeeded",
+                "paid_attempt": {
+                    "attempt_id": "fal-lipsync:f1b-reject",
+                    "provider_job_id": "request-f1b-reject",
+                    "request_fingerprint": "fingerprint-f1b-reject",
+                    "provider_status": "completed",
+                    "state": "succeeded",
+                },
+            }
+            _retained_reject.update(
+                kwargs["_retain_rejected_candidate"](evidence)
+            )
+            kwargs["_cascade_out"]["cascade_metadata"] = {
+                "engine": "MuseTalk",
+                "score": 0.91,
+                "validation_state": "PASS",
+                "threshold": 0.65,
+                "fallback": False,
+                "attempts": ["SyncSoV3", "MuseTalk"],
+            }
+            return ls_clip
 
         with (
             patch(
                 "cinema.shots.controller.generate_ai_video",
                 side_effect=_write_owned_video_candidate,
             ) as mock_gen_vid,
-            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_ctrl,
-            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_lip,
+            patch("cinema.shots.controller.generate_lip_sync_video", side_effect=_fake_lipsync) as mock_gen_ls_ctrl,
+            patch("lip_sync.generate_lip_sync_video", side_effect=_fake_lipsync) as mock_gen_ls_lip,
             patch("lip_sync.validate_lipsync_quality", return_value=0.91) as mock_validate,
             patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
             patch("cinema.shots.controller._probe_duration", return_value=3.5),
@@ -908,6 +946,10 @@ class TestGenerateMotionTakeOverlayWiring:
             "F1b must use the per-shot TTS audio "
             f"(expected audio_path={audio_file!r}; got {ls_kwargs.get('audio_path')!r})"
         )
+        assert callable(ls_kwargs.get("_retain_rejected_candidate")), (
+            "F1b must provide the project-scoped immutable reject recorder"
+        )
+        assert _retained_reject["artifact_id"].startswith("av-")
 
         # --- take metadata ---
         assert "audio_embedded" not in _captured_take.get("metadata", {}), (

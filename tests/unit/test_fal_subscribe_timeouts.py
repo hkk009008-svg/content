@@ -203,9 +203,9 @@ class TestFalLimits:
         assert 300 <= FAL_TIMEOUT_VIDEO_S <= 1800
         # Image class: FLUX fallbacks are seconds-fast; bound absorbs queue wait.
         assert 60 <= FAL_TIMEOUT_IMAGE_S <= 600
-        # Talking-head generation scales with audio length: measured ~40x
-        # realtime locally (logs/_lipsync_gen_test.log: 3.84s audio -> 156s
-        # wall), so a contract-legal 60s job extrapolates past 600s and a
+        # Talking-head generation scales with audio length: a prior live timing
+        # measured roughly 40x realtime (3.84s audio -> 156s wall), so a
+        # contract-legal 60s job extrapolates past 600s and a
         # 600s bound would CANCEL legitimately progressing long-form jobs
         # (silent Omnihuman -> Aurora-720p downgrade). Review wf_e0d1765b.
         assert 900 <= FAL_TIMEOUT_TALKING_HEAD_S <= 3600

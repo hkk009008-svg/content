@@ -102,7 +102,10 @@ class TestAutoResearchOn:
                 auto_research=True,
             )
 
-        mock_rv.assert_called_once_with("Dense pine forest with morning mist")
+        mock_rv.assert_called_once_with(
+            "Dense pine forest with morning mist",
+            cost_tracker=None,
+        )
         assert mock_dl.call_count == 2
         refs = location["reference_images"]
         assert len(refs) == 2

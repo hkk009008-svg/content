@@ -103,12 +103,23 @@ def setup_logging(level: str | None = None) -> None:
     """
     resolved_level = (level or os.environ.get("CINEMA_LOG_LEVEL") or "INFO").upper()
     root = logging.getLogger()
-    # Idempotent: clear any handlers we (or someone else) already added.
+    # Idempotent: clear and close handlers we (or someone else) already added.
     for handler in list(root.handlers):
         root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(_JsonFormatter())
     root.addHandler(handler)
+    try:
+        from cinema.trace_store import SQLiteTraceHandler
+
+        root.addHandler(SQLiteTraceHandler(level=logging.INFO))
+    except Exception:
+        # Stdout remains authoritative when local trace indexing is unavailable.
+        pass
     root.setLevel(resolved_level)
     for noisy in _NOISY_LIBRARIES:
         logging.getLogger(noisy).setLevel(logging.WARNING)

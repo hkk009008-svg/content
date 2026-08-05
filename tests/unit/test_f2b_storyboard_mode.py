@@ -1668,10 +1668,10 @@ class TestRecordCostParam:
 
         scene = project["scenes"][0]
         shot = scene["shots"][0]
+        fake = {"motion_takes": []}
 
         def _fake_mutate(shot_id, mutator, timeout=10):
             from cinema.shots.controller import MutationResult
-            fake = {"motion_takes": []}
             result = mutator(scene, fake)
             return result.value
 

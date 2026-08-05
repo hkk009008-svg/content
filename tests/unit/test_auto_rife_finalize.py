@@ -89,9 +89,9 @@ def _setup_ctrl(tmp_path):
     shot = scene["shots"][0]
 
     stored = {}
+    fake = {"motion_takes": []}
 
     def _fake_mutate(shot_id, mutator, timeout=10):
-        fake = {"motion_takes": []}
         result = mutator(scene, fake)
         stored["project_shot"] = fake
         return result.value

@@ -40,9 +40,12 @@ def veo_native_audio_available() -> bool:
 VEO_RESOLUTIONS = {
     "720p": "720p",
     "1080p": "1080p",
-    "4k": "2160p",
-    "2160p": "2160p",
+    "4k": "4k",
+    # Accept the common display-height alias at our boundary, but send the
+    # spelling documented by the Veo API.
+    "2160p": "4k",
 }
+VEO_ASPECT_RATIOS = frozenset({"16:9", "9:16"})
 # Server-valid output durations (seconds) for the image_to_video feature.
 # 5s is REJECTED with INVALID_ARGUMENT for image_to_video despite older docs
 # (captured server error: "supported durations are [8,4,6] for feature
@@ -134,6 +137,51 @@ def _clamp_image_to_video_duration(seconds: int) -> int:
     return min(VEO_IMAGE_TO_VIDEO_DURATIONS, key=lambda v: (abs(v - seconds), -v))
 
 
+def _validate_generate_videos_fields(
+    *,
+    duration_seconds: int,
+    resolution: str,
+    has_reference_images: bool,
+    aspect_ratio: str,
+) -> tuple[str, str]:
+    """Return the provider spelling for a valid Veo field combination.
+
+    Veo accepts 4/6/8-second 720p image-to-video calls, but requires exactly
+    eight seconds for 1080p, 4K, or reference-image generation.  Keeping the
+    rule at the config construction boundary protects direct adapter callers
+    as well as the normal pipeline path.
+    """
+
+    normalized_resolution = VEO_RESOLUTIONS.get(str(resolution).strip().lower())
+    if normalized_resolution is None:
+        allowed = ", ".join(sorted(VEO_RESOLUTIONS))
+        raise ValueError(
+            f"Unsupported Veo resolution {resolution!r}; expected one of: {allowed}"
+        )
+
+    normalized_aspect_ratio = str(aspect_ratio).strip()
+    if normalized_aspect_ratio not in VEO_ASPECT_RATIOS:
+        allowed_aspects = ", ".join(sorted(VEO_ASPECT_RATIOS))
+        raise ValueError(
+            f"Unsupported Veo aspect ratio {aspect_ratio!r}; "
+            f"expected one of: {allowed_aspects}"
+        )
+
+    needs_eight_seconds = (
+        normalized_resolution in {"1080p", "4k"} or has_reference_images
+    )
+    if needs_eight_seconds and duration_seconds != 8:
+        reasons = []
+        if normalized_resolution in {"1080p", "4k"}:
+            reasons.append(normalized_resolution)
+        if has_reference_images:
+            reasons.append("reference images")
+        raise ValueError(
+            f"Veo {' and '.join(reasons)} generation requires an 8-second duration"
+        )
+    return normalized_resolution, normalized_aspect_ratio
+
+
 def _build_generate_videos_config(
     *,
     generate_audio: bool,
@@ -151,12 +199,21 @@ def _build_generate_videos_config(
     passed raw Images as a top-level ``generate_videos`` kwarg, which the SDK
     rejects (TypeError); and never set audio/duration/resolution at all.
     """
+    duration_seconds = _clamp_image_to_video_duration(
+        _parse_duration_seconds(duration)
+    )
+    normalized_resolution, normalized_aspect_ratio = _validate_generate_videos_fields(
+        duration_seconds=duration_seconds,
+        resolution=resolution,
+        has_reference_images=bool(reference_images),
+        aspect_ratio=aspect_ratio,
+    )
     kwargs = dict(
         person_generation=person_generation,
-        aspect_ratio=aspect_ratio,
+        aspect_ratio=normalized_aspect_ratio,
         generate_audio=generate_audio,
-        duration_seconds=_clamp_image_to_video_duration(_parse_duration_seconds(duration)),
-        resolution=resolution,
+        duration_seconds=duration_seconds,
+        resolution=normalized_resolution,
     )
     if reference_images:
         kwargs["reference_images"] = [

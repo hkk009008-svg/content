@@ -14,7 +14,7 @@ This file pins the replacement contract implemented by _ProjectEventBus /
 _ensure_progress_queue / _make_progress_cb / api_stream in web_server.py:
 
   1. Two subscribers both receive the same published event (bus-level and
-     real HTTP-level, including through the actual /generate daemon).
+     real HTTP-level, including through the durable /generate queue worker).
   2. A reconnect presenting Last-Event-ID replays exactly the missed
      suffix, in order, tagged `replayed: true`.
   3. A disconnecting subscriber is removed from the bus (no leak).
@@ -160,8 +160,8 @@ def test_two_subscribers_both_receive_the_same_event_http_level(client):
     resp2.response.close()
 
 
-def test_generate_daemon_broadcasts_to_two_stream_subscribers_and_cleans_up(client):
-    """End-to-end: the REAL /generate route + run_pipeline daemon thread,
+def test_generate_worker_broadcasts_to_two_stream_subscribers_and_cleans_up(client):
+    """End-to-end: the real /generate route + bounded queue worker,
     with two real /stream HTTP subscribers attached while it runs. Both
     must see DONE then END live — and the daemon's finally-block cleanup
     (Bundle-C 3.2) must still pop _progress_queues[pid] afterward.
@@ -187,13 +187,16 @@ def test_generate_daemon_broadcasts_to_two_stream_subscribers_and_cleans_up(clie
             proceed.wait(timeout=5.0)
             return "ok"
 
+        def cancel(self):
+            pass
+
     with (
         patch("web_server.CinemaPipeline", FakeCinemaPipeline),
-        patch("web_server.load_project", return_value={"id": pid, "scenes": [], "characters": []}),
+        patch("web_server.load_existing_project_readonly", return_value={"id": pid, "scenes": [], "characters": []}),
         patch("web_server._get_or_build_core", return_value=MagicMock()),
     ):
         gen_resp = client.post(f"/api/projects/{pid}/generate", json={})
-        assert gen_resp.status_code == 200
+        assert gen_resp.status_code == 202
         assert keyframe_published.wait(timeout=2.0), "daemon never published KEYFRAME"
 
         stream1 = client.get(f"/api/projects/{pid}/stream")
@@ -804,7 +807,7 @@ def test_publish_does_not_block_on_a_never_draining_subscriber():
 
 
 def test_close_does_not_block_on_a_never_draining_subscriber():
-    """close() shares _deliver with publish() -- the /generate daemon's
+    """close() shares _deliver with publish() -- the /generate worker's
     finally block calls close() from its own thread and must never hang
     it waiting for room in a subscriber's already-full, never-drained
     inbox."""

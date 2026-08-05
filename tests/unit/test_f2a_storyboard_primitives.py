@@ -1067,13 +1067,14 @@ class TestFinalizeTakeHelper:
             "global_settings": {},
         }
         ctrl = _build_controller_stub(project)
+        ctrl._core.project_dir = str(tmp_path)
 
         # Stub _mutate_shot to capture the appended take.
         stored = {}
+        fake_shot_dict = {"motion_takes": []}
 
         def _fake_mutate(shot_id, mutator, timeout=10):
             # Execute the mutator on a fake shot dict to capture what was appended.
-            fake_shot_dict = {"motion_takes": []}
             from cinema.shots.controller import MutationResult
             result = mutator(scene, fake_shot_dict)
             stored["mutation_result"] = result
@@ -1113,7 +1114,9 @@ class TestFinalizeTakeHelper:
         )
 
         assert result["success"] is True
-        assert ctrl._mutate_shot.call_count == 1
+        # Acceptance and immutable-ledger reconciliation are two distinct
+        # durable mutations so a crash can never replay provider work.
+        assert ctrl._mutate_shot.call_count == 2
 
         # The mutator must have appended the take.
         shot_after = stored["shot_after"]
@@ -1133,7 +1136,7 @@ class TestFinalizeTakeHelper:
             resolved_shot_type="medium",
         )
 
-        assert take["path"] == video_path
+        assert take["path"] == os.path.relpath(video_path, ctrl.project_dir)
 
     def test_updates_shot_results(self, tmp_path):
         """shot_results[shot_id] is updated with correct fields."""
@@ -1205,6 +1208,9 @@ class TestFinalizeTakeHelper:
             mode="standard",
             attempt=0,
             max_attempts=3,
+            cost_tracker=ctrl.cost_tracker,
+            video_id="proj_test",
+            shot_id=shot["id"],
         )
         assert result["identity_score"] == 0.82
         assert take["metadata"]["identity_score"] == 0.82

@@ -3,7 +3,6 @@ import os
 import json
 import base64
 import logging
-import time
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
@@ -18,8 +17,6 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
-_IDENTITY_API_MAX_ATTEMPTS = 3
-_IDENTITY_API_RETRY_BACKOFF_SECONDS = 0.1
 
 
 def _identity_error_result(reason: str, issue: str) -> dict:
@@ -71,10 +68,27 @@ def extract_frame_at(video_path, position_ratio, output_path):
     return ret
 
 
-def face_swap_video_frames(video_path, reference_image, output_path):
+def face_swap_video_frames(
+    video_path,
+    reference_image,
+    output_path,
+    *,
+    cost_tracker=None,
+    shot_id="",
+    video_id="",
+    _cascade_out=None,
+):
     """
     Post-processing face swap for identity consistency.
-    Priority: fal.ai cloud swap → FaceFusion CLI → skip
+
+    Pipeline-owned FAL calls use the shared paid-attempt ledger.  A provider
+    request ID is persisted before polling and the same request is resumed
+    after restart.  FaceFusion is eligible only when the cloud request was
+    provably never submitted (missing key/authority, upload/preflight failure,
+    or an atomic budget refusal) or is terminal with explicit unbilled
+    evidence.  Ambiguous, running, succeeded-but-not-retained, and billed
+    failures deliberately raise ``PaidCallDeferred`` instead of starting a
+    replacement transform.
     """
     # Both swap paths (fal.ai PixVerse, FaceFusion CLI) emit VIDEO-ONLY clips.
     # Restore the source clip's audio in place so a face-swap of a dialogue take
@@ -83,39 +97,260 @@ def face_swap_video_frames(video_path, reference_image, output_path):
     # coupling; lip_sync owns the shared re-mux helper). [§3 audio-sibling family]
     from lip_sync import _remux_source_audio_in_place
 
-    # PRIORITY 1: fal.ai PixVerse face swap (cloud, no local deps)
-    try:
-        import fal_client
+    from paid_provider import (
+        PaidCallBudgetBlocked,
+        PaidCallDeferred,
+        PaidCallUnbilled,
+        file_fingerprint,
+        has_paid_attempt_authority,
+        paid_attempt_id,
+        request_fingerprint,
+        run_durable_fal_job,
+    )
 
-        if settings.fal_key:
-            print(f"   [FACESWAP] Uploading to fal.ai...")
-            video_url = fal_client.upload_file(video_path)
-            face_url = fal_client.upload_file(reference_image)
+    def _record_winner(**fields):
+        if isinstance(_cascade_out, dict):
+            _cascade_out.update(fields)
 
-            result = fal_client.subscribe(
-                "fal-ai/pixverse/swap",
-                client_timeout=FAL_TIMEOUT_VIDEO_S,
-                arguments={
-                    "video_url": video_url,
-                    "swap_image_url": face_url,
-                },
-                with_logs=True,
+    # PRIORITY 1: fal.ai PixVerse face swap.  There is intentionally no direct
+    # subscribe compatibility path: without project-scoped durable authority,
+    # the paid provider is provably unsubmitted and only the local path may run.
+    if settings.fal_key and has_paid_attempt_authority(cost_tracker):
+        application = "fal-ai/pixverse/swap"
+        try:
+            stable_request = request_fingerprint(
+                application,
+                file_fingerprint(video_path),
+                file_fingerprint(reference_image),
+                "person",
+                "720p",
+                "5",
             )
-            out_url = result.get("video", {}).get("url")
-            if out_url:
-                downloaded = safe_download(
-                    out_url,
-                    output_path,
-                    allowed_content_types=("video/mp4",),
-                    content_validator=validate_video_artifact,
+            attempt_id = paid_attempt_id(
+                "fal-pixverse-swap",
+                video_id,
+                shot_id,
+                stable_request,
+            )
+        except Exception as exc:
+            # No provider upload or generation submission has happened yet.
+            logger.warning(
+                "PixVerse face-swap preflight failed before provider submission",
+                extra={
+                    "provider": "fal",
+                    "engine": "FAL_PIXVERSE_SWAP",
+                    "shot_id": shot_id,
+                    "video_id": video_id,
+                    "detail": type(exc).__name__,
+                },
+            )
+        else:
+            try:
+                import fal_client
+
+                print("   [FACESWAP] Uploading inputs to fal.ai...")
+                video_url = fal_client.upload_file(video_path)
+                face_url = fal_client.upload_file(reference_image)
+            except Exception as exc:
+                # FAL file upload is not the paid generation boundary.  With no
+                # queue submission, local execution remains safe.
+                logger.warning(
+                    "PixVerse face-swap upload failed before paid submission",
+                    extra={
+                        "provider": "fal",
+                        "engine": "FAL_PIXVERSE_SWAP",
+                        "shot_id": shot_id,
+                        "video_id": video_id,
+                        "attempt_id": attempt_id,
+                        "detail": type(exc).__name__,
+                    },
                 )
-                if downloaded is None:
-                    raise RuntimeError("face-swap output failed MP4 validation")
-                _remux_source_audio_in_place(output_path, video_path, engine="pixverse_swap")
-                print(f"   [FACESWAP] Cloud swap complete: {output_path}")
-                return output_path
-    except Exception as e:
-        print(f"   [FACESWAP] fal.ai swap failed: {e}")
+            else:
+                arguments = {
+                    "video_url": video_url,
+                    "image_url": face_url,
+                    "mode": "person",
+                    "resolution": "720p",
+                    "duration": "5",
+                    # The local re-mux remains the repository's measured audio
+                    # integrity path; avoid paying the provider to transform it.
+                    "original_sound_switch": False,
+                }
+                logger.info(
+                    "PixVerse face-swap paid request starting or resuming",
+                    extra={
+                        "provider": "fal",
+                        "engine": "FAL_PIXVERSE_SWAP",
+                        "shot_id": shot_id,
+                        "video_id": video_id,
+                        "attempt_id": attempt_id,
+                    },
+                )
+                try:
+                    from cost_tracker import API_COST_USD
+
+                    result = run_durable_fal_job(
+                        application=application,
+                        arguments=arguments,
+                        attempt_id=attempt_id,
+                        engine="FAL_PIXVERSE_SWAP",
+                        operation="face_swap",
+                        estimated_cost_usd=API_COST_USD["FAL_PIXVERSE_SWAP"],
+                        request_fingerprint_value=stable_request,
+                        cost_tracker=cost_tracker,
+                        shot_id=shot_id,
+                        video_id=video_id,
+                        poll_timeout_s=FAL_TIMEOUT_VIDEO_S,
+                        with_logs=True,
+                    )
+                except PaidCallBudgetBlocked as exc:
+                    # The reservation transaction proves no provider request
+                    # was submitted, so local FaceFusion remains eligible.
+                    _record_winner(
+                        paid_attempt=dict(exc.snapshot.attempt),
+                        paid_deferred=False,
+                    )
+                    logger.warning(
+                        "PixVerse face-swap atomic budget reservation refused",
+                        extra={
+                            "provider": "fal",
+                            "engine": "FAL_PIXVERSE_SWAP",
+                            "shot_id": shot_id,
+                            "video_id": video_id,
+                            "attempt_id": attempt_id,
+                            "state": "blocked_budget",
+                        },
+                    )
+                except PaidCallUnbilled as exc:
+                    # Explicit terminal no-charge evidence permits the local
+                    # implementation, but never re-POSTs this attempt ID.
+                    _record_winner(
+                        paid_attempt=dict(exc.attempt),
+                        paid_deferred=False,
+                    )
+                    logger.warning(
+                        "PixVerse face-swap is terminal and unbilled; using local path",
+                        extra={
+                            "provider": "fal",
+                            "engine": "FAL_PIXVERSE_SWAP",
+                            "shot_id": shot_id,
+                            "video_id": video_id,
+                            "attempt_id": attempt_id,
+                            "state": str(exc.attempt.get("state") or "failed_unbilled"),
+                        },
+                    )
+                except PaidCallDeferred as exc:
+                    _record_winner(
+                        paid_attempt=dict(exc.snapshot.attempt),
+                        paid_deferred=True,
+                    )
+                    logger.warning(
+                        "PixVerse face-swap requires provider recovery; local replacement blocked",
+                        extra={
+                            "provider": "fal",
+                            "engine": "FAL_PIXVERSE_SWAP",
+                            "shot_id": shot_id,
+                            "video_id": video_id,
+                            "attempt_id": attempt_id,
+                            "provider_status": str(exc.snapshot.attempt.get("provider_status") or ""),
+                            "state": str(exc.snapshot.attempt.get("state") or "accepted_unknown"),
+                        },
+                    )
+                    raise
+                except Exception as exc:
+                    # The durable adapter is designed to translate provider
+                    # ambiguity to PaidCallDeferred.  Any unexpected error at
+                    # this boundary is still not proof of non-submission.
+                    try:
+                        attempt = cost_tracker.get_paid_attempt(attempt_id) or {}
+                    except Exception:
+                        attempt = {}
+                    _record_winner(paid_attempt=dict(attempt), paid_deferred=True)
+                    raise PaidCallDeferred(
+                        "PixVerse face-swap paid boundary failed without safe fallback evidence",
+                        attempt=attempt,
+                    ) from exc
+                else:
+                    try:
+                        attempt = cost_tracker.get_paid_attempt(attempt_id) or {}
+                    except Exception:
+                        attempt = {}
+                    _record_winner(
+                        engine="FAL_PIXVERSE_SWAP",
+                        model=application,
+                        provider="fal",
+                        paid_attempt=dict(attempt),
+                        paid_attempt_id=attempt_id,
+                        provider_job_id=str(attempt.get("provider_job_id") or ""),
+                        paid_cost_recorded=True,
+                    )
+                    out_url = result.get("video", {}).get("url")
+                    if not out_url:
+                        _record_winner(paid_deferred=True)
+                        logger.warning(
+                            "PixVerse completed without a retained video URL",
+                            extra={
+                                "provider": "fal",
+                                "engine": "FAL_PIXVERSE_SWAP",
+                                "shot_id": shot_id,
+                                "video_id": video_id,
+                                "attempt_id": attempt_id,
+                                "provider_status": "completed",
+                                "state": "succeeded",
+                            },
+                        )
+                        raise PaidCallDeferred(
+                            "PixVerse completed without a retained video; no local replacement started",
+                            attempt=attempt,
+                        )
+                    try:
+                        downloaded = safe_download(
+                            out_url,
+                            output_path,
+                            allowed_content_types=("video/mp4",),
+                            content_validator=validate_video_artifact,
+                        )
+                    except Exception as exc:
+                        _record_winner(paid_deferred=True)
+                        raise PaidCallDeferred(
+                            "PixVerse completed but output retention raised; no local replacement started",
+                            attempt=attempt,
+                        ) from exc
+                    if downloaded is None:
+                        _record_winner(paid_deferred=True)
+                        raise PaidCallDeferred(
+                            "PixVerse completed but output retention failed; no local replacement started",
+                            attempt=attempt,
+                        )
+                    _remux_source_audio_in_place(
+                        output_path, video_path, engine="pixverse_swap"
+                    )
+                    logger.info(
+                        "PixVerse face-swap completed",
+                        extra={
+                            "provider": "fal",
+                            "engine": "FAL_PIXVERSE_SWAP",
+                            "shot_id": shot_id,
+                            "video_id": video_id,
+                            "attempt_id": attempt_id,
+                            "provider_status": "completed",
+                            "state": "succeeded",
+                            "cost_usd": API_COST_USD["FAL_PIXVERSE_SWAP"],
+                        },
+                    )
+                    print(f"   [FACESWAP] Cloud swap complete: {output_path}")
+                    return output_path
+    elif settings.fal_key:
+        logger.warning(
+            "PixVerse face-swap skipped before submission: no project paid-attempt authority",
+            extra={
+                "provider": "fal",
+                "engine": "FAL_PIXVERSE_SWAP",
+                "shot_id": shot_id,
+                "video_id": video_id,
+                "state": "unsubmitted",
+            },
+        )
 
     # PRIORITY 2: FaceFusion CLI (local, needs full install)
     try:
@@ -132,6 +367,23 @@ def face_swap_video_frames(video_path, reference_image, output_path):
         )
         if result.returncode == 0 and os.path.exists(output_path):
             _remux_source_audio_in_place(output_path, video_path, engine="facefusion")
+            _record_winner(
+                engine="FACEFUSION_LOCAL",
+                model="inswapper_128_fp16+gfpgan_1.4",
+                provider="local",
+                paid_cost_recorded=False,
+            )
+            logger.info(
+                "local FaceFusion face-swap completed",
+                extra={
+                    "provider": "local",
+                    "engine": "FACEFUSION_LOCAL",
+                    "shot_id": shot_id,
+                    "video_id": video_id,
+                    "state": "succeeded",
+                    "cost_usd": 0.0,
+                },
+            )
             print(f"   [FACESWAP] FaceFusion complete: {output_path}")
             return output_path
     except FileNotFoundError:
@@ -270,7 +522,14 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
         return default_pass
 
 
-def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
+def validate_identity_vision(
+    reference_path: str,
+    generated_path: str,
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    shot_id: str = "",
+) -> dict:
     """
     Claude Vision compares reference face vs generated face.
     Replaces broken DeepFace with LLM visual reasoning.
@@ -324,9 +583,39 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
             + PIPELINE_CONTEXT
         )
 
-        for attempt in range(1, _IDENTITY_API_MAX_ATTEMPTS + 1):
+        from cost_tracker import API_COST_USD, PRICING
+        from cost_tracker_lifecycle import cost_tracker_scope
+        from paid_provider import (
+            PaidCallBudgetBlocked,
+            PaidCallDeferred,
+            PaidCallUnbilled,
+            file_fingerprint,
+            paid_attempt_id,
+            request_fingerprint,
+            run_nonresumable_paid_call,
+        )
+
+        def _input_fingerprint(path: str) -> str:
             try:
-                response = client.messages.create(
+                return file_fingerprint(path)
+            except Exception:
+                return request_fingerprint("unreadable-identity-input", path)
+
+        request_key = request_fingerprint(
+            "claude-vision-identity-v1",
+            "claude-sonnet-4-6",
+            _input_fingerprint(reference_path),
+            _input_fingerprint(generated_path),
+        )
+        attempt_key = paid_attempt_id(
+            "claude-vision-identity",
+            video_id,
+            shot_id,
+            request_key,
+        )
+
+        def _call_provider():
+            return client.messages.create(
                     model="claude-sonnet-4-6",
                     max_tokens=500,
                     system=system_prompt,
@@ -358,17 +647,57 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
                         },
                     ],
                 )
-                break
-            except Exception:
-                if attempt >= _IDENTITY_API_MAX_ATTEMPTS:
-                    raise
-                logger.warning(
-                    "[VISION-ID] Claude identity validation attempt %s/%s failed; retrying",
-                    attempt,
-                    _IDENTITY_API_MAX_ATTEMPTS,
-                    exc_info=True,
+
+        def _actual_cost(response) -> float:
+            usage = getattr(response, "usage", None)
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            pricing = PRICING["claude-sonnet-4-6"]
+            return (
+                input_tokens / 1_000_000 * pricing["input"]
+                + output_tokens / 1_000_000 * pricing["output"]
+            )
+
+        try:
+            with cost_tracker_scope(cost_tracker) as tracker:
+                response = run_nonresumable_paid_call(
+                    call=_call_provider,
+                    attempt_id=attempt_key,
+                    provider="anthropic",
+                    engine="CLAUDE_VISION_IDENTITY",
+                    operation="identity_validation",
+                    estimated_cost_usd=API_COST_USD["CLAUDE_VISION_IDENTITY"],
+                    actual_cost_usd=_actual_cost,
+                    request_fingerprint_value=request_key,
+                    cost_tracker=tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
                 )
-                time.sleep(_IDENTITY_API_RETRY_BACKOFF_SECONDS * attempt)
+        except PaidCallBudgetBlocked:
+            logger.warning(
+                "[VISION-ID] Identity validation blocked by the project budget"
+            )
+            return _identity_error_result(
+                "paid_budget_blocked",
+                "identity check unavailable: project budget refused the provider call",
+            )
+        except PaidCallDeferred:
+            logger.warning(
+                "[VISION-ID] Claude identity outcome requires reconciliation; "
+                "automatic replay is blocked"
+            )
+            return _identity_error_result(
+                "paid_work_reconciliation_required",
+                "identity check unavailable: provider outcome requires reconciliation",
+            )
+        except PaidCallUnbilled:
+            logger.warning(
+                "[VISION-ID] Claude identity request has terminal unbilled evidence"
+            )
+            return _identity_error_result(
+                "provider_unbilled_failure",
+                "identity check unavailable: provider rejected the request",
+            )
 
         raw = response.content[0].text.strip()
         if raw.startswith("```"):

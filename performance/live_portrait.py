@@ -12,13 +12,16 @@ to None when the node isn't installed.
 
 from __future__ import annotations
 
-import json
+import math
 import os
 from typing import Optional
+from urllib.parse import urlencode
 
+from comfyui_client import RunPodComfyUI
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import has_paid_attempt_authority
 from performance._net import safe_download, validate_video_artifact
-from performance._poll import poll_task
 
 
 _POLL_INTERVAL_S = 2
@@ -27,17 +30,29 @@ _POLL_INTERVAL_S = 2
 def _cost_log(duration_s: float, shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:
     """Tiny fixed cost — Railway GPU amortization (~$0.02 per 5s clip)."""
     try:
-        from cost_tracker import CostTracker
-        (cost_tracker or CostTracker()).log_api(
-            provider="comfyui",
-            model="live_portrait",
-            operation="performance_capture",
-            cost_usd=round(0.02 + 0.004 * float(duration_s), 4),
-            shot_id=shot_id,
-            video_id=video_id,
-        )
+        with cost_tracker_scope(cost_tracker) as tracker:
+            tracker.log_api(
+                provider="comfyui",
+                model="live_portrait",
+                operation="performance_capture",
+                cost_usd=round(0.02 + 0.004 * float(duration_s), 4),
+                shot_id=shot_id,
+                video_id=video_id,
+            )
     except Exception:
         pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
+
+
+def _estimated_cost(duration_s: float) -> float:
+    """Return the same bounded estimate used by the historical cost log."""
+
+    try:
+        duration = float(duration_s)
+    except (TypeError, ValueError, OverflowError):
+        duration = 5.0
+    if not math.isfinite(duration) or duration < 0.0:
+        duration = 5.0
+    return round(0.02 + 0.004 * duration, 4)
 
 
 def generate_live_portrait_performance(
@@ -64,21 +79,15 @@ def generate_live_portrait_performance(
         return None
 
     try:
-        import requests
+        comfy = RunPodComfyUI(
+            server_url,
+            auth_token=getattr(settings, "comfyui_api_key", "") or "",
+        )
 
-        # 1) Upload both files to the ComfyUI server
-        def _upload(path):
-            with open(path, "rb") as f:
-                rr = requests.post(
-                    f"{server_url}/upload/image",
-                    files={"image": f},
-                    timeout=60,
-                )
-            rr.raise_for_status()
-            return rr.json().get("name") or os.path.basename(path)
-
-        remote_kf = _upload(keyframe_path)
-        remote_dv = _upload(driving_video_path)
+        # The shared client provides bearer auth, graph preflight, bounded
+        # transport, WebSocket/history recovery, and ID-scoped cancellation.
+        remote_kf = comfy.upload_image(keyframe_path)
+        remote_dv = comfy.upload_image(driving_video_path)
 
         # 2) Build a minimal LivePortrait workflow. Node IDs are local to this
         # workflow — they don't collide with the keyframe pipeline.
@@ -110,38 +119,51 @@ def generate_live_portrait_performance(
             },
         }
 
-        # 3) Queue it
-        qr = requests.post(f"{server_url}/prompt", json={"prompt": workflow}, timeout=30)
-        if not qr.ok:
-            print(f"   [LIVE-PORTRAIT] queue failed: HTTP {qr.status_code}")
-            return None
-        prompt_id = qr.json().get("prompt_id")
+        durable = has_paid_attempt_authority(cost_tracker)
+        if durable:
+            from paid_provider import (
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_comfy_job,
+            )
 
-        # 4) Poll for completion
-        def _get_status():
-            hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
-            if not hr.ok or prompt_id not in hr.json():
-                return {"status": "PROCESSING"}
-            hist = hr.json()[prompt_id]
-            inner = hist.get("status", {})
-            if inner.get("status_str") == "error":
-                return {"status": "FAILED", "messages": inner.get("messages", [])}
-            if hist.get("outputs"):
-                return {"status": "SUCCEEDED", "outputs": hist["outputs"]}
-            return {"status": "PROCESSING"}
-
-        final = poll_task(
-            _get_status,
-            success_states={"SUCCEEDED"},
-            terminal_states={"FAILED"},
-            interval_s=_POLL_INTERVAL_S,
-            timeout_s=poll_timeout_s,
-        )
-        if not final:
-            print(f"   [LIVE-PORTRAIT] timed out or failed")
-            return None
-
-        outputs = final["outputs"]
+            stable_request = request_fingerprint(
+                "comfy-live-portrait",
+                file_fingerprint(keyframe_path),
+                file_fingerprint(driving_video_path),
+                float(duration_s),
+            )
+            attempt_id = paid_attempt_id(
+                "comfy-live-portrait",
+                video_id,
+                shot_id,
+                stable_request,
+            )
+            history = run_durable_comfy_job(
+                client=comfy,
+                workflow=workflow,
+                attempt_id=attempt_id,
+                engine="LIVE_PORTRAIT",
+                operation="performance_capture",
+                estimated_cost_usd=_estimated_cost(duration_s),
+                request_fingerprint_value=stable_request,
+                cost_tracker=cost_tracker,
+                shot_id=shot_id,
+                video_id=video_id,
+                poll_timeout_s=float(poll_timeout_s),
+                poll_interval_s=float(_POLL_INTERVAL_S),
+            )
+        else:
+            prompt_id = comfy.queue_prompt(workflow)
+            history = comfy.wait_for_completion(
+                prompt_id,
+                timeout=float(poll_timeout_s),
+                poll_interval=float(_POLL_INTERVAL_S),
+            )
+        prompt_id = next(iter(history), "") if durable else prompt_id
+        record = history.get(prompt_id, {})
+        outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
         for node_id, nout in outputs.items():
             if "gifs" in nout or "videos" in nout:
                 items = nout.get("gifs") or nout.get("videos") or []
@@ -149,20 +171,30 @@ def generate_live_portrait_performance(
                     fname = items[0].get("filename")
                     sub = items[0].get("subfolder", "")
                     ftype = items[0].get("type", "output")
-                    view = (
-                        f"{server_url}/view"
-                        f"?filename={fname}&subfolder={sub}&type={ftype}"
+                    query = urlencode({
+                        "filename": fname,
+                        "subfolder": sub,
+                        "type": ftype,
+                    })
+                    view = f"{server_url}/view?{query}"
+                    token = (getattr(settings, "comfyui_api_key", "") or "").strip()
+                    request_headers = (
+                        {"Authorization": f"Bearer {token}"} if token else None
                     )
-                    # ComfyUI pod is internal-trusted; allow http.
+                    # HTTP is allowed only for the operator-configured private
+                    # gateway. Authentication is forwarded explicitly because
+                    # safe_download owns a separate pooled session.
                     if not safe_download(
                         view,
                         output_mp4,
                         allow_http=True,
+                        request_headers=request_headers,
                         allowed_content_types=("video/mp4",),
                         content_validator=validate_video_artifact,
                     ):
                         return None
-                    _cost_log(duration_s, shot_id, video_id, cost_tracker=cost_tracker)
+                    if not durable:
+                        _cost_log(duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                     print(f"   ✅ LivePortrait: {output_mp4}")
                     return output_mp4
         return None

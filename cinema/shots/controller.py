@@ -85,7 +85,7 @@ import stat
 import tempfile
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import Any, Mapping, TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
@@ -295,6 +295,80 @@ def _lipsync_cost_api_key(engine: object) -> str:
     if raw.upper().startswith("LIPSYNC_"):
         return raw
     return f"LIPSYNC_{raw}"
+
+
+def _record_rejected_lipsync_candidate(
+    *,
+    project: Mapping[str, Any],
+    project_root: str,
+    shot_id: str,
+    candidate_id: str,
+    source_take_id: str,
+    evidence: Mapping[str, Any],
+    audio_path: str,
+    character_reference_path: str,
+    input_video_path: str,
+    mode: str,
+) -> dict:
+    """Copy one paid, locally rejected lip-sync output into artifact history."""
+
+    candidate_path = evidence.get("path")
+    if not isinstance(candidate_path, str) or not candidate_path:
+        raise RuntimeError("rejected lip-sync candidate has no output path")
+    paid_attempt = evidence.get("paid_attempt")
+    attempt = dict(paid_attempt) if isinstance(paid_attempt, Mapping) else {}
+    cascade_metadata = {
+        "engine": evidence.get("engine"),
+        "provider": evidence.get("provider"),
+        "model": evidence.get("model"),
+        "score": evidence.get("score"),
+        "validation_state": evidence.get("validation_state"),
+        "threshold": evidence.get("threshold"),
+        "rejection_stage": evidence.get("rejection_stage"),
+        "aspect_ratio": evidence.get("aspect_ratio"),
+        "attempt_id": evidence.get("attempt_id") or attempt.get("attempt_id"),
+        "provider_job_id": (
+            evidence.get("provider_job_id") or attempt.get("provider_job_id")
+        ),
+        "request_fingerprint": (
+            evidence.get("request_fingerprint")
+            or attempt.get("request_fingerprint")
+        ),
+        "provider_status": (
+            evidence.get("provider_status") or attempt.get("provider_status")
+        ),
+        "attempt_state": evidence.get("attempt_state") or attempt.get("state"),
+    }
+    rejected_take = make_take(
+        "postprocess",
+        path=candidate_path,
+        source_take_id=source_take_id,
+        status="rejected",
+        metadata={
+            "action": "lip_sync",
+            "mode": mode,
+            "threshold": evidence.get("threshold"),
+            "rejection_stage": evidence.get("rejection_stage"),
+            "lipsync_score": evidence.get("score"),
+            "lipsync_validation_state": evidence.get("validation_state"),
+            "audio_path": audio_path,
+            "character_reference_path": character_reference_path,
+            "lipsync_input_video_path": input_video_path,
+        },
+    )
+    rejected_take["id"] = candidate_id
+    rejected_take["cascade_metadata"] = cascade_metadata
+
+    from cinema.artifact_indexing import record_take_version
+
+    return record_take_version(
+        str(project.get("id") or ""),
+        shot_id,
+        "postprocess",
+        rejected_take,
+        project_snapshot=project,
+        project_root=project_root,
+    )
 
 
 def _inherit_audio_flags_from_base(base_take: Optional[dict], variant: dict) -> None:
@@ -840,6 +914,14 @@ class ShotController:
             ]
         if isinstance(job.get("billed"), bool):
             result["billed"] = job["billed"]
+        attempt_id = job.get("attempt_id")
+        if (
+            isinstance(attempt_id, str)
+            and 0 < len(attempt_id) <= 512
+            and attempt_id == attempt_id.strip()
+            and not any(ord(char) < 32 or ord(char) == 127 for char in attempt_id)
+        ):
+            result["attempt_id"] = attempt_id
         duration_s = job.get("duration_s")
         if (
             isinstance(duration_s, (int, float))
@@ -1062,6 +1144,156 @@ class ShotController:
 
         self._mutate_shot(shot_id, _mutator)
 
+    @staticmethod
+    def _take_collection(take_kind: str) -> str:
+        collections = {
+            "keyframe": "keyframe_takes",
+            "performance": "performance_takes",
+            "motion": "motion_takes",
+            "postprocess": "postprocess_variants",
+        }
+        try:
+            return collections[take_kind]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported take kind: {take_kind}") from exc
+
+    @staticmethod
+    def _mark_artifact_version_pending(take: dict) -> None:
+        take.setdefault("metadata", {})["artifact_versioning_pending"] = True
+
+    def _finalize_take_artifact_version(
+        self,
+        shot_id: str,
+        take_kind: str,
+        take: dict,
+    ) -> tuple[Optional[dict], Optional[dict]]:
+        """Index accepted bytes, then durably clear their recovery marker.
+
+        The pending marker is written in the same project mutation that
+        accepts the take.  A crash or ledger failure therefore cannot turn a
+        UI retry into another provider submission: the next call repairs this
+        exact take first and returns it without entering generation.
+        """
+
+        from cinema.artifact_indexing import record_take_version
+
+        take_id = str(take.get("id") or "")
+        try:
+            record = record_take_version(
+                str(self.project.get("id") or ""),
+                shot_id,
+                take_kind,
+                take,
+                project_snapshot=self.project,
+                project_root=self.project_dir,
+            )
+        except Exception:
+            logger.exception(
+                "Accepted take awaits artifact version recovery",
+                extra={"shot_id": shot_id, "take_id": take_id, "take_kind": take_kind},
+            )
+            return None, {
+                "success": False,
+                "error": (
+                    "The accepted output is retained, but its immutable artifact "
+                    "record is pending. Retry repairs this record without starting "
+                    "new provider work."
+                ),
+                "error_kind": "artifact_versioning",
+                "code": "artifact_version_pending",
+                "retryable": True,
+                "accepted_take_id": take_id,
+            }
+
+        collection = self._take_collection(take_kind)
+
+        def _clear_pending(_scene: dict, project_shot: dict):
+            for candidate in project_shot.get(collection, []):
+                if candidate.get("id") != take_id:
+                    continue
+                metadata = candidate.setdefault("metadata", {})
+                metadata.pop("artifact_versioning_pending", None)
+                metadata["artifact_version_id"] = record["artifact_id"]
+                metadata["artifact_version"] = record["version"]
+                return MutationResult(candidate, save=True)
+            return MutationResult(None, save=False)
+
+        try:
+            updated = self._mutate_shot(shot_id, _clear_pending)
+        except Exception:
+            logger.exception(
+                "Artifact version recorded but take marker could not be cleared",
+                extra={"shot_id": shot_id, "take_id": take_id, "take_kind": take_kind},
+            )
+            updated = None
+        if not isinstance(updated, dict):
+            return None, {
+                "success": False,
+                "error": (
+                    "The immutable artifact was recorded, but project recovery "
+                    "state is still pending. Retry reconciles it without provider work."
+                ),
+                "error_kind": "artifact_versioning",
+                "code": "artifact_version_pending",
+                "retryable": True,
+                "accepted_take_id": take_id,
+            }
+        return updated, None
+
+    def _recover_pending_take_artifact(
+        self,
+        shot_id: str,
+        take_kind: str,
+        shot: dict,
+    ) -> Optional[dict]:
+        """Repair accepted pending takes before any new provider dispatch."""
+
+        collection = self._take_collection(take_kind)
+        pending = [
+            take
+            for take in shot.get(collection, [])
+            if isinstance(take, dict)
+            and isinstance(take.get("metadata"), dict)
+            and take["metadata"].get("artifact_versioning_pending") is True
+        ]
+        if not pending:
+            return None
+
+        recovered: Optional[dict] = None
+        for take in pending:
+            recovered, error = self._finalize_take_artifact_version(
+                shot_id, take_kind, take,
+            )
+            if error is not None:
+                return error
+        if recovered is None:
+            return None
+
+        resolved_path = self._resolve_stored_media_path(str(recovered.get("path") or ""))
+        metadata = recovered.get("metadata") if isinstance(recovered.get("metadata"), dict) else {}
+        self.progress(
+            "ARTIFACT_VERSION_RECOVERED",
+            f"Recovered immutable {take_kind} artifact for {shot_id}",
+            -1,
+            shot_id=shot_id,
+            take_id=recovered.get("id"),
+            take_kind=take_kind,
+        )
+        result = {
+            "success": True,
+            "take": recovered,
+            "artifact_recovered": True,
+        }
+        if take_kind == "keyframe":
+            result["image"] = resolved_path
+        else:
+            result["video"] = resolved_path
+        if take_kind == "performance":
+            result["engine"] = metadata.get("engine")
+        if "identity_score" in metadata:
+            result["identity_score"] = metadata.get("identity_score")
+        return result
+
     def _resolve_previous_approved_keyframe(self, scene: dict, shot_index: int) -> str:
         if shot_index <= 0:
             return ""
@@ -1088,11 +1320,31 @@ class ShotController:
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
+        pending_artifact = self._recover_pending_take_artifact(
+            shot_id, "keyframe", shot,
+        )
+        if pending_artifact is not None:
+            return pending_artifact
         if shot.get("plan_status") != "approved":
             return {"success": False, "error": "Shot plan must be approved before generating a keyframe"}
         existing_keyframe_job = shot.get("deferred_keyframe_job")
+        recovery_attempt_id = ""
         if isinstance(existing_keyframe_job, dict):
-            return self._deferred_keyframe_response(existing_keyframe_job)
+            public_existing = self._public_deferred_motion_job(existing_keyframe_job)
+            candidate_attempt_id = public_existing.get("attempt_id")
+            if (
+                isinstance(candidate_attempt_id, str)
+                and candidate_attempt_id.startswith("take_")
+            ):
+                # Re-enter the exact logical take. Durable provider adapters
+                # derive their paid-attempt key from this take's output path;
+                # reusing it lets FAL/ComfyUI poll the acknowledged request ID
+                # after a crash, while non-resumable providers remain fenced
+                # as accepted_unknown. A new take ID here would be a new paid
+                # request and could duplicate the original work.
+                recovery_attempt_id = candidate_attempt_id
+            else:
+                return self._deferred_keyframe_response(existing_keyframe_job)
 
         settings = project.get("global_settings", {})
         style_suffix = style_rules_to_prompt_suffix(settings.get("style_rules", {}))
@@ -1157,6 +1409,9 @@ class ShotController:
                 "target_api": shot.get("target_api", "AUTO"),
             },
         )
+        if recovery_attempt_id:
+            take["id"] = recovery_attempt_id
+            take["metadata"]["provider_recovery_resume"] = True
         img_path = self._take_output_path(shot_id, take["id"], ".jpg")
         self._runstate.update_progress_pointer("KEYFRAME", scene_id, shot_id)
         self.progress(
@@ -1305,11 +1560,21 @@ class ShotController:
             "resolve_after": (claim_started + timedelta(seconds=660)).isoformat(),
             "attempt_id": attempt_id,
         }
-        claim = self._claim_deferred_keyframe_job(shot_id, submission_marker)
-        if claim is None:
-            return {"success": False, "error": "Shot not found"}
-        if isinstance(claim, dict) and claim.get("claimed") is False:
-            return self._deferred_keyframe_response(claim.get("job"))
+        if not recovery_attempt_id:
+            claim = self._claim_deferred_keyframe_job(shot_id, submission_marker)
+            if claim is None:
+                return {"success": False, "error": "Shot not found"}
+            if isinstance(claim, dict) and claim.get("claimed") is False:
+                return self._deferred_keyframe_response(claim.get("job"))
+        else:
+            self.progress(
+                "KEYFRAME_RECOVERY",
+                f"Resuming the durable keyframe attempt for {shot_id}",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                take_id=attempt_id,
+            )
 
         recovery: dict = {}
         result = generate_ai_broll(
@@ -1334,6 +1599,13 @@ class ShotController:
                        "image_api": _image_api_hint},
             ctx=ctx,
             _recovery_out=recovery,
+            cost_tracker=self.cost_tracker,
+            shot_id=shot_id,
+            video_id=str(project.get("id", "")),
+            take_id=take["id"],
+            project_snapshot=project,
+            project_root=self.project_dir,
+            artifact_metadata=take.get("metadata"),
         )
         if not result:
             # The provider cascade can fail after an earlier provider already
@@ -1386,19 +1658,20 @@ class ShotController:
         # gates so spend cannot disappear behind a recovery/error path.
         image_api = result.api_name
         video_id = self.project.get("id", "")
-        try:
-            self.cost_tracker.record_api_call(
-                image_api,
-                operation="keyframe_generation",
-                shot_id=shot_id,
-                video_id=video_id,
-            )
-        except Exception:
-            logger.warning(
-                "keyframe cost record skipped",
-                exc_info=True,
-                extra={"shot_id": shot_id},
-            )
+        if not recovery.get("_winner_paid_cost_recorded"):
+            try:
+                self.cost_tracker.record_api_call(
+                    image_api,
+                    operation="keyframe_generation",
+                    shot_id=shot_id,
+                    video_id=video_id,
+                )
+            except Exception:
+                logger.warning(
+                    "keyframe cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id},
+                )
         for rejected_engine in result.billed_rejects:
             if rejected_engine == image_api:
                 continue
@@ -1479,6 +1752,9 @@ class ShotController:
                 img_path, primary_ref,
                 character_id=primary_char_id,
                 threshold=threshold,
+                cost_tracker=self.cost_tracker,
+                video_id=str(project.get("id", "")),
+                shot_id=shot_id,
             )
             identity_score = id_result.overall_score  # None on skip = not scored
             take["metadata"]["identity_score"] = identity_score
@@ -1520,6 +1796,9 @@ class ShotController:
                     img_path, spec_c.reference,
                     character_id=spec_c.char_id,
                     threshold=threshold,
+                    cost_tracker=self.cost_tracker,
+                    video_id=str(project.get("id", "")),
+                    shot_id=shot_id,
                 )
                 per_char[spec_c.char_id] = sec_result.overall_score
             take["metadata"]["identity_per_char"] = per_char
@@ -1536,6 +1815,8 @@ class ShotController:
             # params_delta + anchor_refs are populated post-generation by
             # regenerate_with_intent's _stash_delta mutator (single source of
             # truth — pre-seed removed per operator Lane V #4 F5).
+
+        self._mark_artifact_version_pending(take)
 
         def _mutator(_scene: dict, project_shot: dict):
             current = project_shot.get("deferred_keyframe_job")
@@ -1563,6 +1844,11 @@ class ShotController:
                 ),
             )
         stored_take = stored["take"]
+        stored_take, artifact_error = self._finalize_take_artifact_version(
+            shot_id, "keyframe", stored_take,
+        )
+        if artifact_error is not None:
+            return artifact_error
         self._runstate.shot_results[shot_id] = {
             "image": img_path,
             "video": None,
@@ -1616,6 +1902,11 @@ class ShotController:
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
+        pending_artifact = self._recover_pending_take_artifact(
+            shot_id, "performance", shot,
+        )
+        if pending_artifact is not None:
+            return pending_artifact
         if shot.get("plan_status") != "approved":
             return {"success": False, "error": "Shot plan must be approved before performance capture"}
         keyframe_take_id = shot.get("approved_keyframe_take_id", "")
@@ -1760,6 +2051,118 @@ class ShotController:
                     extra={"shot_id": shot_id, "engine": engine},
                 )
 
+            if not driving:
+                mode_b_attempt = None
+                get_latest_attempt = getattr(
+                    self.cost_tracker, "get_latest_paid_attempt", None
+                )
+                if callable(get_latest_attempt):
+                    try:
+                        mode_b_attempt = get_latest_attempt(
+                            video_id=str(project.get("id", "")),
+                            shot_id=shot_id,
+                            engine="PERFORMANCE_DRIVING_SADTALKER",
+                            operation="performance_capture_driving",
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Mode-B durable state lookup failed",
+                            exc_info=True,
+                            extra={"shot_id": shot_id},
+                        )
+                if isinstance(mode_b_attempt, dict) and mode_b_attempt.get("state") == "blocked_budget":
+                    self.progress(
+                        "BUDGET_EXCEEDED",
+                        f"Shot {shot_id}: atomic budget reservation refused Mode-B driving synthesis",
+                        -1,
+                        scene_id=scene_id,
+                        shot_id=shot_id,
+                        performance_engine="PERFORMANCE_DRIVING_SADTALKER",
+                        paid_attempt_id=mode_b_attempt.get("attempt_id"),
+                        paid_attempt_state="blocked_budget",
+                        spent=self.cost_tracker.spent_usd,
+                        budget=self.cost_tracker.budget_usd,
+                    )
+                    self._lifecycle.pause()
+                    return {
+                        "success": False,
+                        "error": "Budget cap reached — Mode-B driving synthesis not started",
+                        "error_kind": "budget",
+                        "engine": "PERFORMANCE_DRIVING_SADTALKER",
+                        "paid_attempt": mode_b_attempt,
+                    }
+                if isinstance(mode_b_attempt, dict) and mode_b_attempt.get("state") in {
+                    "reserved",
+                    "submitting",
+                    "accepted_unknown",
+                    "running",
+                    "cancel_requested",
+                    "succeeded",
+                    "failed_billed",
+                }:
+                    return {
+                        "success": False,
+                        "error": "Mode-B paid prompt requires recovery or operator review",
+                        "error_kind": "deferred",
+                        "code": "provider_job_deferred",
+                        "engine": "PERFORMANCE_DRIVING_SADTALKER",
+                        "paid_attempt": mode_b_attempt,
+                    }
+
+        if driving and needs_mode_b_driving:
+            try:
+                from cinema.artifact_indexing import record_auxiliary_version
+
+                record_auxiliary_version(
+                    str(project.get("id") or ""),
+                    "driving_video",
+                    shot_id,
+                    driving,
+                    provider=("sadtalker" if driving_provider == "sadtalker" else None),
+                    model=("sadtalker" if driving_provider == "sadtalker" else None),
+                    parameters={
+                        "duration": duration_s,
+                        "source_mode": source_mode,
+                    },
+                    source_paths={
+                        "dialogue_audio": audio_path,
+                        "keyframe": source_image,
+                    },
+                    project_snapshot=project,
+                    project_root=self.project_dir,
+                )
+            except Exception:
+                logger.exception(
+                    "Generated driving video awaits artifact version recovery",
+                    extra={"shot_id": shot_id},
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        "The generated driving video is retained, but immutable "
+                        "indexing is pending. Retry resumes the same paid task."
+                    ),
+                    "error_kind": "artifact_versioning",
+                    "code": "artifact_version_pending",
+                    "retryable": True,
+                }
+
+        # Bind the exact resolved driving input to the take recipe before the
+        # paid performance dispatch.  Accepted takes persist a portable,
+        # project-relative path; artifact versioning hashes these exact bytes
+        # as an input dependency.  This is provenance, not provider identity.
+        driving_video_path = self._to_project_relative(driving) if driving else ""
+        if driving and os.path.isabs(driving_video_path):
+            return {
+                "success": False,
+                "error": (
+                    "Resolved performance driving input is outside the project; "
+                    "copy/upload it into the project before capture"
+                ),
+                "error_kind": "input_provenance",
+                "engine": engine,
+            }
+
         # --- 4. Dispatch to the chosen engine ---
         take = make_take(
             "performance",
@@ -1771,6 +2174,7 @@ class ShotController:
                 "driving_source": "upload" if shot.get("driving_video_path") else (
                     "tts_auto" if driving else "none"
                 ),
+                "driving_video_path": driving_video_path,
                 "audio_path": audio_path,
                 "duration_s": duration_s,
                 "driving_provider": driving_provider,  # "sadtalker" | "cache" | None
@@ -1804,6 +2208,73 @@ class ShotController:
             return {"success": False, "error": f"Performance dispatch raised: {e}"}
 
         if not result_path or not os.path.exists(perf_path):
+            paid_attempt = None
+            get_latest_attempt = getattr(
+                self.cost_tracker, "get_latest_paid_attempt", None
+            )
+            if engine in {"ACT_ONE", "LIVE_PORTRAIT", "VIGGLE"} and callable(get_latest_attempt):
+                try:
+                    paid_attempt = get_latest_attempt(
+                        video_id=str(project.get("id", "")),
+                        shot_id=shot_id,
+                        engine=engine,
+                        operation="performance_capture",
+                    )
+                except Exception:
+                    logger.warning(
+                        "Performance provider durable state lookup failed",
+                        exc_info=True,
+                        extra={"shot_id": shot_id, "engine": engine},
+                    )
+            if isinstance(paid_attempt, dict) and paid_attempt.get("state") == "blocked_budget":
+                self.progress(
+                    "BUDGET_EXCEEDED",
+                    f"Shot {shot_id}: atomic budget reservation refused {engine}",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    performance_engine=engine,
+                    paid_attempt_id=paid_attempt.get("attempt_id"),
+                    paid_attempt_state="blocked_budget",
+                    spent=self.cost_tracker.spent_usd,
+                    budget=self.cost_tracker.budget_usd,
+                )
+                self._lifecycle.pause()
+                return {
+                    "success": False,
+                    "error": "Budget cap reached — performance capture not started",
+                    "error_kind": "budget",
+                    "engine": engine,
+                    "paid_attempt": paid_attempt,
+                }
+            if isinstance(paid_attempt, dict) and paid_attempt.get("state") in {
+                "reserved",
+                "submitting",
+                "accepted_unknown",
+                "running",
+                "cancel_requested",
+                "succeeded",
+                "failed_billed",
+            }:
+                state = str(paid_attempt.get("state") or "accepted_unknown")
+                self.progress(
+                    "PERFORMANCE_DEFERRED",
+                    f"Shot {shot_id}: {engine} task is {state}; no successful skip was recorded",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    performance_engine=engine,
+                    paid_attempt_id=paid_attempt.get("attempt_id"),
+                    paid_attempt_state=state,
+                )
+                return {
+                    "success": False,
+                    "error": f"{engine} paid task requires recovery or operator review",
+                    "error_kind": "deferred",
+                    "code": "provider_job_deferred",
+                    "engine": engine,
+                    "paid_attempt": paid_attempt,
+                }
             # Engine failed gracefully (returned None). Mark as SKIP so motion_render
             # uses plain text-to-video — pipeline keeps moving.
             def _mut_fail(_scene: dict, project_shot: dict):
@@ -1849,7 +2320,17 @@ class ShotController:
                 face_anchor = ""
 
         from performance.identity_gate import validate_performance_take, DEFAULT_PERFORMANCE_FLOOR
-        arc_score = validate_performance_take(perf_path, face_anchor) if face_anchor else None
+        arc_score = (
+            validate_performance_take(
+                perf_path,
+                face_anchor,
+                cost_tracker=self.cost_tracker,
+                video_id=str(project.get("id", "")),
+                shot_id=shot_id,
+            )
+            if face_anchor
+            else None
+        )
         gate_passed = (arc_score is None) or (arc_score >= DEFAULT_PERFORMANCE_FLOOR)
 
         def _mut_success(_scene: dict, project_shot: dict):
@@ -1863,7 +2344,13 @@ class ShotController:
             take.setdefault("metadata", {})["identity_score"] = arc_score
             return MutationResult(take, save=True)
 
+        self._mark_artifact_version_pending(take)
         stored_take = self._mutate_shot(shot_id, _mut_success)
+        stored_take, artifact_error = self._finalize_take_artifact_version(
+            shot_id, "performance", stored_take,
+        )
+        if artifact_error is not None:
+            return artifact_error
         self._host._save_checkpoint()
         if not gate_passed:
             self.progress(
@@ -1923,6 +2410,9 @@ class ShotController:
             mode="standard",
             attempt=0,
             max_attempts=settings.get("identity_retry_max", 3),
+            cost_tracker=self.cost_tracker,
+            video_id=str(self.project.get("id", "")),
+            shot_id=str(shot.get("id", "")),
         )
         identity_score = (vid_result.overall_score
                           if hasattr(vid_result, "overall_score") and vid_result.overall_score is not None
@@ -1997,7 +2487,13 @@ class ShotController:
             # for short or unopenable clips) — never send those to the cloud.
             if mq.get("recommendation") != "regenerate" and smoothness < threshold:
                 rife_out = self._take_output_path(shot_id, take["id"] + "_rife", ".mp4")
-                rife_result = generate_rife_interpolation(video_path, rife_out)
+                rife_result = generate_rife_interpolation(
+                    video_path,
+                    rife_out,
+                    cost_tracker=self.cost_tracker,
+                    shot_id=shot_id,
+                    video_id=self.project.get("id", ""),
+                )
                 if rife_result and os.path.exists(rife_result):
                     take["metadata"]["auto_rife_applied"] = True
                     logger.info(
@@ -2008,19 +2504,40 @@ class ShotController:
                             "threshold": threshold,
                         },
                     )
-                    try:
-                        self.cost_tracker.record_api_call(
-                            "FAL_RIFE",
-                            operation="rife_interpolation",
-                            shot_id=shot_id,
-                            video_id=self.project.get("id", ""),
-                        )
-                    except Exception:
-                        logger.warning(
-                            "auto-RIFE cost record skipped",
-                            exc_info=True,
-                            extra={"shot_id": shot_id},
-                        )
+                    # The production adapter reconciles the FAL request ID and
+                    # cost atomically. Preserve the legacy/mocked seam without
+                    # double-charging a real durable attempt.
+                    durable_rife = None
+                    get_latest_attempt = getattr(
+                        self.cost_tracker, "get_latest_paid_attempt", None
+                    )
+                    if callable(get_latest_attempt):
+                        try:
+                            durable_rife = get_latest_attempt(
+                                video_id=self.project.get("id", ""),
+                                shot_id=shot_id,
+                                engine="FAL_RIFE",
+                                operation="rife_interpolation",
+                            )
+                        except Exception:
+                            durable_rife = None
+                    if not (
+                        isinstance(durable_rife, dict)
+                        and durable_rife.get("state") == "succeeded"
+                    ):
+                        try:
+                            self.cost_tracker.record_api_call(
+                                "FAL_RIFE",
+                                operation="rife_interpolation",
+                                shot_id=shot_id,
+                                video_id=self.project.get("id", ""),
+                            )
+                        except Exception:
+                            logger.warning(
+                                "auto-RIFE legacy cost record skipped",
+                                exc_info=True,
+                                extra={"shot_id": shot_id},
+                            )
                     return rife_result
                 logger.warning(
                     "auto-RIFE produced no output; keeping original",
@@ -2084,6 +2601,22 @@ class ShotController:
             _dur = (cascade_metadata or {}).get("duration_s")
             if isinstance(_dur, (int, float)) and not isinstance(_dur, bool) and _dur > 0:
                 result["duration_seconds"] = _dur
+            _backend = str((cascade_metadata or {}).get("backend") or "").lower()
+            if _backend == "native":
+                result.update({
+                    "backend": "native",
+                    "model": str(
+                        (cascade_metadata or {}).get("model") or "ltx-2-3-pro"
+                    ),
+                    "resolution": str(
+                        (cascade_metadata or {}).get("resolution") or "1080p"
+                    ),
+                    "audio": bool((cascade_metadata or {}).get("audio", False)),
+                    "pricing_operation": str(
+                        (cascade_metadata or {}).get("pricing_operation")
+                        or "image_to_video"
+                    ),
+                })
             return result
         if _engine == "GEMINI_OMNI" and video_path and os.path.exists(video_path):
             from cost_tracker import API_COST_USD
@@ -2307,6 +2840,7 @@ class ShotController:
 
         # 4–5. Persist take via mutation
         final_vid = video_path
+        self._mark_artifact_version_pending(take)
 
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("motion_takes", []).append(take)
@@ -2317,6 +2851,11 @@ class ShotController:
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
+        stored_take, artifact_error = self._finalize_take_artifact_version(
+            shot_id, "motion", stored_take,
+        )
+        if artifact_error is not None:
+            return artifact_error
 
         # 6. Update shot_results
         self._runstate.shot_results[shot_id] = {
@@ -2338,27 +2877,32 @@ class ShotController:
         if record_cost:
             try:
                 video_id = self.project.get("id", "")
+                cascade_metadata = take.get("cascade_metadata") or {}
                 # Key the record on the cascade WINNER, not the requested
                 # primary — a SEEDANCE win behind a cheaper primary otherwise
                 # accumulates at the primary's price and defeats both the
                 # precheck and the post-hoc budget gate (money-gate review
                 # 2026-07-11; mirrors the lipsync winner-keyed record below).
                 _motion_engine = (
-                    (take.get("cascade_metadata") or {}).get("engine")
+                    cascade_metadata.get("engine")
                     or target_api
                 )
-                self.cost_tracker.record_api_call(
-                    _motion_engine,
-                    operation="motion_generation",
-                    shot_id=shot_id,
-                    video_id=video_id,
-                    **self._motion_cost_kwargs(
+                # The dispatcher now settles transaction-backed paid attempts
+                # before publishing success.  Keep the legacy record path for
+                # callers/test doubles that do not carry that authority marker.
+                if not cascade_metadata.get("paid_attempt_id"):
+                    self.cost_tracker.record_api_call(
                         _motion_engine,
-                        resolved_shot_type,
-                        video_path=final_vid,
-                        cascade_metadata=take.get("cascade_metadata"),
-                    ),
-                )
+                        operation="motion_generation",
+                        shot_id=shot_id,
+                        video_id=video_id,
+                        **self._motion_cost_kwargs(
+                            _motion_engine,
+                            resolved_shot_type,
+                            video_path=final_vid,
+                            cascade_metadata=cascade_metadata,
+                        ),
+                    )
             except Exception:
                 logger.warning(
                     "motion cost record skipped",
@@ -2423,6 +2967,11 @@ class ShotController:
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
+        pending_artifact = self._recover_pending_take_artifact(
+            shot_id, "motion", shot,
+        )
+        if pending_artifact is not None:
+            return pending_artifact
         if shot.get("plan_status") != "approved":
             return {"success": False, "error": "Shot plan must be approved before generating motion"}
         keyframe_take_id = shot.get("approved_keyframe_take_id", "")
@@ -2448,7 +2997,9 @@ class ShotController:
                 )
             )
             if (
-                deferred_engine != "LTX"
+                deferred_engine not in {
+                    "VEO", "KLING_3_0", "SEEDANCE", "LTX", "RUNWAY_GEN4",
+                }
                 or not isinstance(deferred_job_id, str)
                 or not deferred_job_id
                 or (
@@ -2472,10 +3023,10 @@ class ShotController:
         from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
 
         resolved_shot_type = classify_shot_type(shot)
-        # An unresolved accepted LTX job owns this shot until it reaches a
+        # An unresolved accepted provider job owns this shot until it reaches a
         # terminal state. A changed target must not launch a second provider;
         # the dispatcher receives the persisted exact-request binding below.
-        raw_api = "LTX" if resuming_deferred else shot.get("target_api", "AUTO")
+        raw_api = deferred_engine if resuming_deferred else shot.get("target_api", "AUTO")
 
         # F1a: Read the optimizer cache to recover the purpose + suggested_video_api
         # that was computed during keyframe generation but not forwarded here.
@@ -2779,7 +3330,7 @@ class ShotController:
         _video_cascade: dict = {
             "policy_rejections": list(policy_rejections),
         }
-        if resuming_deferred:
+        if resuming_deferred and deferred_engine == "LTX":
             _video_cascade["expected_ltx_job"] = {
                 "engine": "LTX",
                 "job_id": deferred_job_id,
@@ -2817,6 +3368,7 @@ class ShotController:
             dir=os.path.dirname(vid_path) or ".",
         )
         os.close(candidate_fd)
+        final_vid = None
         try:
             temp_vid = generate_ai_video(
                 source_image,
@@ -2835,8 +3387,10 @@ class ShotController:
                 duration=_veo_duration,
                 ctx=motion_ctx,
                 _cascade_out=_video_cascade,
+                cost_tracker=self.cost_tracker,
+                shot_id=shot_id,
+                video_id=str(project.get("id", "")),
             )
-            final_vid = None
             try:
                 returned_path = os.fspath(temp_vid) if temp_vid else ""
             except TypeError:
@@ -2863,26 +3417,87 @@ class ShotController:
                     final_vid = vid_path
         finally:
             # On failure/rejection the owned candidate may contain a billed
-            # provider output.  It must remain accounting evidence, not a
-            # selectable take artifact.
-            try:
-                os.remove(candidate_vid)
-            except FileNotFoundError:
-                pass
-            except OSError:
-                logger.warning(
-                    "Unable to remove rejected motion candidate",
-                    exc_info=True,
-                    extra={"shot_id": shot_id, "candidate_path": candidate_vid},
-                )
+            # provider output. Retain its exact bytes as an internal immutable
+            # version before removing the mutable temp path. It is evidence,
+            # not a selectable take, but artifact history must not silently
+            # lose a paid output merely because a local gate rejected it.
+            retained_reject = False
+            candidate_has_bytes = False
+            if final_vid is None:
+                try:
+                    candidate_stat = os.stat(candidate_vid, follow_symlinks=False)
+                    candidate_has_bytes = (
+                        stat.S_ISREG(candidate_stat.st_mode)
+                        and candidate_stat.st_size > 0
+                    )
+                except OSError:
+                    candidate_has_bytes = False
+                if candidate_has_bytes:
+                    rejected_take = {
+                        **take,
+                        "path": candidate_vid,
+                        "status": "rejected",
+                        "metadata": {
+                            **(take.get("metadata") or {}),
+                            "rejection_stage": "motion_dispatch_or_validation",
+                        },
+                        "cascade_metadata": dict(_video_cascade),
+                    }
+                    try:
+                        from cinema.artifact_indexing import record_take_version
+
+                        record_take_version(
+                            str(project.get("id") or ""),
+                            shot_id,
+                            "motion",
+                            rejected_take,
+                            project_snapshot=project,
+                            project_root=self.project_dir,
+                        )
+                        retained_reject = True
+                    except Exception:
+                        _video_cascade["rejected_artifact_retention_error"] = True
+                        logger.exception(
+                            "Rejected motion candidate could not be retained; leaving recovery bytes in place",
+                            extra={"shot_id": shot_id, "candidate_path": candidate_vid},
+                        )
+            if retained_reject or not candidate_has_bytes:
+                try:
+                    os.remove(candidate_vid)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning(
+                        "Unable to remove rejected motion candidate",
+                        exc_info=True,
+                        extra={"shot_id": shot_id, "candidate_path": candidate_vid},
+                    )
 
         if not final_vid or not os.path.exists(final_vid):
+            blocked_attempt = _video_cascade.get("budget_blocked_attempt")
+            if isinstance(blocked_attempt, dict):
+                self.progress(
+                    "BUDGET_EXCEEDED",
+                    f"Atomic reservation for {blocked_attempt.get('engine', target_api)} was refused; no provider was started.",
+                    -1,
+                    scene_id=scene_id,
+                    shot_id=shot_id,
+                    spent=self.cost_tracker.spent_usd,
+                    budget=self.cost_tracker.budget_usd,
+                )
+                self._lifecycle.pause()
+                return {
+                    "success": False,
+                    "error": "Budget cap reached — paid attempt reservation refused",
+                    "error_kind": "budget",
+                    "attempt_id": blocked_attempt.get("attempt_id"),
+                }
             if _video_cascade.get("policy_error"):
                 if resuming_deferred:
                     return self._deferred_motion_response(
                         existing_deferred,
                         detail=(
-                            "The accepted LTX job is still reserved, but current "
+                            f"The accepted {deferred_engine} job is still reserved, but current "
                             "provider policy or configuration blocks recovery. No "
                             "new provider was started."
                         ),
@@ -2958,12 +3573,12 @@ class ShotController:
                 except Exception:
                     logger.exception(
                         "Unable to clear terminal deferred provider job",
-                        extra={"shot_id": shot_id, "engine": "LTX"},
+                        extra={"shot_id": shot_id, "engine": deferred_engine},
                     )
                     return self._deferred_motion_response(
                         existing_deferred,
                         detail=(
-                            "The LTX job reached a terminal state, but its recovery "
+                            "The provider job reached a terminal state, but its recovery "
                             "record could not be cleared safely. No fallback was started."
                         ),
                     )
@@ -2971,7 +3586,7 @@ class ShotController:
                     "success": False,
                     "code": "provider_job_failed",
                     "error": (
-                        "The deferred LTX job ended without a publishable video. "
+                        "The deferred provider job ended without a publishable video. "
                         "Its reservation was cleared; no fallback was started."
                     ),
                 }
@@ -3069,6 +3684,28 @@ class ShotController:
                 if audio_path_for_sync and primary_ref_for_sync:
                     lipsync_out = self._take_output_path(shot_id, take["id"] + "_ls", ".mp4")
                     _ls_cascade: dict = {}
+                    _rejected_lipsync_count = 0
+
+                    def _retain_f1b_lipsync_reject(evidence: dict) -> dict:
+                        nonlocal _rejected_lipsync_count
+                        _rejected_lipsync_count += 1
+                        return _record_rejected_lipsync_candidate(
+                            project=project,
+                            project_root=self.project_dir,
+                            shot_id=shot_id,
+                            candidate_id=(
+                                f"{take['id']}-ls-reject-{_rejected_lipsync_count}"
+                            ),
+                            source_take_id=str(
+                                take.get("source_take_id") or keyframe_take_id
+                            ),
+                            evidence=evidence,
+                            audio_path=str(audio_path_for_sync),
+                            character_reference_path=str(primary_ref_for_sync),
+                            input_video_path=str(final_vid),
+                            mode=str(settings.get("lip_sync_mode", "auto")),
+                        )
+
                     ls_result = generate_lip_sync_video(
                         character_image_path=primary_ref_for_sync,
                         audio_path=audio_path_for_sync,
@@ -3077,7 +3714,25 @@ class ShotController:
                         mode=settings.get("lip_sync_mode", "auto"),
                         settings=settings,
                         _cascade_out=_ls_cascade,
+                        cost_tracker=self.cost_tracker,
+                        shot_id=shot_id,
+                        video_id=self.project.get("id", ""),
+                        _retain_rejected_candidate=_retain_f1b_lipsync_reject,
                     )
+                    if _ls_cascade.get("rejected_candidate_retention_failed"):
+                        return {
+                            "success": False,
+                            "error": (
+                                "A paid lip-sync candidate failed local validation, "
+                                "but its immutable artifact record could not be written. "
+                                "Fallback stopped and recovery bytes were left in place."
+                            ),
+                            "code": "lipsync_artifact_retention_failed",
+                            "provider_recovery_required": True,
+                            "rejected_candidate": _ls_cascade.get(
+                                "recovery_candidate", {}
+                            ),
+                        }
                     if ls_result and os.path.exists(ls_result):
                         # Replace take video with the lip-synced output.
                         final_vid = ls_result
@@ -3127,15 +3782,16 @@ class ShotController:
                         # namespaced LIPSYNC_<engine> so the cost key can't collide with a
                         # same-named video engine (e.g. lipsync "kling" vs KLING_NATIVE)
                         # and resolves against the LIPSYNC_* rows in API_COST_USD.
-                        try:
-                            _ls_engine = (_ls_cascade.get("cascade_metadata", {})
-                                          .get("engine") or "default")
-                            self.cost_tracker.record_api_call(
-                                _lipsync_cost_api_key(_ls_engine), operation="lipsync",
-                                shot_id=shot_id, video_id=self.project.get("id", ""),
-                            )
-                        except Exception:
-                            logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
+                        if not _ls_cascade.get("paid_cost_recorded"):
+                            try:
+                                _ls_engine = (_ls_cascade.get("cascade_metadata", {})
+                                              .get("engine") or "default")
+                                self.cost_tracker.record_api_call(
+                                    _lipsync_cost_api_key(_ls_engine), operation="lipsync",
+                                    shot_id=shot_id, video_id=self.project.get("id", ""),
+                                )
+                            except Exception:
+                                logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
                     else:
                         # No scorer result exists: this is UNKNOWN, not a
                         # measured numeric failure.
@@ -3345,6 +4001,8 @@ class ShotController:
             take_context,
             scene_context,
             project=project,
+            cost_tracker=self.cost_tracker,
+            video_id=project_id or str(project.get("id") or ""),
         )
 
         revised_prompt = translated.get("revised_prompt") or take_context["prompt"]
@@ -3498,7 +4156,12 @@ class ShotController:
             if primary_ref:
                 from phase_c_vision import _get_shared_validator
                 id_result = _get_shared_validator().validate_image(
-                    str(image_path), primary_ref, character_id=chars[0]
+                    str(image_path),
+                    primary_ref,
+                    character_id=chars[0],
+                    cost_tracker=self.cost_tracker,
+                    video_id=str(self.project.get("id", "")),
+                    shot_id=shot_id,
                 )
                 result["scores"]["identity"] = id_result.overall_score  # None on skip = not scored
                 if not id_result.passed:
@@ -3597,7 +4260,11 @@ class ShotController:
                             _p = get_reference_image(self.project, _cid)
                             if _p:
                                 _refs.append((_char_map.get(_cid, _cid), _p))
-                        _deep = ChiefDirector(self.project).evaluate_generation_quality(
+                        _deep = ChiefDirector(
+                            self.project,
+                            cost_tracker=self.cost_tracker,
+                            video_id=str(project.get("id") or ""),
+                        ).evaluate_generation_quality(
                             image_path=str(image_path),
                             reference_path="",
                             reference_paths=_refs or None,
@@ -3639,6 +4306,11 @@ class ShotController:
         scene, shot, shot_index = self._find_shot(shot_id, project)
         if not scene or not shot:
             return {"success": False, "error": "Clip not found in review"}
+        pending_artifact = self._recover_pending_take_artifact(
+            shot_id, "postprocess", shot,
+        )
+        if pending_artifact is not None:
+            return pending_artifact
 
         base_take = None
         if take_id:
@@ -3695,18 +4367,45 @@ class ShotController:
                 chars = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 if video_path and primary_ref:
-                    result = face_swap_video_frames(str(video_path), primary_ref, out_path)
-                    if result:
-                        variant["path"] = result
-                    else:
-                        # face_swap_video_frames is a best-effort cascade
-                        # (fal.ai → FaceFusion CLI → skip); None means every
-                        # path failed or was unavailable.  Surface a specific
-                        # reason so the operator knows the swap was not applied,
-                        # rather than receiving the generic action-failed message.
+                    _faceswap_cascade: dict = {}
+                    try:
+                        result = face_swap_video_frames(
+                            str(video_path),
+                            primary_ref,
+                            out_path,
+                            cost_tracker=self.cost_tracker,
+                            shot_id=shot_id,
+                            video_id=str(project.get("id") or ""),
+                            _cascade_out=_faceswap_cascade,
+                        )
+                    except Exception as exc:
+                        from paid_provider import PaidCallDeferred
+
+                        if not isinstance(exc, PaidCallDeferred):
+                            raise
+                        attempt = dict(exc.snapshot.attempt)
                         return {
                             "success": False,
-                            "error": "face_swap could not be applied (no swapper succeeded)",
+                            "error": str(exc),
+                            "code": "paid_face_swap_recovery_required",
+                            "retryable": bool(attempt.get("provider_job_id")),
+                            "provider_recovery_required": True,
+                            "paid_attempt": attempt,
+                        }
+                    if result:
+                        variant["path"] = result
+                        variant["cascade_metadata"] = dict(_faceswap_cascade)
+                        variant["metadata"]["identity_reference_path"] = (
+                            self._to_project_relative(primary_ref)
+                        )
+                        if chars:
+                            variant["metadata"]["identity_character_id"] = str(chars[0])
+                    else:
+                        # None means the paid provider was provably unsubmitted
+                        # or unbilled and the eligible local path also failed.
+                        return {
+                            "success": False,
+                            "error": "face_swap could not be applied (no safe swapper succeeded)",
                         }
 
             elif action == "lip_sync":
@@ -3726,6 +4425,26 @@ class ShotController:
                 if video_path and primary_ref and audio_path:
                     _settings = self.project.get("global_settings", {})
                     _lipsync_cascade: dict = {}
+                    _rejected_lipsync_count = 0
+
+                    def _retain_correction_lipsync_reject(evidence: dict) -> dict:
+                        nonlocal _rejected_lipsync_count
+                        _rejected_lipsync_count += 1
+                        return _record_rejected_lipsync_candidate(
+                            project=project,
+                            project_root=self.project_dir,
+                            shot_id=shot_id,
+                            candidate_id=(
+                                f"{variant['id']}-ls-reject-{_rejected_lipsync_count}"
+                            ),
+                            source_take_id=str(base_take.get("id") or ""),
+                            evidence=evidence,
+                            audio_path=str(audio_path),
+                            character_reference_path=str(primary_ref),
+                            input_video_path=str(video_path),
+                            mode=str(_settings.get("lip_sync_mode", "auto")),
+                        )
+
                     result = generate_lip_sync_video(
                         character_image_path=primary_ref,
                         audio_path=audio_path,
@@ -3734,7 +4453,27 @@ class ShotController:
                         mode=_settings.get("lip_sync_mode", "auto"),
                         settings=_settings,
                         _cascade_out=_lipsync_cascade,
+                        cost_tracker=self.cost_tracker,
+                        shot_id=shot_id,
+                        video_id=self.project.get("id", ""),
+                        _retain_rejected_candidate=_retain_correction_lipsync_reject,
                     )
+                    if _lipsync_cascade.get(
+                        "rejected_candidate_retention_failed"
+                    ):
+                        return {
+                            "success": False,
+                            "error": (
+                                "A paid lip-sync candidate failed local validation, "
+                                "but its immutable artifact record could not be written. "
+                                "Fallback stopped and recovery bytes were left in place."
+                            ),
+                            "code": "lipsync_artifact_retention_failed",
+                            "provider_recovery_required": True,
+                            "rejected_candidate": _lipsync_cascade.get(
+                                "recovery_candidate", {}
+                            ),
+                        }
                     if result:
                         variant["path"] = result
                         from lip_sync import (
@@ -3790,25 +4529,38 @@ class ShotController:
                         # untracked). Attribute to the winning cascade engine,
                         # namespaced LIPSYNC_<engine> like the motion path so it
                         # resolves against API_COST_USD.
-                        try:
-                            _ls_engine = (_lipsync_cascade.get("cascade_metadata", {})
-                                          .get("engine") or "default")
-                            self.cost_tracker.record_api_call(
-                                _lipsync_cost_api_key(_ls_engine), operation="lipsync",
-                                shot_id=shot_id, video_id=self.project.get("id", ""),
-                            )
-                        except Exception:
-                            logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
+                        if not _lipsync_cascade.get("paid_cost_recorded"):
+                            try:
+                                _ls_engine = (_lipsync_cascade.get("cascade_metadata", {})
+                                              .get("engine") or "default")
+                                self.cost_tracker.record_api_call(
+                                    _lipsync_cost_api_key(_ls_engine), operation="lipsync",
+                                    shot_id=shot_id, video_id=self.project.get("id", ""),
+                                )
+                            except Exception:
+                                logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
 
             elif action == "rife":
                 if video_path:
-                    result = generate_rife_interpolation(str(video_path), out_path)
+                    result = generate_rife_interpolation(
+                        str(video_path),
+                        out_path,
+                        cost_tracker=self.cost_tracker,
+                        shot_id=shot_id,
+                        video_id=self.project.get("id", ""),
+                    )
                     if result:
                         variant["path"] = result
 
             elif action == "upscale":
                 if video_path:
-                    result = upscale_video_seedvr2(str(video_path), out_path)
+                    result = upscale_video_seedvr2(
+                        str(video_path),
+                        out_path,
+                        cost_tracker=self.cost_tracker,
+                        shot_id=shot_id,
+                        video_id=str(self.project.get("id", "")),
+                    )
                     if result:
                         variant["path"] = result
 
@@ -3849,12 +4601,18 @@ class ShotController:
             # exists check + audio-stream probe above, which need the real,
             # directly-openable absolute path _take_output_path produced.
             variant["path"] = self._to_project_relative(variant["path"])
+            self._mark_artifact_version_pending(variant)
 
             def _mutator(_scene: dict, project_shot: dict):
                 project_shot.setdefault("postprocess_variants", []).append(variant)
                 return MutationResult(variant, save=True)
 
             stored_variant = self._mutate_shot(shot_id, _mutator)
+            stored_variant, artifact_error = self._finalize_take_artifact_version(
+                shot_id, "postprocess", stored_variant,
+            )
+            if artifact_error is not None:
+                return artifact_error
             self._host._rebuild_review_clips()
             self._host._save_checkpoint()
             self.progress(
@@ -3908,11 +4666,39 @@ class ShotController:
         if valid_clips:
             try:
                 stitch_modules(valid_clips, preview_path)
-                return preview_path
             except Exception:
                 logger.exception(
                     "Preview stitch failed; returning first clip",
                     extra={"scene_id": scene_id},
                 )
                 return valid_clips[0] if valid_clips else None
+            if not os.path.exists(preview_path):
+                return valid_clips[0] if valid_clips else None
+            try:
+                from cinema.artifact_indexing import record_auxiliary_version
+
+                record_auxiliary_version(
+                    str(project.get("id") or ""),
+                    "scene_preview",
+                    scene_id,
+                    preview_path,
+                    provider="local",
+                    model="ffmpeg-scene-stitch",
+                    parameters={"clip_count": len(valid_clips)},
+                    source_paths={
+                        f"clip_{index:03d}": clip
+                        for index, clip in enumerate(valid_clips)
+                    },
+                    project_snapshot=project,
+                    project_root=self.project_dir,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "Scene preview awaits immutable artifact indexing",
+                    extra={"scene_id": scene_id},
+                )
+                raise RuntimeError(
+                    "Scene preview was rendered but artifact versioning failed"
+                ) from exc
+            return preview_path
         return None

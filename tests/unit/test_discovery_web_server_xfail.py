@@ -270,6 +270,7 @@ def test_removed_ip_adapter_weight_is_ignored_not_persisted_on_all_mutators(
             client.post,
             f"/api/projects/{pid}/characters",
             {"data": {"name": "Stale Char", "description": "desc",
+                      "creation_request_id": "b" * 32,
                       "ip_adapter_weight": "0.85"}},
         ),
         (
@@ -350,18 +351,19 @@ def test_cleanup_null_json_body_returns_non_500(client, tmp_path, monkeypatch):
     )
 
 
-def test_cleanup_all_null_json_body_returns_non_500(client):
-    """POST /cleanup-all with body null must not crash with 500."""
-    resp = client.post(
-        "/api/cleanup-all",
-        data=b"null",
-        content_type="application/json",
+def test_cleanup_all_endpoint_is_retired(client):
+    """The misleading global temp cleanup must not masquerade as a reset."""
+    import web_server
+
+    assert all(
+        rule.rule != "/api/cleanup-all"
+        for rule in web_server.app.url_map.iter_rules()
     )
-    # CURRENT behaviour (bug): 500 AttributeError
-    # FIXED behaviour: any 2xx or 4xx (not 500)
-    assert resp.status_code != 500, (
-        f"Expected non-500 for null JSON body on /cleanup-all, got {resp.status_code}: {resp.data!r}"
-    )
+    # Avoid malformed-body preflight: this assertion is about route absence,
+    # not the global object-only JSON contract. The SPA's GET-only catch-all
+    # makes an otherwise unknown POST a 405 instead of a 404.
+    resp = client.post("/api/cleanup-all")
+    assert resp.status_code == 405
 
 
 # ---------------------------------------------------------------------------

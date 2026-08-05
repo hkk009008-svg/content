@@ -10,7 +10,7 @@ import pytest
 
 import prep.lora_quality
 import prep.lora_training
-from web_server import app, _lora_training_lock, _lora_training_threads
+from web_server import app
 
 
 PID = "proj-dormant"
@@ -30,13 +30,9 @@ def _bomb(*_args, **_kwargs):
 
 
 @pytest.fixture(autouse=True)
-def clean_lora_thread_registry():
+def configure_app():
     app.config["TESTING"] = True
-    with _lora_training_lock:
-        _lora_training_threads.clear()
     yield
-    with _lora_training_lock:
-        _lora_training_threads.clear()
 
 
 @pytest.mark.parametrize(
@@ -70,7 +66,6 @@ def test_train_lora_returns_exact_409_before_any_operation(body, suffix):
 
     assert response.status_code == 409
     assert response.get_json() == EXPECTED_TRAINING_DENIAL
-    assert _lora_training_threads == {}
 
 
 def test_repeated_and_concurrent_attempts_never_insert_a_thread():
@@ -84,13 +79,13 @@ def test_repeated_and_concurrent_attempts_never_insert_a_thread():
 
     with (
         patch("web_server.load_project", side_effect=_bomb),
+        patch("web_server.get_project_dir", side_effect=_bomb),
         patch("web_server.mutate_project", side_effect=_bomb),
     ):
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _index: attempt(), range(24)))
 
     assert results == [(409, EXPECTED_TRAINING_DENIAL)] * 24
-    assert _lora_training_threads == {}
 
 
 def test_lora_status_preserves_history_and_projects_dormant_availability():

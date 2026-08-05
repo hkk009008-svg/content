@@ -5,10 +5,17 @@ aspect ratio) and produces consistent cinematography, color grading, and sound d
 that feed into every scene's shot decomposition.
 """
 
-import os
 import json
+import time
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import (
+    PaidCallDeferred,
+    fence_openai_tools_client,
+)
+
+
 def generate_style_rules(
     project_name: str,
     mood: str = "cinematic",
@@ -46,16 +53,24 @@ def generate_style_rules(
         try:
             from research_engine import research_cinematography
             # Search for mood-specific techniques — grounds the LLM in real cinema
-            ref = research_cinematography(mood, "general cinematic setting", f"{mood} film")
+            ref = research_cinematography(
+                mood,
+                "general cinematic setting",
+                f"{mood} film",
+                cost_tracker=cost_tracker,
+            )
             if ref:
                 research_context = ref
-                print(f"   [STYLE] Research-enhanced with cinematography reference")
+                print("   [STYLE] Research-enhanced with cinematography reference")
         except Exception as e:
             print(f"   [STYLE] web research unavailable; proceeding without it: {e}")
 
     # Additional reference film research if specified
     if use_web_research and reference_films:
-        film_ref = _research_aesthetic(reference_films)
+        film_ref = _research_aesthetic(
+            reference_films,
+            cost_tracker=cost_tracker,
+        )
         if film_ref:
             research_context = f"{research_context}\n{film_ref}" if research_context else film_ref
 
@@ -103,13 +118,19 @@ Use them to research:
 - Real-world photographic techniques for maximum realism
 Use tools proactively to make the style guide as professional as possible."""
 
+        tools_client, tools_tracker = fence_openai_tools_client(
+            client,
+            cost_tracker=cost_tracker,
+            operation_prefix="style_director",
+        )
+
         raw = run_with_tools(
-            client, "gpt-4o",
+            tools_client, "gpt-4o",
             system_prompt=system_with_tools,
             user_prompt="Generate the comprehensive style guide. Use web search to research professional cinematography techniques. Output ONLY raw JSON.",
             max_tool_rounds=3,
             response_format={"type": "json_object"},
-            cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
+            cost_tracker=tools_tracker,
         )
         rules = json.loads(raw)
         defaults = _default_style_rules(mood, color_palette, music_mood)
@@ -121,6 +142,8 @@ Use tools proactively to make the style guide as professional as possible."""
         print(f"   ✅ Style rules generated for '{project_name}'")
         return rules
 
+    except PaidCallDeferred:
+        raise
     except Exception as e:
         print(f"   ⚠️ Style generation failed: {e}")
         return _default_style_rules(mood, color_palette, music_mood)
@@ -147,11 +170,29 @@ def _default_style_rules(mood: str, color_palette: str, music_mood: str) -> dict
     }
 
 
-def _research_aesthetic(reference_films: str) -> str:
+def _research_aesthetic(reference_films: str, cost_tracker=None) -> str:
     """Use Tavily to research aesthetic references (reused from phase_0_director logic)."""
     tavily_key = settings.tavily_api_key
     if not tavily_key:
         return ""
+
+    started = time.perf_counter()
+
+    def record(status: str) -> None:
+        latency_ms = max(0, round((time.perf_counter() - started) * 1000))
+        try:
+            with cost_tracker_scope(cost_tracker) as tracker:
+                recorder = getattr(tracker, "record_provider_observation", None)
+                if callable(recorder):
+                    recorder(
+                        provider="tavily",
+                        engine="TAVILY_SEARCH",
+                        operation="research_aesthetic",
+                        status=status,
+                        latency_ms=latency_ms,
+                    )
+        except Exception:
+            pass
 
     try:
         import requests
@@ -168,8 +209,11 @@ def _research_aesthetic(reference_films: str) -> str:
             context_parts = []
             for r in results[:3]:
                 context_parts.append(f"- {r.get('title', '')}: {r.get('content', '')[:200]}")
-            return f"\n[RESEARCH CONTEXT]:\n" + "\n".join(context_parts)
+            record("succeeded")
+            return "\n[RESEARCH CONTEXT]:\n" + "\n".join(context_parts)
+        record("failed")
     except Exception as e:
+        record("failed")
         print(f"   ⚠️ Tavily research failed: {e}")
 
     return ""

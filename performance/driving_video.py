@@ -15,10 +15,13 @@ from __future__ import annotations
 import math
 import os
 from typing import Optional, Tuple
+from urllib.parse import urlencode
 
+from comfyui_client import RunPodComfyUI
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import has_paid_attempt_authority
 from performance._net import safe_download, validate_video_artifact
-from performance._poll import poll_task
 
 
 # Polling configuration — pulled to constants so timing is auditable and tunable
@@ -49,13 +52,13 @@ def estimate_driving_face_cost(provider: str, duration_s: float) -> float:
 
 def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str, cost_tracker=None) -> None:
     try:
-        from cost_tracker import CostTracker
-        (cost_tracker or CostTracker()).log_api(
-            provider=provider, model="driving_face",
-            operation="performance_capture_driving",
-            cost_usd=estimate_driving_face_cost(provider, duration_s),
-            shot_id=shot_id, video_id=video_id,
-        )
+        with cost_tracker_scope(cost_tracker) as tracker:
+            tracker.log_api(
+                provider=provider, model="driving_face",
+                operation="performance_capture_driving",
+                cost_usd=estimate_driving_face_cost(provider, duration_s),
+                shot_id=shot_id, video_id=video_id,
+            )
     except Exception:
         pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
@@ -74,16 +77,12 @@ def _synth_via_sadtalker(
         return None
 
     try:
-        import requests
-
-        def _upload(path):
-            with open(path, "rb") as f:
-                rr = requests.post(f"{server_url}/upload/image", files={"image": f}, timeout=60)
-            rr.raise_for_status()
-            return rr.json().get("name") or os.path.basename(path)
-
-        remote_kf = _upload(keyframe_path)
-        remote_audio = _upload(audio_path)
+        comfy = RunPodComfyUI(
+            server_url,
+            auth_token=getattr(settings, "comfyui_api_key", "") or "",
+        )
+        remote_kf = comfy.upload_image(keyframe_path)
+        remote_audio = comfy.upload_image(audio_path)
 
         workflow = {
             "10": {"class_type": "LoadImage", "inputs": {"image": remote_kf}},
@@ -110,55 +109,97 @@ def _synth_via_sadtalker(
             },
         }
 
-        qr = requests.post(f"{server_url}/prompt", json={"prompt": workflow}, timeout=30)
-        if not qr.ok:
-            return None
-        prompt_id = qr.json().get("prompt_id")
+        durable_cost_recorded = False
+        if not has_paid_attempt_authority(cost_tracker):
+            prompt_id = comfy.queue_prompt(workflow)
+            history = comfy.wait_for_completion(
+                prompt_id,
+                timeout=float(_SADTALKER_POLL_TIMEOUT_S),
+                poll_interval=float(_SADTALKER_POLL_INTERVAL_S),
+            )
+        else:
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_comfy_job,
+            )
 
-        def _get_sadtalker_status():
-            hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
-            if not hr.ok or prompt_id not in hr.json():
-                return {"status": "PROCESSING"}
-            hist = hr.json()[prompt_id]
-            inner = hist.get("status", {})
-            if inner.get("status_str") == "error":
-                return {"status": "FAILED"}
-            if hist.get("outputs"):
-                return {"status": "SUCCEEDED", "outputs": hist["outputs"]}
-            return {"status": "PROCESSING"}
-
-        final = poll_task(
-            _get_sadtalker_status,
-            success_states={"SUCCEEDED"},
-            terminal_states={"FAILED"},
-            interval_s=_SADTALKER_POLL_INTERVAL_S,
-            timeout_s=_SADTALKER_POLL_TIMEOUT_S,
-        )
-        if not final:
-            return None
-
-        outputs = final["outputs"]
+            stable_request = request_fingerprint(
+                "comfy-sadtalker-mode-b",
+                file_fingerprint(audio_path),
+                file_fingerprint(keyframe_path),
+                float(duration_s),
+                os.path.abspath(output_mp4),
+            )
+            try:
+                history = run_durable_comfy_job(
+                    client=comfy,
+                    workflow=workflow,
+                    attempt_id=paid_attempt_id(
+                        "comfy-mode-b", video_id, shot_id, stable_request
+                    ),
+                    engine="PERFORMANCE_DRIVING_SADTALKER",
+                    operation="performance_capture_driving",
+                    estimated_cost_usd=estimate_driving_face_cost(
+                        "sadtalker", duration_s
+                    ),
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
+                    poll_timeout_s=float(_SADTALKER_POLL_TIMEOUT_S),
+                    poll_interval_s=float(_SADTALKER_POLL_INTERVAL_S),
+                )
+                durable_cost_recorded = True
+                attempt = cost_tracker.get_latest_paid_attempt(
+                    video_id=video_id,
+                    shot_id=shot_id,
+                    engine="PERFORMANCE_DRIVING_SADTALKER",
+                    operation="performance_capture_driving",
+                )
+                prompt_id = str((attempt or {}).get("provider_job_id") or "")
+            except PaidCallBudgetBlocked:
+                print("   [DRIVING/SADTALKER] atomic budget reservation refused")
+                return None
+            except PaidCallDeferred:
+                print("   [DRIVING/SADTALKER] prompt requires recovery; no replay started")
+                return None
+            except PaidCallUnbilled:
+                print("   [DRIVING/SADTALKER] prompt is terminal and unbilled")
+                return None
+        record = history.get(prompt_id, {})
+        outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
         for _, nout in outputs.items():
             items = nout.get("gifs") or nout.get("videos") or []
             if items:
                 item = items[0]
-                view = (
-                    f"{server_url}/view"
-                    f"?filename={item.get('filename')}"
-                    f"&subfolder={item.get('subfolder', '')}"
-                    f"&type={item.get('type', 'output')}"
+                query = urlencode({
+                    "filename": item.get("filename"),
+                    "subfolder": item.get("subfolder", ""),
+                    "type": item.get("type", "output"),
+                })
+                view = f"{server_url}/view?{query}"
+                token = (getattr(settings, "comfyui_api_key", "") or "").strip()
+                request_headers = (
+                    {"Authorization": f"Bearer {token}"} if token else None
                 )
-                # ComfyUI pod is internal-trusted; allow http (RunPod often
-                # exposes the proxy URL without TLS).
+                # HTTP is restricted to the operator-configured private,
+                # authenticated gateway.
                 if not safe_download(
                     view,
                     output_mp4,
                     allow_http=True,
+                    request_headers=request_headers,
                     allowed_content_types=("video/mp4",),
                     content_validator=validate_video_artifact,
                 ):
                     return None
-                _cost_log("sadtalker", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
+                if not durable_cost_recorded:
+                    _cost_log("sadtalker", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                 print(f"   ✅ SadTalker driving face: {output_mp4}")
                 return output_mp4
         return None

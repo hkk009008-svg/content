@@ -43,6 +43,7 @@ import shutil
 import subprocess
 import sys
 import dataclasses
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -182,19 +183,32 @@ class TestFaceSwapAudioRemux:
         _make_clip(source, with_audio=True)
         assert _has_audio(source)
         out = tmp_path / "swapped.mp4"
+        reference = tmp_path / "ref.jpg"
+        reference.write_bytes(b"reference")
 
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
-        mock_fal.subscribe.return_value = {"video": {"url": "http://fal/swap.mp4"}}
+        mock_fal.submit.return_value = SimpleNamespace(request_id="pixverse-audio")
+        mock_fal.status.return_value = {"status": "COMPLETED"}
+        mock_fal.result.return_value = {"video": {"url": "http://fal/swap.mp4"}}
 
         def _fake_download(url, dest, **_kwargs):
             _make_clip(dest, with_audio=False)  # cloud swap output is video-only
             return dest
 
-        with patch.object(pcv, "settings", _fal_settings()), \
-             patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(pcv, "safe_download", _fake_download):
-            result = pcv.face_swap_video_frames(str(source), str(tmp_path / "ref.jpg"), str(out))
+        from cost_tracker import CostTracker
+
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.0)
+        try:
+            with patch.object(pcv, "settings", _fal_settings()), \
+                 patch.dict(sys.modules, {"fal_client": mock_fal}), \
+                 patch.object(pcv, "safe_download", _fake_download):
+                result = pcv.face_swap_video_frames(
+                    str(source), str(reference), str(out),
+                    cost_tracker=tracker, shot_id="shot-1", video_id="project-1",
+                )
+        finally:
+            tracker.close()
 
         assert result == str(out)
         assert _has_audio(out), "face_swap output silently dropped the source audio track"
@@ -206,19 +220,32 @@ class TestFaceSwapAudioRemux:
         source = tmp_path / "silent_source.mp4"
         _make_clip(source, with_audio=False)
         out = tmp_path / "swapped.mp4"
+        reference = tmp_path / "ref.jpg"
+        reference.write_bytes(b"reference")
 
         mock_fal = MagicMock()
         mock_fal.upload_file.return_value = "http://fal/upload"
-        mock_fal.subscribe.return_value = {"video": {"url": "http://fal/swap.mp4"}}
+        mock_fal.submit.return_value = SimpleNamespace(request_id="pixverse-silent")
+        mock_fal.status.return_value = {"status": "COMPLETED"}
+        mock_fal.result.return_value = {"video": {"url": "http://fal/swap.mp4"}}
 
         def _fake_download(url, dest, **_kwargs):
             _make_clip(dest, with_audio=False)
             return dest
 
-        with patch.object(pcv, "settings", _fal_settings()), \
-             patch.dict(sys.modules, {"fal_client": mock_fal}), \
-             patch.object(pcv, "safe_download", _fake_download):
-            result = pcv.face_swap_video_frames(str(source), str(tmp_path / "ref.jpg"), str(out))
+        from cost_tracker import CostTracker
+
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.0)
+        try:
+            with patch.object(pcv, "settings", _fal_settings()), \
+                 patch.dict(sys.modules, {"fal_client": mock_fal}), \
+                 patch.object(pcv, "safe_download", _fake_download):
+                result = pcv.face_swap_video_frames(
+                    str(source), str(reference), str(out),
+                    cost_tracker=tracker, shot_id="shot-1", video_id="project-1",
+                )
+        finally:
+            tracker.close()
 
         assert result == str(out)
         assert not _has_audio(out)
@@ -273,10 +300,11 @@ def _make_correction_ctrl(tmp_path, base_meta: dict):
         side_effect=lambda sid, tid, ext: str(tmp_path / f"{tid}{ext}")
     )
 
+    fake_shot: dict = {"postprocess_variants": []}
+
     def _capture_mutate(shot_id, mutator):
-        fake_shot: dict = {}
-        mutator({}, fake_shot)
-        return fake_shot["postprocess_variants"][-1]
+        result = mutator({}, fake_shot)
+        return result.value
 
     ctrl._mutate_shot = MagicMock(side_effect=_capture_mutate)
     return ctrl

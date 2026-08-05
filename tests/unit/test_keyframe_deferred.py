@@ -64,20 +64,25 @@ def _controller():
     return controller, project, shot
 
 
-def test_unknown_comfyui_state_persists_and_blocks_duplicate_submission():
+def test_unknown_comfyui_state_reenters_exact_take_for_provider_id_recovery():
     controller, _project, shot = _controller()
     provider_calls = []
+    controller._take_output_path = MagicMock(
+        side_effect=lambda _shot_id, take_id, suffix: f"/missing/{take_id}{suffix}"
+    )
 
     def _unknown_provider(*args, **kwargs):
-        provider_calls.append(kwargs)
-        kwargs["_recovery_out"].update({
+        provider_calls.append((args, kwargs))
+        recovery = {
             "engine": "COMFYUI_PULID",
             "status": "recovery_required",
             "provider_status": "job_state_unknown",
             "reason": "Reconcile ComfyUI before retrying.",
             "job_id": "prompt-123",
-            "_billed_rejects": ("GEMINI_IMAGE",),
-        })
+        }
+        if len(provider_calls) == 1:
+            recovery["_billed_rejects"] = ("GEMINI_IMAGE",)
+        kwargs["_recovery_out"].update(recovery)
         return None
 
     with patch("cinema.shots.controller.generate_ai_broll", _unknown_provider):
@@ -89,7 +94,12 @@ def test_unknown_comfyui_state_persists_and_blocks_duplicate_submission():
     assert first["deferred_job"]["job_id"] == "prompt-123"
     assert "attempt_id" not in first["deferred_job"]
     assert second["error_kind"] == "deferred"
-    assert len(provider_calls) == 1
+    # The controller re-enters the adapter so ComfyUI/FAL can poll the saved
+    # provider ID, but it reuses the exact logical output/take identity. The
+    # durable paid wrapper therefore resumes instead of submitting again.
+    assert len(provider_calls) == 2
+    assert provider_calls[0][0][1] == provider_calls[1][0][1]
+    assert shot["deferred_keyframe_job"]["attempt_id"] in provider_calls[0][0][1]
     assert shot["deferred_keyframe_job"]["provider_status"] == "job_state_unknown"
     assert "_billed_rejects" not in shot["deferred_keyframe_job"]
     controller.cost_tracker.record_api_call.assert_called_once_with(

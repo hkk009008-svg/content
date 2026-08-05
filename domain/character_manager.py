@@ -9,10 +9,11 @@ Key changes from v1:
 - Higher identity validation thresholds (0.70+)
 - Multi-reference support for downstream Kling subject binding
 """
-from typing import Optional, List
+from typing import Any, Mapping, Optional, List
 
 import os
 import json
+import re
 import shutil
 import numpy as np
 try:
@@ -34,9 +35,71 @@ IDENTITY_THRESHOLD_LENIENT = 0.55
 
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
+from cost_tracker import API_COST_USD
+from paid_provider import (
+    file_fingerprint,
+    has_paid_attempt_authority,
+    paid_attempt_id,
+    request_fingerprint,
+    run_durable_fal_job,
+)
 from performance._net import safe_download, validate_image_artifact
 from domain.project_manager import (
-    make_character, add_character, save_project, get_project_dir, get_character
+    MutationResult,
+    add_character,
+    get_character,
+    get_project_dir,
+    make_character,
+    mutate_project,
+)
+
+
+_CREATION_REQUEST_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_FLUX_KONTEXT_APPLICATION = "fal-ai/flux-pro/kontext/max/multi"
+_FLUX_KONTEXT_ENGINE = "FLUX_KONTEXT"
+_FLUX_KONTEXT_OPERATION = "multi_angle_ref"
+_FLUX_KONTEXT_COST_USD = API_COST_USD[_FLUX_KONTEXT_ENGINE]
+_ANGLE_CONFIGS = (
+    {
+        "name": "angle_45",
+        "prompt": (
+            "Keep this exact person's face identical. Same person, same clothing, same lighting. "
+            "Three-quarter view, face turned 45 degrees to the right. "
+            "Photorealistic portrait, 8K, cinematic studio lighting."
+        ),
+    },
+    {
+        "name": "angle_profile",
+        "prompt": (
+            "Keep this exact person's face identical. Same person, same clothing, same lighting. "
+            "Side profile view, face turned 90 degrees showing left side. "
+            "Photorealistic portrait, 8K, cinematic studio lighting."
+        ),
+    },
+    {
+        "name": "angle_back",
+        "prompt": (
+            "Keep this exact person identical. Same clothing, same hairstyle visible from behind. "
+            "Back of head and shoulders view. "
+            "Photorealistic, 8K, cinematic studio lighting."
+        ),
+    },
+    {
+        "name": "expression_smile",
+        "prompt": (
+            "Keep this exact person's face identical. Same person, same clothing, same lighting. "
+            "Warm genuine smile, eyes slightly crinkled, direct eye contact with camera. "
+            "Photorealistic portrait, 8K, cinematic studio lighting."
+        ),
+    },
+    {
+        "name": "lighting_outdoor",
+        "prompt": (
+            "Keep this exact person's face identical. Same person, same clothing. "
+            "Natural outdoor golden hour lighting, warm side light from the left, soft shadows. "
+            "Photorealistic portrait, 8K, cinematic natural lighting."
+        ),
+    },
 )
 
 # Expanded voice pool — full range: women, men, children, elderly, diverse accents
@@ -183,23 +246,253 @@ def _resolve_stored_media_path(project: dict, stored_path: str) -> str:
     return ShotController._resolve_stored_media_path(ctx, stored_path)
 
 
-def _budget_usd_from_project(project: dict) -> Optional[object]:
-    budget_usd = (project.get("global_settings") or {}).get("budget_limit_usd")
-    if budget_usd is None:
-        return None
-    try:
-        return float(budget_usd)
-    except (TypeError, ValueError, OverflowError):
-        # Preserve corrupted caps for CostTracker's fail-closed coercion.
-        return budget_usd
+def _normalise_creation_request_id(value: object) -> str:
+    """Validate the UI's stable idempotency token.
+
+    Empty remains a compatibility mode for non-HTTP callers.  The production
+    POST route requires the token, so paid character creation always has a
+    stable identity across a lost response or process restart.
+    """
+
+    if value is None or value == "":
+        return ""
+    if not isinstance(value, str) or not _CREATION_REQUEST_ID_RE.fullmatch(value):
+        raise ValueError("creation_request_id must be 32 lowercase hexadecimal characters")
+    return value
 
 
-def _cost_tracker_from_project(project: dict):
-    try:
-        from cost_tracker import CostTracker
-        return CostTracker(budget_usd=_budget_usd_from_project(project))
-    except Exception:
-        return None
+def _character_creation_fingerprint(
+    *,
+    name: str,
+    description: str,
+    voice_id: str,
+    gender: str,
+    reference_image_paths: Optional[List[str]],
+) -> str:
+    references = []
+    for source in reference_image_paths or []:
+        if os.path.exists(source):
+            references.append(file_fingerprint(source))
+    return request_fingerprint(
+        "character-creation-v1",
+        {
+            "name": name,
+            "description": description,
+            "voice_id": voice_id,
+            "gender": gender,
+            "reference_files": references,
+        },
+    )
+
+
+def _character_id_for_request(creation_request_id: str) -> str:
+    return f"char_{creation_request_id}"
+
+
+def _assert_matching_creation(
+    character: Mapping[str, Any],
+    creation_request_id: str,
+    creation_fingerprint: str,
+) -> None:
+    if (
+        str(character.get("creation_request_id") or "") != creation_request_id
+        or str(character.get("creation_request_fingerprint") or "")
+        != creation_fingerprint
+    ):
+        raise ValueError(
+            "creation_request_id was already used for different character inputs"
+        )
+
+
+def _persist_character_once(
+    project: dict,
+    character: dict,
+    *,
+    commit_timeout: float,
+    creation_request_id: str,
+    creation_fingerprint: str,
+) -> tuple[dict, bool]:
+    """Atomically append one deterministic character or return its prior row."""
+
+    pid = project["id"]
+    cid = character["id"]
+    created = False
+
+    def _mutate(latest: dict):
+        nonlocal created
+        existing = get_character(latest, cid)
+        if existing is not None:
+            _assert_matching_creation(
+                existing,
+                creation_request_id,
+                creation_fingerprint,
+            )
+            return MutationResult(existing, save=False)
+        created = True
+        latest["characters"].append(character)
+        return character
+
+    result = mutate_project(
+        pid,
+        _mutate,
+        timeout=commit_timeout,
+        snapshot=project,
+    )
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result, created
+
+
+def _finalize_character_reference_artifacts(
+    project: dict,
+    character: Mapping[str, Any],
+    *,
+    commit_timeout: float,
+) -> dict:
+    """Index pending generated references, then atomically publish their IDs.
+
+    The pending recipe is saved with the character before this function runs.
+    A crash during ledger writes therefore leaves enough exact evidence for a
+    later POST with the same creation request to finish the records without
+    entering a provider submission path.
+    """
+
+    raw_evidence = character.get("multi_angle_artifact_evidence") or []
+    embedding_evidence = character.get("embedding_artifact_evidence")
+    if not isinstance(raw_evidence, list):
+        raise RuntimeError("character artifact evidence is malformed")
+    if embedding_evidence is not None and not isinstance(
+        embedding_evidence, Mapping
+    ):
+        raise RuntimeError("character embedding artifact evidence is malformed")
+    if not raw_evidence and embedding_evidence is None:
+        return dict(character)
+    if character.get("artifact_versioning_pending") is not True:
+        raise RuntimeError("character artifact evidence is not marked pending")
+
+    from cinema.artifact_indexing import record_auxiliary_version
+
+    pid = project["id"]
+    cid = str(character["id"])
+    project_root = get_project_dir(pid)
+    summaries: list[dict[str, Any]] = []
+    for item in raw_evidence:
+        if not isinstance(item, Mapping):
+            raise RuntimeError("character artifact evidence is malformed")
+        angle_name = str(item.get("angle_name") or "")
+        output_path = item.get("path")
+        source_path = item.get("source_path")
+        parameters = item.get("parameters")
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", angle_name)
+            or not isinstance(output_path, str)
+            or not output_path
+            or not isinstance(source_path, str)
+            or not source_path
+            or not isinstance(parameters, Mapping)
+        ):
+            raise RuntimeError("character artifact evidence is malformed")
+        record = record_auxiliary_version(
+            pid,
+            "character_reference",
+            f"{cid}-{angle_name}",
+            output_path,
+            provider="fal",
+            model=_FLUX_KONTEXT_APPLICATION,
+            parameters=dict(parameters),
+            source_paths={"canonical_reference": source_path},
+            project_snapshot=project,
+            project_root=project_root,
+        )
+        summaries.append(
+            {
+                "angle_name": angle_name,
+                "path": output_path,
+                "artifact_version_id": record["artifact_id"],
+                "artifact_version": record["version"],
+                "sha256": record["sha256"],
+            }
+        )
+
+    embedding_summary = None
+    if isinstance(embedding_evidence, Mapping):
+        embedding_path = embedding_evidence.get("path")
+        embedding_source = embedding_evidence.get("source_path")
+        embedding_parameters = embedding_evidence.get("parameters")
+        embedding_model = embedding_evidence.get("model")
+        if (
+            not isinstance(embedding_path, str)
+            or not embedding_path
+            or not isinstance(embedding_source, str)
+            or not embedding_source
+            or not isinstance(embedding_parameters, Mapping)
+            or not isinstance(embedding_model, str)
+            or not embedding_model
+        ):
+            raise RuntimeError("character embedding artifact evidence is malformed")
+        record = record_auxiliary_version(
+            pid,
+            "character_embedding",
+            cid,
+            embedding_path,
+            model=embedding_model,
+            parameters=dict(embedding_parameters),
+            source_paths={"canonical_reference": embedding_source},
+            project_snapshot=project,
+            project_root=project_root,
+        )
+        embedding_summary = {
+            "path": embedding_path,
+            "artifact_version_id": record["artifact_id"],
+            "artifact_version": record["version"],
+            "sha256": record["sha256"],
+            "model": embedding_model,
+        }
+
+    creation_request_id = str(character.get("creation_request_id") or "")
+    creation_fingerprint = str(character.get("creation_request_fingerprint") or "")
+
+    def _publish(latest: dict):
+        current = get_character(latest, cid)
+        if current is None:
+            raise RuntimeError("pending character disappeared before artifact publication")
+        _assert_matching_creation(
+            current,
+            creation_request_id,
+            creation_fingerprint,
+        )
+        if current.get("artifact_versioning_pending") is not True:
+            existing_angles = current.get("generated_multi_angle_artifacts") or []
+            existing_embedding = current.get("generated_embedding_artifact")
+            if (
+                existing_angles == summaries
+                and existing_embedding == embedding_summary
+            ):
+                return MutationResult(current, save=False)
+            raise RuntimeError("character artifact publication state changed concurrently")
+        if (current.get("multi_angle_artifact_evidence") or []) != raw_evidence:
+            raise RuntimeError("character artifact evidence changed concurrently")
+        if current.get("embedding_artifact_evidence") != embedding_evidence:
+            raise RuntimeError(
+                "character embedding artifact evidence changed concurrently"
+            )
+        current["generated_multi_angle_artifacts"] = summaries
+        if embedding_summary is not None:
+            current["generated_embedding_artifact"] = embedding_summary
+        current.pop("multi_angle_artifact_evidence", None)
+        current.pop("embedding_artifact_evidence", None)
+        current.pop("artifact_versioning_pending", None)
+        return current
+
+    result = mutate_project(
+        pid,
+        _publish,
+        timeout=commit_timeout,
+        snapshot=project,
+    )
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result
 
 
 def create_character_with_images(
@@ -211,6 +504,8 @@ def create_character_with_images(
     commit_timeout: float = 10,
     gender: str = "",
     cost_tracker=None,
+    creation_request_id: str = "",
+    _recovery_out: Optional[dict] = None,
 ) -> dict:
     """
     Creates a character from REAL uploaded photos.
@@ -224,11 +519,43 @@ def create_character_with_images(
     6. Store all references for downstream Kling subject binding
     """
     pid = project["id"]
+    request_id = _normalise_creation_request_id(creation_request_id)
+    creation_fingerprint = (
+        _character_creation_fingerprint(
+            name=name,
+            description=description,
+            voice_id=voice_id,
+            gender=gender,
+            reference_image_paths=reference_image_paths,
+        )
+        if request_id
+        else ""
+    )
+    if request_id:
+        cid = _character_id_for_request(request_id)
+        existing = get_character(project, cid)
+        if existing is not None:
+            _assert_matching_creation(existing, request_id, creation_fingerprint)
+            if existing.get("artifact_versioning_pending") is True:
+                existing = _finalize_character_reference_artifacts(
+                    project,
+                    existing,
+                    commit_timeout=commit_timeout,
+                )
+            if _recovery_out is not None:
+                _recovery_out["idempotent"] = True
+                _recovery_out["character_id"] = cid
+            return existing
+
     character = make_character(
         name, description,
         voice_id=voice_id,
         gender=gender,
     )
+    if request_id:
+        character["id"] = _character_id_for_request(request_id)
+        character["creation_request_id"] = request_id
+        character["creation_request_fingerprint"] = creation_fingerprint
     cid = character["id"]
     char_path = _char_dir(pid, cid)
     project_dir = get_project_dir(pid)
@@ -275,14 +602,17 @@ def create_character_with_images(
 
     # 3. Generate multi-angle reference sheet for Kling subject binding
     multi_angles = []
+    angle_artifact_evidence: list[dict[str, Any]] = []
+    embedding_artifact_evidence: Optional[dict[str, Any]] = None
     if canonical:
-        angle_cost_tracker = cost_tracker or _cost_tracker_from_project(project)
         multi_angles = _generate_multi_angle_refs(
             canonical,
             char_path,
             description,
-            cost_tracker=angle_cost_tracker,
+            cost_tracker=cost_tracker,
             video_id=pid,
+            character_id=cid,
+            artifact_evidence_out=angle_artifact_evidence,
         )
     character["multi_angle_refs"] = multi_angles
     print(f"   [ANGLES] Generated {len(multi_angles)} angle references")
@@ -308,6 +638,18 @@ def create_character_with_images(
         if embedding is not None:
             np.save(emb_path, embedding)
             character["embedding_cache"] = emb_path
+            from identity.validator import EMBED_MODEL
+
+            embedding_artifact_evidence = {
+                "path": emb_path,
+                "source_path": canonical,
+                "model": EMBED_MODEL,
+                "parameters": {
+                    "embedding_model": EMBED_MODEL,
+                    "array_dtype": str(embedding.dtype),
+                    "array_shape": list(embedding.shape),
+                },
+            }
             print(f"   [EMB] Cached face embedding: {emb_path}")
 
     # 6. Physical traits + identity anchor
@@ -335,12 +677,60 @@ def create_character_with_images(
     character["embedding_cache"] = _to_project_relative(
         project_dir, character.get("embedding_cache", "")
     )
+    if angle_artifact_evidence:
+        character["multi_angle_artifact_evidence"] = [
+            {
+                **entry,
+                "path": _to_project_relative(project_dir, entry["path"]),
+                "source_path": _to_project_relative(
+                    project_dir, entry["source_path"]
+                ),
+            }
+            for entry in angle_artifact_evidence
+        ]
+    if embedding_artifact_evidence is not None:
+        character["embedding_artifact_evidence"] = {
+            **embedding_artifact_evidence,
+            "path": _to_project_relative(
+                project_dir, embedding_artifact_evidence["path"]
+            ),
+            "source_path": _to_project_relative(
+                project_dir, embedding_artifact_evidence["source_path"]
+            ),
+        }
+    if angle_artifact_evidence or embedding_artifact_evidence is not None:
+        character["artifact_versioning_pending"] = True
 
+    persisted_new = True
     try:
-        add_character(project, character, timeout=commit_timeout)
+        if request_id:
+            character, persisted_new = _persist_character_once(
+                project,
+                character,
+                commit_timeout=commit_timeout,
+                creation_request_id=request_id,
+                creation_fingerprint=creation_fingerprint,
+            )
+        else:
+            add_character(project, character, timeout=commit_timeout)
     except Exception:
-        shutil.rmtree(char_path, ignore_errors=True)
+        # Compatibility callers without a durable creation identity retain the
+        # old all-or-cleanup contract. A request-keyed directory is recovery
+        # state and must survive a lock loss, crash, or ambiguous provider call.
+        if not request_id:
+            shutil.rmtree(char_path, ignore_errors=True)
         raise
+
+    if character.get("artifact_versioning_pending") is True:
+        character = _finalize_character_reference_artifacts(
+            project,
+            character,
+            commit_timeout=commit_timeout,
+        )
+
+    if _recovery_out is not None:
+        _recovery_out["idempotent"] = not persisted_new
+        _recovery_out["character_id"] = cid
 
     print(f"   [OK] Character '{name}' created: {cid} (refs={len(stored_refs)}, angles={len(multi_angles)})")
     return character
@@ -379,127 +769,170 @@ def _generate_multi_angle_refs(
     description: str,
     cost_tracker=None,
     video_id: str = "",
+    character_id: str = "",
+    artifact_evidence_out: Optional[list[dict[str, Any]]] = None,
 ) -> List[str]:
     """
     Generate multi-angle reference images from the canonical front-facing photo.
     Uses FLUX Kontext (in-context editing) to create consistent angle variations.
 
-    Output: up to 3 additional angles (45°, profile, back) stored in char_path.
+    Output: five generated references stored in ``char_path``.
     These are used for Kling 3.0 Pro subject binding (multi-image references).
+
+    Every paid generation is reserved through the shared project tracker before
+    FAL submission. Existing attempts resume their durable request ID; a lost
+    submission acknowledgement fails closed and never enters another POST.
     """
+    del description  # The current provider recipe is angle-specific only.
     if not FAL_AVAILABLE or not settings.fal_key:
         print("   [WARN] FAL not available — skipping multi-angle generation")
         return [canonical_path]  # Return just the canonical
+    if not has_paid_attempt_authority(cost_tracker):
+        raise TypeError(
+            "multi-angle generation requires the project shared paid-attempt tracker"
+        )
 
     angle_refs = [canonical_path]  # Front is always the canonical upload
+    canonical_fingerprint = file_fingerprint(canonical_path)
+    logical_character_id = character_id or os.path.basename(os.path.abspath(char_path))
+    canonical_url: Optional[str] = None
 
-    # 6 reference angles for maximum identity lock
-    # User uploads 1 front-facing photo → system generates 5 more
-    # If user uploads multiple photos, system fills in missing angles only
-    angle_configs = [
-        {
-            "name": "angle_45",
-            "prompt": (
-                f"Keep this exact person's face identical. Same person, same clothing, same lighting. "
-                f"Three-quarter view, face turned 45 degrees to the right. "
-                f"Photorealistic portrait, 8K, cinematic studio lighting."
-            ),
-        },
-        {
-            "name": "angle_profile",
-            "prompt": (
-                f"Keep this exact person's face identical. Same person, same clothing, same lighting. "
-                f"Side profile view, face turned 90 degrees showing left side. "
-                f"Photorealistic portrait, 8K, cinematic studio lighting."
-            ),
-        },
-        {
-            "name": "angle_back",
-            "prompt": (
-                f"Keep this exact person identical. Same clothing, same hairstyle visible from behind. "
-                f"Back of head and shoulders view. "
-                f"Photorealistic, 8K, cinematic studio lighting."
-            ),
-        },
-        {
-            "name": "expression_smile",
-            "prompt": (
-                f"Keep this exact person's face identical. Same person, same clothing, same lighting. "
-                f"Warm genuine smile, eyes slightly crinkled, direct eye contact with camera. "
-                f"Photorealistic portrait, 8K, cinematic studio lighting."
-            ),
-        },
-        {
-            "name": "lighting_outdoor",
-            "prompt": (
-                f"Keep this exact person's face identical. Same person, same clothing. "
-                f"Natural outdoor golden hour lighting, warm side light from the left, soft shadows. "
-                f"Photorealistic portrait, 8K, cinematic natural lighting."
-            ),
-        },
+    plans: list[dict[str, Any]] = []
+    for cfg in _ANGLE_CONFIGS:
+        full_prompt = (
+            "PRESERVE IDENTITY: Keep this exact person's face, hair, skin, "
+            "and all physical features identical to @Image1. "
+            f"{cfg['prompt']}"
+        )
+        provider_recipe = {
+            "prompt": full_prompt,
+            "guidance_scale": 4.0,
+            "aspect_ratio": "3:4",
+            "output_format": "jpeg",
+            "num_images": 1,
+        }
+        fingerprint = request_fingerprint(
+            "character-multi-angle-v1",
+            _FLUX_KONTEXT_APPLICATION,
+            canonical_fingerprint,
+            cfg["name"],
+            provider_recipe,
+        )
+        attempt_id = paid_attempt_id(
+            "character-angle",
+            video_id,
+            logical_character_id,
+            cfg["name"],
+            fingerprint,
+        )
+        plans.append(
+            {
+                "angle_name": cfg["name"],
+                "provider_recipe": provider_recipe,
+                "fingerprint": fingerprint,
+                "attempt_id": attempt_id,
+            }
+        )
+
+    # The character row is intentionally committed only after reference
+    # generation succeeds. A process may therefore die after an angle attempt
+    # is durable but before the row carries the overall creation fingerprint.
+    # Bind that gap to the paid ledger: the same UI request/character ID may
+    # resume only the exact planned attempt IDs. Different source bytes or a
+    # changed provider recipe fail closed before upload or submit.
+    paid_snapshot = cost_tracker.get_paid_attempts_snapshot(video_id)
+    planned_attempt_ids = {str(plan["attempt_id"]) for plan in plans}
+    conflicting_attempts = [
+        attempt
+        for attempt in paid_snapshot.get("attempts", [])
+        if isinstance(attempt, Mapping)
+        and attempt.get("shot_id") == logical_character_id
+        and attempt.get("engine") == _FLUX_KONTEXT_ENGINE
+        and attempt.get("operation") == _FLUX_KONTEXT_OPERATION
+        and attempt.get("attempt_id") not in planned_attempt_ids
     ]
+    if conflicting_attempts:
+        raise ValueError(
+            "creation_request_id already owns paid character work for different inputs"
+        )
 
-    # Upload canonical once for all angle generations
-    try:
-        canonical_url = fal_client.upload_file(canonical_path)
-    except Exception as e:
-        print(f"   [WARN] Could not upload canonical for angle gen: {e}")
-        return angle_refs
+    for plan in plans:
+        angle_name = str(plan["angle_name"])
+        provider_recipe = plan["provider_recipe"]
+        fingerprint = str(plan["fingerprint"])
+        attempt_id = str(plan["attempt_id"])
+        existing_attempt = cost_tracker.get_paid_attempt(attempt_id)
+        if existing_attempt is None:
+            # Upload is a non-generative prerequisite. Delay it until a new
+            # paid request really needs submission; resumed requests use only
+            # their persisted FAL request ID and never depend on a fresh URL.
+            if canonical_url is None:
+                canonical_url = fal_client.upload_file(canonical_path)
+                if not isinstance(canonical_url, str) or not canonical_url:
+                    raise RuntimeError("FAL canonical upload returned no URL")
+            submitted_arguments = {
+                **provider_recipe,
+                "image_urls": [canonical_url],
+            }
+        else:
+            submitted_arguments = {
+                **provider_recipe,
+                # Existing attempts never submit these arguments. Avoid a new
+                # upload URL so recovery stays independent of signed-URL churn.
+                "image_urls": [],
+            }
 
-    for cfg in angle_configs:
-        try:
-            # Use FLUX Kontext MAX MULTI for highest identity accuracy
-            # Max Multi uses AuraFace embeddings — strongest identity lock available
-            result = fal_client.subscribe(
-                "fal-ai/flux-pro/kontext/max/multi",
-                client_timeout=FAL_TIMEOUT_IMAGE_S,
-                arguments={
-                    "prompt": (
-                        f"PRESERVE IDENTITY: Keep this exact person's face, hair, skin, "
-                        f"and all physical features identical to @Image1. "
-                        f"{cfg['prompt']}"
-                    ),
-                    "image_urls": [canonical_url],
-                    "guidance_scale": 4.0,  # Higher = stricter adherence to identity
-                    "aspect_ratio": "3:4",  # Portrait aspect for reference shots
-                    "output_format": "jpeg",
-                    "num_images": 1,
-                },
+        result = run_durable_fal_job(
+            application=_FLUX_KONTEXT_APPLICATION,
+            arguments=submitted_arguments,
+            attempt_id=attempt_id,
+            engine=_FLUX_KONTEXT_ENGINE,
+            operation=_FLUX_KONTEXT_OPERATION,
+            estimated_cost_usd=_FLUX_KONTEXT_COST_USD,
+            request_fingerprint_value=fingerprint,
+            cost_tracker=cost_tracker,
+            shot_id=logical_character_id,
+            video_id=video_id,
+            poll_timeout_s=FAL_TIMEOUT_IMAGE_S,
+        )
+        images = result.get("images") if isinstance(result, Mapping) else None
+        image = images[0] if isinstance(images, list) and images else None
+        img_url = image.get("url") if isinstance(image, Mapping) else None
+        if not isinstance(img_url, str) or not img_url:
+            raise RuntimeError("FLUX Kontext result omitted its generated image URL")
+
+        out_path = os.path.join(char_path, f"{angle_name}.jpg")
+        downloaded = safe_download(
+            img_url,
+            out_path,
+            max_bytes=64 * 1024 * 1024,
+            allowed_content_types=("image/jpeg",),
+            content_validator=lambda path: validate_image_artifact(
+                path, expected_formats=("JPEG",)
+            ),
+        )
+        if downloaded is None:
+            raise RuntimeError("generated reference image failed download validation")
+
+        attempt = cost_tracker.get_paid_attempt(attempt_id) or {}
+        provider_request_id = str(attempt.get("provider_job_id") or "")
+        if not provider_request_id:
+            raise RuntimeError("completed FLUX Kontext attempt has no durable request ID")
+        angle_refs.append(out_path)
+        if artifact_evidence_out is not None:
+            artifact_evidence_out.append(
+                {
+                    "angle_name": angle_name,
+                    "path": out_path,
+                    "source_path": canonical_path,
+                    "parameters": {
+                        **provider_recipe,
+                        "provider_request_id": provider_request_id,
+                        "request_fingerprint": fingerprint,
+                    },
+                }
             )
-            img_url = result["images"][0]["url"]
-            out_path = os.path.join(char_path, f"{cfg['name']}.jpg")
-            downloaded = safe_download(
-                img_url,
-                out_path,
-                max_bytes=64 * 1024 * 1024,
-                allowed_content_types=("image/jpeg",),
-                content_validator=lambda path: validate_image_artifact(
-                    path, expected_formats=("JPEG",)
-                ),
-            )
-            if downloaded is None:
-                raise RuntimeError("generated reference image failed download validation")
-            angle_refs.append(out_path)
-            print(f"   [ANGLE] Generated {cfg['name']} (Max Multi): {out_path}")
-            # F-D.1 / MR-C0 closure (cycle-16 max-quality audit a79c59):
-            # character-creation FLUX Kontext Max Multi calls were
-            # untracked by cost_tracker — 5 calls × ~$0.04 = ~$0.20 per
-            # character invisible to budget enforcement. Mirrors M-B2
-            # best-effort pattern; non-fatal if tracker import fails.
-            try:
-                from cost_tracker import CostTracker
-                _tracker = cost_tracker or CostTracker()
-                _tracker.record_api_call(
-                    "FLUX_KONTEXT",
-                    operation="multi_angle_ref",
-                    video_id=video_id,
-                )
-            except Exception:
-                print(f"   [ANGLE] cost record skipped for {cfg['name']} (non-critical)")
-
-        except Exception as e:
-            print(f"   [WARN] Angle generation failed ({cfg['name']}): {e}")
-            # Non-fatal — continue with whatever angles we have
+        print(f"   [ANGLE] Generated {angle_name} (Max Multi): {out_path}")
 
     return angle_refs
 

@@ -457,7 +457,11 @@ _SORA_PARAMETERS = (
 
 _VEO_PARAMETERS = (
     ParameterConstraint("duration", allowed_values=(4, 6, 8)),
-    ParameterConstraint("resolution", allowed_values=("720p", "1080p")),
+    ParameterConstraint(
+        "resolution",
+        allowed_values=("720p", "1080p", "4k"),
+        note="1080p and 4K require an eight-second request.",
+    ),
     ParameterConstraint(
         "additional_reference_images",
         max_items=0,

@@ -114,6 +114,8 @@ class KlingNativeAPI:
         cfg_scale: float = 0.5,
         face_consistency: bool = False,
         image_references: list = None,
+        on_submission_started: Callable[[], None] | None = None,
+        on_submitted: Callable[[str], None] | None = None,
     ) -> str:
         """Submit an image-to-video generation task.
 
@@ -128,6 +130,11 @@ class KlingNativeAPI:
             face_consistency: Enable face consistency preservation.
             image_references: Optional list of reference image paths for
                 style/character consistency.
+            on_submission_started: Callback invoked immediately before the
+                non-idempotent HTTP POST.  Once this fires, callers must treat
+                any missing acknowledgement as ambiguous paid work.
+            on_submitted: Callback invoked with the provider task ID as soon
+                as Kling acknowledges the submission, before any polling.
 
         Returns:
             The task_id string for polling.
@@ -173,6 +180,8 @@ class KlingNativeAPI:
         url = f"{self.BASE_URL}/v1/videos/image2video"
         print(f"[KLING-NATIVE] Submitting image2video task ({mode}, {duration}s)")
 
+        if on_submission_started is not None:
+            on_submission_started()
         resp = requests.post(url, json=body, headers=self._headers(), timeout=60)
         resp.raise_for_status()
         result = resp.json()
@@ -184,6 +193,8 @@ class KlingNativeAPI:
             )
 
         task_id = result["data"]["task_id"]
+        if on_submitted is not None:
+            on_submitted(task_id)
         print(f"[KLING-NATIVE] Task {task_id} queued")
         return task_id
 
@@ -288,6 +299,9 @@ class KlingNativeAPI:
         prompt: str,
         output_path: str,
         on_billed: Callable[[], None] | None = None,
+        on_submission_started: Callable[[], None] | None = None,
+        on_submitted: Callable[[str], None] | None = None,
+        expected_job_id: str | None = None,
         **kwargs,
     ) -> str | None:
         """High-level convenience: create task, poll, download.
@@ -308,6 +322,12 @@ class KlingNativeAPI:
                 Exceptions raised by the callback are logged and swallowed
                 — a broken accounting hook must never abort a download that
                 would otherwise succeed.
+            on_submission_started: Callback forwarded to the low-level submit
+                boundary immediately before Kling's non-idempotent POST.
+            on_submitted: Callback receiving the acknowledged Kling task ID
+                before polling begins, allowing durable exact-ID recovery.
+            expected_job_id: Previously acknowledged task ID to poll and
+                download.  When supplied, no create request is sent.
             **kwargs: Additional arguments passed to create_image_to_video
                 (negative_prompt, duration, mode, model_name, cfg_scale,
                 face_consistency, image_references).
@@ -324,7 +344,18 @@ class KlingNativeAPI:
             # TypeError there and be swallowed into a silent None. Default 300s: Kling i2v
             # runs ~178-195s; 180 timed out flakily.
             timeout = kwargs.pop("timeout", 300)
-            task_id = self.create_image_to_video(image_path, prompt, **kwargs)
+            if expected_job_id:
+                task_id = expected_job_id
+                if on_submitted is not None:
+                    on_submitted(task_id)
+            else:
+                task_id = self.create_image_to_video(
+                    image_path,
+                    prompt,
+                    on_submission_started=on_submission_started,
+                    on_submitted=on_submitted,
+                    **kwargs,
+                )
             print(f"[KLING-NATIVE] Task {task_id} queued...")
             result = self.poll_task(task_id, timeout=timeout)
 

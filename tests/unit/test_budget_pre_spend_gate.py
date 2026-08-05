@@ -651,6 +651,9 @@ class TestPreSpendBudgetGate:
                 "workflow_selector.classify_shot_type",
                 return_value="medium",
             ),
+            patch(
+                "cinema.artifact_indexing.record_take_version"
+            ) as retain_rejected,
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
@@ -658,6 +661,14 @@ class TestPreSpendBudgetGate:
         ctrl._finalize_motion_take.assert_not_called()
         assert provider_paths and provider_paths[0] != canonical
         assert not any(os.path.exists(path) for path in provider_paths)
+        retain_rejected.assert_called_once()
+        rejected_take = retain_rejected.call_args.args[3]
+        assert rejected_take["kind"] == "motion"
+        assert rejected_take["status"] == "rejected"
+        assert rejected_take["path"] == provider_paths[0]
+        assert rejected_take["metadata"]["rejection_stage"] == (
+            "motion_dispatch_or_validation"
+        )
         with open(canonical, "rb") as handle:
             assert handle.read() == b"pre-existing-valid-take"
 
@@ -719,12 +730,18 @@ class TestPreSpendBudgetGate:
                 "cinema.shots.controller._video_policy_current_date",
                 return_value=_PRE_SORA_SUNSET,
             ),
+            patch(
+                "cinema.artifact_indexing.record_take_version"
+            ) as retain_rejected,
         ):
             result = ctrl.generate_motion_take("scene_1", "shot_1_0")
 
         assert result == {"success": False, "error": "Video generation failed"}
         ctrl._finalize_motion_take.assert_not_called()
         assert candidate_paths and not os.path.exists(candidate_paths[0])
+        retain_rejected.assert_called_once()
+        assert retain_rejected.call_args.args[3]["status"] == "rejected"
+        assert retain_rejected.call_args.args[3]["path"] == candidate_paths[0]
         with open(canonical, "rb") as handle:
             assert handle.read() == canonical_bytes
         with open(external, "rb") as handle:
@@ -733,6 +750,53 @@ class TestPreSpendBudgetGate:
             call.kwargs.get("operation") == "motion_generation"
             for call in cost_tracker.record_api_call.call_args_list
         )
+
+    def test_dispatch_exception_retains_owned_candidate_before_reraising(
+        self,
+        tmp_path,
+    ):
+        project = self._make_project(target_api="KLING_NATIVE")
+        ctrl, _host, _lifecycle, _cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        ctrl._take_output_path = MagicMock(
+            return_value=str(tmp_path / "canonical_take.mp4")
+        )
+        candidate_paths = []
+
+        def _raise_after_write(*args, **kwargs):
+            del kwargs
+            candidate = args[3]
+            candidate_paths.append(candidate)
+            with open(candidate, "wb") as handle:
+                handle.write(b"provider-returned-before-local-error")
+            raise RuntimeError("synthetic dispatch failure")
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_raise_after_write,
+            ),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=_kling_native_runtime(),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+            patch(
+                "cinema.artifact_indexing.record_take_version"
+            ) as retain_rejected,
+            pytest.raises(RuntimeError, match="synthetic dispatch failure"),
+        ):
+            ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        retain_rejected.assert_called_once()
+        assert retain_rejected.call_args.args[3]["status"] == "rejected"
+        assert candidate_paths and not os.path.exists(candidate_paths[0])
 
     def test_deferred_provider_job_is_sanitized_and_returned_for_ui(
         self, tmp_path
@@ -902,6 +966,59 @@ class TestPreSpendBudgetGate:
         assert "No new provider was started" in result["error"]
         cost_tracker.would_exceed.assert_not_called()
         cost_tracker.would_exceed_cost.assert_not_called()
+
+    @pytest.mark.parametrize("engine", ["VEO", "KLING_3_0", "SEEDANCE"])
+    def test_fal_recovery_record_reenters_exact_durable_dispatcher(
+        self, tmp_path, engine
+    ):
+        """The controller must not strand FAL jobs its adapter can resume."""
+        project = self._make_project(target_api="LTX")
+        project["scenes"][0]["shots"][0]["deferred_motion_job"] = {
+            "engine": engine,
+            "status": "recovery_required",
+            "reason": "provider_request_pending",
+            "job_id": f"request-{engine.lower()}",
+            "attempt_id": f"attempt-{engine.lower()}",
+        }
+        ctrl, _host, _lifecycle, _cost_tracker = self._build_controller(
+            project,
+            tmp_path,
+        )
+        ctrl._persist_deferred_motion_job = MagicMock(return_value={})
+
+        def _still_pending(*args, **kwargs):
+            assert args[2] == engine
+            kwargs["_cascade_out"]["deferred_job"] = {
+                **project["scenes"][0]["shots"][0]["deferred_motion_job"],
+                "attempts": [engine],
+                "billed": False,
+            }
+            return None
+
+        with (
+            patch(
+                "cinema.shots.controller.generate_ai_video",
+                side_effect=_still_pending,
+            ) as dispatch,
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+            patch(
+                "cinema.shots.controller._video_policy_runtime_snapshot",
+                return_value=RuntimeSnapshot(
+                    credentials={"fal_key"},
+                    modules={"fal_client"},
+                ),
+            ),
+            patch(
+                "cinema.shots.controller._video_policy_current_date",
+                return_value=_PRE_SORA_SUNSET,
+            ),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert dispatch.call_count == 1
+        assert result["code"] == "provider_job_deferred"
+        assert result["deferred_job"]["engine"] == engine
+        assert result["deferred_job"]["job_id"] == f"request-{engine.lower()}"
 
     def test_deferred_job_helper_persists_and_clears_atomically(self, tmp_path):
         project = self._make_project(target_api="LTX")
@@ -1592,7 +1709,11 @@ class TestPerformancePreSpendBudgetGate:
         ctrl._take_output_path = MagicMock(
             side_effect=lambda shot_id, take_id, ext: str(tmp_path / f"{take_id}{ext}")
         )
-        ctrl._mutate_shot = MagicMock(side_effect=lambda shot_id, mutator: {"id": "perf_take"})
+        scene = project["scenes"][0]
+        shot = scene["shots"][0]
+        ctrl._mutate_shot = MagicMock(
+            side_effect=lambda shot_id, mutator: mutator(scene, shot).value
+        )
         return ctrl, lifecycle, cost_tracker
 
     def _make_project(self, tmp_path):

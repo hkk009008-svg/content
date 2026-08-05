@@ -1,9 +1,12 @@
 import os
 import json
+import logging
 import math
+import shutil
+import tempfile
 import time
 
-from typing import NamedTuple
+from typing import Mapping, NamedTuple
 
 from config.settings import settings
 from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
@@ -17,6 +20,14 @@ from comfyui_client import (
     RunPodComfyUI,
 )
 from performance._net import safe_download, validate_image_artifact
+from paid_provider import has_paid_attempt_authority
+
+
+logger = logging.getLogger(__name__)
+
+
+class _ImagePaidCascadeStop(RuntimeError):
+    """Internal signal that a paid image outcome blocks fallback."""
 
 
 class ImageGenResult(NamedTuple):
@@ -106,7 +117,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        char_lora_trigger=None,
                        secondary_char_refs=None,
                        style_reference=None, shot_hint=None, ctx=None,
-                       _recovery_out=None):
+                       _recovery_out=None, cost_tracker=None,
+                       shot_id="", video_id="", take_id="",
+                       project_snapshot=None, project_root=None,
+                       artifact_metadata=None):
     """
     Generates a cinematic image with face-identity preservation.
 
@@ -174,6 +188,195 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # is nothing to fall through from).
     billed_rejects = []
 
+    has_artifact_scope = bool(
+        video_id
+        and shot_id
+        and take_id
+        and project_root is not None
+        and isinstance(project_snapshot, Mapping)
+    )
+
+    def _gemini_candidate_take(
+        *,
+        status: str,
+        stage: str,
+        identity_score=None,
+        identity_threshold=None,
+    ) -> dict:
+        metadata = (
+            dict(artifact_metadata)
+            if isinstance(artifact_metadata, Mapping)
+            else {}
+        )
+        metadata.update({
+            "prompt": prompt,
+            "seed": seed,
+            "mechanism_actually_used": "GEMINI_IMAGE",
+            "rejection_stage": stage if status == "rejected" else None,
+            "identity_score": identity_score,
+            "identity_threshold": identity_threshold,
+        })
+        return {
+            "id": take_id,
+            "kind": "keyframe",
+            "path": output_filename,
+            "status": status,
+            "metadata": metadata,
+            "cascade_metadata": {
+                "engine": "GEMINI_IMAGE",
+                "stage": stage,
+            },
+        }
+
+    def _record_gemini_candidate(
+        *,
+        status: str,
+        stage: str,
+        identity_score=None,
+        identity_threshold=None,
+    ) -> dict | None:
+        if not has_artifact_scope:
+            return None
+        from cinema.artifact_indexing import record_take_version
+
+        return record_take_version(
+            video_id,
+            shot_id,
+            "keyframe",
+            _gemini_candidate_take(
+                status=status,
+                stage=stage,
+                identity_score=identity_score,
+                identity_threshold=identity_threshold,
+            ),
+            project_snapshot=project_snapshot,
+            project_root=project_root,
+        )
+
+    def _retain_rejected_gemini(
+        *,
+        rejection_stage: str,
+        identity_score=None,
+        identity_threshold=None,
+    ):
+        """Copy a rejected paid frame before a fallback overwrites it.
+
+        ``None`` means this is a legacy unscoped caller. The active controller
+        always supplies an exact project/take scope; there, ``False`` blocks
+        fallback so a retention failure cannot destroy the only provider
+        output bytes.
+        """
+        if not has_artifact_scope:
+            return None
+        try:
+            record = _record_gemini_candidate(
+                status="rejected",
+                stage=rejection_stage,
+                identity_score=identity_score,
+                identity_threshold=identity_threshold,
+            )
+        except Exception:
+            if isinstance(_recovery_out, dict):
+                _recovery_out.update({
+                    "engine": "GEMINI_IMAGE",
+                    "status": "recovery_required",
+                    "provider_status": "artifact_retention_failed",
+                    "reason": (
+                        "Gemini returned a paid frame, but its rejected bytes "
+                        "could not be copied into immutable artifact history. "
+                        "Fallback is blocked so the provider output is not overwritten."
+                    ),
+                })
+            print(
+                "   [UNKNOWN] Rejected Gemini frame could not be retained; "
+                "fallback blocked"
+            )
+            return False
+        return record
+
+    def _restore_completed_gemini_candidate():
+        """Restore retained provider bytes, or flag a prior local rejection."""
+        if not has_artifact_scope:
+            return None
+        from cinema.artifact_versions import ArtifactVersionStore
+
+        store = ArtifactVersionStore(video_id, project_root)
+        logical_name = f"shots/{shot_id}/keyframe/{take_id}"
+        records = [
+            record
+            for record in store.history(logical_name)
+            if record.get("provider") == "GEMINI_IMAGE"
+        ]
+        completed = [
+            record
+            for record in records
+            if (record.get("parameters") or {}).get("status")
+            == "provider_completed"
+        ]
+        if not completed:
+            return None
+        latest_completed = completed[-1]
+        rejected_later = any(
+            record.get("sequence", 0) > latest_completed.get("sequence", 0)
+            and (record.get("parameters") or {}).get("status") == "rejected"
+            for record in records
+        )
+        if rejected_later:
+            return False
+        if not store.verify_artifact(latest_completed["artifact_id"]):
+            raise RuntimeError("retained Gemini candidate failed hash verification")
+        source = os.path.join(project_root, latest_completed["object_path"])
+        destination_dir = os.path.dirname(output_filename) or "."
+        os.makedirs(destination_dir, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{os.path.basename(output_filename)}.",
+            suffix=".artifact-restore",
+            dir=destination_dir,
+        )
+        os.close(fd)
+        try:
+            shutil.copyfile(source, temporary)
+            if not validate_image_artifact(temporary, expected_formats=("JPEG",)):
+                raise RuntimeError("retained Gemini candidate is not a valid JPEG")
+            os.replace(temporary, output_filename)
+        finally:
+            try:
+                os.remove(temporary)
+            except FileNotFoundError:
+                pass
+        return output_filename
+
+    def _retain_completed_gemini_candidate(_result) -> None:
+        if not has_artifact_scope:
+            return
+        try:
+            _record_gemini_candidate(
+                status="provider_completed",
+                stage="provider_response",
+            )
+        except Exception:
+            if isinstance(_recovery_out, dict):
+                _recovery_out.update({
+                    "engine": "GEMINI_IMAGE",
+                    "status": "recovery_required",
+                    "provider_status": "artifact_retention_failed",
+                    "reason": (
+                        "Gemini completed a paid frame, but its bytes could not "
+                        "be retained before reconciliation. Automatic replay and "
+                        "fallback are blocked."
+                    ),
+                })
+            raise
+
+    def _fal_fallback(*args, **kwargs):
+        kwargs.update({
+            "cost_tracker": cost_tracker,
+            "shot_id": shot_id,
+            "video_id": video_id,
+            "_recovery_out": _recovery_out,
+        })
+        return _fal_flux_fallback(*args, **kwargs)
+
     def _with_rejects(result):
         """Hand accumulated billed rejects to the caller on every outcome.
 
@@ -192,11 +395,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # projects (WS3, user-confirmed decision — "Nano Banana as image
     # PRIMARY, pod demoted to first fallback"); a project sets
     # identity_backend='pod' to opt OUT. The pod remains the arc-gate
-    # fallback below. This block NEVER raises and NEVER returns None — a
-    # missing key, a generation failure, or a failed identity check all
-    # fall through into the existing PRIORITY-1 pod logic below untouched
-    # (silent-gate-degradation discipline: fall through loudly via prints,
-    # not silently).
+    # fallback below. Ordinary unbilled failure and safely retained identity
+    # rejection fall through. Ambiguous paid work or rejected-byte retention
+    # failure returns None with recovery evidence so no replacement provider
+    # can spend or overwrite the only output.
     identity_backend = get_project_setting(ctx, "identity_backend", "gemini_multiref")
     if (
         (settings.google_api_key or settings.gemini_api_key)
@@ -209,15 +411,130 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             gemini_secondary_refs = [
                 sc.get("reference") for sc in (secondary_char_refs or []) if sc.get("reference")
             ]
-            gemini_path = GeminiImageAPI().generate_image(
-                prompt,
-                output_filename,
-                character_image=character_image,
-                multi_angle_refs=multi_angle_refs,
-                secondary_char_refs=gemini_secondary_refs,
-                aspect_ratio=aspect_ratio,
-                negative_prompt=negative_prompt,
-            )
+            def _generate_gemini_image():
+                return GeminiImageAPI().generate_image(
+                    prompt,
+                    output_filename,
+                    character_image=character_image,
+                    multi_angle_refs=multi_angle_refs,
+                    secondary_char_refs=gemini_secondary_refs,
+                    aspect_ratio=aspect_ratio,
+                    negative_prompt=negative_prompt,
+                )
+
+            if not has_paid_attempt_authority(cost_tracker):
+                gemini_path = _generate_gemini_image()
+            else:
+                from cost_tracker import API_COST_USD
+                from paid_provider import (
+                    PaidCallBudgetBlocked,
+                    PaidCallDeferred,
+                    PaidCallUnbilled,
+                    file_fingerprint,
+                    paid_attempt_id,
+                    request_fingerprint,
+                    run_nonresumable_paid_call,
+                )
+
+                ref_paths = [character_image]
+                ref_paths.extend(
+                    path for path in (multi_angle_refs or []) if path and os.path.exists(path)
+                )
+                ref_paths.extend(
+                    path for path in gemini_secondary_refs if path and os.path.exists(path)
+                )
+                stable_request = request_fingerprint(
+                    "gemini-image",
+                    prompt,
+                    negative_prompt,
+                    aspect_ratio,
+                    [file_fingerprint(path) for path in ref_paths],
+                    os.path.abspath(output_filename),
+                )
+                gemini_attempt_id = paid_attempt_id(
+                    "gemini-image",
+                    video_id,
+                    shot_id,
+                    os.path.abspath(output_filename),
+                )
+                try:
+                    existing_attempt = cost_tracker.get_paid_attempt(
+                        gemini_attempt_id
+                    )
+                    restored = (
+                        _restore_completed_gemini_candidate()
+                        if existing_attempt is not None
+                        else None
+                    )
+                    if restored is False:
+                        # Identity already rejected the exact immutable Gemini
+                        # candidate. Continue into the durable fallback chain
+                        # without trying or revalidating Gemini again.
+                        gemini_path = None
+                    elif isinstance(restored, str):
+                        if existing_attempt.get("state") != "succeeded":
+                            cost_tracker.reconcile_paid_attempt(
+                                gemini_attempt_id,
+                                state="succeeded",
+                                actual_cost_usd=API_COST_USD["GEMINI_IMAGE"],
+                                provider_status="completed_artifact_recovered",
+                                detail=(
+                                    "Recovered exact retained Gemini output "
+                                    "without another provider submission"
+                                ),
+                            )
+                        gemini_path = restored
+                    else:
+                        gemini_path = run_nonresumable_paid_call(
+                            call=_generate_gemini_image,
+                            attempt_id=gemini_attempt_id,
+                            provider="google",
+                            engine="GEMINI_IMAGE",
+                            operation="keyframe_generation",
+                            estimated_cost_usd=API_COST_USD["GEMINI_IMAGE"],
+                            request_fingerprint_value=stable_request,
+                            cost_tracker=cost_tracker,
+                            shot_id=shot_id,
+                            video_id=video_id,
+                            on_completed=_retain_completed_gemini_candidate,
+                        )
+                except PaidCallUnbilled:
+                    gemini_path = None
+                except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                    if isinstance(_recovery_out, dict):
+                        _recovery_out.setdefault("engine", "GEMINI_IMAGE")
+                        _recovery_out.setdefault("status", "recovery_required")
+                        _recovery_out.setdefault(
+                            "provider_status",
+                            "budget_blocked"
+                            if isinstance(paid_error, PaidCallBudgetBlocked)
+                            else "accepted_unknown",
+                        )
+                        _recovery_out.setdefault(
+                            "reason",
+                            "Gemini Image has no durable job identifier or "
+                            "idempotency key. Automatic replay and paid fallback "
+                            "are blocked until this attempt is reconciled.",
+                        )
+                        _recovery_out["paid_attempt_id"] = (
+                            paid_error.snapshot.attempt.get("attempt_id")
+                        )
+                    print(f"   [UNKNOWN] Gemini image paid outcome: {paid_error}")
+                    return None
+                except Exception as recovery_error:
+                    if isinstance(_recovery_out, dict):
+                        _recovery_out.update({
+                            "engine": "GEMINI_IMAGE",
+                            "status": "recovery_required",
+                            "provider_status": "artifact_recovery_failed",
+                            "reason": (
+                                "Retained Gemini provider bytes could not be "
+                                "verified or restored. Automatic fallback is blocked."
+                            ),
+                        })
+                    raise _ImagePaidCascadeStop(
+                        "Gemini artifact recovery failed"
+                    ) from recovery_error
             if gemini_path:
                 # A successful generation crosses Google's billing boundary.
                 # Record that spend before any local validation work because
@@ -225,36 +542,73 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 # already charged for the frame.  A passing Gemini result
                 # returns directly below, so this local reject ledger is only
                 # threaded onto a later fallback winner.
-                billed_rejects.append("GEMINI_IMAGE")
+                if not has_paid_attempt_authority(cost_tracker):
+                    billed_rejects.append("GEMINI_IMAGE")
                 from phase_c_vision import _get_shared_validator
                 _chars_in_frame = (shot_hint or {}).get("characters_in_frame") or []
-                id_result = _get_shared_validator().validate_image(
-                    gemini_path, character_image,
-                    character_id=_chars_in_frame[0] if _chars_in_frame else "",
-                    threshold=get_project_setting(ctx, "identity_strictness", None),
-                )
+                try:
+                    id_result = _get_shared_validator().validate_image(
+                        gemini_path, character_image,
+                        character_id=_chars_in_frame[0] if _chars_in_frame else "",
+                        threshold=get_project_setting(ctx, "identity_strictness", None),
+                        cost_tracker=cost_tracker,
+                        video_id=video_id,
+                        shot_id=shot_id,
+                    )
+                except Exception:
+                    retained = _retain_rejected_gemini(
+                        rejection_stage="identity_validation_error",
+                    )
+                    if retained is False:
+                        raise _ImagePaidCascadeStop(
+                            "rejected Gemini output retention failed"
+                        )
+                    raise
                 if id_result.passed:
                     print(f"   [PHASE C] Gemini 3.1 Flash Image (Nano Banana 2) passed identity "
                           f"check (score={id_result.overall_score}): '{prompt[:60]}...'")
+                    if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
+                        _recovery_out["_winner_paid_cost_recorded"] = True
                     return ImageGenResult(output_filename, "GEMINI_IMAGE")
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
                       f"falling back to the pod/FAL cascade")
-                try:
-                    os.makedirs("logs", exist_ok=True)
-                    with open("logs/gemini_image_arc_comparison.jsonl", "a", encoding="utf-8") as f:
-                        f.write(json.dumps({
-                            "ts": time.time(),
-                            "prompt": prompt[:200],
-                            "output_filename": output_filename,
-                            "character_image": character_image,
-                            "characters_in_frame": _chars_in_frame,
-                            "gemini_score": id_result.overall_score,
-                            "threshold": id_result.threshold_used,
-                        }) + "\n")
-                except Exception:
-                    pass  # comparison log is best-effort telemetry, never load-bearing
+                retained = _retain_rejected_gemini(
+                    rejection_stage="identity_validation",
+                    identity_score=id_result.overall_score,
+                    identity_threshold=id_result.threshold_used,
+                )
+                if retained is False:
+                    raise _ImagePaidCascadeStop(
+                        "rejected Gemini output retention failed"
+                    )
+                logger.info(
+                    "Gemini identity candidate rejected",
+                    extra={
+                        "provider": "google",
+                        "engine": "GEMINI_IMAGE",
+                        "code": "identity_validation",
+                        "status": "rejected",
+                        "shot_id": shot_id,
+                        "video_id": video_id,
+                        "identity_score": id_result.overall_score,
+                        "identity_threshold": id_result.threshold_used,
+                        "artifact_id": (
+                            retained.get("artifact_id")
+                            if isinstance(retained, Mapping)
+                            else None
+                        ),
+                        "artifact_sha256": (
+                            retained.get("sha256")
+                            if isinstance(retained, Mapping)
+                            else None
+                        ),
+                    },
+                )
             else:
                 print("   [GEMINI-IMAGE] Generation returned no image; falling back to the pod/FAL cascade")
+        except _ImagePaidCascadeStop as e:
+            print(f"   [UNKNOWN] Gemini image cascade stopped: {e}")
+            return None
         except Exception as e:
             print(f"   [GEMINI-IMAGE] PRIORITY-0 block failed ({e}); falling back to the pod/FAL cascade")
 
@@ -270,7 +624,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     # (Same args as the old elif/else, consolidated.)
     if not (server_url and os.path.exists("pulid.json")):
         if character_image and os.path.exists(character_image) and settings.fal_key:
-            return _with_rejects(_fal_flux_fallback(
+            return _with_rejects(_fal_fallback(
                 prompt, output_filename, seed,
                 character_image=character_image,
                 multi_angle_refs=multi_angle_refs,
@@ -278,7 +632,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 aspect_ratio=aspect_ratio,
                 secondary_char_refs=secondary_char_refs,
             ))
-        return _with_rejects(_fal_flux_fallback(
+        return _with_rejects(_fal_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
             aspect_ratio=aspect_ratio,
@@ -292,7 +646,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     try:
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
-            return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+            return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
                                       aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
         with open("pulid.json", "r") as f:
@@ -317,7 +671,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Skip ComfyUI entirely for landscape shots (no face-lock needed)
             if shot_type == "landscape" and character_image:
                 print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
-                return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=None,
+                return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=None,
                                           aspect_ratio=aspect_ratio, secondary_char_refs=None))
         except ImportError:
             pass  # workflow_selector not available — use defaults
@@ -410,45 +764,117 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         # for the current pipeline; FAL PixVerse swap handles any post-video refinement
         # (see phase_c_vision.face_swap_video_frames).
 
-        # 6. Fire Master Execution Workflow
-        prompt_id = comfy.queue_prompt(workflow)
-        print(f"      ↳ ComfyUI Task {prompt_id} queued. Awaiting GPU computation...")
+        # 6/7. Queue and monitor under the shared paid-attempt authority when
+        # the pipeline supplied its project tracker. The prompt ID is durable
+        # before polling, so a worker restart resumes /history for that exact
+        # graph instead of opening a FAL replacement render.
+        if has_paid_attempt_authority(cost_tracker):
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_comfy_job,
+            )
 
-        # 7. WebSocket job events with bounded /history fallback.  Terminal
-        # execution_error/interrupted events fail immediately; a timeout enters
-        # fallback only after ID-scoped cancellation is positively confirmed.
-        try:
-            history = comfy.wait_for_completion(prompt_id)
-        except KeyboardInterrupt:
+            local_assets = []
+            for candidate in [character_image, init_image, *(multi_angle_refs or [])]:
+                if candidate and os.path.exists(candidate):
+                    local_assets.append(file_fingerprint(candidate))
+            stable_request = request_fingerprint(
+                "comfy-pulid",
+                prompt,
+                negative_prompt,
+                seed,
+                aspect_ratio,
+                local_assets,
+                _delivery_w,
+                _delivery_h,
+                os.path.abspath(output_filename),
+            )
             try:
-                comfy.cancel_prompt(prompt_id)
-            except Exception as cancel_error:
-                print(f"      ↳ ComfyUI cancellation failed: {cancel_error}")
-            raise
-        except ComfyUIJobError:
-            # Explicit terminal execution failure: no live job remains, so the
-            # normal image cascade may safely continue.
-            raise
-        except ComfyUITimeout:
-            # wait_for_completion raises this type only after ID-scoped
-            # cancellation was positively confirmed. Do not cancel twice.
-            raise
-        except Exception as monitor_error:
-            # A known prompt must not be abandoned while the cascade starts a
-            # replacement render. Continue only after cancellation is confirmed.
+                history = run_durable_comfy_job(
+                    client=comfy,
+                    workflow=workflow,
+                    attempt_id=paid_attempt_id(
+                        "comfy-keyframe",
+                        video_id,
+                        shot_id,
+                        os.path.abspath(output_filename),
+                    ),
+                    engine="COMFYUI_PULID",
+                    operation="keyframe_generation",
+                    estimated_cost_usd=API_COST_USD["COMFYUI_PULID"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
+                    poll_timeout_s=600.0,
+                    poll_interval_s=2.0,
+                )
+                attempt = cost_tracker.get_latest_paid_attempt(
+                    video_id=video_id,
+                    shot_id=shot_id,
+                    engine="COMFYUI_PULID",
+                    operation="keyframe_generation",
+                )
+                prompt_id = str((attempt or {}).get("provider_job_id") or "")
+            except PaidCallUnbilled:
+                raise ComfyUIJobError("ComfyUI graph was rejected before billing")
+            except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                if isinstance(_recovery_out, dict):
+                    _recovery_out.clear()
+                    _recovery_out.update({
+                        "engine": "COMFYUI_PULID",
+                        "status": "recovery_required",
+                        "provider_status": (
+                            "budget_blocked"
+                            if isinstance(paid_error, PaidCallBudgetBlocked)
+                            else "job_state_unknown"
+                        ),
+                        "reason": (
+                            "ComfyUI paid prompt is reserved or recoverable by its "
+                            "durable prompt ID. No FAL replacement was started."
+                        ),
+                        "paid_attempt_id": paid_error.snapshot.attempt.get("attempt_id"),
+                    })
+                    job_id = paid_error.snapshot.attempt.get("provider_job_id")
+                    if job_id:
+                        _recovery_out["job_id"] = job_id
+                return None
+        else:
+            # Legacy standalone path without a project tracker.
+            prompt_id = comfy.queue_prompt(workflow)
+            print(f"      ↳ ComfyUI Task {prompt_id} queued. Awaiting GPU computation...")
             try:
-                cancelled = comfy.cancel_prompt(prompt_id)
-            except Exception as cancel_error:
-                raise ComfyUIJobStateUnknown(
-                    f"ComfyUI monitoring failed ({monitor_error}); cancellation "
-                    f"could not be confirmed ({cancel_error})"
-                ) from monitor_error
-            if not cancelled:
-                raise ComfyUIJobStateUnknown(
-                    f"ComfyUI monitoring failed ({monitor_error}); prompt/output "
-                    "state remains UNKNOWN"
-                ) from monitor_error
-            raise
+                history = comfy.wait_for_completion(prompt_id)
+            except KeyboardInterrupt:
+                try:
+                    comfy.cancel_prompt(prompt_id)
+                except Exception as cancel_error:
+                    print(f"      ↳ ComfyUI cancellation failed: {cancel_error}")
+                raise
+            except ComfyUIJobError:
+                raise
+            except ComfyUITimeout:
+                raise
+            except Exception as monitor_error:
+                try:
+                    cancelled = comfy.cancel_prompt(prompt_id)
+                except Exception as cancel_error:
+                    raise ComfyUIJobStateUnknown(
+                        f"ComfyUI monitoring failed ({monitor_error}); cancellation "
+                        f"could not be confirmed ({cancel_error})"
+                    ) from monitor_error
+                if not cancelled:
+                    raise ComfyUIJobStateUnknown(
+                        f"ComfyUI monitoring failed ({monitor_error}); prompt/output "
+                        "state remains UNKNOWN"
+                    ) from monitor_error
+                raise
         record = history.get(prompt_id, {})
         outputs = record.get("outputs", {}) if isinstance(record, dict) else {}
         if isinstance(outputs, dict):
@@ -459,20 +885,40 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 img_info = images[0]
                 if not isinstance(img_info, dict):
                     continue
-                comfy.download_image(
-                    img_info.get("filename"),
-                    img_info.get("subfolder", ""),
-                    img_info.get("type", "output"),
-                    output_filename,
-                    expected_dimensions=(_delivery_w, _delivery_h),
-                )
+                try:
+                    comfy.download_image(
+                        img_info.get("filename"),
+                        img_info.get("subfolder", ""),
+                        img_info.get("type", "output"),
+                        output_filename,
+                        expected_dimensions=(_delivery_w, _delivery_h),
+                    )
+                except Exception as download_error:
+                    if has_paid_attempt_authority(cost_tracker):
+                        if isinstance(_recovery_out, dict):
+                            _recovery_out.update({
+                                "engine": "COMFYUI_PULID",
+                                "status": "recovery_required",
+                                "provider_status": "artifact_unavailable",
+                                "reason": (
+                                    "ComfyUI completed and may be billed, but its "
+                                    "image could not be published. Resume the durable "
+                                    "prompt instead of starting a FAL render."
+                                ),
+                                "job_id": prompt_id,
+                            })
+                        print(f"   [UNKNOWN] ComfyUI artifact publication failed: {download_error}")
+                        return None
+                    raise
                 print(f"      ✅ Downloaded {mode} render: {output_filename}")
+                if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
+                    _recovery_out["_winner_paid_cost_recorded"] = True
                 return _with_rejects(ImageGenResult(output_filename, "COMFYUI_PULID"))
 
         print("      ⚠️ ComfyUI task completed but produced no valid image output")
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
-        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+        return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
                                   aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
     except (ComfyUISubmitUnknown, ComfyUIJobStateUnknown) as e:
@@ -504,7 +950,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         return None
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
-        return _with_rejects(_fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+        return _with_rejects(_fal_fallback(prompt, output_filename, seed, character_image=character_image,
                                   aspect_ratio=aspect_ratio, secondary_char_refs=None))
 
 
@@ -593,7 +1039,8 @@ def _build_multichar_kontext_prompt(sections, char_blocks):
 
 def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                        multi_angle_refs=None, identity_anchor="", aspect_ratio=None,
-                       secondary_char_refs=None):
+                       secondary_char_refs=None, cost_tracker=None,
+                       shot_id="", video_id="", _recovery_out=None):
     """
     Image generator using FAL.ai FLUX Kontext Max Multi for identity preservation.
 
@@ -610,6 +1057,119 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
 
     try:
         import fal_client
+
+        local_ref_paths = []
+        for candidate in [character_image, *(multi_angle_refs or [])]:
+            if candidate and os.path.exists(candidate):
+                local_ref_paths.append(candidate)
+        for entry in secondary_char_refs or []:
+            for candidate in [entry.get("reference"), *(entry.get("multi_angle_refs") or [])]:
+                if candidate and os.path.exists(candidate):
+                    local_ref_paths.append(candidate)
+
+        def _fal_image_call(application: str, arguments: dict, engine_key: str) -> dict:
+            if not has_paid_attempt_authority(cost_tracker):
+                return fal_client.subscribe(
+                    application,
+                    client_timeout=FAL_TIMEOUT_IMAGE_S,
+                    arguments=arguments,
+                )
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                file_fingerprint,
+                paid_attempt_id,
+                request_fingerprint,
+                run_durable_fal_job,
+            )
+
+            safe_arguments = {
+                key: value
+                for key, value in arguments.items()
+                if key not in {"image_urls", "image_url"}
+            }
+            stable_request = request_fingerprint(
+                application,
+                safe_arguments,
+                [file_fingerprint(path) for path in local_ref_paths],
+                os.path.abspath(output_filename),
+            )
+            try:
+                return run_durable_fal_job(
+                    application=application,
+                    arguments=arguments,
+                    attempt_id=paid_attempt_id(
+                        "fal-keyframe",
+                        video_id,
+                        shot_id,
+                        engine_key,
+                        os.path.abspath(output_filename),
+                    ),
+                    engine=engine_key,
+                    operation="keyframe_generation",
+                    estimated_cost_usd=API_COST_USD[engine_key],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=shot_id,
+                    video_id=video_id,
+                    poll_timeout_s=FAL_TIMEOUT_IMAGE_S,
+                )
+            except PaidCallUnbilled:
+                return {}
+            except (PaidCallBudgetBlocked, PaidCallDeferred) as paid_error:
+                if isinstance(_recovery_out, dict):
+                    _recovery_out.update({
+                        "engine": engine_key,
+                        "status": "recovery_required",
+                        "provider_status": (
+                            "budget_blocked"
+                            if isinstance(paid_error, PaidCallBudgetBlocked)
+                            else "job_state_unknown"
+                        ),
+                        "reason": (
+                            "FAL keyframe request is budget-blocked or recoverable "
+                            "by durable request ID. No paid fallback was started."
+                        ),
+                        "paid_attempt_id": paid_error.snapshot.attempt.get("attempt_id"),
+                    })
+                    job_id = paid_error.snapshot.attempt.get("provider_job_id")
+                    if job_id:
+                        _recovery_out["job_id"] = job_id
+                raise _ImagePaidCascadeStop(str(paid_error)) from paid_error
+
+        def _defer_completed_image_artifact(engine_key: str) -> None:
+            if not has_paid_attempt_authority(cost_tracker):
+                return
+            attempt = None
+            try:
+                attempt = cost_tracker.get_latest_paid_attempt(
+                    video_id=video_id,
+                    shot_id=shot_id,
+                    engine=engine_key,
+                    operation="keyframe_generation",
+                )
+            except Exception:
+                pass
+            if isinstance(_recovery_out, dict):
+                _recovery_out.update({
+                    "engine": engine_key,
+                    "status": "recovery_required",
+                    "provider_status": "artifact_unavailable",
+                    "reason": (
+                        "The provider completed and may be billed, but its image "
+                        "could not be published. Retrieve the durable provider result "
+                        "instead of starting another paid backend."
+                    ),
+                })
+                if isinstance(attempt, dict):
+                    _recovery_out["paid_attempt_id"] = attempt.get("attempt_id")
+                    if attempt.get("provider_job_id"):
+                        _recovery_out["job_id"] = attempt["provider_job_id"]
+            raise _ImagePaidCascadeStop(
+                f"{engine_key} completed but artifact publication failed"
+            )
 
         # PRIORITY 1: FLUX Kontext Max Multi (strongest identity — up to 9 refs)
         if character_image and os.path.exists(character_image):
@@ -739,10 +1299,9 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
 
                     kontext_prompt = " ".join(parts)
 
-                result = fal_client.subscribe(
+                result = _fal_image_call(
                     "fal-ai/flux-pro/kontext/max/multi",
-                    client_timeout=FAL_TIMEOUT_IMAGE_S,
-                    arguments={
+                    {
                         "prompt": kontext_prompt,
                         "image_urls": image_urls,
                         "guidance_scale": 3.5,
@@ -750,22 +1309,27 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         "output_format": "jpeg",
                         "num_images": 1,
                     },
+                    "FLUX_KONTEXT",
                 )
                 img_url = result["images"][0]["url"]
                 if _download_generated_jpeg(img_url, output_filename) is None:
+                    _defer_completed_image_artifact("FLUX_KONTEXT")
                     raise RuntimeError("FLUX Kontext output failed JPEG validation")
                 print(f"      [OK] FLUX Kontext image: {output_filename}")
+                if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
+                    _recovery_out["_winner_paid_cost_recorded"] = True
                 return ImageGenResult(output_filename, "FLUX_KONTEXT")
+            except _ImagePaidCascadeStop:
+                return None
             except Exception as e_kontext:
                 print(f"      [WARN] FLUX Kontext failed: {e_kontext}, trying FLUX-Pro...")
 
         # PRIORITY 2: FLUX-Pro text-to-image (no face-lock)
         print(f"   [FALLBACK] FLUX-Pro (no face-lock): '{prompt[:60]}...'")
         try:
-            result = fal_client.subscribe(
+            result = _fal_image_call(
                 "fal-ai/flux-pro/v1.1-ultra",
-                client_timeout=FAL_TIMEOUT_IMAGE_S,
-                arguments={
+                {
                     "prompt": prompt,
                     "aspect_ratio": fal_aspect_ratio(aspect_ratio),
                     "output_format": "jpeg",
@@ -773,33 +1337,44 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     "num_inference_steps": 32,
                     "guidance_scale": 3.5,
                 },
+                "FLUX_PRO",
             )
             img_url = result["images"][0]["url"]
             if _download_generated_jpeg(img_url, output_filename) is None:
+                _defer_completed_image_artifact("FLUX_PRO")
                 raise RuntimeError("FLUX-Pro output failed JPEG validation")
             print(f"      [OK] FLUX-Pro image: {output_filename}")
+            if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
+                _recovery_out["_winner_paid_cost_recorded"] = True
             return ImageGenResult(output_filename, "FLUX_PRO")
+        except _ImagePaidCascadeStop:
+            return None
         except Exception as e1:
             print(f"      [WARN] FLUX-Pro failed: {e1}, trying FLUX schnell...")
 
         # Fallback to schnell (faster, lower quality)
         try:
             import fal_client
-            result = fal_client.subscribe(
+            result = _fal_image_call(
                 "fal-ai/flux/schnell",
-                client_timeout=FAL_TIMEOUT_IMAGE_S,
-                arguments={
+                {
                     "prompt": prompt,
                     "image_size": fal_image_size(aspect_ratio),
                     "num_inference_steps": 4,
                     "seed": seed,
                 },
+                "FLUX_SCHNELL",
             )
             img_url = result["images"][0]["url"]
             if _download_generated_jpeg(img_url, output_filename) is None:
+                _defer_completed_image_artifact("FLUX_SCHNELL")
                 raise RuntimeError("FLUX-schnell output failed JPEG validation")
             print(f"      ✅ FAL FLUX-schnell image: {output_filename}")
+            if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
+                _recovery_out["_winner_paid_cost_recorded"] = True
             return ImageGenResult(output_filename, "FLUX_SCHNELL")
+        except _ImagePaidCascadeStop:
+            return None
         except Exception as e2:
             print(f"      ⚠️ FLUX-schnell also failed: {e2}")
 
@@ -816,6 +1391,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         print("❌ All image generation methods failed.")
         return None
 
+    except _ImagePaidCascadeStop:
+        return None
     except Exception as e:
         print(f"❌ Fallback image generation failed: {e}")
         return None

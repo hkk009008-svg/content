@@ -8,6 +8,7 @@ event, so the state assertions go RED).
 """
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -118,12 +119,20 @@ def test_ci_workflow_signs_only_an_explicit_threeway_integration_sha():
     assert "integration_ref:" in workflow
     assert "ref: ${{ inputs.integration_ref || github.sha }}" in workflow
     assert 'test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"' in workflow
-    assert "needs: [smoke, pytest-unit, tsc]" in workflow
+    assert (
+        "needs: [smoke, pytest-unit, dependency-minimum, "
+        "dependency-security, tsc]"
+    ) in workflow
     assert "github.ref == 'refs/heads/main'" in workflow
     assert "INTEGRATION_SHA: ${{ inputs.integration_sha }}" in workflow
     assert 'test "${#INTEGRATION_SHA}" -eq 40' in workflow
     assert 'python scripts/sign_ci_result.py --integration-sha "$INTEGRATION_SHA" --result PASS --remote origin' in workflow
     assert "--integration-sha ${{ github.sha }}" not in workflow
+    assert "\npermissions:\n  contents: read\n" in workflow
+    assert "\n    permissions:\n      contents: write\n" in workflow
+    action_refs = re.findall(r"uses:\s+[^@\s]+@([^\s#]+)", workflow)
+    assert action_refs
+    assert all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in action_refs)
 
 
 # --------------------------------------------------------------------------- run_merge_gate

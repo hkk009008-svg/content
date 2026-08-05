@@ -399,7 +399,8 @@ def test_known_parameter_contracts_are_pinned() -> None:
 
     veo = constraints("VEO_NATIVE")
     assert veo["duration"].allowed_values == (4, 6, 8)
-    assert veo["resolution"].allowed_values == ("720p", "1080p")
+    assert veo["resolution"].allowed_values == ("720p", "1080p", "4k")
+    assert "eight-second" in veo["resolution"].note
     assert veo["additional_reference_images"].max_items == 0
     assert veo["driving_video"].allowed_values == (False,)
     assert "Vertex" in veo["native_audio"].note

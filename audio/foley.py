@@ -21,6 +21,8 @@ from typing import Optional
 
 import requests
 from config.settings import settings
+from cost_tracker_lifecycle import cost_tracker_scope
+from paid_provider import has_paid_attempt_authority
 from performance._net import atomic_publish_bytes, validate_audio_artifact
 
 
@@ -116,6 +118,8 @@ def generate_stability_foley(
     cfg_scale: float = 7.0,
     seed: int | None = None,
     cost_tracker: "Optional[object]" = None,
+    video_id: str = "",
+    scope_id: str = "",
 ) -> str | None:
     """Generate environmental foley via Stability AI Stable Audio 2.0 REST API.
 
@@ -163,33 +167,79 @@ def generate_stability_foley(
         if seed is not None:
             data["seed"] = str(seed)
 
-        print(f"   [FOLEY] Generating foley ({duration}s): {foley_description[:80]}...")
-        r = requests.post(
-            url,
-            headers=headers,
-            files={k: (None, v) for k, v in data.items()},
-            timeout=120,
-        )
-        r.raise_for_status()
+        def _request_and_publish_foley():
+            print(f"   [FOLEY] Generating foley ({duration}s): {foley_description[:80]}...")
+            r = requests.post(
+                url,
+                headers=headers,
+                files={k: (None, v) for k, v in data.items()},
+                timeout=120,
+            )
+            r.raise_for_status()
 
-        response_content_type = r.headers.get("content-type", "")
-        if not isinstance(response_content_type, str):
-            response_content_type = ""
-        if atomic_publish_bytes(
-            r.content,
-            output_path,
-            max_bytes=256 * 1024 * 1024,
-            content_type=response_content_type,
-            allowed_content_types=(
-                "audio/mpeg",
-                "audio/mp3",
-                "audio/wav",
-                "audio/x-wav",
-                "application/octet-stream",
-            ),
-            content_validator=validate_audio_artifact,
-        ) is None:
-            raise RuntimeError("Stable Audio response failed audio validation")
+            response_content_type = r.headers.get("content-type", "")
+            if not isinstance(response_content_type, str):
+                response_content_type = ""
+            if atomic_publish_bytes(
+                r.content,
+                output_path,
+                max_bytes=256 * 1024 * 1024,
+                content_type=response_content_type,
+                allowed_content_types=(
+                    "audio/mpeg",
+                    "audio/mp3",
+                    "audio/wav",
+                    "audio/x-wav",
+                    "application/octet-stream",
+                ),
+                content_validator=validate_audio_artifact,
+            ) is None:
+                raise RuntimeError("Stable Audio response failed audio validation")
+            return True
+
+        durable_cost_recorded = False
+        if not has_paid_attempt_authority(cost_tracker):
+            _request_and_publish_foley()
+        else:
+            from cost_tracker import API_COST_USD
+            from paid_provider import (
+                PaidCallBudgetBlocked,
+                PaidCallDeferred,
+                PaidCallUnbilled,
+                paid_attempt_id,
+                request_fingerprint,
+                run_nonresumable_paid_call,
+            )
+
+            stable_request = request_fingerprint(
+                "stability-foley",
+                data,
+                os.path.abspath(output_path),
+            )
+            try:
+                run_nonresumable_paid_call(
+                    call=_request_and_publish_foley,
+                    attempt_id=paid_attempt_id(
+                        "stability-foley",
+                        video_id,
+                        scope_id,
+                        os.path.abspath(output_path),
+                    ),
+                    provider="stability",
+                    engine="STABILITY_FOLEY",
+                    operation="scene_foley",
+                    estimated_cost_usd=API_COST_USD["STABILITY_FOLEY"],
+                    request_fingerprint_value=stable_request,
+                    cost_tracker=cost_tracker,
+                    shot_id=scope_id,
+                    video_id=video_id,
+                )
+                durable_cost_recorded = True
+            except PaidCallUnbilled:
+                return None
+            except (PaidCallBudgetBlocked, PaidCallDeferred):
+                print("   [FOLEY] paid outcome requires recovery; automatic replay blocked")
+                return None
         print(f"   ✅ Stable Audio Foley saved as: {output_path}")
         # Best-effort cost tracking — M-B2 closure (cycle-16). STABILITY_FOLEY
         # was in API_COST_USD ($0.03) since cycle-15 v0.9.6 but had no
@@ -197,12 +247,17 @@ def generate_stability_foley(
         # Mirrors Cartesia pattern at audio/dialogue.py:419-427.
         # T5: use caller-supplied tracker when provided so spend accumulates on
         # the pipeline's budget-aware tracker (cross-process persistence deferred).
-        try:
-            from cost_tracker import CostTracker
-            _tracker = cost_tracker or CostTracker()
-            _tracker.record_api_call("STABILITY_FOLEY", operation="scene_foley")
-        except Exception:
-            print(f"   [FOLEY] cost record skipped (non-critical)")
+        if not durable_cost_recorded:
+            try:
+                with cost_tracker_scope(cost_tracker) as tracker:
+                    tracker.record_api_call(
+                        "STABILITY_FOLEY",
+                        operation="scene_foley",
+                        shot_id=scope_id,
+                        video_id=video_id,
+                    )
+            except Exception:
+                print(f"   [FOLEY] cost record skipped (non-critical)")
         return output_path
 
     except Exception as e:

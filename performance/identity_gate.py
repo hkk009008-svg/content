@@ -56,6 +56,10 @@ def _arcface_score(
     frame_path: str,
     anchor_path: str,
     threshold: float = 0.0,
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    shot_id: str = "",
 ) -> Optional[float]:
     """Score a single frame against the anchor. Wrapper around IdentityValidator.
 
@@ -68,7 +72,14 @@ def _arcface_score(
     if v is None:
         return None
     try:
-        result = v.validate_image(frame_path, anchor_path, threshold=threshold)
+        result = v.validate_image(
+            frame_path,
+            anchor_path,
+            threshold=threshold,
+            cost_tracker=cost_tracker,
+            video_id=video_id,
+            shot_id=shot_id,
+        )
         if result.overall_score is None:        # skipped: no comparable face
             return None
         return float(result.overall_score)
@@ -96,6 +107,10 @@ def validate_performance_take(
     video_path: str,
     face_anchor: str,
     floor: float = DEFAULT_PERFORMANCE_FLOOR,
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    shot_id: str = "",
 ) -> Optional[float]:
     """Score a performance take against the character face anchor.
 
@@ -116,4 +131,11 @@ def validate_performance_take(
         # flag reflects whether this take met the operator-set bar. The
         # `floor` param was previously documented-but-ignored; now it drives
         # success_rate honestly. (See ARCHITECTURE.md §16 #1.1.)
-        return _arcface_score(frame_png, face_anchor, threshold=floor)
+        return _arcface_score(
+            frame_png,
+            face_anchor,
+            threshold=floor,
+            cost_tracker=cost_tracker,
+            video_id=video_id,
+            shot_id=shot_id,
+        )

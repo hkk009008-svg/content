@@ -15,10 +15,11 @@ import audio.music as music
 
 
 class _FakeResp:
-    def __init__(self, payload=None, ok=True, content=b""):
+    def __init__(self, payload=None, ok=True, content=b"", status_code=200):
         self._payload = payload
         self.ok = ok
         self.content = content
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
@@ -172,6 +173,88 @@ def test_suno_rejects_invalid_download(monkeypatch, tmp_path):
     output = tmp_path / "bad.mp3"
     assert music.generate_suno_v5("epic", str(output)) is False
     assert not output.exists()
+
+
+def test_suno_restart_resumes_task_id_and_never_reposts(monkeypatch, tmp_path):
+    from cost_tracker import CostTracker
+
+    _patch_env(monkeypatch)
+    output = str(tmp_path / "durable.mp3")
+    db = str(tmp_path / "suno.db")
+    post_calls = []
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *a, **k: post_calls.append((a, k))
+        or _FakeResp({"code": 200, "data": {"taskId": "durable-task"}}),
+    )
+
+    first = CostTracker(db_path=db, budget_usd=2.0)
+    recovery = {}
+    try:
+        assert music.generate_suno_v5(
+            "epic",
+            output,
+            poll_timeout_s=0,
+            cost_tracker=first,
+            _recovery_out=recovery,
+            video_id="project-suno",
+        ) is False
+        assert recovery["paid_deferred"] is True
+        pending = first.get_latest_paid_attempt(
+            video_id="project-suno",
+            shot_id="",
+            engine="SUNO_V5",
+            operation="bgm",
+        )
+        assert pending["provider_job_id"] == "durable-task"
+        assert pending["state"] == "accepted_unknown"
+    finally:
+        first.close()
+
+    monkeypatch.setattr(
+        "requests.post",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("restart must poll durable taskId, not POST")
+        ),
+    )
+    monkeypatch.setattr(
+        "requests.get",
+        lambda *a, **k: _FakeResp(
+            {
+                "data": {
+                    "status": "SUCCESS",
+                    "response": {"sunoData": [{"audioUrl": "https://cdn/resume.mp3"}]},
+                }
+            }
+        ),
+    )
+
+    def _download(_url, destination, **_kwargs):
+        from pathlib import Path
+        Path(destination).write_bytes(b"ID3-resumed")
+        return destination
+
+    monkeypatch.setattr(music, "safe_download", _download)
+    resumed = CostTracker(db_path=db, budget_usd=2.0)
+    try:
+        assert music.generate_suno_v5(
+            "epic",
+            output,
+            poll_timeout_s=1,
+            cost_tracker=resumed,
+            video_id="project-suno",
+        ) is True
+        assert len(post_calls) == 1
+        settled = resumed.get_latest_paid_attempt(
+            video_id="project-suno",
+            shot_id="",
+            engine="SUNO_V5",
+            operation="bgm",
+        )
+        assert settled["state"] == "succeeded"
+        assert resumed.get_video_cost("project-suno")["total_usd"] == 0.5
+    finally:
+        resumed.close()
 
 
 # --- generate_bgm router threads cost_tracker + AUTO-degrades (capacity audit wf_6be2ee18-f4b) ---

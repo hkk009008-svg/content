@@ -87,7 +87,7 @@ EMBED_MODEL = _resolve_embed_model()
 
 # Type alias for the vision-LLM fallback hook.
 # Returns {"confidence": float, "issues": list[str], ...}.
-VisionValidator = Callable[[str, str], Dict]
+VisionValidator = Callable[..., Dict]
 
 # ---------------------------------------------------------------------------
 # Figure-read constants and helpers (detection filtering)
@@ -145,8 +145,8 @@ def _cv2_single_thread():
     extract_faces — both align) route through this guard.
 
     NOTE: cv2.setNumThreads is process-global. quality_max.py used to score
-    candidates in a ThreadPoolExecutor (max_quality_parallel_workers, up to 4
-    workers) before that module was retired WS1 Task 4; the underlying
+    candidates in a ThreadPoolExecutor before that module was retired in WS1
+    Task 4; the underlying
     determinism fix stays valid regardless (any future concurrent caller has
     the same property): if two threads enter here concurrently, EACH call
     still runs single-threaded (determinism holds per-call), but the restore
@@ -488,6 +488,9 @@ class IdentityValidator:
         character_name: str = "",
         shot_type: str = "medium",
         threshold: float = None,
+        cost_tracker=None,
+        video_id: str = "",
+        shot_id: str = "",
     ) -> IdentityValidationResult:
         """
         Validate identity in a single generated IMAGE against a reference.
@@ -503,6 +506,9 @@ class IdentityValidator:
             return self._vision_llm_validate_image(
                 image_path, reference_path, character_id, character_name,
                 shot_type, threshold if threshold is not None else get_threshold_for_shot(shot_type),
+                cost_tracker=cost_tracker,
+                video_id=video_id,
+                shot_id=shot_id,
             )
 
         if threshold is None:
@@ -835,6 +841,9 @@ class IdentityValidator:
         mode: str = "standard",
         attempt: int = 0,
         max_attempts: int = 3,
+        cost_tracker=None,
+        video_id: str = "",
+        shot_id: str = "",
     ) -> IdentityValidationResult:
         """
         Validate character identity in a generated VIDEO with adaptive sampling.
@@ -857,6 +866,9 @@ class IdentityValidator:
         if not DEEPFACE_AVAILABLE:
             return self._vision_llm_validate_video(
                 video_path, character_configs, shot_type, threshold,
+                cost_tracker=cost_tracker,
+                video_id=video_id,
+                shot_id=shot_id,
             )
 
         # Pre-compute reference embeddings
@@ -1495,6 +1507,10 @@ class IdentityValidator:
         character_name: str,
         shot_type: str,
         threshold: float,
+        *,
+        cost_tracker=None,
+        video_id: str = "",
+        shot_id: str = "",
     ) -> IdentityValidationResult:
         """
         Vision-LLM identity validation when DeepFace is unavailable.
@@ -1507,7 +1523,13 @@ class IdentityValidator:
                 "vision_fallback not configured. Construct IdentityValidator "
                 "with vision_fallback=..., or use identity.make_validator()."
             )
-        result = self._vision_fallback(reference_path, image_path)
+        result = self._vision_fallback(
+            reference_path,
+            image_path,
+            cost_tracker=cost_tracker,
+            video_id=video_id,
+            shot_id=shot_id,
+        )
 
         # Map skip/fail markers from validate_identity_vision to the same
         # policy as the DeepFace path (_skipped_result / _missing_output_result).
@@ -1588,6 +1610,10 @@ class IdentityValidator:
         character_configs: list,
         shot_type: str,
         threshold: float,
+        *,
+        cost_tracker=None,
+        video_id: str = "",
+        shot_id: str = "",
     ) -> IdentityValidationResult:
         """
         Vision-LLM video identity validation when DeepFace is unavailable.
@@ -1643,7 +1669,13 @@ class IdentityValidator:
                     "vision_fallback not configured. Construct IdentityValidator "
                     "with vision_fallback=..., or use identity.make_validator()."
                 )
-            result = self._vision_fallback(ref_img, mid_frame)
+            result = self._vision_fallback(
+                ref_img,
+                mid_frame,
+                cost_tracker=cost_tracker,
+                video_id=video_id,
+                shot_id=shot_id,
+            )
             if result.get("error"):
                 failure_result = self._identity_unverified_result(
                     shot_type=shot_type,

@@ -4,13 +4,19 @@ Dashboard API with SSE streaming for real-time generation progress.
 Serves the React frontend and exposes all project/character/location/scene endpoints.
 """
 
+import atexit
+import hashlib
 import logging
 import math
 import mimetypes
 import os
+import re
+import shutil
+import tempfile
 import warnings
 from collections import Counter, deque
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import wraps
 
@@ -41,6 +47,7 @@ import queue
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response, send_file
 from flask_cors import CORS
+from filelock import FileLock, Timeout as FileLockTimeout
 from werkzeug.utils import secure_filename
 from project_manager import (
     MutationResult, ProjectLockError, create_project, load_project, delete_project,
@@ -64,6 +71,7 @@ from cinema_pipeline import CinemaPipeline
 from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported, DEFAULT_ASPECT_RATIO
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
+from cinema.trace_store import trace_context
 from domain.provider_catalog import CATALOG, Modality, RuntimeSnapshot
 from domain.video_engine_policy import (
     VideoPolicyReason,
@@ -75,6 +83,17 @@ from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
 from config.settings import settings as env_settings
 from prep import lora_policy
+from paid_provider import PaidCallBudgetBlocked, PaidCallDeferred, PaidCallUnbilled
+from cinema.artifact_versions import ArtifactVersionError
+from pipeline_jobs import (
+    JobExecutionContext,
+    PipelineJob,
+    PipelineJobDispatcher,
+    PipelineJobStore,
+    safe_error_summary,
+)
+from web_observability import observability_api
+from web_artifacts import artifact_api
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # CORS allowlist comes from settings.web_cors_origins. Default is
 # localhost-only ("http://localhost:8080" + "http://localhost:5173" for
@@ -82,6 +101,8 @@ app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # set WEB_CORS_ORIGINS=* in .env. Bound by env to support LAN/multi-device
 # use cases via WEB_CORS_ORIGINS=http://localhost:8080,http://<lan-ip>:8080.
 CORS(app, origins=list(env_settings.web_cors_origins))
+app.register_blueprint(observability_api)
+app.register_blueprint(artifact_api)
 
 # ---------------------------------------------------------------------------
 # Broadcast-safe SSE event fan-out with replay (Slice 11a)
@@ -253,7 +274,7 @@ class _ProjectEventBus:
         once (only the first call has any effect).
 
         Delivery is non-blocking (FIX-SSE), exactly like publish() -- the
-        /generate daemon's finally block calls close() from its own
+        durable queue worker's finally block calls close() from its own
         thread, and a subscriber whose inbox is already full must never
         hang that thread waiting for room that will never come.
         """
@@ -380,15 +401,42 @@ _project_admin_in_flight: set[str] = set()
 # shared PipelineCore while an endpoint is still using it, and serializes
 # otherwise-duplicative direct paid operations. Guarded by _pipelines_lock.
 _project_stage_in_flight: set[str] = set()
+# A generation request must establish project existence and its durable queue
+# row as one same-process administrative boundary.  Without this short-lived
+# reservation, deletion can win between the read and enqueue and leave a job
+# pointing at a project that no longer exists.  Queue workers deliberately do
+# not treat this as a run-time lease: once the row is visible they may claim it.
+_project_queue_accept_in_flight: set[str] = set()
+# Duplicate clicks wait on the first short admission instead of manufacturing
+# a second job or returning a misleading failure. Events are removed as soon
+# as the durable row (or a terminal admission error) is known.
+_project_queue_accept_events: dict[str, threading.Event] = {}
 
 # Guards _running_pipelines, _progress_queues, and both project reservation
 # sets. The construct-window
 # sentinel (_PIPELINE_PENDING) lets us reserve a slot atomically while
 # the heavy CinemaPipeline constructor runs WITHOUT holding the lock.
-# Mirrors the _cores_lock / _lora_training_lock pattern (Session 5 fix
-# and LoRA training). Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md
+# Mirrors the _cores_lock construct-window pattern (Session 5 fix).
+# Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md
 _pipelines_lock = threading.Lock()
 _PIPELINE_PENDING = object()  # sentinel — readers must skip this
+
+# Full-project generation is accepted into this durable SQLite queue before a
+# worker touches provider state.  Connections are method-scoped/closed by the
+# store; the dispatcher is lazy-started on the first accepted request and owns
+# a fixed-size worker pool (never one thread per HTTP request).
+_pipeline_job_store = PipelineJobStore()
+_pipeline_job_dispatcher: PipelineJobDispatcher | None = None
+_pipeline_dispatcher_lock = threading.Lock()
+
+# Every project mutation/direct-stage route and the generation admission
+# boundary share this file lock.  The queue itself is cross-process SQLite;
+# process-local sets alone cannot stop worker A deleting a project while
+# worker B admits it.  Reusing one FileLock instance per canonical path keeps
+# same-thread nested test/route probes re-entrant while independent threads and
+# processes still contend on the filesystem lock.
+_project_operation_locks: dict[str, FileLock] = {}
+_project_operation_locks_lock = threading.Lock()
 
 # Review-gate stages where the pipeline worker thread is BLOCKED at
 # lifecycle.wait_for_gate (cinema/lifecycle.py:172-188 polling Event.wait
@@ -557,13 +605,35 @@ def _evict_cached_project_core(pid: str) -> None:
         )
 
 
+def _close_all_cached_cores() -> None:
+    """Close every controller-owned SQLite connection during normal shutdown."""
+    with _cores_lock:
+        cached = list(_running_cores.items())
+        _running_cores.clear()
+    for pid, core in cached:
+        try:
+            core.cost_tracker.close()
+        except Exception:
+            logger.warning(
+                "Failed to close cached project cost tracker during shutdown",
+                extra={"pid": pid},
+                exc_info=True,
+            )
+
+
+atexit.register(_close_all_cached_cores)
+
+
 def _reserve_project_admin(pid: str) -> bool:
     """Atomically exclude core users and another admin mutation for ``pid``."""
+    queue_job = _pipeline_job_store.project_job(pid, active_only=True)
     with _pipelines_lock:
         if (
             pid in _running_pipelines
             or pid in _project_admin_in_flight
             or pid in _project_stage_in_flight
+            or pid in _project_queue_accept_in_flight
+            or queue_job is not None
         ):
             return False
         _project_admin_in_flight.add(pid)
@@ -582,11 +652,22 @@ def _reserve_project_stage(pid: str) -> bool:
     construction sentinel may not: the object/core pair is not available yet.
     """
 
+    queue_job = _pipeline_job_store.project_job(pid, active_only=True)
     with _pipelines_lock:
+        local_pipeline = _running_pipelines.get(pid)
+        queue_owned_elsewhere_or_waiting = (
+            queue_job is not None
+            and (
+                queue_job.state == "queued"
+                or local_pipeline is None
+            )
+        )
         if (
             pid in _project_admin_in_flight
             or pid in _project_stage_in_flight
-            or _running_pipelines.get(pid) is _PIPELINE_PENDING
+            or pid in _project_queue_accept_in_flight
+            or local_pipeline is _PIPELINE_PENDING
+            or queue_owned_elsewhere_or_waiting
         ):
             return False
         _project_stage_in_flight.add(pid)
@@ -618,7 +699,7 @@ def _get_running_pipeline(pid: str):
 def _ensure_progress_queue(pid: str) -> _ProjectEventBus:
     """Return pid's event bus, creating one if absent OR if the existing
     entry was already closed by a finished run. The closed-bus branch is
-    defensive: under the normal lock discipline (see run_pipeline's
+    defensive: under the normal lock discipline (see _execute_pipeline_job's
     finally block below) a closed bus is popped from _progress_queues
     before close() runs, so it should not be reachable in practice -- but
     a stale/closed bus must never be silently reused for a fresh run's
@@ -688,6 +769,8 @@ def _project_busy_response(pid: str):
     with _pipelines_lock:
         stage_busy = pid in _project_stage_in_flight
         admin_busy = pid in _project_admin_in_flight
+        queue_accept_busy = pid in _project_queue_accept_in_flight
+    queued_job = _pipeline_job_store.project_job(pid, active_only=True)
     if stage_busy:
         detail = (
             f"Project '{pid}' is busy with another direct stage operation. "
@@ -695,6 +778,10 @@ def _project_busy_response(pid: str):
         )
     elif admin_busy:
         detail = f"Project '{pid}' is being updated. Retry shortly."
+    elif queue_accept_busy:
+        detail = f"Project '{pid}' is being admitted to the generation queue. Retry shortly."
+    elif queued_job is not None and queued_job.state == "queued":
+        detail = f"Project '{pid}' already has a queued generation run."
     else:
         detail = (
             f"Project '{pid}' is busy with an active generation run. "
@@ -707,11 +794,14 @@ def _project_busy_response(pid: str):
 
 
 def _reject_if_project_busy(pid: str):
+    queued_job = _pipeline_job_store.project_job(pid, active_only=True)
     with _pipelines_lock:
         busy = (
             pid in _running_pipelines
             or pid in _project_admin_in_flight
             or pid in _project_stage_in_flight
+            or pid in _project_queue_accept_in_flight
+            or queued_job is not None
         )
     if busy:
         return _project_busy_response(pid)
@@ -825,6 +915,9 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
       - paused (real pipeline object, paused): running=True; "cancel"
         and "resume" are legal.
     """
+    queue_job = _pipeline_job_store.project_job(pid, active_only=True)
+    if queue_job is not None and queue_job.state == "queued":
+        return True, ["cancel"]
     if (
         pid not in _running_pipelines
         and (
@@ -834,6 +927,12 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
     ):
         return False, []
     if pid not in _running_pipelines:
+        # A running lease owned by another process (or the brief local
+        # claim-to-construction window) is still real work.  Only durable
+        # cancellation is universally legal; pause/resume require the
+        # process-local CinemaPipeline instance.
+        if queue_job is not None and queue_job.state == "running":
+            return True, ["cancel"]
         actions = ["start"]
         if checkpoint_info(pid).get("resumable"):
             actions.append("resume_checkpoint")
@@ -857,10 +956,38 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
 
 
 def _project_lock_guard(fn):
+    def _operation_lock(pid: str) -> FileLock | None:
+        if not is_safe_project_id(pid):
+            return None
+        project_root = os.path.dirname(os.path.abspath(get_project_dir(pid)))
+        os.makedirs(project_root, exist_ok=True)
+        path = os.path.join(project_root, f".{pid}.operation.lock")
+        with _project_operation_locks_lock:
+            lock = _project_operation_locks.get(path)
+            if lock is None:
+                lock = FileLock(
+                    path,
+                    timeout=HTTP_PROJECT_TIMEOUT,
+                    mode=0o600,
+                    thread_local=True,
+                )
+                _project_operation_locks[path] = lock
+            return lock
+
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        pid = kwargs.get("pid")
+        if not isinstance(pid, str) and args:
+            pid = args[0]
         try:
-            return fn(*args, **kwargs)
+            lock = _operation_lock(pid) if isinstance(pid, str) else None
+            if lock is None:
+                return fn(*args, **kwargs)
+            try:
+                with lock:
+                    return fn(*args, **kwargs)
+            except FileLockTimeout as exc:
+                raise ProjectLockError(pid, HTTP_PROJECT_TIMEOUT) from exc
         except ProjectLockError as exc:
             return _project_locked_response(exc)
 
@@ -1147,12 +1274,6 @@ def get_config():
         "lip_sync_modes": ["auto", "overlay", "generation", "skip"],
         "dialogue_voice_modes": ["overlay", "native"],
         "api_engine_defaults": _API_ENGINE_DEFAULTS,
-        # V11: dropdown options for new settings
-        "cost_optimization_levels": [
-            {"value": "quality_first", "label": "Quality First"},
-            {"value": "balanced", "label": "Balanced"},
-            {"value": "budget_conscious", "label": "Budget Conscious"},
-        ],
         "creative_llm_options": [
             {"value": "auto", "label": "Auto (Router decides)"},
             {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
@@ -1906,50 +2027,932 @@ def api_delete_project(pid):
 # Characters
 # ---------------------------------------------------------------------------
 
+_PENDING_CHARACTER_CREATION_KEY = "pending_character_creation"
+_CHARACTER_CREATION_RECONCILIATIONS_KEY = "character_creation_reconciliations"
+_PENDING_CHARACTER_STATUSES = {
+    "submitting",
+    "retryable",
+    "reconciliation_required",
+}
+_CHARACTER_RECONCILIATION_CONFIRMATION = "reconciled_no_resumable_paid_work"
+_CHARACTER_NAME_MAX_CHARS = 200
+_CHARACTER_DESCRIPTION_MAX_CHARS = 10_000
+_CHARACTER_VOICE_ID_MAX_CHARS = 200
+
+
+def _character_form_metadata_or_error() -> tuple[tuple[str, str, str] | None, str | None]:
+    values = (
+        ("name", request.form.get("name", "Unnamed Character"), _CHARACTER_NAME_MAX_CHARS),
+        ("description", request.form.get("description", ""), _CHARACTER_DESCRIPTION_MAX_CHARS),
+        ("voice_id", request.form.get("voice_id", ""), _CHARACTER_VOICE_ID_MAX_CHARS),
+    )
+    for field, value, limit in values:
+        if not isinstance(value, str) or len(value) > limit or "\x00" in value:
+            return None, f"{field} must be at most {limit} characters and contain no NUL bytes"
+    return (values[0][1], values[1][1], values[2][1]), None
+
+
+def _bounded_character_recovery_text(value, limit: int) -> str:
+    """Return one bounded, printable line for the public recovery contract."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:limit]
+
+
+def _public_pending_character_creation(value) -> dict | None:
+    """Project-safe projection: deliberately excludes paths, files and inputs."""
+    if not isinstance(value, dict):
+        return None
+    request_id = value.get("creation_request_id")
+    status = value.get("status")
+    if (
+        not isinstance(request_id, str)
+        or not re.fullmatch(r"[0-9a-f]{32}", request_id)
+        or status not in _PENDING_CHARACTER_STATUSES
+    ):
+        return None
+    return {
+        "creation_request_id": request_id,
+        "name": _bounded_character_recovery_text(value.get("name"), 200)
+        or "Unnamed Character",
+        "status": status,
+        "retryable": value.get("retryable") is True,
+        "message": _bounded_character_recovery_text(value.get("message"), 500),
+        "provider_job_id": (
+            _bounded_character_recovery_text(value.get("provider_job_id"), 200)
+            or None
+        ),
+        "attempt_state": (
+            _bounded_character_recovery_text(value.get("attempt_state"), 64)
+            or None
+        ),
+        "created_at": (
+            _bounded_character_recovery_text(value.get("created_at"), 64)
+            or None
+        ),
+        "updated_at": (
+            _bounded_character_recovery_text(value.get("updated_at"), 64)
+            or None
+        ),
+    }
+
+
+def _character_recovery_dir(pid: str, creation_request_id: str) -> str:
+    return os.path.join(
+        get_project_dir(pid), "temp_uploads", creation_request_id
+    )
+
+
+def _character_recovery_sidecar_path(pid: str, creation_request_id: str) -> str:
+    return os.path.join(
+        _character_recovery_dir(pid, creation_request_id),
+        ".creation-request.json",
+    )
+
+
+def _cleanup_character_recovery_dir(pid: str, creation_request_id: str) -> None:
+    """Remove one exact request's private staging after its fence is cleared."""
+    if not re.fullmatch(r"[0-9a-f]{32}", creation_request_id):
+        raise ValueError("Invalid character creation request id")
+    temp_root = os.path.realpath(os.path.join(get_project_dir(pid), "temp_uploads"))
+    target = os.path.realpath(
+        _character_recovery_dir(pid, creation_request_id)
+    )
+    expected = os.path.join(temp_root, creation_request_id)
+    if target != expected or os.path.commonpath([temp_root, target]) != temp_root:
+        raise ValueError("Unsafe character recovery cleanup target")
+    if os.path.isdir(target):
+        shutil.rmtree(target)
+
+
+def _write_character_recovery_sidecar(
+    pid: str,
+    creation_request_id: str,
+    payload: dict,
+) -> None:
+    """Atomically persist private retry inputs before entering paid dispatch."""
+    recovery_dir = _character_recovery_dir(pid, creation_request_id)
+    os.makedirs(recovery_dir, exist_ok=True)
+    target = _character_recovery_sidecar_path(pid, creation_request_id)
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".creation-request-", suffix=".tmp", dir=recovery_dir
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, target)
+    except BaseException:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
+
+def _load_character_recovery_sidecar(
+    pid: str,
+    creation_request_id: str,
+) -> dict | None:
+    try:
+        with open(
+            _character_recovery_sidecar_path(pid, creation_request_id),
+            "r",
+            encoding="utf-8",
+        ) as handle:
+            value = json.load(handle)
+    except (FileNotFoundError, OSError, ValueError, TypeError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    if value.get("creation_request_id") != creation_request_id:
+        return None
+    return value
+
+
+def _hash_file(path: str) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _hash_uploaded_file(upload) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    stream = upload.stream
+    try:
+        position = stream.tell()
+    except (AttributeError, OSError):
+        position = 0
+    while chunk := stream.read(1024 * 1024):
+        digest.update(chunk)
+        size += len(chunk)
+    try:
+        stream.seek(position)
+    except (AttributeError, OSError):
+        pass
+    return digest.hexdigest(), size
+
+
+def _stage_character_recovery_uploads(
+    pid: str,
+    creation_request_id: str,
+    images: list,
+) -> tuple[list[str], list[dict]]:
+    project_dir = os.path.realpath(get_project_dir(pid))
+    recovery_dir = _character_recovery_dir(pid, creation_request_id)
+    os.makedirs(recovery_dir, exist_ok=True)
+    paths: list[str] = []
+    records: list[dict] = []
+    for index, image in enumerate(images):
+        if not image.filename:
+            continue
+        filename = secure_filename(image.filename)
+        if not filename:
+            continue
+        path = os.path.join(recovery_dir, f"{index:03d}-{filename}")
+        image.save(path)
+        sha256, byte_size = _hash_file(path)
+        relative = os.path.relpath(path, project_dir).replace(os.sep, "/")
+        paths.append(path)
+        records.append({
+            "filename": filename,
+            "relative_path": relative,
+            "sha256": sha256,
+            "byte_size": byte_size,
+        })
+    return paths, records
+
+
+def _character_recovery_input_fingerprint(
+    name: str,
+    description: str,
+    voice_id: str,
+    upload_records: list[dict],
+) -> str:
+    safe_uploads = [
+        {
+            "filename": item.get("filename"),
+            "sha256": item.get("sha256"),
+            "byte_size": item.get("byte_size"),
+        }
+        for item in upload_records
+    ]
+    encoded = json.dumps(
+        {
+            "name": name,
+            "description": description,
+            "voice_id": voice_id,
+            "uploads": safe_uploads,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resolve_character_recovery_uploads(
+    pid: str,
+    creation_request_id: str,
+    upload_records,
+) -> list[str] | None:
+    if not isinstance(upload_records, list):
+        return None
+    recovery_root = os.path.realpath(
+        _character_recovery_dir(pid, creation_request_id)
+    )
+    project_root = os.path.realpath(get_project_dir(pid))
+    expected_prefix = f"temp_uploads/{creation_request_id}/"
+    paths: list[str] = []
+    for item in upload_records:
+        if not isinstance(item, dict):
+            return None
+        relative = item.get("relative_path")
+        expected_hash = item.get("sha256")
+        expected_size = item.get("byte_size")
+        if (
+            not isinstance(relative, str)
+            or not relative.startswith(expected_prefix)
+            or os.path.isabs(relative)
+            or not isinstance(expected_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", expected_hash)
+            or isinstance(expected_size, bool)
+            or not isinstance(expected_size, int)
+            or expected_size < 0
+        ):
+            return None
+        resolved = os.path.realpath(os.path.join(project_root, relative))
+        try:
+            if os.path.commonpath([recovery_root, resolved]) != recovery_root:
+                return None
+        except ValueError:
+            return None
+        if not os.path.isfile(resolved):
+            return None
+        actual_hash, actual_size = _hash_file(resolved)
+        if actual_hash != expected_hash or actual_size != expected_size:
+            return None
+        paths.append(resolved)
+    return paths
+
+
+def _resume_uploads_match(upload_records, images: list) -> bool:
+    submitted = [image for image in images if image.filename]
+    if len(submitted) != len(upload_records):
+        return False
+    for stored, image in zip(upload_records, submitted):
+        if not isinstance(stored, dict):
+            return False
+        filename = secure_filename(image.filename or "")
+        sha256, byte_size = _hash_uploaded_file(image)
+        if (
+            filename != stored.get("filename")
+            or sha256 != stored.get("sha256")
+            or byte_size != stored.get("byte_size")
+        ):
+            return False
+    return True
+
+
+def _pending_character_payload(
+    creation_request_id: str,
+    *,
+    name: str,
+    input_fingerprint: str,
+    status: str = "submitting",
+    retryable: bool = True,
+    message: str = "Character creation is in progress and can be resumed safely.",
+    provider_job_id=None,
+    attempt_state=None,
+    created_at: str | None = None,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "creation_request_id": creation_request_id,
+        "name": _bounded_character_recovery_text(name, 200) or "Unnamed Character",
+        "status": status,
+        "retryable": retryable,
+        "message": _bounded_character_recovery_text(message, 500),
+        "provider_job_id": (
+            _bounded_character_recovery_text(provider_job_id, 200) or None
+        ),
+        "attempt_state": (
+            _bounded_character_recovery_text(attempt_state, 64) or None
+        ),
+        "created_at": created_at or now,
+        "updated_at": now,
+        # A one-way identity fence is safe to store in project.json and lets
+        # a second worker reject changed inputs before any provider dispatch.
+        "input_fingerprint": input_fingerprint,
+    }
+
+
+def _claim_pending_character_creation(pid: str, candidate: dict) -> tuple[dict | None, str]:
+    disposition = "created"
+
+    def _mutate(latest: dict):
+        nonlocal disposition
+        existing = latest.get(_PENDING_CHARACTER_CREATION_KEY)
+        if existing is not None:
+            if not isinstance(existing, dict):
+                disposition = "malformed"
+                return MutationResult(None, save=False)
+            if existing.get("creation_request_id") != candidate["creation_request_id"]:
+                disposition = "conflict"
+                return MutationResult(existing, save=False)
+            if existing.get("input_fingerprint") != candidate["input_fingerprint"]:
+                disposition = "input_mismatch"
+                return MutationResult(existing, save=False)
+            disposition = "existing"
+            return MutationResult(existing, save=False)
+        latest[_PENDING_CHARACTER_CREATION_KEY] = candidate
+        return candidate
+
+    result = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+    return result, disposition
+
+
+def _update_pending_character_creation(
+    pid: str,
+    creation_request_id: str,
+    *,
+    status: str,
+    retryable: bool,
+    message: str,
+    provider_job_id=None,
+    attempt_state=None,
+) -> dict | None:
+    def _mutate(latest: dict):
+        existing = latest.get(_PENDING_CHARACTER_CREATION_KEY)
+        if (
+            not isinstance(existing, dict)
+            or existing.get("creation_request_id") != creation_request_id
+        ):
+            return MutationResult(None, save=False)
+        updated = _pending_character_payload(
+            creation_request_id,
+            name=str(existing.get("name") or "Unnamed Character"),
+            input_fingerprint=str(existing.get("input_fingerprint") or ""),
+            status=status,
+            retryable=retryable,
+            message=message,
+            provider_job_id=provider_job_id,
+            attempt_state=attempt_state,
+            created_at=str(existing.get("created_at") or "") or None,
+        )
+        latest[_PENDING_CHARACTER_CREATION_KEY] = updated
+        return updated
+
+    return mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+
+
+def _clear_pending_character_creation(
+    pid: str,
+    creation_request_id: str,
+    *,
+    reconciled: bool = False,
+) -> bool:
+    def _mutate(latest: dict):
+        existing = latest.get(_PENDING_CHARACTER_CREATION_KEY)
+        if (
+            not isinstance(existing, dict)
+            or existing.get("creation_request_id") != creation_request_id
+        ):
+            return MutationResult(False, save=False)
+        if reconciled:
+            history = latest.setdefault(
+                _CHARACTER_CREATION_RECONCILIATIONS_KEY, []
+            )
+            if not isinstance(history, list):
+                history = []
+                latest[_CHARACTER_CREATION_RECONCILIATIONS_KEY] = history
+            history.append({
+                "creation_request_id": creation_request_id,
+                "name": _bounded_character_recovery_text(existing.get("name"), 200),
+                "previous_status": (
+                    _bounded_character_recovery_text(existing.get("status"), 64)
+                    or "unknown"
+                ),
+                "provider_job_id": (
+                    _bounded_character_recovery_text(
+                        existing.get("provider_job_id"), 200
+                    ) or None
+                ),
+                "reconciled_at": datetime.now(timezone.utc).isoformat(),
+                "source": "operator_ui",
+            })
+            del history[:-50]
+        latest.pop(_PENDING_CHARACTER_CREATION_KEY, None)
+        return True
+
+    return mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT) is True
+
+
+def _validated_character_resume_inputs(
+    pid: str,
+    creation_request_id: str,
+    pending: dict,
+    images: list,
+) -> tuple[tuple[str, str, str, list[str]] | None, str | None]:
+    internal = _load_character_recovery_sidecar(pid, creation_request_id)
+    if internal is None:
+        return None, "missing"
+    name = internal.get("name")
+    description = internal.get("description")
+    voice_id = internal.get("voice_id")
+    upload_records = internal.get("uploads")
+    if not all(isinstance(value, str) for value in (name, description, voice_id)):
+        return None, "corrupt"
+    if not isinstance(upload_records, list):
+        return None, "corrupt"
+    fingerprint = _character_recovery_input_fingerprint(
+        name, description, voice_id, upload_records
+    )
+    if (
+        internal.get("input_fingerprint") != fingerprint
+        or pending.get("input_fingerprint") != fingerprint
+    ):
+        return None, "corrupt"
+    for key, stored in (
+        ("name", name),
+        ("description", description),
+        ("voice_id", voice_id),
+    ):
+        if key in request.form and request.form.get(key) != stored:
+            return None, "metadata_mismatch"
+    if images and not _resume_uploads_match(upload_records, images):
+        return None, "uploads_mismatch"
+    image_paths = _resolve_character_recovery_uploads(
+        pid, creation_request_id, upload_records
+    )
+    if image_paths is None:
+        return None, "corrupt"
+    return (name, description, voice_id, image_paths), None
+
+
+def _pending_character_conflict_response(pending, *, malformed: bool = False):
+    public = _public_pending_character_creation(pending)
+    return jsonify({
+        "error": (
+            "Character creation recovery data is malformed; new paid work is "
+            "blocked pending operator reconciliation."
+            if malformed
+            else "A recoverable character creation already owns this project. "
+            "Resume or reconcile it before starting another paid request."
+        ),
+        "code": "character_creation_recovery_required",
+        "retryable": False,
+        "pending_creation": public,
+    }), 409
+
+
+@app.route(
+    "/api/projects/<pid>/characters/pending-creation",
+    methods=["GET"],
+)
+def api_get_pending_character_creation(pid):
+    project = load_existing_project_readonly(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    raw = project.get(_PENDING_CHARACTER_CREATION_KEY)
+    if raw is None:
+        return jsonify({"pending_creation": None})
+    public = _public_pending_character_creation(raw)
+    if public is None:
+        return jsonify({
+            "error": "Character recovery state requires operator reconciliation.",
+            "code": "character_creation_recovery_malformed",
+            "retryable": False,
+        }), 500
+    return jsonify({"pending_creation": public})
+
+
+@app.route(
+    "/api/projects/<pid>/characters/pending-creation",
+    methods=["DELETE"],
+)
+@_project_lock_guard
+def api_reconcile_pending_character_creation(pid):
+    if not request.is_json or not isinstance(request.json, dict):
+        return jsonify({"error": "JSON object required"}), 400
+    creation_request_id = request.json.get("creation_request_id")
+    confirmation = request.json.get("confirmation")
+    if (
+        not isinstance(creation_request_id, str)
+        or not re.fullmatch(r"[0-9a-f]{32}", creation_request_id)
+        or confirmation != _CHARACTER_RECONCILIATION_CONFIRMATION
+    ):
+        return jsonify({
+            "error": (
+                "Exact request id and reconciliation confirmation are required."
+            )
+        }), 400
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
+    try:
+        project = load_project(pid)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        pending = project.get(_PENDING_CHARACTER_CREATION_KEY)
+        if not isinstance(pending, dict):
+            return jsonify({"error": "No pending character creation"}), 404
+        if pending.get("creation_request_id") != creation_request_id:
+            return _pending_character_conflict_response(pending)
+        request_lock = FileLock(
+            os.path.join(
+                _character_recovery_dir(pid, creation_request_id), ".resume.lock"
+            ),
+            timeout=0,
+        )
+        try:
+            request_lock.acquire()
+        except FileLockTimeout:
+            return jsonify({
+                "error": (
+                    "This character request is actively running and cannot be "
+                    "reconciled yet."
+                ),
+                "code": "character_creation_in_progress",
+                "retryable": True,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 409
+        try:
+            pending = _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="reconciliation_required",
+                retryable=False,
+                message="Operator-confirmed reconciliation is being finalized.",
+                provider_job_id=pending.get("provider_job_id"),
+                attempt_state=pending.get("attempt_state"),
+            ) or pending
+        finally:
+            request_lock.release()
+        _cleanup_character_recovery_dir(pid, creation_request_id)
+        if not _clear_pending_character_creation(
+            pid, creation_request_id, reconciled=True
+        ):
+            return jsonify({"error": "Pending character creation changed"}), 409
+        _evict_cached_project_core(pid)
+        return jsonify({"reconciled": True, "pending_creation": None})
+    finally:
+        _release_project_admin(pid)
+
 @app.route("/api/projects/<pid>/characters", methods=["POST"])
 @_project_lock_guard
 def api_add_character(pid):
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
-
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-
-    # Handle multipart form data (images + JSON)
-    name = request.form.get("name", "Unnamed Character")
-    description = request.form.get("description", "")
-    voice_id = request.form.get("voice_id", "")
-
-    # Save uploaded reference images
-    images = request.files.getlist("reference_images")
-    image_paths = []
-    temp_upload_dir = os.path.join(get_project_dir(pid), "temp_uploads")
-    os.makedirs(temp_upload_dir, exist_ok=True)
-
-    for img in images:
-        if img.filename:
-            filename = secure_filename(img.filename)
-            path = os.path.join(temp_upload_dir, filename)
-            img.save(path)
-            image_paths.append(path)
-
-    # Create character with full processing.
-    # ValueError is raised by the A3 single-face enforcement when a reference
-    # image contains 2+ faces — surface as HTTP 400 with the informative message
-    # rather than letting Flask return a generic HTTP 500.
+    if not _reserve_project_admin(pid):
+        return _project_busy_response(pid)
     try:
-        character = create_character_with_images(
-            project, name, description,
-            reference_image_paths=image_paths,
-            voice_id=voice_id,
-            commit_timeout=HTTP_PROJECT_TIMEOUT,
-        )
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        project = load_project(pid)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
 
-    return jsonify(character), 201
+        creation_request_id = request.form.get("creation_request_id", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", creation_request_id):
+            return jsonify({
+                "error": (
+                    "creation_request_id must be 32 lowercase hexadecimal "
+                    "characters"
+                )
+            }), 400
+
+        images = request.files.getlist("reference_images")
+        pending = project.get(_PENDING_CHARACTER_CREATION_KEY)
+        if pending is not None and not isinstance(pending, dict):
+            return _pending_character_conflict_response(pending, malformed=True)
+        if (
+            isinstance(pending, dict)
+            and pending.get("creation_request_id") != creation_request_id
+        ):
+            return _pending_character_conflict_response(pending)
+        if (
+            isinstance(pending, dict)
+            and pending.get("status") == "reconciliation_required"
+            and pending.get("retryable") is not True
+        ):
+            return jsonify({
+                "error": str(
+                    pending.get("message")
+                    or "This character request requires operator reconciliation."
+                ),
+                "code": "paid_work_reconciliation_required",
+                "retryable": False,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 409
+
+        if isinstance(pending, dict):
+            resume_inputs, resume_error = _validated_character_resume_inputs(
+                pid, creation_request_id, pending, images
+            )
+            if resume_error in {"metadata_mismatch", "uploads_mismatch"}:
+                return jsonify({
+                    "error": (
+                        "This creation_request_id belongs to different character "
+                        "inputs. Resume it without changing the form or files."
+                    ),
+                    "code": "character_creation_input_mismatch",
+                    "retryable": False,
+                    "pending_creation": _public_pending_character_creation(pending),
+                }), 409
+            if resume_inputs is None:
+                pending = _update_pending_character_creation(
+                    pid,
+                    creation_request_id,
+                    status="reconciliation_required",
+                    retryable=False,
+                    message=(
+                        "The staged recovery inputs could not be verified. New paid "
+                        "work is blocked until an operator reconciles this request."
+                    ),
+                ) or pending
+                return jsonify({
+                    "error": str(pending.get("message") or "Recovery data invalid"),
+                    "code": "character_creation_recovery_invalid",
+                    "retryable": False,
+                    "pending_creation": _public_pending_character_creation(pending),
+                }), 409
+            name, description, voice_id, image_paths = resume_inputs
+        else:
+            metadata, metadata_error = _character_form_metadata_or_error()
+            if metadata is None:
+                return jsonify({
+                    "error": metadata_error,
+                    "code": "invalid_character_metadata",
+                    "retryable": False,
+                }), 400
+            name, description, voice_id = metadata
+            image_paths, upload_records = _stage_character_recovery_uploads(
+                pid, creation_request_id, images
+            )
+            input_fingerprint = _character_recovery_input_fingerprint(
+                name, description, voice_id, upload_records
+            )
+            candidate = _pending_character_payload(
+                creation_request_id,
+                name=name,
+                input_fingerprint=input_fingerprint,
+            )
+            pending, disposition = _claim_pending_character_creation(pid, candidate)
+            if disposition in {"conflict", "malformed"}:
+                _cleanup_character_recovery_dir(pid, creation_request_id)
+                return _pending_character_conflict_response(
+                    pending, malformed=disposition == "malformed"
+                )
+            if disposition == "input_mismatch":
+                return jsonify({
+                    "error": (
+                        "This creation_request_id is already bound to different "
+                        "character inputs."
+                    ),
+                    "code": "character_creation_input_mismatch",
+                    "retryable": False,
+                    "pending_creation": _public_pending_character_creation(pending),
+                }), 409
+            if pending is None:
+                _cleanup_character_recovery_dir(pid, creation_request_id)
+                return jsonify({"error": "Project not found"}), 404
+            if disposition == "created":
+                try:
+                    _write_character_recovery_sidecar(
+                        pid,
+                        creation_request_id,
+                        {
+                            "schema_version": 1,
+                            "creation_request_id": creation_request_id,
+                            "name": name,
+                            "description": description,
+                            "voice_id": voice_id,
+                            "uploads": upload_records,
+                            "input_fingerprint": input_fingerprint,
+                        },
+                    )
+                except Exception:
+                    logger.exception(
+                        "could not persist character recovery inputs pid=%s", pid
+                    )
+                    _update_pending_character_creation(
+                        pid,
+                        creation_request_id,
+                        status="reconciliation_required",
+                        retryable=False,
+                        message="Recovery staging cleanup is being finalized.",
+                    )
+                    _cleanup_character_recovery_dir(pid, creation_request_id)
+                    _clear_pending_character_creation(pid, creation_request_id)
+                    return jsonify({
+                        "error": "Could not persist character recovery inputs.",
+                        "code": "character_creation_recovery_write_failed",
+                        "retryable": False,
+                    }), 500
+            else:
+                resume_inputs, resume_error = _validated_character_resume_inputs(
+                    pid, creation_request_id, pending, images
+                )
+                if resume_inputs is None:
+                    return jsonify({
+                        "error": (
+                            "This character request is already being prepared. "
+                            "Retry the same request shortly."
+                        ),
+                        "code": "character_creation_in_progress",
+                        "retryable": True,
+                        "pending_creation": _public_pending_character_creation(pending),
+                    }), 409
+                name, description, voice_id, image_paths = resume_inputs
+
+        # The request-specific file lock extends the in-process admin guard to
+        # multiple server workers. A crashed worker releases it automatically;
+        # the next same-token request then resumes against the paid ledger.
+        request_lock = FileLock(
+            os.path.join(
+                _character_recovery_dir(pid, creation_request_id), ".resume.lock"
+            ),
+            timeout=0,
+        )
+        try:
+            request_lock.acquire()
+        except FileLockTimeout:
+            return jsonify({
+                "error": "This character request is already running.",
+                "code": "character_creation_in_progress",
+                "retryable": True,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 409
+
+        recovery: dict[str, object] = {}
+        terminal_cleanup = False
+        try:
+            # The reservation was saved before this boundary. Reload the
+            # project so domain persistence starts from the authoritative row.
+            project = load_project(pid)
+            if not project:
+                return jsonify({"error": "Project not found"}), 404
+            core = _get_or_build_core(pid)
+            character = create_character_with_images(
+                project,
+                name,
+                description,
+                reference_image_paths=image_paths,
+                voice_id=voice_id,
+                commit_timeout=HTTP_PROJECT_TIMEOUT,
+                cost_tracker=core.cost_tracker,
+                creation_request_id=creation_request_id,
+                _recovery_out=recovery,
+            )
+        except PaidCallBudgetBlocked as exc:
+            _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="reconciliation_required",
+                retryable=False,
+                message="Budget refusal confirmed no paid submission; cleanup is being finalized.",
+                attempt_state=exc.snapshot.attempt.get("state"),
+            )
+            terminal_cleanup = True
+            return jsonify({
+                "error": "Project budget refused a character reference generation.",
+                "code": "paid_budget_blocked",
+                "retryable": False,
+                "attempt_state": exc.snapshot.attempt.get("state"),
+            }), 409
+        except PaidCallDeferred as exc:
+            attempt_state = str(exc.snapshot.attempt.get("state") or "")
+            provider_job_id = exc.snapshot.attempt.get("provider_job_id") or None
+            exact_resume_available = (
+                isinstance(provider_job_id, str)
+                and attempt_state
+                in {"accepted_unknown", "running", "cancel_requested", "succeeded"}
+            )
+            message = (
+                "Character reference generation has durable paid work pending; "
+                "resume this same character request."
+                if exact_resume_available
+                else "Character reference billing or submission is ambiguous; "
+                "automatic replay is blocked pending operator reconciliation."
+            )
+            pending = _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status=(
+                    "retryable"
+                    if exact_resume_available
+                    else "reconciliation_required"
+                ),
+                retryable=exact_resume_available,
+                message=message,
+                provider_job_id=provider_job_id,
+                attempt_state=attempt_state,
+            )
+            return jsonify({
+                "error": message,
+                "code": (
+                    "paid_work_pending"
+                    if exact_resume_available
+                    else "paid_work_reconciliation_required"
+                ),
+                "retryable": exact_resume_available,
+                "attempt_state": attempt_state,
+                "provider_job_id": provider_job_id,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 409
+        except PaidCallUnbilled as exc:
+            _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="reconciliation_required",
+                retryable=False,
+                message="Provider rejection was confirmed unbilled; cleanup is being finalized.",
+                attempt_state=exc.attempt.get("state"),
+            )
+            terminal_cleanup = True
+            return jsonify({
+                "error": "Character reference generation was rejected before billing.",
+                "code": "provider_rejected_unbilled",
+                "retryable": False,
+                "attempt_state": exc.attempt.get("state"),
+            }), 502
+        except ArtifactVersionError:
+            logger.exception(
+                "character artifact indexing is pending for pid=%s", pid
+            )
+            message = (
+                "Character references were generated but immutable indexing is "
+                "pending; resume this same character request."
+            )
+            pending = _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="retryable",
+                retryable=True,
+                message=message,
+            )
+            return jsonify({
+                "error": message,
+                "code": "artifact_version_pending",
+                "retryable": True,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 503
+        except ValueError as exc:
+            # Includes the A3 single-face guard and request-token reuse with
+            # different inputs. Both are caller-correctable validation errors.
+            _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="reconciliation_required",
+                retryable=False,
+                message="Validation failed before billable work; cleanup is being finalized.",
+            )
+            terminal_cleanup = True
+            return jsonify({"error": str(exc)}), 400
+        except ProjectLockError:
+            # Let the outer cross-process operation guard translate domain
+            # lock contention into the standard retryable HTTP 409. Preserve
+            # the durable request reservation so a potentially paid attempt
+            # remains resumable rather than being discarded as a generic 500.
+            raise
+        except Exception:
+            logger.exception(
+                "character creation failed with unresolved provider state pid=%s",
+                pid,
+            )
+            message = (
+                "Character creation stopped with an unknown provider outcome. "
+                "New paid work is blocked pending operator reconciliation."
+            )
+            pending = _update_pending_character_creation(
+                pid,
+                creation_request_id,
+                status="reconciliation_required",
+                retryable=False,
+                message=message,
+            )
+            return jsonify({
+                "error": message,
+                "code": "character_creation_reconciliation_required",
+                "retryable": False,
+                "pending_creation": _public_pending_character_creation(pending),
+            }), 500
+        finally:
+            request_lock.release()
+            if terminal_cleanup:
+                _cleanup_character_recovery_dir(pid, creation_request_id)
+                _clear_pending_character_creation(pid, creation_request_id)
+
+        # The cached creative services hold a project snapshot. The durable
+        # tracker has finished its writes, so evict the now-stale core and let
+        # the next operation rebuild against the newly added character.
+        _cleanup_character_recovery_dir(pid, creation_request_id)
+        _clear_pending_character_creation(pid, creation_request_id)
+        _evict_cached_project_core(pid)
+        status = 200 if recovery.get("idempotent") is True else 201
+        return jsonify(character), status
+    finally:
+        _release_project_admin(pid)
 
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["PUT"])
@@ -2097,127 +3100,12 @@ def api_remove_character(pid, cid):
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# LoRA training (per-character) — triggers async training, exposes status.
+# Dormant per-character LoRA compatibility surface.
 # ---------------------------------------------------------------------------
-# Active jobs tracked in-memory; survives only for the lifetime of the server.
-# Status sidecar on disk (<project>/loras/<char>/status.json) is the source of truth.
-# The lock guards check-and-insert into _lora_training_threads to prevent the
-# TOCTOU race where two concurrent POSTs both pass the is_alive() check before
-# either starts a thread.
-_lora_training_threads: dict[str, threading.Thread] = {}
-_lora_training_lock = threading.Lock()
-
-
 @app.route("/api/projects/<pid>/characters/<cid>/train-lora", methods=["POST"])
-@_project_lock_guard
 def api_train_lora(pid, cid):
-    """Deny dormant LoRA training before any operational dependency is read."""
+    """Compatibility tombstone; never inspect or mutate project state."""
     return jsonify(lora_policy.lora_training_dormant_error()), 409
-    # Preserved producer/registration code stays below this unconditional guard.
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-    char = next((c for c in project.get("characters", []) if c["id"] == cid), None)
-    if not char:
-        return jsonify({"error": "Character not found"}), 404
-
-    if len(char.get("reference_images", []) or []) < 15:
-        return jsonify({
-            "error": "Insufficient reference images",
-            "needed": 15,
-            "have": len(char.get("reference_images", []) or []),
-            "guidance": "25-50 varied angles + lighting recommended for FLUX LoRA training",
-        }), 400
-
-    key = f"{pid}:{cid}"
-
-    try:
-        from prep.lora_quality import train_character_lora_gated
-    except Exception as e:
-        return jsonify({"error": f"prep.lora_quality unavailable: {e}"}), 500
-
-    project_dir = get_project_dir(pid)
-    config_overrides = (request.json or {}).get("config_overrides") if request.is_json else None
-
-    def _runner():
-        try:
-            result = train_character_lora_gated(project_dir, char, config_overrides=config_overrides)
-            # Persist the quality-gate verdict so that get_lora_status surfaces
-            # rejected / quality_warning / quality_score / best_strength for
-            # polling clients — for BOTH accept and reject outcomes. On a train
-            # FAILURE (success=False) we intentionally skip this: the failure is
-            # already surfaced by status=failed + error, and there is no verdict.
-            if result.get("success"):
-                from prep.lora_training import record_lora_verdict
-                try:
-                    record_lora_verdict(
-                        project_dir,
-                        cid,
-                        quality_score=result.get("quality_score"),
-                        best_strength=result.get("best_strength"),
-                        rejected=bool(result.get("rejected")),
-                        quality_warning=bool(result.get("quality_warning")),
-                    )
-                except Exception:
-                    logger.error(
-                        "[LoRA] could not write verdict to status (pid=%s cid=%s)",
-                        pid, cid, exc_info=True,
-                    )
-            # On success, register the LoRA path only when the gated orchestrator
-            # did NOT reject the result (rejected=True means net-negative vs PuLID-only;
-            # the pipeline falls back to PuLID-only in that case).
-            if result.get("success") and result.get("lora_path") and not result.get("rejected"):
-                def _mutate(latest):
-                    # P1-3 part 12 (Variant 1 simplified): inner validate for
-                    # race protection — Project.model_validate(...) raises
-                    # ValidationError UNCONDITIONALLY on shape mismatch (race
-                    # protection requires deterministic raise; NOT gated by
-                    # CINEMA_STRICT_SCHEMA).  NOTE: this mutator runs in a
-                    # background thread; ValidationError-on-shape-mismatch will
-                    # be silently logged via the existing [LoRA] print handler
-                    # below (pre-existing exception swallow, not B-006-broad-B
-                    # scope to change).  See docs/MIGRATION-PATTERN-pydantic-
-                    # caller.md §"Variant 1".
-                    Project.model_validate(latest)
-                    settings = latest.setdefault("global_settings", {})
-                    paths = settings.setdefault("char_lora_paths", {})
-                    paths[cid] = result["lora_path"]
-                    if result.get("best_strength") is not None:
-                        settings.setdefault("char_lora_strengths", {})[cid] = result["best_strength"]
-                    else:
-                        # skip-retrain (best_strength None): drop any stale strength so it
-                        # doesn't apply to the re-trained-but-unvalidated LoRA — keep
-                        # char_lora_strengths and char_lora_paths in lockstep.
-                        settings.get("char_lora_strengths", {}).pop(cid, None)
-                    if result.get("trigger_token"):
-                        settings.setdefault("char_lora_triggers", {})[cid] = result["trigger_token"]
-                    else:
-                        # lockstep with strengths: a re-trained LoRA without a
-                        # known trigger must not inherit a stale token.
-                        settings.get("char_lora_triggers", {}).pop(cid, None)
-                    return MutationResult(True, save=True)
-                try:
-                    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
-                except Exception:
-                    logger.error(
-                        "[LoRA] could not persist lora_path to settings (pid=%s cid=%s)",
-                        pid, cid, exc_info=True,
-                    )
-        finally:
-            with _lora_training_lock:
-                _lora_training_threads.pop(key, None)
-
-    # Atomic check-and-insert: the lock serializes the existence check and the
-    # thread-start so two concurrent POSTs can't both pass the check.
-    with _lora_training_lock:
-        existing = _lora_training_threads.get(key)
-        if existing and existing.is_alive():
-            return jsonify({"error": "Training already in progress for this character"}), 409
-        t = threading.Thread(target=_runner, daemon=True, name=f"lora-train-{cid}")
-        _lora_training_threads[key] = t
-        t.start()
-
-    return jsonify({"started": True, "char_id": cid, "background": True}), 202
 
 
 @app.route("/api/projects/<pid>/characters/<cid>/lora-status", methods=["GET"])
@@ -2606,6 +3494,7 @@ def api_add_location(pid):
         weather=weather,
         commit_timeout=HTTP_PROJECT_TIMEOUT,
         auto_research=auto_research,
+        cost_tracker=_get_or_build_core(pid).cost_tracker,
     )
 
     return jsonify(location), 201
@@ -2978,7 +3867,13 @@ def api_generate_dialogue(pid, sid):
 
     chars = [c for c in project_typed.characters if c.id in scene.characters_present]
     lang = project.get("global_settings", {}).get("language", "English")
-    lines = generate_dialogue(scene.model_dump(), [c.model_dump() for c in chars], scene.mood or "neutral", language=lang)
+    lines = generate_dialogue(
+        scene.model_dump(),
+        [c.model_dump() for c in chars],
+        scene.mood or "neutral",
+        language=lang,
+        cost_tracker=_get_or_build_core(pid).cost_tracker,
+    )
     return jsonify({"dialogue_lines": lines})
 
 
@@ -3025,6 +3920,7 @@ def api_decompose_scene(pid, sid):
         location_typed.model_dump() if location_typed else {},
         settings,
         style_rules,
+        cost_tracker=_get_or_build_core(pid).cost_tracker,
     )
     try:
         update_scene_shots(
@@ -3091,6 +3987,7 @@ def api_generate_style_rules(pid):
             aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
             reference_films=data.get("reference_films", ""),
             use_web_research=data.get("use_web_research", True),
+            cost_tracker=_get_or_build_core(pid).cost_tracker,
         )
         conflict = None
 
@@ -3128,122 +4025,203 @@ def api_generate_style_rules(pid):
 # Generation Pipeline with SSE Streaming
 # ---------------------------------------------------------------------------
 
-@app.route("/api/projects/<pid>/generate", methods=["POST"])
-def api_generate(pid):
-    """Start a generation run — the ONLY dispatch point for both the
-    "start" and "resume_checkpoint" actions ``_pipeline_action_authority``
-    reports (Slice 11c). The two are distinguished purely by the request
-    body's ``resume`` flag, read below: omitted/false begins a fresh run
-    (does NOT silently continue an on-disk checkpoint); ``{"resume":
-    true}`` continues from ``temp/pipeline_state.json`` via
-    ``CinemaPipeline.generate(resume=True)`` (does NOT silently discard
-    it — see ``cinema.checkpoint.CheckpointStore._restore_from_checkpoint``).
 
-    A stale click (the pid is already running by the time this request
-    lands — another client already started/resumed it, or this is a
-    double-submit) returns 409 with machine-readable refresh guidance
-    (``code``/``retryable``, the same shape ``_project_conflict_response``
-    already uses for ``project_busy`` elsewhere in this module) rather
-    than silently no-opping — the caller is expected to re-fetch
-    ``GET /pipeline-state`` and re-render from that truth instead of
-    assuming its own click had any effect.
+class _PipelineRunFailed(RuntimeError):
+    """A pipeline returned without a deliverable and without cancellation."""
+
+
+def _execute_pipeline_job(job: PipelineJob, execution: JobExecutionContext) -> None:
+    """Bind one stable queue/job correlation id across the complete run."""
+
+    with trace_context(trace_id=job.job_id, project_id=job.project_id):
+        logger.info(
+            "Durable pipeline job claimed",
+            extra={
+                "project_id": job.project_id,
+                "state": job.state,
+                "attempt_id": job.job_id,
+            },
+        )
+        _execute_pipeline_job_traced(job, execution)
+
+
+def _execute_pipeline_job_traced(job: PipelineJob, execution: JobExecutionContext) -> None:
+    """Run one claimed durable job through the existing pipeline/checkpoint path."""
+
+    pid = job.project_id
+    if not load_existing_project_readonly(pid):
+        raise _PipelineRunFailed("Project no longer exists")
+
+    # The queue owns the cross-process claim.  This in-process sentinel keeps
+    # all pre-existing direct-stage/admin fences and action endpoints aligned
+    # while CinemaPipeline and its cached core are being constructed.
+    with _pipelines_lock:
+        if pid in _project_admin_in_flight or pid in _project_stage_in_flight:
+            raise _PipelineRunFailed("Project became busy before its queued run started")
+        if pid in _running_pipelines:
+            raise _PipelineRunFailed("Project already has a local generation runner")
+        _running_pipelines[pid] = _PIPELINE_PENDING
+
+    bus = _ensure_progress_queue(pid)
+    progress_cb = _make_progress_cb(pid, bus)
+    pipeline: CinemaPipeline | None = None
+    try:
+        pipeline = CinemaPipeline(
+            pid,
+            core=_get_or_build_core(pid),
+            progress_callback=progress_cb,
+        )
+        execution.set_cancel_callback(pipeline.cancel)
+        with _pipelines_lock:
+            if _running_pipelines.get(pid) is not _PIPELINE_PENDING:
+                raise _PipelineRunFailed("Local generation reservation was lost")
+            _running_pipelines[pid] = pipeline
+
+        result = pipeline.generate(resume=job.effective_resume)
+        latest_job = _pipeline_job_store.get(job.job_id)
+        cancelled = execution.cancel_requested or bool(
+            latest_job is not None and latest_job.cancel_requested
+        )
+        if cancelled:
+            bus.publish({"stage": "CANCELLED", "detail": "Generation cancelled", "percent": 0})
+            return
+        if result is None:
+            raise _PipelineRunFailed("Pipeline completed without a deliverable")
+        bus.publish({"stage": "DONE", "detail": result, "percent": 100})
+    except Exception as exc:
+        summary = safe_error_summary(exc)
+        bus.publish({"stage": "ERROR", "detail": summary, "percent": 0})
+        raise
+    finally:
+        with _pipelines_lock:
+            current = _running_pipelines.get(pid)
+            if current is _PIPELINE_PENDING or current is pipeline:
+                _running_pipelines.pop(pid, None)
+            if _progress_queues.get(pid) is bus:
+                _progress_queues.pop(pid, None)
+        bus.close()
+
+
+def _ensure_pipeline_dispatcher() -> PipelineJobDispatcher:
+    global _pipeline_job_dispatcher
+    with _pipeline_dispatcher_lock:
+        dispatcher = _pipeline_job_dispatcher
+        if dispatcher is None:
+            dispatcher = PipelineJobDispatcher(
+                _pipeline_job_store,
+                _execute_pipeline_job,
+            )
+            _pipeline_job_dispatcher = dispatcher
+        dispatcher.start()
+    dispatcher.wake()
+    return dispatcher
+
+
+def _stop_pipeline_dispatcher() -> None:
+    dispatcher = _pipeline_job_dispatcher
+    if dispatcher is not None:
+        # Do not wait indefinitely for a provider call or human review gate.
+        # stop() cancels local lifecycle waiters but deliberately leaves the
+        # durable row running; its lease makes it resumable after restart.
+        dispatcher.stop(wait=True, timeout=5.0)
+
+
+atexit.register(_stop_pipeline_dispatcher)
+
+
+@app.before_request
+def _resume_durable_pipeline_jobs_after_restart():
+    """Start the fixed dispatcher on the first normal server request."""
+
+    # Unit tests explicitly start an isolated dispatcher through /generate;
+    # they must not accidentally consume a developer's default runtime DB on
+    # unrelated GETs. Production receives its first health/UI request and then
+    # resumes any expired/queued lease automatically.
+    if not app.config.get("TESTING"):
+        _ensure_pipeline_dispatcher()
+    return None
+
+@app.route("/api/projects/<pid>/generate", methods=["POST"])
+@_project_lock_guard
+def api_generate(pid):
+    """Idempotently accept a fresh/checkpoint run into the durable queue.
+
+    The response is 202 because provider work has not necessarily started.
+    Repeated requests while this project is queued/running return the same
+    stable job id; they never create a second paid run.
     """
     data = _json_object_or_none() if request.is_json else {}
     if data is None:
         return jsonify({"error": "JSON object required"}), 400
     resume = bool(data.get("resume", False))
-
-    # Atomic check-then-reserve under the lock BEFORE reading project state.
-    # _PIPELINE_PENDING acts as "busy" to deletion/settings writers and other
-    # generation readers while both existence validation and
-    # CinemaPipeline.__init__ run WITHOUT holding the lock. Reserving after
-    # load_project allowed deletion to complete between the read and reserve,
-    # then a stale request could start a pipeline against the deleted path.
-    # Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md Finding #1
-    with _pipelines_lock:
-        if pid in _project_admin_in_flight:
+    # Reserve the short existence-read -> durable-enqueue window. Destructive
+    # and direct-stage operations inspect this set under the same lock, so a
+    # delete cannot remove the project after our read but before the job row is
+    # committed. Simultaneous duplicate requests wait only for this admission
+    # window, then re-enter and receive the same stable SQLite job id.
+    while True:
+        with _pipelines_lock:
+            if pid in _project_admin_in_flight:
+                return _project_conflict_response(
+                    "project_busy",
+                    f"Project '{pid}' is being updated. Retry shortly.",
+                )
+            if pid in _project_stage_in_flight:
+                return _project_conflict_response(
+                    "project_busy",
+                    f"Project '{pid}' is busy with another direct stage operation. "
+                    "Retry shortly.",
+                )
+            pending_event = _project_queue_accept_events.get(pid)
+            if pending_event is None:
+                accept_event = threading.Event()
+                _project_queue_accept_events[pid] = accept_event
+                _project_queue_accept_in_flight.add(pid)
+                break
+        if not pending_event.wait(timeout=HTTP_PROJECT_TIMEOUT):
             return _project_conflict_response(
                 "project_busy",
-                f"Project '{pid}' is being updated. Retry shortly.",
-            )
-        if pid in _project_stage_in_flight:
-            return _project_conflict_response(
-                "project_busy",
-                f"Project '{pid}' is busy with another direct stage operation. "
+                f"Project '{pid}' queue admission is taking longer than expected. "
                 "Retry shortly.",
             )
-        if pid in _running_pipelines:
-            return _project_conflict_response(
-                "generation_in_progress",
-                "Generation already in progress. Refresh to see the current state.",
-            )
-        _running_pipelines[pid] = _PIPELINE_PENDING
 
     try:
-        project = load_project(pid)
-    except Exception:
+        if not is_safe_project_id(pid) or not load_existing_project_readonly(pid):
+            return jsonify({"error": "Project not found"}), 404
+
+        # The queue's BEGIN IMMEDIATE transaction supplies the cross-process
+        # idempotency boundary for generation requests themselves.
         with _pipelines_lock:
-            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
-                _running_pipelines.pop(pid, None)
-        raise
-    if not project:
+            active_job = _pipeline_job_store.project_job(pid, active_only=True)
+            if pid in _running_pipelines and active_job is None:
+                return _project_conflict_response(
+                    "generation_in_progress",
+                    "Generation already in progress. Refresh to see the current state.",
+                )
+            job, created = _pipeline_job_store.enqueue(pid, resume=resume)
+    finally:
         with _pipelines_lock:
-            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
-                _running_pipelines.pop(pid, None)
-        return jsonify({"error": "Project not found"}), 404
+            if _project_queue_accept_events.get(pid) is accept_event:
+                _project_queue_accept_events.pop(pid, None)
+                _project_queue_accept_in_flight.discard(pid)
+                accept_event.set()
 
-    # Create the event bus for SSE (lock released before this call)
-    bus = _ensure_progress_queue(pid)
-    progress_cb = _make_progress_cb(pid, bus)
-
-    def run_pipeline():
-        try:
-            pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=progress_cb)
-            with _pipelines_lock:
-                _running_pipelines[pid] = pipeline  # replace sentinel with real pipeline
-            result = pipeline.generate(resume=resume)
-            bus.publish({"stage": "DONE", "detail": result or "Failed", "percent": 100})
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            bus.publish({"stage": "ERROR", "detail": str(e), "percent": 0})
-        finally:
-            # Session 9 review fix: cleanup of BOTH dicts under the same
-            # lock that _ensure_progress_queue takes. Since both surfaces
-            # now share _pipelines_lock, leaving bus-cleanup unguarded
-            # re-opens the race the lock was added to close (a concurrent
-            # _ensure_progress_queue could see the entry mid-pop and return
-            # a popped reference).
-            with _pipelines_lock:
-                _running_pipelines.pop(pid, None)
-                # Bundle-C 3.2 (2026-05-24): release the bus so we don't
-                # grow _progress_queues unboundedly across runs. Drop only
-                # this run's bus; if another /generate raced and replaced
-                # the entry, leave it. The `is bus` identity check is
-                # preserved — it correctly does nothing if a replacement
-                # landed.
-                if _progress_queues.get(pid) is bus:
-                    _progress_queues.pop(pid, None)
-            # Slice 11a: bus.close() wakes every subscriber CURRENTLY
-            # attached (each has its own inbox queue, fed under the bus's
-            # own lock) with the terminal sentinel — intentionally outside
-            # _pipelines_lock, since close() only touches the bus's own
-            # lock/subscriber set, never the shared dicts.
-            bus.close()
-
-    thread = threading.Thread(target=run_pipeline, daemon=True)
-    try:
-        thread.start()
-    except Exception:
-        with _pipelines_lock:
-            if _running_pipelines.get(pid) is _PIPELINE_PENDING:
-                _running_pipelines.pop(pid, None)
-            if _progress_queues.get(pid) is bus:
-                _progress_queues.pop(pid, None)
-        bus.close()
-        raise
-
-    return jsonify({"started": True, "resume": resume, "message": "Generation started. Connect to /api/projects/<pid>/stream for progress."})
+    # Make /stream reachable immediately while the job waits behind another
+    # project. The claimed worker reuses this exact bus in this process.
+    _ensure_progress_queue(pid)
+    _ensure_pipeline_dispatcher()
+    snapshot = _pipeline_job_store.public_snapshot(
+        _pipeline_job_store.get(job.job_id) or job
+    )
+    return jsonify({
+        "accepted": True,
+        "started": False,
+        "idempotent": not created,
+        "job_id": job.job_id,
+        "resume": job.requested_resume,
+        "queue": snapshot,
+        "message": "Generation queued. Connect to /api/projects/<pid>/stream for progress.",
+    }), 202
 
 
 @app.route("/api/projects/<pid>/checkpoint")
@@ -3352,6 +4330,11 @@ def api_stream(pid):
     the HTTP/SSE framing halves of that contract.
     """
     bus = _progress_queues.get(pid)
+    if bus is None:
+        queued_job = _pipeline_job_store.project_job(pid, active_only=True)
+        if queued_job is not None and load_existing_project_readonly(pid):
+            bus = _ensure_progress_queue(pid)
+            _ensure_pipeline_dispatcher()
     if not bus:
         return jsonify({"error": "No generation in progress"}), 404
 
@@ -3410,12 +4393,100 @@ def api_stream(pid):
 
 
 @app.route("/api/projects/<pid>/cancel", methods=["POST"])
+@_project_lock_guard
 def api_cancel(pid):
+    if not is_safe_project_id(pid) or not load_existing_project_readonly(pid):
+        return jsonify({"error": "Project not found"}), 404
+
+    job = _pipeline_job_store.cancel_project(pid)
     pipeline = _get_running_pipeline(pid)
     if pipeline:
         pipeline.cancel()
-        return jsonify({"cancelled": True})
+    if job is not None:
+        dispatcher = _pipeline_job_dispatcher
+        if dispatcher is not None:
+            dispatcher.wake()
+        snapshot = _pipeline_job_store.public_snapshot(
+            _pipeline_job_store.get(job.job_id) or job
+        )
+        if snapshot is not None and snapshot["state"] == "cancelled":
+            with _pipelines_lock:
+                bus = _progress_queues.pop(pid, None)
+            if bus is not None:
+                bus.publish({"stage": "CANCELLED", "detail": "Queued run cancelled", "percent": 0})
+                bus.close()
+        return jsonify({
+            "cancelled": snapshot is not None and snapshot["state"] == "cancelled",
+            "cancellation_requested": snapshot is not None and snapshot["cancel_requested"],
+            "job_id": job.job_id,
+            "queue": snapshot,
+        })
+    if pipeline:
+        # Backward-compatible fallback for a process-local pipeline that
+        # predates queue adoption (or a test fixture injected directly).
+        return jsonify({"cancelled": True, "cancellation_requested": True})
     return jsonify({"error": "No generation in progress"}), 404
+
+
+@app.route("/api/projects/<pid>/queue/abandon", methods=["POST"])
+def api_abandon_unverifiable_queue_job(pid):
+    """Close an expired, unverifiable lease after explicit risk acceptance."""
+
+    if not is_safe_project_id(pid) or not load_existing_project_readonly(pid):
+        return jsonify({"error": "Project not found"}), 404
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    job_id = data.get("job_id")
+    if not isinstance(job_id, str) or not re.fullmatch(r"[0-9a-f]{32}", job_id):
+        return jsonify({"error": "job_id must be a 32-character lowercase hexadecimal ID"}), 400
+    if data.get("acknowledge_paid_work_risk") is not True:
+        return jsonify({
+            "error": "acknowledge_paid_work_risk must be true",
+            "code": "operator_acknowledgement_required",
+        }), 400
+    if _get_running_pipeline(pid) is not None:
+        return _project_conflict_response(
+            "owner_still_local",
+            "The project still has a local pipeline owner; stop it before abandonment.",
+        )
+
+    try:
+        job, outcome = _pipeline_job_store.abandon_unverifiable(pid, job_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if outcome == "not_found":
+        return jsonify({"error": "Queue job not found"}), 404
+    if outcome != "abandoned":
+        messages = {
+            "not_running": "The queue job is no longer running.",
+            "lease_active": "The worker lease has not expired.",
+            "owner_live": "The worker owner fence is still active.",
+            "owner_stopped": "The stopped worker was safely recovered; abandonment is not allowed.",
+        }
+        return jsonify({
+            "error": messages.get(outcome, "Queue job cannot be abandoned."),
+            "code": outcome,
+            "queue": _pipeline_job_store.public_snapshot(job),
+        }), 409
+
+    dispatcher = _pipeline_job_dispatcher
+    if dispatcher is not None:
+        dispatcher.wake()
+    with _pipelines_lock:
+        bus = _progress_queues.pop(pid, None)
+    if bus is not None:
+        bus.publish({
+            "stage": "CANCELLED",
+            "detail": "Expired unverifiable queue job abandoned by operator",
+            "percent": 0,
+        })
+        bus.close()
+    return jsonify({
+        "abandoned": True,
+        "job_id": job_id,
+        "queue": _pipeline_job_store.public_snapshot(job),
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -4018,13 +5089,15 @@ def api_pipeline_state(pid):
     not exist.
     """
     running, allowed_actions = _pipeline_action_authority(pid)
+    queue_snapshot = _pipeline_job_store.project_snapshot(pid)
     pipeline = _get_running_pipeline(pid)
     if pipeline:
         state = pipeline.get_state()
         state["running"] = running
         state["allowed_actions"] = allowed_actions
+        state["queue"] = queue_snapshot
         return jsonify(state)
-    project = load_project(pid)
+    project = load_existing_project_readonly(pid)
     if not project:
         return jsonify({"error": "Project not found", "paused": False, "cancelled": False}), 404
     # Lightweight path — replicates get_state() shape without spinning
@@ -4032,6 +5105,7 @@ def api_pipeline_state(pid):
     state = state_snapshot(pid)
     state["running"] = running
     state["allowed_actions"] = allowed_actions
+    state["queue"] = queue_snapshot
     state["checkpoint"] = checkpoint_info(pid)
     return jsonify(state)
 
@@ -4575,9 +5649,14 @@ def api_assemble_reassemble(pid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/cleanup", methods=["POST"])
+@_project_lock_guard
 def api_cleanup(pid):
     """Clean up temporary files from a project."""
     from cleanup import cleanup_project, get_project_disk_usage
+
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
 
     data = _json_object_or_none() if request.is_json else {}
     data = data or {}
@@ -4596,42 +5675,146 @@ def api_disk_usage(pid):
     return jsonify(get_project_disk_usage(pid))
 
 
+def _project_budget_authority(project: Mapping[str, object]) -> tuple[str, float | None]:
+    """Normalize the persisted project cap without turning corruption into unlimited."""
+    settings = project.get("global_settings")
+    raw = settings.get("budget_limit_usd") if isinstance(settings, Mapping) else None
+    if raw is None or (not isinstance(raw, bool) and raw == 0):
+        return "unlimited", None
+    if isinstance(raw, bool):
+        return "invalid", None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return "invalid", None
+    if not math.isfinite(value) or value < 0:
+        return "invalid", None
+    if value == 0:
+        return "unlimited", None
+    return "active", value
+
+
+@contextmanager
+def _project_cost_tracker(pid: str, project: Mapping[str, object]):
+    """Yield the cached tracker or an owned, deterministically-closed reader."""
+    with _cores_lock:
+        cached_core = _running_cores.get(pid)
+    if cached_core is not None:
+        yield cached_core.cost_tracker
+        return
+
+    from cost_tracker import CostTracker
+
+    settings = project.get("global_settings")
+    budget = settings.get("budget_limit_usd") if isinstance(settings, Mapping) else None
+    with CostTracker(budget_usd=budget) as tracker:
+        yield tracker
+
+
+_PUBLIC_PAID_ATTEMPT_FIELDS = (
+    "attempt_id", "provider", "engine", "operation", "shot_id", "video_id",
+    "state", "reserved_cost_usd", "reconciled_cost_usd", "billed",
+    "provider_job_id", "provider_status", "failure_code", "detail",
+    "created_at", "updated_at", "active",
+)
+
+
+def _public_paid_attempt(attempt: Mapping[str, object]) -> dict[str, object]:
+    """Project only the stable operator contract; omit request internals."""
+    return {field: attempt.get(field) for field in _PUBLIC_PAID_ATTEMPT_FIELDS}
+
+
+def _cost_live_snapshot(pid: str, project: Mapping[str, object], tracker) -> dict:
+    cost = tracker.get_video_cost(pid)
+    paid = tracker.get_paid_attempts_snapshot(pid)
+    charged = round(float(cost.get("total_usd") or 0.0), 6)
+    reserved = round(float(paid.get("active_reservation_usd") or 0.0), 6)
+    committed = round(charged + reserved, 6)
+    budget_status, budget_limit = _project_budget_authority(project)
+    remaining = (
+        round(max(0.0, budget_limit - committed), 6)
+        if budget_status == "active" and budget_limit is not None
+        else 0.0 if budget_status == "invalid"
+        else None
+    )
+
+    all_attempts = [
+        row for row in paid.get("attempts", []) if isinstance(row, Mapping)
+    ]
+    active_attempts = [row for row in all_attempts if row.get("active") is True]
+    recent_terminal = [row for row in all_attempts if row.get("active") is not True][-25:]
+    visible_ids: set[object] = set()
+    visible_attempts: list[dict[str, object]] = []
+    for row in active_attempts + recent_terminal:
+        attempt_id = row.get("attempt_id")
+        if attempt_id in visible_ids:
+            continue
+        visible_ids.add(attempt_id)
+        visible_attempts.append(_public_paid_attempt(row))
+
+    return {
+        # total_usd remains for compatibility with older polling clients.
+        "total_usd": charged,
+        "charged_usd": charged,
+        "active_reservation_usd": reserved,
+        "committed_usd": committed,
+        "budget_status": budget_status,
+        "budget_limit_usd": budget_limit,
+        "remaining_usd": remaining,
+        "accepted_unknown_count": int(paid.get("accepted_unknown_count") or 0),
+        "billed_failure_count": int(paid.get("billed_failure_count") or 0),
+        "blocked_attempt_count": int(paid.get("blocked_attempt_count") or 0),
+        "attempts": visible_attempts,
+    }
+
+
 @app.route("/api/projects/<pid>/cost-live", methods=["GET"])
 def api_cost_live(pid):
-    """Sum of cost_log entries for this video_id since pipeline start.
-
-    Returns total_usd rounded to 4 decimal places. Unknown video_id (no
-    rows) returns {"total_usd": 0.0} — not a 404 — because Telemetry
-    polls this before any cost entries exist.
-    """
+    """Return durable charged spend, reservations, exposure, and paid jobs."""
+    project = load_existing_project_readonly(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
     try:
-        from cost_tracker import CostTracker
-        # Re-use the cached PipelineCore's tracker when available so we
-        # share the same SQLite connection rather than opening a second one.
-        with _cores_lock:
-            cached_core = _running_cores.get(pid)
-        tracker = cached_core.cost_tracker if cached_core else CostTracker()
-        row = tracker.conn.execute(
-            "SELECT SUM(cost_usd) AS total FROM cost_log WHERE video_id = ?",
-            (pid,),
-        ).fetchone()
-        total = round(float(row["total"] or 0.0), 4)
-        return jsonify({"total_usd": total})
+        with _project_cost_tracker(pid, project) as tracker:
+            return jsonify(_cost_live_snapshot(pid, project, tracker))
     except Exception as exc:
-        print(f"[cost-live] query failed for pid={pid}: {exc}")
+        logger.exception("cost-live query failed for pid=%s", pid)
         return jsonify({"error": "Cost query failed"}), 500
 
 
-@app.route("/api/cleanup-all", methods=["POST"])
-def api_cleanup_all():
-    """Clean up all projects."""
-    from cleanup import cleanup_all_projects
+@app.route(
+    "/api/projects/<pid>/paid-attempts/<attempt_id>/cancel",
+    methods=["POST"],
+)
+@_project_lock_guard
+def api_cancel_paid_attempt(pid, attempt_id):
+    """Request cancellation for one project-owned active Runway task."""
+    project = load_existing_project_readonly(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
 
-    data = _json_object_or_none() if request.is_json else {}
-    data = data or {}
-    aggressive = data.get("aggressive", False)
-    result = cleanup_all_projects(aggressive=aggressive)
-    return jsonify(result)
+    try:
+        with _project_cost_tracker(pid, project) as tracker:
+            attempt = tracker.get_paid_attempt(attempt_id)
+            # Return one indistinguishable 404 for unknown and cross-project IDs.
+            if not attempt or attempt.get("video_id") != pid:
+                return jsonify({"error": "Paid attempt not found"}), 404
+            if attempt.get("provider") != "runway":
+                return jsonify({"error": "Only Runway attempts support cancellation"}), 409
+            if attempt.get("active") is not True:
+                return jsonify({"error": "Paid attempt is already terminal"}), 409
+
+            from performance.runway_tasks import cancel_runway_attempt
+
+            cancellation = cancel_runway_attempt(tracker, attempt_id)
+            payload = _cost_live_snapshot(pid, project, tracker)
+            payload["cancellation"] = _public_paid_attempt(cancellation)
+            return jsonify(payload), 202
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception:
+        logger.exception("paid-attempt cancellation failed for pid=%s", pid)
+        return jsonify({"error": "Cancellation request failed"}), 500
 
 
 @app.route("/api/projects/<pid>/export")
@@ -4659,6 +5842,11 @@ def api_preview_scene(pid, sid):
 if __name__ == "__main__":
     bind_host = env_settings.web_bind_host
     cors_origins = env_settings.web_cors_origins
+
+    # Standalone startup must reclaim expired leases even before the first UI
+    # or health request arrives. Imported WSGI deployments retain the
+    # before_request fallback above because their lifecycle is server-owned.
+    _ensure_pipeline_dispatcher()
 
     print("\n" + "=" * 60)
     print("🎬 CINEMA PRODUCTION TOOL — Web Server")
