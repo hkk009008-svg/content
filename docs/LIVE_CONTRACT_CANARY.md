@@ -33,11 +33,44 @@ To dispatch one run from the Actions UI:
    and accepts `$0.03` through `$0.05`.
 4. A required reviewer approves access to the protected environment.
 
+The Runway target uses SDK `4.14.0` and the official ephemeral-upload API.
+Its character image and driving performance are derived locally from the
+repository's synthetic, fictional-adult expression sheet and accepted only
+when its SHA-256 digest matches the canary constant. The panels are blended
+into a cut-free video of exactly three seconds; no captured real-person media
+is sent to Runway. Fixture provenance is recorded in
+`tests/assets/live_contract/README.md`. A terminal Runway result logs a
+sanitized task ID and failure code, and the workflow keeps the complete attempt
+ledger as a 30-day artifact even when the test fails. The complete SQLite/WAL
+directory is also restored from the most recent target-specific Actions cache,
+so an ordinary rerun resumes an accepted task instead of uploading or
+submitting again. The protected job re-reads the fixed GitHub Deployment key
+for its current run ID and run-attempt immediately before execution; it never
+trusts an upstream job output as authority. Fixture construction and ephemeral
+uploads finish first. At the final boundary before the provider POST, the
+adapter creates one logical-attempt Deployment preclaim, then issues one POST
+with SDK retries disabled. Immediately after Runway returns a task ID, it
+records that UUID as a Deployment status before any local ledger write or
+polling. A replacement runner reconstructs its local ledger from that remote
+task ID and performs retrieval only. If a runner is lost in the narrow
+preclaim/acceptance/checkpoint interval, the Deployment remains but has no task
+ID, so every later run fails closed for manual provider reconciliation instead
+of risking a second paid task. GitHub Deployments are trusted-writer crash and
+retry fencing, not tamper-resistant storage: repository actors with Deployment
+write permission can delete them. A new paid attempt needs a new reviewed
+logical fixture/fence version and fresh approval; deleting an existing
+Deployment is not a retry mechanism. The live authority is restricted to
+`refs/heads/main`.
+
 The input gate does not claim to be a provider-side billing limit. The bound is
 enforced structurally: a target maps to one immutable pytest selector with a
 fixed duration, the runner has a 12-minute timeout, the job has a 15-minute
 timeout, and concurrency never cancels an already submitted provider task.
 Provider invoices remain the final billing authority.
+
+The RunPod canary caps cover only the fixed generation call. GPU pod uptime,
+network volume, image build, registry, and model-transfer charges are separate
+infrastructure costs and require their own budget before provisioning.
 
 Any configured provider that returns no output, rejects the fixture, lacks a
 required node, times out, or produces an invalid artifact fails the canary.

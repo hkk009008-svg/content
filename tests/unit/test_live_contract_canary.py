@@ -254,6 +254,10 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
     assert "\npermissions:\n  contents: read\n" in workflow
     assert "name: live-contract-canary" in workflow
     assert "timeout-minutes: 15" in workflow
+    assert workflow.count("deployments: write") == 1
+    assert "\n  runway-fence:" not in workflow
+    assert "python scripts/live_contract_canary.py verify-runway-fence" in workflow
+    assert "CANARY_AUTHORITY_GITHUB_TOKEN" in workflow
     assert "- runpod-pulid-production" in workflow
     assert "- runpod-liveportrait-performance" in workflow
     assert (
@@ -275,6 +279,187 @@ def test_workflow_is_manual_only_default_inert_and_immutable():
     )
     refs = re.findall(r"uses:\s+[^@\s]+@([^\s#]+)", workflow)
     assert refs and all(re.fullmatch(r"[0-9a-f]{40}", ref) for ref in refs)
+
+
+def test_runway_canary_uses_owned_hash_verified_synthetic_media():
+    source = Path("tests/integration/test_act_two_smoke.py").read_text()
+    assert "testsrc2" not in source
+    assert "raw.githubusercontent.com" not in source
+    assert "97471b9377c817251c86dbb58982464d7586b6b3d800936683f900da668c0fb6" in source
+    assert "hmac.compare_digest" in source
+    assert "Image.blend" in source
+    assert '"-frames:v", str(frame_count)' in source
+
+
+def test_workflow_pins_the_audited_runway_sdk():
+    workflow = Path(".github/workflows/live-contract-canary.yml").read_text()
+    assert "'runwayml==4.14.0'" in workflow
+
+
+def test_workflow_restores_and_retains_complete_runway_attempt_state():
+    workflow = Path(".github/workflows/live-contract-canary.yml").read_text()
+    assert "LIVE_CONTRACT_CANARY_LEDGER_PATH" in workflow
+    assert "LIVE_CONTRACT_CANARY_FIXTURE_DIR" in workflow
+    assert "actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25" in workflow
+    assert "actions/cache/save@caa296126883cff596d87d8935842f9db880ef25" in workflow
+    assert "runway-act-two-ledger-v3-97471b93-" in workflow
+    assert "restore-keys:" in workflow
+    assert workflow.count("if: always() && inputs.target == 'runway-act-two'") == 2
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
+    assert "path: ${{ runner.temp }}/live-contract-canary/" in workflow
+    assert "if-no-files-found: warn" in workflow
+
+
+def _github_fence_environment(tmp_path: Path) -> dict[str, str]:
+    return {
+        **_base(),
+        "GITHUB_REPOSITORY": "owner/repository",
+        canary.RUNWAY_AUTHORITY_TOKEN_ENV: "g" * 40,
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_REF": "refs/heads/main",
+        "GITHUB_RUN_ID": "1234",
+        "GITHUB_RUN_ATTEMPT": "1",
+    }
+
+
+def _deployment(deployment_id: int = 42) -> dict:
+    return {
+        "id": deployment_id,
+        "payload": {
+            "schema_version": 1,
+            "target": "runway-act-two",
+            "logical_attempt": f"v3-{canary.RUNWAY_FIXTURE_SHA256[:8]}",
+            "fixture_sha256": canary.RUNWAY_FIXTURE_SHA256,
+            "owner_run_id": "1234",
+            "owner_run_attempt": "1",
+        },
+    }
+
+
+def test_runway_claim_is_created_only_at_the_provider_boundary(
+    monkeypatch,
+    tmp_path,
+):
+    environment = _github_fence_environment(tmp_path)
+    calls = []
+    list_calls = 0
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        nonlocal list_calls
+        calls.append((method, path, payload, accepted_statuses))
+        assert token == "g" * 40
+        if method == "GET" and "/deployments?" in path:
+            list_calls += 1
+            return (200, [] if list_calls == 1 else [_deployment()])
+        if method == "GET" and "/statuses" in path:
+            return 200, []
+        assert method == "POST" and path.endswith("/deployments")
+        return 201, _deployment()
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    assert canary.claim_runway_submission(environment) == 42
+    create_payload = next(payload for method, _path, payload, _ in calls if method == "POST")
+    assert create_payload["task"] == canary.RUNWAY_AUTHORITY_TASK
+    assert create_payload["auto_merge"] is False
+    assert create_payload["required_contexts"] == []
+
+
+def test_stale_fresh_output_cannot_bypass_attempt_two_remote_recheck(
+    monkeypatch,
+    tmp_path,
+):
+    environment = {
+        **_github_fence_environment(tmp_path),
+        "GITHUB_RUN_ATTEMPT": "2",
+        "LIVE_CONTRACT_CANARY_FENCE_FRESH": "true",
+        canary.RUNWAY_LEDGER_ENV: str(tmp_path / "missing.sqlite3"),
+        canary.RUNWAY_FIXTURE_DIR_ENV: str(tmp_path / "fixture"),
+    }
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        if "/statuses" in path:
+            return 200, []
+        return 200, [_deployment()]
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    with pytest.raises(canary.CanaryPreflightError, match="duplicate submission blocked"):
+        canary.verify_runway_fence(environment)
+
+
+def test_remote_deployment_task_id_rehydrates_retrieval_only_ledger(
+    monkeypatch,
+    tmp_path,
+):
+    task_id = "d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b"
+    environment = {
+        **_github_fence_environment(tmp_path),
+        "GITHUB_RUN_ATTEMPT": "2",
+        canary.RUNWAY_LEDGER_ENV: str(tmp_path / "authority.sqlite3"),
+        canary.RUNWAY_FIXTURE_DIR_ENV: str(tmp_path / "fixture"),
+    }
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        if "/statuses" in path:
+            return 200, [{"description": f"runway_task_id={task_id}"}]
+        return 200, [_deployment()]
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    canary.verify_runway_fence(environment)
+
+    from cost_tracker import CostTracker
+
+    with CostTracker(db_path=environment[canary.RUNWAY_LEDGER_ENV]) as tracker:
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="live-contract-canary",
+            shot_id="runway-act-two-fixture-v1",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+    assert attempt["provider_job_id"] == task_id
+    assert attempt["state"] == "running"
+
+
+def test_accepted_runway_task_is_appended_as_deployment_status(
+    monkeypatch,
+):
+    task_id = "d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b"
+    environment = {
+        **_github_fence_environment(Path("/tmp")),
+        canary.RUNWAY_AUTHORITY_TOKEN_ENV: "t" * 40,
+    }
+    calls = []
+
+    def fake_api(method, path, *, token, payload=None, accepted_statuses=(200,)):
+        calls.append((method, path, payload))
+        if method == "GET" and "/deployments?" in path:
+            return 200, [_deployment()]
+        if method == "GET":
+            return 200, []
+        return 201, {"id": 99}
+
+    monkeypatch.setattr(canary, "_github_api_json", fake_api)
+    canary.checkpoint_runway_task(environment, task_id)
+    assert calls[-1][0] == "POST"
+    assert calls[-1][2]["description"] == f"runway_task_id={task_id}"
+    assert calls[-1][2]["auto_inactive"] is False
+
+
+def test_non_main_runway_authority_is_refused_before_remote_write(tmp_path):
+    environment = {
+        **_github_fence_environment(tmp_path),
+        "GITHUB_REF": "refs/heads/feature/canary",
+    }
+    with pytest.raises(canary.CanaryPreflightError, match="restricted to main"):
+        canary.claim_runway_submission(environment)
+
+
+def test_conflicting_deployment_task_ids_fail_closed():
+    statuses = [
+        {"description": "runway_task_id=d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b"},
+        {"description": "runway_task_id=ad4fdc3e-3b76-45a0-9136-9f2ea15cb978"},
+    ]
+    with pytest.raises(canary.CanaryPreflightError, match="conflicting task IDs"):
+        canary._deployment_task_id(statuses)
 
 
 def test_configured_live_tests_fail_instead_of_skipping_on_empty_result():

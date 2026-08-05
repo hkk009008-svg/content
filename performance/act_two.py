@@ -24,21 +24,19 @@ Verified against the installed ``runwayml`` SDK (v4.14.0) — see
     length from the reference video. The pre-migration code sent
     ``duration=int(round(duration_s))`` on every call; the SDK's
     ``CharacterPerformanceCreateParams`` TypedDict does not define that
-    field, so it has been removed from the outgoing request entirely (both
-    the SDK kwargs and the REST fallback body). ``duration_s`` remains a
-    Python-side keyword, used only for the $/s cost estimate — it is never
-    forwarded to Runway.
+    field, so it has been removed from the outgoing request entirely.
+    ``duration_s`` remains a Python-side keyword, used only for the $/s cost
+    estimate — it is never forwarded to Runway. The raw REST path is now
+    retrieval-only and cannot submit new work.
   - Optional knobs the endpoint DOES offer but this adapter does not yet
     wire: ``body_control`` (bool), ``content_moderation``,
     ``expression_intensity`` (1-5 int), ``seed``.
-  - ``uri`` for both ``character`` and ``reference`` is a LOCAL FILESYSTEM
-    PATH at the call sites in this module (``keyframe_path`` /
-    ``driving_video_path``) — Runway obviously cannot fetch a path off this
-    machine's disk. This adapter encodes each local file as an RFC 2397
-    ``data:<mime>;base64,<...>`` URI (see ``_to_data_uri`` below) rather than
-    passing the path through, since the SDK's own type stubs document `uri`
-    as "A HTTPS URL." with no separate local-file/upload parameter on
-    ``character_performance.create()``.
+  - ``uri`` for both ``character`` and ``reference`` cannot be a local
+    filesystem path.  New submissions therefore use the SDK's documented
+    ``uploads.create_ephemeral(file=Path(...))`` transport and pass the
+    returned short-lived ``runway://`` URIs to ``character_performance``.
+    A resumed task already owns its inputs and goes directly to retrieval;
+    it never uploads or submits again.
 
 API surface:
   - POST https://api.dev.runwayml.com/v1/character_performance
@@ -50,11 +48,10 @@ the existing Runway Gen-4 integration).
 
 from __future__ import annotations
 
-import base64
-import mimetypes
 import os
 import time
-from typing import Optional
+from pathlib import Path
+from typing import Callable, Optional
 
 from config.settings import settings
 from performance._net import safe_download, validate_video_artifact
@@ -64,21 +61,24 @@ _POLL_INTERVAL_S = 3
 _MODEL = "act_two"
 _RUNWAY_API_VERSION = "2024-11-06"
 
-# Conservative pre-encode size cap for inline data-URI payloads. The installed
-# runwayml SDK (v4.14.0) does NOT document a data-URI byte limit anywhere —
-# `character_performance_create_params.py` types `uri` only as "A HTTPS URL.",
-# and grepping the SDK's types/, resources/, and dist-info METADATA for
-# "data:", "base64", or a size figure turns up nothing. This cap is therefore
-# THIS ADAPTER's own safety bound, not a documented Runway limit: base64
-# inflates a payload by ~4/3, and `reference` videos can run up to 30s, so an
-# unbounded inline encode risks a multi-hundred-MB JSON request body. Fail
-# loudly before sending rather than hang on an oversized request or have an
-# intermediate proxy silently truncate it.
-# 15 MB pre-encode (~20 MB after base64). This is this adapter's OWN safety
-# bound, not a documented Runway limit. For larger assets the installed SDK
-# exposes uploads.create_ephemeral() (asset upload, no inline cap) — the
-# future no-cap path if real driving videos outgrow inline data-URIs.
-_MAX_INLINE_BYTES = 15 * 1024 * 1024
+
+def _evidence_token(value: object, *, fallback: str = "UNKNOWN") -> str:
+    """Return a bounded, single-line token safe for operator evidence logs."""
+    raw = str(value or "").strip()
+    safe = "".join(
+        character if character.isalnum() or character in "._:-" else "_"
+        for character in raw
+    )[:128]
+    return safe or fallback
+
+
+def _ephemeral_uri(client, path: str, *, role: str) -> str:
+    """Upload one local input and validate the SDK's opaque Runway URI."""
+    response = client.uploads.create_ephemeral(file=Path(path))
+    uri = getattr(response, "uri", None)
+    if not isinstance(uri, str) or not uri.startswith("runway://"):
+        raise ValueError(f"Runway {role} upload returned no usable runway URI")
+    return uri
 
 
 def _cost_log(
@@ -122,6 +122,8 @@ def generate_act_two_performance(
     video_id: str = "",
     poll_timeout_s: int = 300,
     cost_tracker=None,
+    task_submission_callback: Optional[Callable[[], object]] = None,
+    task_acceptance_callback: Optional[Callable[[str], None]] = None,
 ) -> Optional[str]:
     """Generate an Act-Two performance clip.
 
@@ -170,6 +172,7 @@ def generate_act_two_performance(
 
     _paid_attempt: dict | None = None
     _resume_task_id: str | None = None
+    _submission_started = False
     try:
         from cost_tracker import CostTracker
     except Exception:
@@ -237,15 +240,22 @@ def generate_act_two_performance(
             _paid_attempt["attempt_id"], state=state, **kwargs
         )
 
-    # Prefer the official SDK when available; fall through to raw REST only
-    # on ImportError (SDK package missing) — a transport swap that sends the
-    # exact same act_two contract (see _raw_rest_call). Errors raised BY the
-    # SDK after a successful import (auth, malformed request, rate limit,
-    # network, ...) are classified below and returned as None WITHOUT a REST
-    # retry: REST would hit the same API with the same credentials/payload
-    # and fail the same way, so retrying there would not change the outcome
-    # — only hide which failure mode actually happened. That classification
-    # IS the "no silent conceal" contract for this adapter.
+    def _keep_known_task_reserved(detail: str) -> bool:
+        """Preserve ownership when an error occurs after task acceptance."""
+        if not _resume_task_id:
+            return False
+        _paid_update(
+            "accepted_unknown",
+            provider_job_id=_resume_task_id,
+            detail=detail,
+        )
+        return True
+
+    # New submissions require the official SDK because it owns the supported
+    # ephemeral-upload flow.  When the SDK is missing, _raw_rest_call may only
+    # retrieve an already-durable task ID; it must never improvise a second
+    # submission transport. Errors raised BY the SDK after a successful import
+    # are classified below and never trigger a REST retry.
     try:
         from runwayml import RunwayML  # type: ignore
         from runwayml import (  # type: ignore
@@ -257,7 +267,7 @@ def generate_act_two_performance(
         )
     except ImportError:
         return _raw_rest_call(
-            api_key, keyframe_path, driving_video_path, output_mp4,
+            api_key, output_mp4,
             duration_s, poll_timeout_s, shot_id, video_id,
             cost_tracker=cost_tracker,
             paid_attempt=_paid_attempt,
@@ -265,48 +275,102 @@ def generate_act_two_performance(
         )
 
     try:
-        character_uri = _to_data_uri(keyframe_path)
-        reference_uri = _to_data_uri(driving_video_path)
-    except (OSError, ValueError) as e:
-        print(f"   [ACT-TWO] failed to encode input as a data URI: {e}")
-        return None
-
-    try:
-        client = RunwayML(api_key=api_key)
-        kwargs = {
-            "model": _MODEL,
-            "character": {"type": "image", "uri": character_uri},
-            "reference": {"type": "video", "uri": reference_uri},
-            "ratio": "1280:720",
-        }
+        # Submission is intentionally single-shot. The SDK otherwise retries
+        # POST requests after connection/5xx failures without an idempotency
+        # key, which can create duplicate paid tasks before any task ID reaches
+        # our durable authority.
+        client = RunwayML(api_key=api_key, max_retries=0)
         task_id = _resume_task_id
         if not task_id:
-            create_attempt = 0
-            while True:
-                try:
-                    task = client.character_performance.create(**kwargs)
-                    break
-                except RateLimitError as exc:
-                    create_attempt += 1
-                    if create_attempt >= 4:
-                        raise
-                    from performance.runway_tasks import retry_delay_seconds
+            # Uploads are deliberately outside the generation-submission
+            # ambiguity boundary. Even if one upload succeeds and the other
+            # fails, no paid Act-Two task exists; the short-lived orphan simply
+            # expires. Runway's upload contract says a failed upload is not
+            # retried in place, so a later invocation starts a fresh upload.
+            try:
+                character_uri = _ephemeral_uri(client, keyframe_path, role="character")
+                reference_uri = _ephemeral_uri(client, driving_video_path, role="reference")
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                failure_code = (
+                    f"UPLOAD_HTTP_{status}"
+                    if isinstance(status, int)
+                    else f"UPLOAD_{type(exc).__name__.upper()}"
+                )
+                failure_code = _evidence_token(failure_code)
+                print(
+                    "   [ACT-TWO] input upload failed before generation "
+                    f"submission: failure_code={failure_code}"
+                )
+                _paid_reconcile(
+                    "failed_unbilled",
+                    failure_code=failure_code,
+                    detail=(
+                        "Runway ephemeral input upload failed before "
+                        "Act-Two generation submission"
+                    ),
+                )
+                return None
 
-                    time.sleep(retry_delay_seconds(exc, create_attempt - 1))
+            kwargs = {
+                "model": _MODEL,
+                "character": {"type": "image", "uri": character_uri},
+                "reference": {"type": "video", "uri": reference_uri},
+                "ratio": "1280:720",
+            }
+            if task_submission_callback is not None:
+                try:
+                    task_submission_callback()
+                except Exception as exc:
+                    _paid_update(
+                        "accepted_unknown",
+                        detail=(
+                            "Act-Two remote pre-submit claim was ambiguous: "
+                            f"{type(exc).__name__}"
+                        ),
+                    )
+                    print(
+                        "   [ACT-TWO] durable pre-submit claim failed; "
+                        "provider creation was not attempted"
+                    )
+                    return None
+            _submission_started = True
+            task = client.character_performance.create(**kwargs)
             task_id = getattr(task, "id", None)
             if not isinstance(task_id, str) or not task_id:
+                print("   [ACT-TWO] accepted response had no usable task_id")
                 _paid_update(
                     "accepted_unknown",
                     detail="Act-Two accepted response had no usable task ID",
                 )
                 return None
             _resume_task_id = task_id
+            if task_acceptance_callback is not None:
+                try:
+                    task_acceptance_callback(task_id)
+                except Exception as exc:
+                    _paid_update(
+                        "accepted_unknown",
+                        provider_job_id=task_id,
+                        detail=(
+                            "Act-Two task accepted but remote task checkpoint "
+                            f"failed: {type(exc).__name__}"
+                        ),
+                    )
+                    print(
+                        "   [ACT-TWO] task accepted but durable remote "
+                        "checkpoint failed; polling stopped"
+                    )
+                    return None
             _paid_update(
                 "running",
                 provider_job_id=task_id,
                 provider_status="PENDING",
                 detail="Act-Two task accepted; polling durable task identity",
             )
+            print(f"   [ACT-TWO] task accepted: task_id={_evidence_token(task_id)}")
+        else:
+            print(f"   [ACT-TWO] resuming task: task_id={_evidence_token(task_id)}")
 
         from performance.runway_tasks import call_with_backoff, classify_task_failure
 
@@ -319,6 +383,11 @@ def generate_act_two_performance(
                     base_delay_s=0.5,
                 )
             except Exception as exc:
+                print(
+                    "   [ACT-TWO] task retrieval remained ambiguous: "
+                    f"task_id={_evidence_token(task_id)} "
+                    f"error={_evidence_token(type(exc).__name__)}"
+                )
                 _paid_update(
                     "accepted_unknown",
                     provider_job_id=task_id,
@@ -329,6 +398,11 @@ def generate_act_two_performance(
             if final_status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
                 break
             if elapsed >= poll_timeout_s:
+                print(
+                    "   [ACT-TWO] local poll timeout; provider still owns task: "
+                    f"task_id={_evidence_token(task_id)} "
+                    f"status={_evidence_token(final_status)}"
+                )
                 _paid_update(
                     "accepted_unknown",
                     provider_job_id=task_id,
@@ -346,6 +420,7 @@ def generate_act_two_performance(
             elapsed += _POLL_INTERVAL_S
 
         if final_status == "CANCELLED":
+            print(f"   [ACT-TWO] task cancelled: task_id={_evidence_token(task_id)}")
             _paid_reconcile(
                 "cancelled",
                 provider_job_id=task_id,
@@ -355,18 +430,27 @@ def generate_act_two_performance(
             return None
         if final_status == "FAILED":
             failure = classify_task_failure(final_task)
+            failure_code = _evidence_token(failure["code"])
+            print(
+                "   [ACT-TWO] task failed: "
+                f"task_id={_evidence_token(task_id)} "
+                f"failure_code={failure_code}"
+            )
             _paid_reconcile(
                 "failed_billed" if failure["billed"] else "failed_unbilled",
                 provider_job_id=task_id,
                 provider_status=final_status,
-                failure_code=str(failure["code"]),
+                failure_code=failure_code,
                 detail="Runway reported terminal Act-Two failure",
             )
             return None
         output = getattr(final_task, "output", None)
         out_url = (output or [None])[0]
         if not out_url:
-            print("   [ACT-TWO] SUCCEEDED but no output URL")
+            print(
+                "   [ACT-TWO] task succeeded without output URL: "
+                f"task_id={_evidence_token(task_id)}"
+            )
             _paid_update(
                 "accepted_unknown",
                 provider_job_id=task_id,
@@ -376,6 +460,10 @@ def generate_act_two_performance(
             )
             return None
         if not safe_download(out_url, output_mp4, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact):
+            print(
+                "   [ACT-TWO] output reconciliation failed: "
+                f"task_id={_evidence_token(task_id)}"
+            )
             _paid_update(
                 "accepted_unknown",
                 provider_job_id=task_id,
@@ -404,19 +492,40 @@ def generate_act_two_performance(
         print(f"   ✅ Act-Two: {output_mp4}")
         return output_mp4
     except AuthenticationError as e:
-        print(f"   [ACT-TWO] SDK auth error (bad/expired RUNWAYML_API_SECRET): {e}")
-        _paid_reconcile("failed_unbilled", failure_code="AUTHENTICATION_ERROR", detail=str(e))
+        print("   [ACT-TWO] SDK auth error (bad/expired RUNWAYML_API_SECRET)")
+        if not _keep_known_task_reserved(
+            "Act-Two accepted task could not be retrieved after authentication failed"
+        ):
+            _paid_reconcile(
+                "failed_unbilled",
+                failure_code="AUTHENTICATION_ERROR",
+                detail=type(e).__name__,
+            )
         return None
     except BadRequestError as e:
-        print(f"   [ACT-TWO] SDK rejected the request (bad params): {e}")
-        _paid_reconcile("failed_unbilled", failure_code="BAD_REQUEST", detail=str(e))
+        print("   [ACT-TWO] SDK rejected the request (bad params)")
+        if not _keep_known_task_reserved(
+            "Act-Two accepted task retrieval returned a bad-request response"
+        ):
+            _paid_reconcile(
+                "failed_unbilled",
+                failure_code="BAD_REQUEST",
+                detail=type(e).__name__,
+            )
         return None
     except RateLimitError as e:
-        print(f"   [ACT-TWO] SDK rate-limited: {e}")
-        _paid_reconcile("failed_unbilled", failure_code="RATE_LIMIT", detail=str(e))
+        print("   [ACT-TWO] SDK rate-limited")
+        if not _keep_known_task_reserved(
+            "Act-Two accepted task retrieval remained rate-limited"
+        ):
+            _paid_reconcile(
+                "failed_unbilled",
+                failure_code="RATE_LIMIT",
+                detail=type(e).__name__,
+            )
         return None
     except APIConnectionError as e:
-        print(f"   [ACT-TWO] SDK connection error: {e}")
+        print(f"   [ACT-TWO] SDK connection error: {type(e).__name__}")
         _paid_update(
             "accepted_unknown",
             provider_job_id=_resume_task_id,
@@ -425,12 +534,16 @@ def generate_act_two_performance(
         return None
     except APIStatusError as e:
         status = getattr(e, "status_code", "?")
-        print(f"   [ACT-TWO] SDK API error (status={status}): {e}")
-        if status in {400, 401, 403, 422}:
+        print(f"   [ACT-TWO] SDK API error (status={status})")
+        if _keep_known_task_reserved(
+            f"Act-Two accepted task retrieval returned HTTP {status}"
+        ):
+            pass
+        elif status in {400, 401, 403, 422}:
             _paid_reconcile(
                 "failed_unbilled",
                 failure_code=f"HTTP_{status}",
-                detail=str(e),
+                detail=type(e).__name__,
             )
         else:
             _paid_update(
@@ -440,67 +553,41 @@ def generate_act_two_performance(
             )
         return None
     except Exception as e:
-        print(f"   [ACT-TWO] SDK call failed with unexpected error ({type(e).__name__}): {e}")
-        if _resume_task_id:
+        print(
+            "   [ACT-TWO] SDK call failed with unexpected error "
+            f"({type(e).__name__})"
+        )
+        if _resume_task_id or _submission_started:
             _paid_update(
                 "accepted_unknown",
                 provider_job_id=_resume_task_id,
-                detail=f"Act-Two accepted task hit local {type(e).__name__}",
+                detail=(
+                    "Act-Two submission outcome is ambiguous after local "
+                    f"{type(e).__name__}"
+                ),
             )
         else:
             _paid_reconcile(
                 "failed_unbilled",
                 failure_code=type(e).__name__.upper()[:128],
-                detail=str(e),
+                detail=type(e).__name__,
             )
         return None
 
 
-def _to_data_uri(path: str) -> str:
-    """Encode a local file as an RFC 2397 ``data:<mime>;base64,<...>`` URI.
-
-    Used for both ``character.uri`` and ``reference.uri`` — the SDK's typed
-    params document ``uri`` as "A HTTPS URL." with no separate local-file
-    parameter, and this adapter has no asset-upload step, so a real data URI
-    (not a bare filesystem path, which Runway's servers cannot dereference)
-    is the only way to hand Runway a local keyframe/driving-video file.
-
-    Raises:
-        OSError: the file cannot be stat'd or read (missing/permissions).
-        ValueError: the file exceeds ``_MAX_INLINE_BYTES`` — callers must
-            fail the request loudly rather than attempt an inline payload
-            this large (see ``_MAX_INLINE_BYTES`` for why the cap exists).
-    """
-    size = os.path.getsize(path)
-    if size > _MAX_INLINE_BYTES:
-        raise ValueError(
-            f"{path} is {size} bytes, over the {_MAX_INLINE_BYTES}-byte "
-            f"inline data-URI cap for Act-Two requests"
-        )
-    mime, _ = mimetypes.guess_type(path)
-    if not mime:
-        mime = "application/octet-stream"
-    with open(path, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode("ascii")
-    return f"data:{mime};base64,{encoded}"
-
-
 def _raw_rest_call(
-    api_key: str, keyframe_path: str, reference_video_path: str, output_mp4: str,
+    api_key: str, output_mp4: str,
     duration_s: float, poll_timeout_s: int, shot_id: str, video_id: str,
     cost_tracker=None,
     paid_attempt: Optional[dict] = None,
     resume_task_id: Optional[str] = None,
 ) -> Optional[str]:
-    """Raw REST fallback for when the ``runwayml`` package isn't installed.
+    """Retrieve a durable Act-Two task when the official SDK is unavailable.
 
-    Sends the SAME act_two contract as the SDK path above: model="act_two",
-    a video `reference` (Act-Two has no audio-reference mode — see module
-    docstring), and no `duration` field (the endpoint doesn't accept one).
-    The precondition (reference_video_path exists) is already checked by
-    the caller before this is invoked.
-
-    Returns None on any failure — graceful for the cascade.
+    New submissions fail closed: local inputs require the SDK's official
+    ephemeral-upload transport, and inventing a second raw submission path
+    would reopen duplicate-paid-work and asset-contract ambiguity. GET polling
+    an already-recorded task ID remains safe and idempotent.
     """
     import requests
 
@@ -522,76 +609,24 @@ def _raw_rest_call(
         )
         return paid_attempt
 
-    try:
-        character_uri = _to_data_uri(keyframe_path)
-        reference_uri = _to_data_uri(reference_video_path)
-    except (OSError, ValueError) as e:
-        print(f"   [ACT-TWO/REST] failed to encode input as a data URI: {e}")
+    task_id = resume_task_id
+    if not task_id:
+        print(
+            "   [ACT-TWO/REST] SDK unavailable; refusing new Act-Two "
+            "submission before paid work"
+        )
+        _reconcile(
+            "failed_unbilled",
+            failure_code="SDK_UNAVAILABLE",
+            detail=(
+                "Official Runway SDK unavailable; new Act-Two submission "
+                "requires ephemeral input uploads"
+            ),
+        )
         return None
 
+    print(f"   [ACT-TWO/REST] resuming task: task_id={_evidence_token(task_id)}")
     try:
-        body = {
-            "model": _MODEL,
-            "character": {"type": "image", "uri": character_uri},
-            "reference": {"type": "video", "uri": reference_uri},
-            "ratio": "1280:720",
-        }
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "X-Runway-Version": _RUNWAY_API_VERSION,
-            "Content-Type": "application/json",
-        }
-        task_id = resume_task_id
-        if not task_id:
-            post_attempt = 0
-            while True:
-                r = requests.post(
-                    "https://api.dev.runwayml.com/v1/character_performance",
-                    json=body,
-                    headers=headers,
-                    timeout=60,
-                )
-                if r.status_code != 429 or post_attempt >= 3:
-                    break
-                from types import SimpleNamespace
-                from performance.runway_tasks import retry_delay_seconds
-
-                time.sleep(
-                    retry_delay_seconds(
-                        SimpleNamespace(response=r),
-                        post_attempt,
-                    )
-                )
-                post_attempt += 1
-            if r.status_code not in (200, 201, 202):
-                print(f"   [ACT-TWO/REST] HTTP {r.status_code}: {r.text[:200]}")
-                if r.status_code in {400, 401, 403, 422, 429}:
-                    _reconcile(
-                        "failed_unbilled",
-                        failure_code=f"HTTP_{r.status_code}",
-                        detail="Runway REST submission rejected",
-                    )
-                else:
-                    _update(
-                        "accepted_unknown",
-                        detail=f"Runway REST submission outcome ambiguous (HTTP {r.status_code})",
-                    )
-                return None
-            task_id = r.json().get("id")
-            if not isinstance(task_id, str) or not task_id:
-                _update(
-                    "accepted_unknown",
-                    detail="Runway REST accepted response had no usable task ID",
-                )
-                return None
-            _update(
-                "running",
-                provider_job_id=task_id,
-                provider_status="PENDING",
-                detail="Act-Two REST task accepted",
-            )
-
         def _get_status_rest():
             tr = requests.get(
                 f"https://api.dev.runwayml.com/v1/tasks/{task_id}",
@@ -616,6 +651,11 @@ def _raw_rest_call(
                     base_delay_s=0.5,
                 )
             except Exception as exc:
+                print(
+                    "   [ACT-TWO/REST] task retrieval remained ambiguous: "
+                    f"task_id={_evidence_token(task_id)} "
+                    f"error={_evidence_token(type(exc).__name__)}"
+                )
                 _update(
                     "accepted_unknown",
                     provider_job_id=task_id,
@@ -626,6 +666,11 @@ def _raw_rest_call(
             if final_status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
                 break
             if elapsed >= poll_timeout_s:
+                print(
+                    "   [ACT-TWO/REST] local poll timeout; provider still owns task: "
+                    f"task_id={_evidence_token(task_id)} "
+                    f"status={_evidence_token(final_status)}"
+                )
                 _update(
                     "accepted_unknown",
                     provider_job_id=task_id,
@@ -643,6 +688,7 @@ def _raw_rest_call(
             elapsed += _POLL_INTERVAL_S
 
         if final_status == "CANCELLED":
+            print(f"   [ACT-TWO/REST] task cancelled: task_id={_evidence_token(task_id)}")
             _reconcile(
                 "cancelled",
                 provider_job_id=task_id,
@@ -656,8 +702,13 @@ def _raw_rest_call(
                 or final.get("failure_code")
                 or final.get("failure")
                 or "UNKNOWN_FAILURE"
-            ).upper()[:128]
+            )
+            code = _evidence_token(code.upper())
             billed = any(marker in code for marker in ("SAFETY", "MODERAT", "CONTENT_POLICY"))
+            print(
+                "   [ACT-TWO/REST] task failed: "
+                f"task_id={_evidence_token(task_id)} failure_code={code}"
+            )
             _reconcile(
                 "failed_billed" if billed else "failed_unbilled",
                 provider_job_id=task_id,
@@ -668,6 +719,10 @@ def _raw_rest_call(
             return None
         out_url = (final.get("output") or [None])[0]
         if not out_url:
+            print(
+                "   [ACT-TWO/REST] task succeeded without output URL: "
+                f"task_id={_evidence_token(task_id)}"
+            )
             _update(
                 "accepted_unknown",
                 provider_job_id=task_id,
@@ -677,6 +732,10 @@ def _raw_rest_call(
             )
             return None
         if not safe_download(out_url, output_mp4, allowed_content_types=("video/mp4",), content_validator=validate_video_artifact):
+            print(
+                "   [ACT-TWO/REST] output reconciliation failed: "
+                f"task_id={_evidence_token(task_id)}"
+            )
             _update(
                 "accepted_unknown",
                 provider_job_id=task_id,
@@ -712,10 +771,5 @@ def _raw_rest_call(
                 "accepted_unknown",
                 provider_job_id=existing_task_id,
                 detail=f"Act-Two REST accepted task hit {type(e).__name__}",
-            )
-        else:
-            _update(
-                "accepted_unknown",
-                detail=f"Act-Two REST submission outcome ambiguous: {type(e).__name__}",
             )
         return None

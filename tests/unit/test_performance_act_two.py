@@ -8,16 +8,18 @@ see performance/act_two.py's module docstring):
   - model must be "act_two" (never the retired "act_one")
   - reference must be {"type": "video", "uri": ...} — no audio-reference mode
   - the outgoing request carries NO "duration" field (SDK has none)
+  - new submissions upload local inputs through ``uploads.create_ephemeral``
+    and send only the returned ``runway://`` URIs
   - SDK errors are classified (auth / bad-request / rate-limit / connection /
-    generic status / unexpected) and NEVER trigger a REST retry — only a
-    missing runwayml package (ImportError) falls through to REST, and REST
-    sends the identical act_two contract.
+    generic status / unexpected) and NEVER trigger a REST retry
+  - without the SDK, new submissions fail closed; raw REST may only retrieve
+    a previously persisted task ID.
 """
 from __future__ import annotations
 
-import base64
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -46,10 +48,32 @@ class _FakeTask:
 
 
 class _FakeRetrievedTask:
-    def __init__(self, status: str, output: Optional[list] = None, failure: Optional[str] = None):
+    def __init__(
+        self,
+        status: str,
+        output: Optional[list] = None,
+        failure: Optional[str] = None,
+        failure_code: Optional[str] = None,
+    ):
         self.status = status
         self.output = output
         self.failure = failure
+        self.failure_code = failure_code
+
+
+class _FakeUploads:
+    """Records the exact local Paths sent to the SDK upload resource."""
+
+    def __init__(self, *, uris: Optional[list[str]] = None, error: Optional[BaseException] = None):
+        self.calls: list[Path] = []
+        self._uris = list(uris or ["runway://character-asset", "runway://reference-asset"])
+        self._error = error
+
+    def create_ephemeral(self, *, file):
+        self.calls.append(file)
+        if self._error is not None:
+            raise self._error
+        return SimpleNamespace(uri=self._uris[len(self.calls) - 1])
 
 
 class _FakeCharacterPerformance:
@@ -79,25 +103,42 @@ class _FakeTasks:
 
 class _FakeRunwayML:
     """Stands in for runwayml.RunwayML(api_key=...)."""
-    def __init__(self, character_performance: _FakeCharacterPerformance, statuses: list[_FakeRetrievedTask]):
+    def __init__(
+        self,
+        character_performance: _FakeCharacterPerformance,
+        statuses: list[_FakeRetrievedTask],
+        uploads: _FakeUploads,
+    ):
         self.character_performance = character_performance
         self.tasks = _FakeTasks(statuses)
+        self.uploads = uploads
 
     def __call__(self, api_key: str):  # the class itself is monkeypatched in, so calling it == constructing
         self.api_key = api_key
         return self
 
 
-def _install_fake_runwayml(monkeypatch, *, create_error=None, statuses=None, create_result=None):
+def _install_fake_runwayml(
+    monkeypatch,
+    *,
+    create_error=None,
+    statuses=None,
+    create_result=None,
+    upload_error=None,
+    upload_uris=None,
+):
     """Monkeypatch runwayml.RunwayML so `from runwayml import RunwayML` in
     act_two.py resolves to our fake. Returns the fake character_performance
     object so tests can inspect received_kwargs."""
     cp = _FakeCharacterPerformance(create_result=create_result, create_error=create_error)
+    uploads = _FakeUploads(uris=upload_uris, error=upload_error)
+    cp.uploads = uploads
     statuses = statuses if statuses is not None else [_FakeRetrievedTask("SUCCEEDED", output=["https://cdn.example.test/out.mp4"])]
 
     class _Ctor:
-        def __call__(self, api_key: str):
-            return _FakeRunwayML(cp, statuses)
+        def __call__(self, api_key: str, *, max_retries=None):
+            cp.constructor_max_retries = max_retries
+            return _FakeRunwayML(cp, statuses, uploads)
 
     import runwayml
     monkeypatch.setattr(runwayml, "RunwayML", _Ctor())
@@ -195,21 +236,56 @@ class TestSdkRequestContract:
         )
 
         assert result == out
+        assert cp.constructor_max_retries == 0
         assert os.path.exists(out)
         sent = cp.received_kwargs
         assert sent is not None
         assert sent["model"] == "act_two"
         assert "duration" not in sent, "Act-Two's create() has no duration parameter — it must not be sent"
-        # The `uri` fields must be real data URIs, not a bare local path —
-        # Runway's servers cannot dereference this machine's filesystem.
+        assert cp.uploads.calls == [Path(kf), Path(driving)]
+        assert all(isinstance(path, Path) for path in cp.uploads.calls)
         assert sent["character"]["type"] == "image"
-        assert sent["character"]["uri"].startswith("data:image/jpeg;base64,")
+        assert sent["character"]["uri"] == "runway://character-asset"
         assert sent["reference"]["type"] == "video"
-        assert sent["reference"]["uri"].startswith("data:video/mp4;base64,")
-        with open(kf, "rb") as f:
-            assert base64.b64decode(sent["character"]["uri"].split(",", 1)[1]) == f.read()
-        with open(driving, "rb") as f:
-            assert base64.b64decode(sent["reference"]["uri"].split(",", 1)[1]) == f.read()
+        assert sent["reference"]["uri"] == "runway://reference-asset"
+
+    def test_upload_failure_is_pre_submission_and_never_calls_create(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        kf, driving, out = _make_files(tmp_path)
+        cp = _install_fake_runwayml(
+            monkeypatch,
+            upload_error=OSError("local upload transport failed"),
+        )
+
+        result = act_two.generate_act_two_performance(
+            kf, "", out, driving_video_path=driving,
+        )
+
+        assert result is None
+        assert cp.received_kwargs is None
+        assert cp.uploads.calls == [Path(kf)]
+        evidence = capsys.readouterr().out
+        assert "before generation submission" in evidence
+        assert "failure_code=UPLOAD_OSERROR" in evidence
+
+    def test_invalid_ephemeral_uri_fails_before_generation_submission(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        kf, driving, out = _make_files(tmp_path)
+        cp = _install_fake_runwayml(
+            monkeypatch,
+            upload_uris=["https://not-a-runway-upload.example/image", "runway://reference"],
+        )
+
+        result = act_two.generate_act_two_performance(
+            kf, "", out, driving_video_path=driving,
+        )
+
+        assert result is None
+        assert cp.received_kwargs is None
+        assert cp.uploads.calls == [Path(kf)]
+        assert "failure_code=UPLOAD_VALUEERROR" in capsys.readouterr().out
 
     def test_cost_log_tags_model_act_two(self, monkeypatch, tmp_path):
         kf, driving, out = _make_files(tmp_path)
@@ -226,14 +302,30 @@ class TestSdkRequestContract:
         assert tracker.calls[0]["provider"] == "runway"
         assert tracker.calls[0]["cost_usd"] == pytest.approx(0.25)  # 0.05 * 5.0s
 
-    def test_terminal_failed_status_returns_none(self, monkeypatch, tmp_path):
+    def test_terminal_failed_status_retains_sanitized_task_and_code(
+        self, monkeypatch, tmp_path, capsys
+    ):
         kf, driving, out = _make_files(tmp_path)
-        _install_fake_runwayml(monkeypatch, statuses=[_FakeRetrievedTask("FAILED", failure="rejected")])
+        _install_fake_runwayml(
+            monkeypatch,
+            create_result=_FakeTask("task/with newline\nnoise"),
+            statuses=[
+                _FakeRetrievedTask(
+                    "FAILED",
+                    failure="input was not usable",
+                    failure_code="ASSET.INVALID\nunsafe-log-fragment",
+                )
+            ],
+        )
 
         result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=driving)
 
         assert result is None
         assert not os.path.exists(out)
+        evidence = capsys.readouterr().out
+        assert "task_id=task_with_newline_noise" in evidence
+        assert "failure_code=ASSET.INVALID_UNSAFE-LOG-FRAGMENT" in evidence
+        assert "task/with newline" not in evidence
 
     def test_succeeded_with_empty_output_returns_none(self, monkeypatch, tmp_path):
         kf, driving, out = _make_files(tmp_path)
@@ -342,67 +434,68 @@ class TestSdkErrorClassification:
 
 
 # ---------------------------------------------------------------------------
-# REST fallback — only on ImportError (SDK package missing), same contract
+# REST fallback — retrieval only; new submission fails closed without SDK
 # ---------------------------------------------------------------------------
 
 class TestRestFallback:
     def _force_sdk_import_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "runwayml", None)
 
-    def test_rest_used_when_sdk_missing_sends_same_contract(self, monkeypatch, tmp_path):
+    def test_new_submission_fails_closed_when_sdk_missing(
+        self, monkeypatch, tmp_path, capsys
+    ):
         self._force_sdk_import_error(monkeypatch)
         kf, driving, out = _make_files(tmp_path)
 
-        posted = {}
+        def _tripwire(*_args, **_kwargs):
+            raise AssertionError("missing SDK must never trigger a REST submission")
 
-        class _FakePostResponse:
-            status_code = 200
-            def json(self):
-                return {"id": "task_rest_1"}
-
-        class _FakeGetResponse:
-            ok = True
-            def json(self):
-                return {"status": "SUCCEEDED", "output": ["https://cdn.example.test/rest_out.mp4"]}
-
-        def _fake_post(url, json, headers, timeout):
-            posted["url"] = url
-            posted["json"] = json
-            posted["headers"] = headers
-            return _FakePostResponse()
-
-        def _fake_get(url, headers, timeout):
-            return _FakeGetResponse()
-
-        monkeypatch.setattr("requests.post", _fake_post)
-        monkeypatch.setattr("requests.get", _fake_get)
-        _ok_safe_download(monkeypatch)
-
-        result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=driving, duration_s=3.0)
-
-        assert result == out
-        assert posted["url"] == "https://api.dev.runwayml.com/v1/character_performance"
-        body = posted["json"]
-        assert body["model"] == "act_two"
-        assert "duration" not in body
-        assert body["reference"]["type"] == "video"
-        assert body["character"]["type"] == "image"
-        assert body["character"]["uri"].startswith("data:image/jpeg;base64,")
-        assert body["reference"]["uri"].startswith("data:video/mp4;base64,")
-
-    def test_rest_http_error_status_returns_none(self, monkeypatch, tmp_path):
-        self._force_sdk_import_error(monkeypatch)
-        kf, driving, out = _make_files(tmp_path)
-
-        class _FakeErrorResponse:
-            status_code = 400
-            text = "bad request"
-
-        monkeypatch.setattr("requests.post", lambda *a, **k: _FakeErrorResponse())
+        monkeypatch.setattr("requests.post", _tripwire)
+        monkeypatch.setattr("requests.get", _tripwire)
 
         result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=driving)
 
         assert result is None
+        assert "refusing new Act-Two submission" in capsys.readouterr().out
+
+    def test_raw_rest_may_retrieve_existing_task_but_never_posts(
+        self, monkeypatch, tmp_path, capsys
+    ):
+        out = str(tmp_path / "out.mp4")
+
+        class _FakeGetResponse:
+            ok = True
+
+            def json(self):
+                return {
+                    "status": "SUCCEEDED",
+                    "output": ["https://cdn.example.test/rest_out.mp4"],
+                }
+
+        def _tripwire(*_args, **_kwargs):
+            raise AssertionError("REST resume must not submit a new task")
+
+        monkeypatch.setattr("requests.post", _tripwire)
+        monkeypatch.setattr("requests.get", lambda *_args, **_kwargs: _FakeGetResponse())
+        _ok_safe_download(monkeypatch)
+        tracker = _FakeCostTracker()
+
+        result = act_two._raw_rest_call(
+            "secret",
+            out,
+            3.0,
+            0,
+            "shot",
+            "video",
+            cost_tracker=tracker,
+            resume_task_id="existing/task\n123",
+        )
+
+        assert result == out
+        assert tracker.calls[0]["provider_job_id"] == "existing/task\n123"
+        evidence = capsys.readouterr().out
+        assert "task_id=existing_task_123" in evidence
+        assert "existing/task" not in evidence
 
     def test_rest_also_requires_driving_video(self, monkeypatch, tmp_path, capsys):
         """The precondition check happens before either transport — REST
@@ -417,69 +510,3 @@ class TestRestFallback:
         result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=None)
 
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _to_data_uri — real base64 encoding, correct MIME, size-aware cap
-# ---------------------------------------------------------------------------
-
-class TestToDataUri:
-    def test_encodes_tiny_mp4_as_data_uri_with_correct_mime_and_bytes(self, tmp_path):
-        p = tmp_path / "clip.mp4"
-        raw = b"tiny-real-mp4-bytes"
-        p.write_bytes(raw)
-
-        uri = act_two._to_data_uri(str(p))
-
-        assert uri.startswith("data:video/mp4;base64,")
-        assert base64.b64decode(uri.split(",", 1)[1]) == raw
-
-    def test_encodes_jpeg_keyframe_with_image_mime(self, tmp_path):
-        p = tmp_path / "keyframe.jpg"
-        raw = b"tiny-real-jpeg-bytes"
-        p.write_bytes(raw)
-
-        uri = act_two._to_data_uri(str(p))
-
-        assert uri.startswith("data:image/jpeg;base64,")
-        assert base64.b64decode(uri.split(",", 1)[1]) == raw
-
-    def test_unknown_extension_falls_back_to_octet_stream(self, tmp_path):
-        p = tmp_path / "mystery.bin"
-        p.write_bytes(b"???")
-
-        uri = act_two._to_data_uri(str(p))
-
-        assert uri.startswith("data:application/octet-stream;base64,")
-
-    def test_oversized_file_raises_value_error_before_reading_full_content(self, tmp_path):
-        # Sparse file: only the last byte is materialized, so this doesn't
-        # actually allocate _MAX_INLINE_BYTES of disk — but os.path.getsize()
-        # reports the full logical size, which is what the cap checks.
-        p = tmp_path / "huge.mp4"
-        with open(p, "wb") as f:
-            f.seek(act_two._MAX_INLINE_BYTES)
-            f.write(b"\0")
-
-        with pytest.raises(ValueError, match="cap"):
-            act_two._to_data_uri(str(p))
-
-    def test_missing_file_raises_oserror(self, tmp_path):
-        with pytest.raises(OSError):
-            act_two._to_data_uri(str(tmp_path / "nope.mp4"))
-
-
-class TestDataUriSizeCapEndToEnd:
-    def test_oversized_input_fails_loudly_before_any_sdk_call(self, monkeypatch, tmp_path, capsys):
-        """A file over the inline cap must refuse BEFORE dispatch — never
-        reach client.character_performance.create()."""
-        kf, driving, out = _make_files(tmp_path)
-        cp = _install_fake_runwayml(monkeypatch)
-        monkeypatch.setattr(act_two, "_MAX_INLINE_BYTES", 1)  # force both tiny fixtures over cap
-
-        result = act_two.generate_act_two_performance(kf, "", out, driving_video_path=driving)
-
-        assert result is None
-        assert cp.received_kwargs is None
-        message = capsys.readouterr().out.lower()
-        assert "cap" in message or "exceeds" in message or "over the" in message

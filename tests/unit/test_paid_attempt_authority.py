@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import sqlite3
 import threading
 
+import httpx
 import pytest
 
 from cost_tracker import CostTracker
@@ -424,10 +425,31 @@ class _TaskEndpoint:
         return self.tasks[0]
 
 
+class _UploadEndpoint:
+    def __init__(self, *, forbid: bool = False, error: BaseException | None = None):
+        self.forbid = forbid
+        self.error = error
+        self.calls = []
+
+    def create_ephemeral(self, *, file):
+        self.calls.append(file)
+        if self.forbid:
+            raise AssertionError("restart must retrieve the existing task, not upload")
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(uri=f"runway://act-input-{len(self.calls)}")
+
+
 class _ActClient:
-    def __init__(self, create: _CreateEndpoint, tasks: _TaskEndpoint):
+    def __init__(
+        self,
+        create: _CreateEndpoint,
+        tasks: _TaskEndpoint,
+        uploads: _UploadEndpoint | None = None,
+    ):
         self.character_performance = create
         self.tasks = tasks
+        self.uploads = uploads or _UploadEndpoint()
 
 
 def _act_files(tmp_path):
@@ -456,9 +478,14 @@ def test_act_two_restart_resumes_same_accepted_task_without_duplicate_submit(
     keyframe, driving, output = _act_files(tmp_path)
     db = str(tmp_path / "act-restart.db")
     create_first = _CreateEndpoint(task_id="act-restart-task")
+    uploads_first = _UploadEndpoint()
     _install_act_client(
         monkeypatch,
-        _ActClient(create_first, _TaskEndpoint(SimpleNamespace(status="PENDING"))),
+        _ActClient(
+            create_first,
+            _TaskEndpoint(SimpleNamespace(status="PENDING")),
+            uploads_first,
+        ),
     )
     first = CostTracker(db_path=db, budget_usd=2.0)
     try:
@@ -481,10 +508,12 @@ def test_act_two_restart_resumes_same_accepted_task_without_duplicate_submit(
         )
         assert pending["state"] == "accepted_unknown"
         assert pending["provider_job_id"] == "act-restart-task"
+        assert len(uploads_first.calls) == 2
     finally:
         first.close()
 
     create_restart = _CreateEndpoint(forbid=True)
+    uploads_restart = _UploadEndpoint(forbid=True)
     _install_act_client(
         monkeypatch,
         _ActClient(
@@ -495,6 +524,7 @@ def test_act_two_restart_resumes_same_accepted_task_without_duplicate_submit(
                     output=["https://offline.test/output.mp4"],
                 )
             ),
+            uploads_restart,
         ),
     )
 
@@ -518,6 +548,7 @@ def test_act_two_restart_resumes_same_accepted_task_without_duplicate_submit(
             cost_tracker=resumed,
         ) == output
         assert create_restart.calls == 0
+        assert uploads_restart.calls == []
         settled = resumed.get_latest_paid_attempt(
             video_id="project-act",
             shot_id="shot-act",
@@ -528,6 +559,265 @@ def test_act_two_restart_resumes_same_accepted_task_without_duplicate_submit(
         assert resumed.get_video_cost("project-act")["total_usd"] == pytest.approx(0.25)
     finally:
         resumed.close()
+
+
+def test_act_two_remote_checkpoint_failure_keeps_known_task_reserved(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    keyframe, driving, output = _act_files(tmp_path)
+    task_id = "d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b"
+    create = _CreateEndpoint(task_id=task_id)
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _TaskEndpoint(SimpleNamespace(status="PENDING"))),
+    )
+
+    def fail_checkpoint(_task_id: str) -> None:
+        raise OSError("remote authority unavailable")
+
+    db = str(tmp_path / "checkpoint-failure.db")
+    with CostTracker(db_path=db, budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            duration_s=5.0,
+            shot_id="shot-checkpoint",
+            video_id="project-checkpoint",
+            cost_tracker=tracker,
+            task_acceptance_callback=fail_checkpoint,
+        ) is None
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="project-checkpoint",
+            shot_id="shot-checkpoint",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+        assert create.calls == 1
+        assert attempt["state"] == "accepted_unknown"
+        assert attempt["provider_job_id"] == task_id
+
+    forbidden_create = _CreateEndpoint(forbid=True)
+    _install_act_client(
+        monkeypatch,
+        _ActClient(
+            forbidden_create,
+            _TaskEndpoint(SimpleNamespace(status="PENDING")),
+            _UploadEndpoint(forbid=True),
+        ),
+    )
+    with CostTracker(db_path=db, budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            poll_timeout_s=0,
+            duration_s=5.0,
+            shot_id="shot-checkpoint",
+            video_id="project-checkpoint",
+            cost_tracker=tracker,
+        ) is None
+        assert forbidden_create.calls == 0
+
+
+def test_act_two_preclaim_failure_stops_after_uploads_and_before_provider_post(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    keyframe, driving, output = _act_files(tmp_path)
+    create = _CreateEndpoint(forbid=True)
+    uploads = _UploadEndpoint()
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _TaskEndpoint(SimpleNamespace(status="PENDING")), uploads),
+    )
+
+    def fail_preclaim() -> None:
+        raise OSError("deployment authority response was ambiguous")
+
+    with CostTracker(db_path=str(tmp_path / "preclaim.db"), budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            duration_s=5.0,
+            shot_id="shot-preclaim",
+            video_id="project-preclaim",
+            cost_tracker=tracker,
+            task_submission_callback=fail_preclaim,
+        ) is None
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="project-preclaim",
+            shot_id="shot-preclaim",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+        assert len(uploads.calls) == 2
+        assert create.calls == 0
+        assert attempt["state"] == "accepted_unknown"
+        assert attempt["provider_job_id"] == ""
+
+
+def test_act_two_claim_create_and_remote_ack_order_is_strict(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    keyframe, driving, output = _act_files(tmp_path)
+    events = []
+    create = _CreateEndpoint(task_id="d9f3cd8d-55c8-4a26-b2c4-b3ea0b0d7f9b")
+    original_create = create.create
+
+    def ordered_create(**kwargs):
+        events.append("create")
+        return original_create(**kwargs)
+
+    create.create = ordered_create
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _TaskEndpoint(SimpleNamespace(status="PENDING"))),
+    )
+    with CostTracker(db_path=str(tmp_path / "ordering.db"), budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            poll_timeout_s=0,
+            duration_s=5.0,
+            shot_id="shot-order",
+            video_id="project-order",
+            cost_tracker=tracker,
+            task_submission_callback=lambda: events.append("claim"),
+            task_acceptance_callback=lambda _task_id: events.append("ack"),
+        ) is None
+    assert events == ["claim", "create", "ack"]
+
+
+def test_act_two_unexpected_post_exception_stays_accepted_unknown(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    keyframe, driving, output = _act_files(tmp_path)
+    create = _CreateEndpoint()
+    create.error = ValueError("response parsing failed after POST")
+
+    def raising_create(**_kwargs):
+        create.calls += 1
+        raise create.error
+
+    create.create = raising_create
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _TaskEndpoint(SimpleNamespace(status="PENDING"))),
+    )
+    with CostTracker(db_path=str(tmp_path / "ambiguous.db"), budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            duration_s=5.0,
+            shot_id="shot-ambiguous",
+            video_id="project-ambiguous",
+            cost_tracker=tracker,
+        ) is None
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="project-ambiguous",
+            shot_id="shot-ambiguous",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+        assert create.calls == 1
+        assert attempt["state"] == "accepted_unknown"
+        assert attempt["provider_job_id"] == ""
+
+
+def test_act_two_upload_failure_releases_unbilled_reservation_without_submit(
+    monkeypatch, tmp_path
+) -> None:
+    keyframe, driving, output = _act_files(tmp_path)
+    create = _CreateEndpoint(forbid=True)
+    uploads = _UploadEndpoint(error=OSError("upload failed"))
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _TaskEndpoint(SimpleNamespace(status="PENDING")), uploads),
+    )
+
+    with CostTracker(db_path=str(tmp_path / "act-upload.db"), budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            duration_s=5.0,
+            shot_id="shot-upload",
+            video_id="project-upload",
+            cost_tracker=tracker,
+        ) is None
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="project-upload",
+            shot_id="shot-upload",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+        assert create.calls == 0
+        assert len(uploads.calls) == 1
+        assert attempt["state"] == "failed_unbilled"
+        assert attempt["provider_job_id"] == ""
+        assert attempt["failure_code"] == "UPLOAD_OSERROR"
+        assert tracker.get_paid_attempts_snapshot("project-upload")["active_reservation_usd"] == 0
+
+
+def test_act_two_post_accept_auth_error_keeps_task_reserved(monkeypatch, tmp_path) -> None:
+    import runwayml
+
+    keyframe, driving, output = _act_files(tmp_path)
+    request = httpx.Request(
+        "GET", "https://api.dev.runwayml.com/v1/tasks/act-auth-task"
+    )
+    response = httpx.Response(401, request=request)
+    auth_error = runwayml.AuthenticationError(
+        "expired while retrieving", response=response, body=None
+    )
+
+    class _AuthFailureTasks:
+        def retrieve(self, *, id: str):  # noqa: A002 - provider signature
+            raise auth_error
+
+    create = _CreateEndpoint(task_id="act-auth-task")
+    _install_act_client(
+        monkeypatch,
+        _ActClient(create, _AuthFailureTasks()),
+    )
+
+    with CostTracker(db_path=str(tmp_path / "act-auth.db"), budget_usd=2.0) as tracker:
+        assert act_two.generate_act_two_performance(
+            keyframe,
+            "",
+            output,
+            driving_video_path=driving,
+            duration_s=5.0,
+            shot_id="shot-auth",
+            video_id="project-auth",
+            cost_tracker=tracker,
+        ) is None
+        attempt = tracker.get_latest_paid_attempt(
+            video_id="project-auth",
+            shot_id="shot-auth",
+            engine="ACT_ONE",
+            operation="performance_capture",
+        )
+        assert attempt["state"] == "accepted_unknown"
+        assert attempt["provider_job_id"] == "act-auth-task"
+        assert attempt["billed"] is None
+        assert tracker.get_paid_attempts_snapshot("project-auth")[
+            "active_reservation_usd"
+        ] == pytest.approx(0.25)
+        assert tracker.get_video_cost("project-auth")["total_usd"] == 0
 
 
 def test_act_two_safety_failure_is_billed_and_not_ambiguous(monkeypatch, tmp_path) -> None:
