@@ -111,7 +111,7 @@
     "Install-Candidate.ps1": "2eeea063550afc6b47cb1aded44c556483cee25b30fe56f809659531a0a1c7a9",
     "README.md": "4f4e76745ebb460d4ee3cc90c269728535336b22202b1855b3b0438cf3a7bd02",
     "benchmark.py": "c7ceb3e579b8678511142a099c539e92cfd6d4259e61ea4edb0a9e94eecdfaea",
-    "contract.py": "9362853ae86d6aa348fbe110f69c5bc4f5e3f83064e9a6a04b1c98607e987fd5",
+    "contract.py": "9e9e13f99526688b15871caf64ec21b08363bb267c250369d6a2c05003328470",
     "inference.py": "2ef2b78b9e44f9056d121fbbed94cf8e7f5742e4ed2a7cf8f33e2879646ab237",
     "install.py": "e9dcfd8bbbde47eec68322995abfc37e11a3a61c7da9359ba87fba5d761f2868",
     "preflight.py": "39fd75f9c9a21661c636f7456e826c4c7bddfced96511e8886042f5f724ae104",

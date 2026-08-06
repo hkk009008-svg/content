@@ -1236,11 +1236,21 @@ def collect_resource_snapshot(state_root: Path) -> dict[str, Any]:
     probe = (
         "import hashlib,importlib,importlib.metadata,json,re;"
         f"pairs=json.loads({import_map!r});"
+        # Enumerate distributions BEFORE importing anything. `setuptools` is the
+        # first DIRECT_RUNTIME_IMPORTS entry, and importing it appends its
+        # `_vendor` directory to sys.path; importlib.metadata.distributions()
+        # then additionally reports ten vendored packages and shadows the
+        # installed platformdirs with the vendored copy. install.py's
+        # `_installed_packages` probe imports nothing, so an enumeration taken
+        # after these imports can never equal the recorded receipt, and
+        # validate_runtime_receipts then fails on every run. Measured on the
+        # target host: 143 distributions before, 159 after, reproduced by
+        # `import setuptools` alone.
+        "p=sorted((re.sub(r'[-_.]+','-',d.metadata.get('Name','').lower()),d.version) for d in importlib.metadata.distributions());"
+        "b=(json.dumps(p,separators=(',',':'))+'\\n').encode();"
         "loaded={n:importlib.import_module(v) for n,v in pairs};"
         "torch=loaded['torch'];"
         "direct=sorted([n,importlib.metadata.version(n),v] for n,v in pairs);"
-        "p=sorted((re.sub(r'[-_.]+','-',d.metadata.get('Name','').lower()),d.version) for d in importlib.metadata.distributions());"
-        "b=(json.dumps(p,separators=(',',':'))+'\\n').encode();"
         "d=(json.dumps(direct,separators=(',',':'))+'\\n').encode();"
         "boxes=torch.tensor([[0.,0.,1.,1.]],device='cuda');"
         "scores=torch.tensor([1.],device='cuda');"
@@ -1266,12 +1276,24 @@ def collect_resource_snapshot(state_root: Path) -> dict[str, Any]:
         check=False,
         timeout=180,
     )
+    # Check the exit status BEFORE parsing stdout, and carry the child's own
+    # stderr into the message. Parsing first made the returncode branch
+    # unreachable for every crash it was written to catch: a crashing probe
+    # prints nothing on stdout, so json.loads("") always raised first and the
+    # real traceback was captured and discarded. One unimportable dependency
+    # then surfaced as "did not return JSON", which cost hours of misdirected
+    # CUDA diagnosis.
+    probe_stderr = " ".join((python_result.stderr or "").split())[-600:]
+    if python_result.returncode != 0:
+        raise ContractError(f"CUDA runtime probe failed: {probe_stderr}")
     try:
         runtime = json.loads(python_result.stdout)
     except json.JSONDecodeError as exc:
-        raise ContractError("CUDA runtime probe did not return JSON") from exc
-    if python_result.returncode != 0 or not isinstance(runtime, Mapping):
-        raise ContractError("CUDA runtime probe failed")
+        raise ContractError(
+            f"CUDA runtime probe did not return JSON: {probe_stderr}"
+        ) from exc
+    if not isinstance(runtime, Mapping):
+        raise ContractError("CUDA runtime probe did not return a JSON object")
     toolkit_smoke = subprocess.run(
         [str(paths["python"]), str(paths["toolkit"] / "run.py"), "--help"],
         cwd=paths["toolkit"],
