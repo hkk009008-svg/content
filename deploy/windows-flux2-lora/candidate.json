@@ -52,7 +52,7 @@
       "repository": "https://github.com/ostris/ai-toolkit.git",
       "commit": "1e1418b22cf4373ec2b90b64ea3b343b031175ff",
       "launcher": "run.py",
-      "requirements_lock_sha256": "32c43d35aff72e1eae652017a7cae97a1734ee76db92b358ef2eee33823d22a2",
+      "requirements_lock_sha256": "39c099b4d0ce70582115d31280da77b3b7e36eaee5a7fef1637a140c473695a0",
       "license": "MIT"
     },
     "training_base": {
@@ -111,12 +111,12 @@
     "Install-Candidate.ps1": "2eeea063550afc6b47cb1aded44c556483cee25b30fe56f809659531a0a1c7a9",
     "README.md": "4f4e76745ebb460d4ee3cc90c269728535336b22202b1855b3b0438cf3a7bd02",
     "benchmark.py": "c7ceb3e579b8678511142a099c539e92cfd6d4259e61ea4edb0a9e94eecdfaea",
-    "contract.py": "b01e08cfb3302e9546f994328f7e8756a9b87dd8fd2adcd3d79e0ff5de11f3b1",
+    "contract.py": "9362853ae86d6aa348fbe110f69c5bc4f5e3f83064e9a6a04b1c98607e987fd5",
     "inference.py": "2ef2b78b9e44f9056d121fbbed94cf8e7f5742e4ed2a7cf8f33e2879646ab237",
     "install.py": "e9dcfd8bbbde47eec68322995abfc37e11a3a61c7da9359ba87fba5d761f2868",
     "preflight.py": "39fd75f9c9a21661c636f7456e826c4c7bddfced96511e8886042f5f724ae104",
-    "requirements.in": "bf4786ffe839c3981fdda9135bbff9eb6e1c16083f1fda64956a02f4fbd97a7a",
-    "requirements.lock": "32c43d35aff72e1eae652017a7cae97a1734ee76db92b358ef2eee33823d22a2",
+    "requirements.in": "f4d7dce7137cd6ea5d8031c8c6f6198665dc5371b095e4142aa7f798b767b5c5",
+    "requirements.lock": "39c099b4d0ce70582115d31280da77b3b7e36eaee5a7fef1637a140c473695a0",
     "train.py": "5dbab1dbff2c1019bfc2d8854328de883d469c09426bedb8bed715fd37bffc61"
   }
 }

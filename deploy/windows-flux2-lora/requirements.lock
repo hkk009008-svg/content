@@ -2400,23 +2400,6 @@ torchao==0.10.0 \
 torchaudio @ https://download-r2.pytorch.org/whl/cu130/torchaudio-2.11.0%2Bcu130-cp312-cp312-win_amd64.whl \
     --hash=sha256:f74949f9ace1e4a6cf9468bdb3211b9cfa0af6ea348125471ac71c8621d6c77d
     # via -r deploy/windows-flux2-lora/requirements.in
-torchcodec==0.9.1 \
-    --hash=sha256:0643c5e9c3a51fdafdea87935d5b0a38e99626c664f47a150482d77ab370a877 \
-    --hash=sha256:2d01c8b3685a3a38f050ed2b526808a2938dba6f56cb9f9e967884fd858bba15 \
-    --hash=sha256:508e0ce6da1e4af186b131cdbdd3d998bc4313e9f3a3f5b78f64aa5f9685ed88 \
-    --hash=sha256:53dfecabc843e4d78b77453732129bd8572dd9d022ab81a94f5305cd5e920ded \
-    --hash=sha256:5c9cdcba50c75be70ef6ec919ec1f7f14d9d5163d93cf6bd94403e134f03734c \
-    --hash=sha256:5e959c7abf95de62f78653d416f00f7ca32936fbfd23371b23d5c8dc199f3670 \
-    --hash=sha256:65634bb28b3155cf99f980dac31ecedb414c07b8156f8473ec9fb74bedbd2a1f \
-    --hash=sha256:72738d7870edbcd6982207609efe314352e0bf90f4e3895a549e23a49ee0673c \
-    --hash=sha256:7a81d29e67cebefaec08f9c817635d1ff47205814884e527ef4b135a6c795612 \
-    --hash=sha256:8996ec62b72c69545c30246df64df386d06d7ec7de0689be5d20dfc06aad6442 \
-    --hash=sha256:a50568ce73b70395d113833fb07394c223f5546ef5d4fafe0fdcd91627fca270 \
-    --hash=sha256:b9bc5a5dff925df96d11bf90bd0ce964b8086bb11ae09adf353518192b5da483 \
-    --hash=sha256:d5267e6112b0d0b948d653dc3ffa486bb9a01febc81606d3dfd75cf5a4dcc9f3 \
-    --hash=sha256:d9c8efe5845bde45a428f96493b4a041511f47f5bd53b333a0ad90426be4623a \
-    --hash=sha256:df0b5a15998fd7457625c2af2a6276e0e710fac158d145045340dbbcd1cfdb65
-    # via -r deploy/windows-flux2-lora/requirements.in
 torchvision @ https://download-r2.pytorch.org/whl/cu130/torchvision-0.28.0%2Bcu130-cp312-cp312-win_amd64.whl \
     --hash=sha256:5ae0ff50fcb43a189250a5fdb36a7dc780ea5caff469653cab1e3f32ed5d385c
     # via
