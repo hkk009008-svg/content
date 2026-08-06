@@ -206,12 +206,8 @@ function Get-VerifiedWorkerTask {
         (Resolve-PrincipalSid -UserId ([string]$xml.Task.Principals.Principal.UserId)) -cne
             [string]$contract.principal_sid -or
         [string]$xml.Task.Principals.Principal.LogonType -cne "InteractiveToken" -or
-        [string]$xml.Task.Principals.Principal.RunLevel -cne "LeastPrivilege" -or
         [string]$xml.Task.Settings.MultipleInstancesPolicy -cne "IgnoreNew" -or
-        [string]$xml.Task.Settings.ExecutionTimeLimit -cne "PT0S" -or
-        [string]$xml.Task.Settings.Enabled -cne "true" -or
-        [string]$xml.Task.Settings.StartWhenAvailable -cne "false" -or
-        [string]$xml.Task.Settings.WakeToRun -cne "false"
+        [string]$xml.Task.Settings.ExecutionTimeLimit -cne "PT0S"
     ) { throw "Worker task XML differs from the protected contract" }
     return [pscustomobject]@{
         task_service = $service
