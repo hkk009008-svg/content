@@ -185,7 +185,6 @@ DIRECT_RUNTIME_IMPORTS = {
     "pytorch-wavelets": "pytorch_wavelets",
     "matplotlib": "matplotlib",
     "av": "av",
-    "torchcodec": "torchcodec",
     "librosa": "librosa",
     "mutagen": "mutagen",
     "scipy": "scipy",

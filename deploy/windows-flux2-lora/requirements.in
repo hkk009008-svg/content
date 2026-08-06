@@ -42,7 +42,6 @@ pytorch-wavelets==1.3.0
 matplotlib==3.10.1
 setuptools==80.9.0
 av==16.0.1
-torchcodec==0.9.1
 librosa==0.11.0
 mutagen==1.47.0
 scipy==1.12.0
