@@ -70,7 +70,7 @@ cd web && npm test -- --run && npm run build
 - Image generation defaults to Gemini multi-reference. A local FLUX.2 Klein
   4B route appears in Setup only when the authenticated Windows worker proves
   its exact package, model, workflow, fixed execution canary, license review,
-  and 1/2/10-reference benchmark. Guarded FAL and Pollinations routes remain
+  and 1/2/4-reference benchmark. Guarded FAL and Pollinations routes remain
   the supported cloud fallbacks.
 - Local performance capture uses the same Windows RTX worker through the
   role-bound LivePortrait capability. Cloud performance adapters remain

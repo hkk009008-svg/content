@@ -21,16 +21,17 @@ WORKER_ROLE = "performance-liveportrait"
 CAPABILITY_SCHEMA_VERSION = 1
 IMAGE_CAPABILITY = "image-flux2-klein"
 IMAGE_BLOCKER_CODE = "candidate_artifacts_not_installed"
+FLUX2_BENCHMARK_REFERENCE_COUNTS = (1, 2, 4)
 # Exact reviewed source-package identity. These values intentionally remain
 # static until a reviewed candidate update changes both the application-side
 # validator and this gateway contract.
 FLUX2_PACKAGE_FIELDS = {
     "capability": IMAGE_CAPABILITY,
-    "candidate_manifest_sha256": "43c505f8776ad4d9e6f6bab281db24f8763b9f6d0a9076efd0f1d2c05ee7944b",
-    "workflow_sha256": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d",
+    "candidate_manifest_sha256": "02f2cc195cf2537c220ae385ef012d038ff46d4f39f2b007280bb7ef2fdf95f7",
+    "workflow_sha256": "f05cd319099ea0c07be6bf6bb8953cea345af154b4b23a86f08c06e180c30148",
     "model_manifest_sha256": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
     "revisions_manifest_sha256": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
-    "contract_digest": "303732a6cf772342a1451a4e7a845128b25fa044d4850224cc58c7c381d6f069",
+    "contract_digest": "97d59ef8400cf199737e1d7d9e4b417874c97d79f667079f323b5aad2490ad1a",
 }
 HOP_BY_HOP = {
     "connection",
@@ -294,7 +295,8 @@ class AuthenticatedGateway:
                 if (
                     benchmark_payload.get("runtime_contract_sha256") != runtime_hash
                     or benchmark_payload.get("probe_evidence_sha256") != canary_hash
-                    or benchmark_payload.get("sequence") != [1, 2, 10]
+                    or benchmark_payload.get("sequence")
+                    != list(FLUX2_BENCHMARK_REFERENCE_COUNTS)
                     or benchmark_payload.get("benchmark_state") != "passed"
                 ):
                     raise ValueError("benchmark evidence binding mismatch")

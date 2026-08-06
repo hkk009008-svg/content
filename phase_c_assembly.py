@@ -2,8 +2,9 @@ import os
 import logging
 import shutil
 import tempfile
+from pathlib import Path
 
-from typing import Mapping, NamedTuple
+from typing import Mapping, NamedTuple, Sequence
 
 from config.settings import settings
 from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
@@ -63,6 +64,53 @@ def _download_generated_jpeg(url: str, output_filename: str):
     )
 
 
+def _validate_preallocated_flux2_references(
+    reference_paths: Sequence[str],
+    *,
+    max_references: int,
+) -> tuple[str, ...]:
+    """Validate a controller-owned FLUX.2 allocation without rewriting it.
+
+    The controller persists this exact ordered tuple in take metadata.  Any
+    normalization, filtering, or deduplication here would let the graph inputs
+    diverge from that identity promise, so every difference is an error.
+    """
+
+    if (
+        isinstance(reference_paths, (str, bytes))
+        or not isinstance(reference_paths, Sequence)
+    ):
+        raise ValueError("preallocated FLUX.2 references must be a sequence")
+    if len(reference_paths) > max_references:
+        raise ValueError("preallocated FLUX.2 references exceed the graph limit")
+
+    exact: list[str] = []
+    seen: set[str] = set()
+    for value in reference_paths:
+        if not isinstance(value, str) or not value:
+            raise ValueError("preallocated FLUX.2 references must be paths")
+        path = Path(value)
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(
+                    "preallocated FLUX.2 references must remain regular files"
+                )
+            canonical = str(path.resolve(strict=True))
+        except OSError as exc:
+            raise ValueError(
+                "preallocated FLUX.2 references must remain available"
+            ) from exc
+        if canonical != value:
+            raise ValueError(
+                "preallocated FLUX.2 reference paths must remain canonical"
+            )
+        if canonical in seen:
+            raise ValueError("preallocated FLUX.2 references must remain unique")
+        seen.add(canonical)
+        exact.append(value)
+    return tuple(exact)
+
+
 def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        continuity_reference=None,
                        multi_angle_refs=None, identity_anchor="",
@@ -72,7 +120,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        _recovery_out=None, cost_tracker=None,
                        shot_id="", video_id="", take_id="",
                        project_snapshot=None, project_root=None,
-                       artifact_metadata=None):
+                       artifact_metadata=None,
+                       preallocated_flux2_reference_paths=None):
     """
     Generates a cinematic image with face-identity preservation.
 
@@ -92,6 +141,11 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
         shot_hint: Provider-neutral shot metadata used by identity validation.
+        preallocated_flux2_reference_paths: Exact controller-owned local
+            FLUX.2 allocation. When supplied for the explicit local route,
+            phase C validates and uses this order verbatim or fails before
+            worker readiness/network access. Direct callers may omit it and
+            use the ordinary allocator.
 
     Returns:
         ImageGenResult(path, api_name, billed_rejects) naming the backend
@@ -580,27 +634,60 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             reason="The project has an unsupported image backend selection.",
         )
 
-    local_references = []
-    for candidate in [
-        character_image,
-        *(multi_angle_refs or []),
-        *(
-            item
-            for entry in (secondary_char_refs or [])
-            for item in [entry.get("reference"), *(entry.get("multi_angle_refs") or [])]
-        ),
-        continuity_reference,
-    ]:
-        if (
-            candidate
-            and os.path.isfile(candidate)
-            and candidate not in local_references
-        ):
-            local_references.append(candidate)
-        if len(local_references) == 10:
-            break
+    from cinema.shots.strategy import CharIdentitySpec, allocate_flux2_references
+    from performance.flux2_klein import MAX_REFERENCE_IMAGES
 
+    primary_spec = None
+    if character_image or multi_angle_refs:
+        primary_spec = CharIdentitySpec(
+            char_id="primary",
+            reference=character_image or "",
+            identity_anchor=identity_anchor,
+            multi_angle_refs=tuple(multi_angle_refs or ()),
+        )
+    secondary_specs = []
+    for index, entry in enumerate(secondary_char_refs or (), 1):
+        if not isinstance(entry, Mapping):
+            continue
+        secondary_specs.append(CharIdentitySpec(
+            char_id=entry.get("char_id") or f"secondary-{index}",
+            reference=entry.get("reference") or "",
+            identity_anchor=entry.get("identity_anchor", ""),
+            multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
+        ))
+    local_allocation = allocate_flux2_references(
+        primary=primary_spec,
+        secondaries=secondary_specs,
+        continuity_reference=continuity_reference,
+        cap=MAX_REFERENCE_IMAGES,
+    )
     explicit_local = identity_backend == "local_flux2_klein"
+    if explicit_local and preallocated_flux2_reference_paths is not None:
+        try:
+            preallocated_references = _validate_preallocated_flux2_references(
+                preallocated_flux2_reference_paths,
+                max_references=MAX_REFERENCE_IMAGES,
+            )
+        except ValueError:
+            return _block_local(
+                code="local_reference_contract_invalid",
+                reason=(
+                    "The persisted FLUX.2 reference allocation is no longer "
+                    "an exact set of available canonical files."
+                ),
+            )
+        if preallocated_references != local_allocation.reference_paths:
+            return _block_local(
+                code="local_reference_contract_mismatch",
+                reason=(
+                    "The FLUX.2 generation inputs differ from the persisted "
+                    "reference allocation."
+                ),
+            )
+        local_references = list(preallocated_references)
+    else:
+        local_references = list(local_allocation.reference_paths)
+
     if explicit_local and not local_references:
         return _block_local(
             code="local_reference_required",

@@ -18,4 +18,4 @@ $ErrorActionPreference = "Stop"
     --output-root $OutputRoot `
     --endpoint $Endpoint `
     --probe-evidence $ProbeEvidence
-if ($LASTEXITCODE -ne 0) { throw "FLUX.2 Klein 1/2/10-reference benchmark failed" }
+if ($LASTEXITCODE -ne 0) { throw "FLUX.2 Klein 1/2/4-reference benchmark failed" }

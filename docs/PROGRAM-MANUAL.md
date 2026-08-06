@@ -116,7 +116,7 @@ Local FLUX.2 is appropriate when:
 - at least one approved local reference exists; and
 - you want local execution with no provider charge.
 
-The local workflow accepts 1–10 unique references, including approved character
+The local workflow accepts 1–4 unique references, including approved character
 angles, secondary-character references, and an approved continuity reference.
 When explicitly selected, Local FLUX.2 is pinned: a local readiness or execution
 problem blocks instead of silently spending on a cloud replacement.
@@ -298,7 +298,7 @@ Before installing, probing, benchmarking, warming, or restarting the worker:
 - use the tracked package and exact state root; and
 - keep bearer credentials out of command output and tracked files.
 
-The FLUX.2 sequence is install → fixed probe → sequential 1/2/10 benchmark →
+The FLUX.2 sequence is install → fixed probe → sequential 1/2/4 benchmark →
 Ready. The LivePortrait readiness record includes its own fixed execution proof.
 Both application adapters persist exact Comfy prompt IDs. One Comfy process
 still means one physical execution queue.
@@ -334,8 +334,8 @@ or manual-review condition.
 1. Give each in-frame character a distinct canonical reference.
 2. Keep names, wardrobe, side of frame, and action explicit in shot prompts.
 3. Inspect every face; one good primary score does not prove the secondary.
-4. Use local FLUX.2 only after the 10-reference benchmark passed on the exact
-   worker if the scene needs many reference inputs.
+4. Use local FLUX.2 only after the 4-reference benchmark passed on the exact
+   worker, and keep every shot within the official Klein reference limit.
 
 ### Lower spend risk
 

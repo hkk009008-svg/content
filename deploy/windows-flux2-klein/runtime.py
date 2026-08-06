@@ -14,6 +14,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import stat
 import sys
@@ -36,7 +37,7 @@ FIXED_PROMPT = (
 )
 FIXED_SEED = 424242
 FIXED_ASPECT_RATIO = "1:1"
-BENCHMARK_REFERENCE_COUNTS = (1, 2, 10)
+BENCHMARK_REFERENCE_COUNTS = (1, 2, 4)
 SAVE_NODE_ID = "23"
 UPLOAD_SUBFOLDER = "content-flux2-klein"
 MAX_JSON_BYTES = 16 * 1024 * 1024
@@ -203,6 +204,7 @@ def load_runtime_status(
         return status
 
     loaded: dict[str, Mapping[str, Any]] = {}
+    loaded_paths: dict[str, Path] = {}
     expected_statuses = {
         "install": "installed_needs_execution_probe",
         "canary": "fixed_probe_passed",
@@ -229,8 +231,25 @@ def load_runtime_status(
         ):
             raise RuntimeContractError("runtime evidence identity/status does not match")
         loaded[key] = payload
+        loaded_paths[key] = path
     if state in {"needs_benchmark", "ready"}:
         canary = loaded["canary"]
+        case_context = {
+            "state_root": state_root,
+            "runtime_contract_sha256": runtime_hash,
+            "binding": {
+                "package": canary.get("package"),
+                "artifacts": canary.get("artifact_contract"),
+                "fixture": canary.get("fixture"),
+            },
+        }
+        _validate_case_payload(
+            canary,
+            context=case_context,
+            reference_count=1,
+            evidence_kind="probe",
+        )
+        _validate_case_output_file(canary, loaded_paths["canary"])
         if (
             canary.get("runtime_contract_sha256") != runtime_hash
             or canary.get("workflow_sha256") != evidence["canary"].get("workflow_sha256")
@@ -243,10 +262,14 @@ def load_runtime_status(
         if (
             benchmark.get("runtime_contract_sha256") != runtime_hash
             or benchmark.get("probe_evidence_sha256") != evidence["canary"].get("sha256")
-            or benchmark.get("sequence") != [1, 2, 10]
-            or benchmark.get("benchmark_state") != "passed"
         ):
             raise RuntimeContractError("benchmark evidence binding does not match status")
+        _validate_benchmark_summary(
+            benchmark,
+            context=case_context,
+            probe_evidence_path=loaded_paths["canary"],
+            verify_case_evidence=True,
+        )
     return status
 
 
@@ -278,6 +301,281 @@ def _status_evidence_record(
             }
         )
     return record
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_case_payload(
+    payload: object,
+    *,
+    context: Mapping[str, Any],
+    reference_count: int,
+    evidence_kind: str,
+) -> Mapping[str, Any]:
+    """Validate one execution record against its requested immutable binding."""
+
+    if not isinstance(payload, Mapping):
+        raise RuntimeContractError("execution case must be a JSON object")
+    expected_status = (
+        "fixed_probe_passed" if evidence_kind == "probe" else "benchmark_case_passed"
+    )
+    binding = context.get("binding")
+    if not isinstance(binding, Mapping):
+        raise RuntimeContractError("runtime context binding is invalid")
+    if (
+        type(payload.get("schema_version")) is not int
+        or payload.get("schema_version") != 1
+        or payload.get("capability") != CAPABILITY
+        or payload.get("kind") != evidence_kind
+        or payload.get("status") != expected_status
+        or payload.get("execution_proven") is not True
+        or type(payload.get("reference_count")) is not int
+        or payload.get("reference_count") != reference_count
+        or payload.get("runtime_contract_sha256")
+        != context.get("runtime_contract_sha256")
+        or payload.get("package") != binding.get("package")
+        or payload.get("artifact_contract") != binding.get("artifacts")
+        or payload.get("fixture") != binding.get("fixture")
+        or payload.get("prompt") != FIXED_PROMPT
+        or payload.get("seed") != FIXED_SEED
+        or payload.get("aspect_ratio") != FIXED_ASPECT_RATIO
+    ):
+        raise RuntimeContractError("execution case identity/binding contract is invalid")
+    run_id = payload.get("run_id")
+    if (
+        not isinstance(run_id, str)
+        or len(run_id) != 32
+        or any(character not in "0123456789abcdef" for character in run_id)
+        or not _is_sha256(payload.get("worker_endpoint_sha256"))
+        or not _is_sha256(payload.get("workflow_sha256"))
+        or not _is_sha256(payload.get("prompt_id_sha256"))
+    ):
+        raise RuntimeContractError("execution case proof identity is invalid")
+    latency = payload.get("latency_seconds")
+    if (
+        isinstance(latency, bool)
+        or not isinstance(latency, (int, float))
+        or not math.isfinite(float(latency))
+        or latency < 0
+        or type(payload.get("workflow_node_count")) is not int
+        or payload.get("workflow_node_count") < 1
+    ):
+        raise RuntimeContractError("execution case workflow/latency proof is invalid")
+    output = payload.get("output")
+    decoded = output.get("decoded") if isinstance(output, Mapping) else None
+    if (
+        not isinstance(output, Mapping)
+        or output.get("path") != "output.png"
+        or type(output.get("bytes")) is not int
+        or output.get("bytes") < 1
+        or not _is_sha256(output.get("sha256"))
+        or output.get("content_type") != "image/png"
+        or not isinstance(decoded, Mapping)
+        or decoded.get("format") != "PNG"
+        or decoded.get("mode") not in {"RGB", "RGBA"}
+        or decoded.get("width") != 1024
+        or decoded.get("height") != 1024
+    ):
+        raise RuntimeContractError("execution case decoded-output proof is invalid")
+    gpu = payload.get("gpu")
+    if (
+        not isinstance(gpu, Mapping)
+        or type(gpu.get("sample_count")) is not int
+        or gpu.get("sample_count") < 1
+        or type(gpu.get("peak_vram_used_bytes")) is not int
+        or gpu.get("peak_vram_used_bytes") < 0
+        or type(gpu.get("minimum_vram_free_bytes")) is not int
+        or gpu.get("minimum_vram_free_bytes") < 0
+        or not isinstance(gpu.get("device"), Mapping)
+    ):
+        raise RuntimeContractError("execution case GPU proof is invalid")
+    cleanup = payload.get("cleanup")
+    inputs = cleanup.get("inputs") if isinstance(cleanup, Mapping) else None
+    output_cleanup = cleanup.get("output") if isinstance(cleanup, Mapping) else None
+    if (
+        not isinstance(inputs, Mapping)
+        or inputs.get("state") != "deleted"
+        or type(inputs.get("count")) is not int
+        or inputs.get("count") != reference_count
+        or not isinstance(output_cleanup, Mapping)
+        or output_cleanup.get("state") != "deleted"
+        or type(output_cleanup.get("count")) is not int
+        or output_cleanup.get("count") != 1
+    ):
+        raise RuntimeContractError("execution case cleanup proof is invalid")
+    return payload
+
+
+def _validate_case_output_file(
+    payload: Mapping[str, Any], evidence_path: Path
+) -> None:
+    """Bind one case JSON record to its immutable decoded output bytes."""
+
+    output = payload["output"]
+    output_path = evidence_path.parent / str(output["path"])
+    try:
+        metadata = output_path.lstat()
+        output_bytes = output_path.read_bytes()
+    except OSError as exc:
+        raise RuntimeContractError("execution case output evidence is missing") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or _is_link_or_reparse(output_path, metadata)
+        or len(output_bytes) != output.get("bytes")
+        or _sha256_bytes(output_bytes) != output.get("sha256")
+    ):
+        raise RuntimeContractError("execution case output evidence binding is invalid")
+    decoded = _validate_decoded_image(
+        output_bytes,
+        output.get("decoded"),
+        label="execution case output evidence",
+    )
+    if decoded != output.get("decoded"):
+        raise RuntimeContractError("execution case decoded-output evidence drifted")
+
+
+def _validate_returned_case(
+    case: object,
+    *,
+    context: Mapping[str, Any],
+    reference_count: int,
+    evidence_kind: str,
+) -> tuple[Mapping[str, Any], Path]:
+    """Bind a case-runner return value to the exact immutable evidence bytes."""
+
+    if not isinstance(case, Mapping):
+        raise RuntimeContractError("case runner returned an invalid result")
+    raw_path = case.get("evidence_path")
+    if not isinstance(raw_path, str) or not raw_path:
+        raise RuntimeContractError("execution case lacks its evidence path")
+    state_root = Path(context["state_root"]).resolve()
+    try:
+        evidence_path = Path(raw_path).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeContractError("execution case evidence is missing") from exc
+    if (
+        state_root not in evidence_path.parents
+        or evidence_path.is_symlink()
+        or not evidence_path.is_file()
+    ):
+        raise RuntimeContractError("execution case evidence path is unsafe")
+    payload = _load_json(evidence_path, "execution case evidence")
+    returned_payload = dict(case)
+    returned_payload.pop("evidence_path", None)
+    if dict(payload) != returned_payload:
+        raise RuntimeContractError("case runner result does not match its evidence bytes")
+    validated = _validate_case_payload(
+        payload,
+        context=context,
+        reference_count=reference_count,
+        evidence_kind=evidence_kind,
+    )
+    _validate_case_output_file(validated, evidence_path)
+    return validated, evidence_path
+
+
+def _validate_benchmark_summary(
+    summary: object,
+    *,
+    context: Mapping[str, Any],
+    probe_evidence_path: Path,
+    verify_case_evidence: bool,
+) -> Mapping[str, Any]:
+    """Revalidate the exact probe + ordered 1/2/4 benchmark evidence chain."""
+
+    if not isinstance(summary, Mapping):
+        raise RuntimeContractError("benchmark summary must be a JSON object")
+    probe_hash = _sha256_file(probe_evidence_path)
+    probe = _load_json(probe_evidence_path, "fixed probe evidence")
+    _validate_case_payload(
+        probe,
+        context=context,
+        reference_count=1,
+        evidence_kind="probe",
+    )
+    _validate_case_output_file(probe, probe_evidence_path)
+    if (
+        type(summary.get("schema_version")) is not int
+        or summary.get("schema_version") != 1
+        or summary.get("capability") != CAPABILITY
+        or summary.get("kind") != "benchmark_summary"
+        or summary.get("status") != "benchmark_passed"
+        or summary.get("benchmark_state") != "passed"
+        or summary.get("execution_proven") is not True
+        or summary.get("runtime_contract_sha256")
+        != context.get("runtime_contract_sha256")
+        or summary.get("probe_evidence_sha256") != probe_hash
+        or summary.get("probe_output_sha256") != probe.get("output", {}).get("sha256")
+        or not isinstance(summary.get("sequence"), list)
+        or any(type(value) is not int for value in summary.get("sequence", ()))
+        or summary.get("sequence") != list(BENCHMARK_REFERENCE_COUNTS)
+        or summary.get("sequential_no_overlap") is not True
+    ):
+        raise RuntimeContractError("benchmark summary identity/binding contract is invalid")
+    cases = summary.get("cases")
+    if (
+        not isinstance(cases, list)
+        or len(cases) != len(BENCHMARK_REFERENCE_COUNTS)
+        or any(
+            type(case.get("reference_count")) is not int
+            for case in cases
+            if isinstance(case, Mapping)
+        )
+        or [
+            case.get("reference_count") if isinstance(case, Mapping) else None
+            for case in cases
+        ]
+        != list(BENCHMARK_REFERENCE_COUNTS)
+    ):
+        raise RuntimeContractError("benchmark cases are not exactly ordered 1/2/4")
+
+    state_root = Path(context["state_root"]).resolve()
+    for expected_count, case in zip(BENCHMARK_REFERENCE_COUNTS, cases, strict=True):
+        if not isinstance(case, Mapping):
+            raise RuntimeContractError("benchmark case summary is invalid")
+        if (
+            not _is_sha256(case.get("workflow_sha256"))
+            or not _is_sha256(case.get("output_sha256"))
+            or not _is_sha256(case.get("evidence_sha256"))
+            or isinstance(case.get("latency_seconds"), bool)
+            or not isinstance(case.get("latency_seconds"), (int, float))
+            or not math.isfinite(float(case.get("latency_seconds")))
+            or case.get("latency_seconds") < 0
+            or type(case.get("peak_vram_used_bytes")) is not int
+            or case.get("peak_vram_used_bytes") < 0
+            or type(case.get("minimum_vram_free_bytes")) is not int
+            or case.get("minimum_vram_free_bytes") < 0
+        ):
+            raise RuntimeContractError("benchmark case summary proof is invalid")
+        if verify_case_evidence:
+            case_path = _bound_evidence_path(state_root, case.get("evidence_path"))
+            if _sha256_file(case_path) != case.get("evidence_sha256"):
+                raise RuntimeContractError("benchmark case evidence SHA-256 does not match")
+            payload = _load_json(case_path, "benchmark case evidence")
+            _validate_case_payload(
+                payload,
+                context=context,
+                reference_count=expected_count,
+                evidence_kind="benchmark",
+            )
+            _validate_case_output_file(payload, case_path)
+            if (
+                payload.get("latency_seconds") != case.get("latency_seconds")
+                or payload.get("workflow_sha256") != case.get("workflow_sha256")
+                or payload.get("output", {}).get("sha256") != case.get("output_sha256")
+                or payload.get("gpu", {}).get("peak_vram_used_bytes")
+                != case.get("peak_vram_used_bytes")
+                or payload.get("gpu", {}).get("minimum_vram_free_bytes")
+                != case.get("minimum_vram_free_bytes")
+            ):
+                raise RuntimeContractError("benchmark case summary drifted from case evidence")
+    return summary
 
 
 def load_fixed_fixture(package_root: Path = ROOT) -> tuple[bytes, Mapping[str, Any]]:
@@ -885,7 +1183,7 @@ def execute_case(
     """Run exactly one submitted graph and persist immutable decoded evidence."""
 
     if reference_count not in BENCHMARK_REFERENCE_COUNTS:
-        raise RuntimeContractError("reference count must be one of 1, 2, or 10")
+        raise RuntimeContractError("reference count must be one of 1, 2, or 4")
     if evidence_kind not in {"probe", "benchmark"}:
         raise RuntimeContractError("evidence kind is invalid")
     if workflow_builder is None or object_info_validator is None or workflow_validator is None:
@@ -1112,16 +1410,18 @@ def publish_probe_status(
     )
     if current.get("state") != "not_installed":
         raise RuntimeContractError("fixed probe can only promote the installed pre-probe state")
-    if (
-        probe_result.get("status") != "fixed_probe_passed"
-        or probe_result.get("runtime_contract_sha256")
-        != context["runtime_contract_sha256"]
-    ):
-        raise RuntimeContractError("fixed probe result cannot promote status")
-    probe_path = Path(str(probe_result.get("evidence_path")))
+    try:
+        persisted_probe, probe_path = _validate_returned_case(
+            probe_result,
+            context=context,
+            reference_count=1,
+            evidence_kind="probe",
+        )
+    except RuntimeContractError as exc:
+        raise RuntimeContractError("fixed probe result cannot promote status") from exc
     evidence = dict(current["evidence"])
     evidence["canary"] = _status_evidence_record(
-        state_root, probe_path, probe_result, include_output=True
+        state_root, probe_path, persisted_probe, include_output=True
     )
     promoted = {
         **current,
@@ -1142,20 +1442,19 @@ def publish_probe_status(
 
 def _validate_probe_evidence(path: Path, context: Mapping[str, Any]) -> Mapping[str, Any]:
     probe = _load_json(path, "fixed probe evidence")
-    if (
-        probe.get("capability") != CAPABILITY
-        or probe.get("kind") != "probe"
-        or probe.get("status") != "fixed_probe_passed"
-        or probe.get("execution_proven") is not True
-        or probe.get("reference_count") != 1
-        or probe.get("runtime_contract_sha256") != context["runtime_contract_sha256"]
-        or probe.get("fixture") != context["binding"]["fixture"]
-    ):
-        raise RuntimeContractError("fixed probe evidence is missing, failed, or stale")
-    output = probe.get("output")
-    if not isinstance(output, Mapping) or not isinstance(output.get("sha256"), str):
-        raise RuntimeContractError("fixed probe decoded-output evidence is invalid")
-    return probe
+    try:
+        validated = _validate_case_payload(
+            probe,
+            context=context,
+            reference_count=1,
+            evidence_kind="probe",
+        )
+        _validate_case_output_file(validated, path)
+        return validated
+    except RuntimeContractError as exc:
+        raise RuntimeContractError(
+            "fixed probe evidence is missing, failed, or stale"
+        ) from exc
 
 
 def run_benchmark(
@@ -1166,7 +1465,7 @@ def run_benchmark(
     case_runner: Callable[..., Mapping[str, Any]] = execute_case,
     **case_options: Any,
 ) -> Mapping[str, Any]:
-    """Run 1, 2, then 10 references serially and bind all case evidence."""
+    """Run 1, 2, then 4 references serially and bind all case evidence."""
 
     probe = _validate_probe_evidence(probe_evidence_path, context)
     benchmark_id = uuid.uuid4().hex
@@ -1182,9 +1481,13 @@ def run_benchmark(
                 evidence_kind="benchmark",
                 **case_options,
             )
-            if case.get("status") != "benchmark_case_passed":
-                raise RuntimeContractError("benchmark case did not pass")
-            completed.append(case)
+            case_payload, case_path = _validate_returned_case(
+                case,
+                context=context,
+                reference_count=reference_count,
+                evidence_kind="benchmark",
+            )
+            completed.append({**case_payload, "evidence_path": str(case_path)})
     except Exception as exc:
         failed = {
             "schema_version": 1,
@@ -1215,6 +1518,11 @@ def run_benchmark(
             "peak_vram_used_bytes": case["gpu"]["peak_vram_used_bytes"],
             "minimum_vram_free_bytes": case["gpu"]["minimum_vram_free_bytes"],
             "evidence_sha256": _sha256_file(Path(case["evidence_path"])),
+            "evidence_path": str(
+                Path(case["evidence_path"])
+                .resolve()
+                .relative_to(Path(context["state_root"]).resolve())
+            ).replace("\\", "/"),
         }
         for case in completed
     ]
@@ -1235,12 +1543,18 @@ def run_benchmark(
         "sequence": list(BENCHMARK_REFERENCE_COUNTS),
         "sequential_no_overlap": True,
         "pass_contract": (
-            "Each 1/2/10-reference graph was submitted exactly once after an empty "
+            "Each 1/2/4-reference graph was submitted exactly once after an empty "
             "queue check, completed successfully, decoded to the fixed dimensions, "
             "and produced consistent bounded GPU telemetry. Latency has no hidden SLA."
         ),
         "cases": summaries,
     }
+    _validate_benchmark_summary(
+        evidence,
+        context=context,
+        probe_evidence_path=probe_evidence_path,
+        verify_case_evidence=True,
+    )
     _write_json_new(benchmark_root / "evidence.json", evidence)
     return {**evidence, "evidence_path": str(benchmark_root / "evidence.json")}
 
@@ -1270,24 +1584,40 @@ def publish_benchmark_status(
     probe_evidence_path: Path,
     benchmark_result: Mapping[str, Any],
 ) -> Mapping[str, Any]:
-    """Atomically publish ready only from exact canary+1/2/10 evidence."""
+    """Atomically publish ready only from exact canary+1/2/4 evidence."""
 
     current = validate_benchmark_status_prerequisite(
         context=context, probe_evidence_path=probe_evidence_path
     )
-    if (
-        benchmark_result.get("status") != "benchmark_passed"
-        or benchmark_result.get("benchmark_state") != "passed"
-        or benchmark_result.get("runtime_contract_sha256")
-        != context["runtime_contract_sha256"]
-        or benchmark_result.get("sequence") != [1, 2, 10]
-    ):
-        raise RuntimeContractError("benchmark result cannot promote status")
     state_root = Path(context["state_root"])
-    benchmark_path = Path(str(benchmark_result.get("evidence_path")))
+    raw_benchmark_path = benchmark_result.get("evidence_path")
+    if not isinstance(raw_benchmark_path, str) or not raw_benchmark_path:
+        raise RuntimeContractError("benchmark result cannot promote status")
+    try:
+        benchmark_path = Path(raw_benchmark_path).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeContractError("benchmark result evidence is missing") from exc
+    resolved_state = state_root.resolve()
+    if (
+        resolved_state not in benchmark_path.parents
+        or benchmark_path.is_symlink()
+        or not benchmark_path.is_file()
+    ):
+        raise RuntimeContractError("benchmark result evidence path is unsafe")
+    persisted_benchmark = _load_json(benchmark_path, "benchmark evidence")
+    returned_benchmark = dict(benchmark_result)
+    returned_benchmark.pop("evidence_path", None)
+    if dict(persisted_benchmark) != returned_benchmark:
+        raise RuntimeContractError("benchmark result does not match its evidence bytes")
+    _validate_benchmark_summary(
+        persisted_benchmark,
+        context=context,
+        probe_evidence_path=probe_evidence_path,
+        verify_case_evidence=True,
+    )
     evidence = dict(current["evidence"])
     evidence["benchmark"] = _status_evidence_record(
-        state_root, benchmark_path, benchmark_result
+        state_root, benchmark_path, persisted_benchmark
     )
     promoted = {
         **current,

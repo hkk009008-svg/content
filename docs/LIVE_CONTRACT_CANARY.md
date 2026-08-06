@@ -11,13 +11,15 @@ There are two selectable targets:
 | `runway-act-two` | One Runway Act-Two request using the pinned fixture and durable attempt ledger | estimate `$0.15`; accepted cap `$0.15`–`$0.20` |
 | `windows-liveportrait-performance` | One authenticated round trip through the fixed Mac loopback tunnel to the role-bound Windows worker | estimate and cap `$0.00` |
 
-The local FLUX.2 fixed probe and 1/2/10-reference benchmark run through its
+The local FLUX.2 fixed probe and 1/2/4-reference benchmark run through its
 guarded Windows package, not this GitHub live-contract workflow.
 
-The latest accepted local FLUX.2 evidence is the successful 2026-08-06 KST
-install, fixed probe, and sequential 1/2/10-reference benchmark recorded in
+The successful 2026-08-06 KST install, fixed probe, and sequential
+1/2/10-reference benchmark remains preserved as historical evidence in
 `logs/worker-benchmarks/windows-flux2-klein/rtx-5070-ti-2026-08-06-v1.summary.json`.
-The tested 16 GB RTX 5070 Ti worker remained single-concurrency: the
+It predates the current official 1/2/4 Klein contract and cannot promote the
+current candidate to Ready. In that historical run, the tested 16 GB RTX 5070
+Ti worker remained single-concurrency: the
 10-reference case peaked at 15,299,448,196 bytes of VRAM use with
 1,795,027,580 bytes free, so the result does not authorize parallel GPU work.
 
@@ -76,11 +78,12 @@ Never register a persistent shared runner for this workflow.
 
 ## Local FLUX.2 boundary
 
-The accepted local image-worker sequence is install, one fixed probe, a cold
-restart, sequential 1/2/10-reference benchmarks, another cold restart, and an
+The required local image-worker sequence is install, one fixed probe, a cold
+restart, sequential 1/2/4-reference benchmarks, another cold restart, and an
 authenticated zero-media shared-readiness check. Every workload submission is
 single-concurrency and bound to the tracked candidate, model, revision,
-workflow, runtime, input, output, and evidence hashes.
+workflow, runtime, input, output, and evidence hashes. No current-contract
+Windows execution evidence has been recorded yet.
 
 The repository retains the sanitized summary and hashes. The Windows worker's
 `D:\ContentFlux2Klein` evidence tree retains the exact JSON records and small

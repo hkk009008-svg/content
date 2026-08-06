@@ -1049,7 +1049,7 @@ def test_gateway_rejects_stale_or_unproven_sentinel(tmp_path: Path) -> None:
         "benchmark_id": "benchmark-1",
         "runtime_contract_sha256": "f" * 64,
         "probe_evidence_sha256": canary["sha256"],
-        "sequence": [1, 2, 10],
+        "sequence": [1, 2, 4],
         "benchmark_state": "passed",
     })
     status_path = state_root / "status.json"

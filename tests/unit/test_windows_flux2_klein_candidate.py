@@ -188,7 +188,7 @@ def test_builder_is_flat_deterministic_four_step_and_multi_reference():
     assert graph["20"]["inputs"]["negative"] == ["114", 0]
 
 
-@pytest.mark.parametrize("reference_count", [1, 2, 10])
+@pytest.mark.parametrize("reference_count", [1, 2, 4])
 def test_builder_and_static_schema_cover_candidate_reference_bounds(reference_count):
     references = tuple(
         f"reference-{index}.png" for index in range(1, reference_count + 1)
@@ -221,7 +221,7 @@ def test_builder_and_static_schema_cover_candidate_reference_bounds(reference_co
     "overrides",
     [
         {"reference_images": []},
-        {"reference_images": [f"r-{index}.png" for index in range(11)]},
+        {"reference_images": [f"r-{index}.png" for index in range(5)]},
         {"reference_images": ["../escape.png"]},
         {"reference_images": ["same.png", "same.png"]},
         {"seed": True},
@@ -276,7 +276,7 @@ def test_mixed_live_and_legacy_metadata_combo_schema_passes():
         {"advanced": True},
     ]
     info["LoadImage"]["input"]["required"]["image"] = [
-        [f"reference-{index}.png" for index in range(1, 11)],
+        [f"reference-{index}.png" for index in range(1, 5)],
         {"image_upload": True},
     ]
 
@@ -481,7 +481,34 @@ def test_package_bindings_and_static_contract_validate_without_ready_claim():
     assert result["execution_proven"] is False
     assert result["artifact_count"] == 3
     assert result["core_class_count"] == 17
-    assert result["validated_reference_counts"] == [1, 2, 10]
+    assert result["validated_reference_counts"] == [1, 2, 4]
+
+
+def test_package_rejects_workflow_reference_limit_drift(tmp_path):
+    candidate_copy = tmp_path / "candidate"
+    shutil.copytree(PACKAGE, candidate_copy)
+    workflow_path = candidate_copy / "workflow.py"
+    workflow_source = workflow_path.read_text(encoding="utf-8")
+    assert "MAX_REFERENCE_IMAGES = 4" in workflow_source
+    workflow_path.write_text(
+        workflow_source.replace(
+            "MAX_REFERENCE_IMAGES = 4", "MAX_REFERENCE_IMAGES = 5", 1
+        ),
+        encoding="utf-8",
+    )
+
+    candidate_path = candidate_copy / "candidate.json"
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    candidate["bindings"]["workflow.py"] = hashlib.sha256(
+        workflow_path.read_bytes()
+    ).hexdigest()
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    with pytest.raises(
+        preflight.CandidateContractError,
+        match="reference-image limit drifted",
+    ):
+        preflight.validate_package(candidate_copy)
 
 
 def test_package_binding_tamper_is_rejected(tmp_path):

@@ -428,6 +428,66 @@ def _case_options():
     }
 
 
+def _successful_case(context, *, kind, count, evidence_path):
+    output = _output_png()
+    payload = {
+        "schema_version": 1,
+        "capability": runtime.CAPABILITY,
+        "kind": kind,
+        "run_id": f"{count:032x}",
+        "created_at": "2026-08-06T00:00:00Z",
+        "runtime_contract_sha256": context["runtime_contract_sha256"],
+        "package": context["binding"]["package"],
+        "artifact_contract": context["binding"]["artifacts"],
+        "fixture": context["binding"]["fixture"],
+        "reference_count": count,
+        "prompt": runtime.FIXED_PROMPT,
+        "seed": runtime.FIXED_SEED,
+        "aspect_ratio": runtime.FIXED_ASPECT_RATIO,
+        "worker_endpoint_sha256": "c" * 64,
+        "execution_proven": True,
+        "status": "fixed_probe_passed" if kind == "probe" else "benchmark_case_passed",
+        "workflow_sha256": f"{count:x}" * 64,
+        "workflow_node_count": 17,
+        "prompt_id_sha256": "d" * 64,
+        "latency_seconds": float(count),
+        "gpu": {
+            "sample_count": 2,
+            "max_sample_interval_seconds": 1.0,
+            "peak_vram_used_bytes": count * 100,
+            "minimum_vram_free_bytes": 1000 - count,
+            "peak_torch_vram_used_bytes": count * 50,
+            "device": {
+                "index": 0,
+                "type": "cuda",
+                "name": "NVIDIA GeForce RTX 5070 Ti",
+                "vram_total_bytes": 16_000_000_000,
+            },
+        },
+        "gpu_samples": [],
+        "output": {
+            "path": "output.png",
+            "bytes": len(output),
+            "sha256": hashlib.sha256(output).hexdigest(),
+            "content_type": "image/png",
+            "decoded": {
+                "format": "PNG",
+                "mode": "RGB",
+                "width": 1024,
+                "height": 1024,
+            },
+        },
+        "cleanup": {
+            "inputs": {"state": "deleted", "count": count},
+            "output": {"state": "deleted", "count": 1},
+        },
+    }
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    (evidence_path.parent / "output.png").write_bytes(output)
+    evidence_path.write_text(json.dumps(payload))
+    return {**payload, "evidence_path": str(evidence_path)}
+
+
 def test_probe_validates_before_upload_submits_once_and_decodes_output(tmp_path):
     context = _runtime_context(tmp_path)
     unrelated_input = Path(context["input_root"]) / "content-flux2-klein" / "keep.png"
@@ -575,40 +635,26 @@ def test_ambiguous_submission_is_not_retried_and_persists_unknown(tmp_path):
 
 def test_benchmark_requires_bound_probe_and_runs_exact_sequence(tmp_path):
     context = _runtime_context(tmp_path)
-    probe_path = tmp_path / "probe.json"
-    probe_path.write_text(
-        json.dumps(
-            {
-                "capability": runtime.CAPABILITY,
-                "kind": "probe",
-                "status": "fixed_probe_passed",
-                "execution_proven": True,
-                "reference_count": 1,
-                "runtime_contract_sha256": context["runtime_contract_sha256"],
-                "fixture": context["binding"]["fixture"],
-                "output": {"sha256": "d" * 64},
-            }
-        )
+    probe = _successful_case(
+        context,
+        kind="probe",
+        count=1,
+        evidence_path=Path(context["state_root"]) / "probe.json",
     )
+    probe_path = Path(probe["evidence_path"])
     sequence = []
 
     def case_runner(**kwargs):
         count = kwargs["reference_count"]
         sequence.append(count)
-        case_evidence = tmp_path / f"case-{count}.json"
-        case_evidence.write_text(json.dumps({"count": count}))
-        return {
-            "status": "benchmark_case_passed",
-            "reference_count": count,
-            "latency_seconds": float(count),
-            "workflow_sha256": str(count) * 64,
-            "output": {"sha256": "e" * 64},
-            "gpu": {
-                "peak_vram_used_bytes": count * 100,
-                "minimum_vram_free_bytes": 1000 - count,
-            },
-            "evidence_path": str(case_evidence),
-        }
+        return _successful_case(
+            context,
+            kind="benchmark",
+            count=count,
+            evidence_path=(
+                Path(context["state_root"]) / "evidence" / f"case-{count}.json"
+            ),
+        )
 
     result = runtime.run_benchmark(
         client=object(),
@@ -617,11 +663,80 @@ def test_benchmark_requires_bound_probe_and_runs_exact_sequence(tmp_path):
         case_runner=case_runner,
     )
 
-    assert sequence == [1, 2, 10]
+    assert sequence == [1, 2, 4]
     assert result["status"] == "benchmark_passed"
     assert result["benchmark_state"] == "passed"
     assert result["sequential_no_overlap"] is True
     assert [case["reference_count"] for case in result["cases"]] == sequence
+
+
+def test_benchmark_rejects_case_runner_repeated_reference_counts(tmp_path):
+    context = _runtime_context(tmp_path)
+    probe = _successful_case(
+        context,
+        kind="probe",
+        count=1,
+        evidence_path=Path(context["state_root"]) / "probe.json",
+    )
+    requested = []
+
+    def repeated_case_runner(**kwargs):
+        requested.append(kwargs["reference_count"])
+        return _successful_case(
+            context,
+            kind="benchmark",
+            count=1,
+            evidence_path=(
+                Path(context["state_root"])
+                / "repeated"
+                / f"requested-{kwargs['reference_count']}.json"
+            ),
+        )
+
+    with pytest.raises(runtime.RuntimeContractError, match="identity/binding"):
+        runtime.run_benchmark(
+            client=object(),
+            context=context,
+            probe_evidence_path=Path(probe["evidence_path"]),
+            case_runner=repeated_case_runner,
+        )
+
+    assert requested == [1, 2]
+
+
+def test_benchmark_rejects_case_runner_wrong_runtime_binding(tmp_path):
+    context = _runtime_context(tmp_path)
+    probe = _successful_case(
+        context,
+        kind="probe",
+        count=1,
+        evidence_path=Path(context["state_root"]) / "probe.json",
+    )
+
+    def wrong_binding_runner(**kwargs):
+        result = _successful_case(
+            context,
+            kind="benchmark",
+            count=kwargs["reference_count"],
+            evidence_path=(
+                Path(context["state_root"])
+                / "wrong-binding"
+                / f"case-{kwargs['reference_count']}.json"
+            ),
+        )
+        result["runtime_contract_sha256"] = "0" * 64
+        payload = dict(result)
+        path = Path(payload.pop("evidence_path"))
+        path.write_text(json.dumps(payload))
+        return result
+
+    with pytest.raises(runtime.RuntimeContractError, match="identity/binding"):
+        runtime.run_benchmark(
+            client=object(),
+            context=context,
+            probe_evidence_path=Path(probe["evidence_path"]),
+            case_runner=wrong_binding_runner,
+        )
 
 
 def test_benchmark_rejects_stale_probe_before_any_case(tmp_path):
@@ -716,20 +831,12 @@ def test_atomic_status_promotes_only_through_bound_probe_and_benchmark(tmp_path)
 
     def case_runner(**kwargs):
         count = kwargs["reference_count"]
-        case_path = state / f"case-{count}.json"
-        case_path.write_text(json.dumps({"count": count}))
-        return {
-            "status": "benchmark_case_passed",
-            "reference_count": count,
-            "latency_seconds": float(count),
-            "workflow_sha256": str(count) * 64,
-            "output": {"sha256": "e" * 64},
-            "gpu": {
-                "peak_vram_used_bytes": count * 100,
-                "minimum_vram_free_bytes": 1000 - count,
-            },
-            "evidence_path": str(case_path),
-        }
+        return _successful_case(
+            context,
+            kind="benchmark",
+            count=count,
+            evidence_path=state / "synthetic-cases" / f"case-{count}.json",
+        )
 
     benchmark = runtime.run_benchmark(
         client=object(),
@@ -737,6 +844,23 @@ def test_atomic_status_promotes_only_through_bound_probe_and_benchmark(tmp_path)
         probe_evidence_path=Path(probe["evidence_path"]),
         case_runner=case_runner,
     )
+    benchmark_path = Path(benchmark["evidence_path"])
+    malformed = dict(benchmark)
+    malformed.pop("evidence_path")
+    malformed["cases"] = [dict(case) for case in malformed["cases"]]
+    for case in malformed["cases"]:
+        case["reference_count"] = 1
+    benchmark_path.write_text(json.dumps(malformed))
+    with pytest.raises(runtime.RuntimeContractError, match="exactly ordered 1/2/4"):
+        runtime.publish_benchmark_status(
+            context=context,
+            probe_evidence_path=Path(probe["evidence_path"]),
+            benchmark_result={**malformed, "evidence_path": str(benchmark_path)},
+        )
+
+    valid_benchmark_payload = dict(benchmark)
+    valid_benchmark_payload.pop("evidence_path")
+    benchmark_path.write_text(json.dumps(valid_benchmark_payload))
     ready = runtime.publish_benchmark_status(
         context=context,
         probe_evidence_path=Path(probe["evidence_path"]),
@@ -746,8 +870,18 @@ def test_atomic_status_promotes_only_through_bound_probe_and_benchmark(tmp_path)
     assert ready["startup_ready"] is True
     assert ready["benchmark_state"] == "passed"
 
-    Path(benchmark["evidence_path"]).write_text("{}")
+    benchmark_path.write_text("{}")
     with pytest.raises(runtime.RuntimeContractError, match="SHA-256"):
+        runtime.load_runtime_status(state, package_root=package)
+
+    # Even an attacker/stale publisher that updates the top-level SHA cannot
+    # turn a repeated case list into Ready evidence.
+    benchmark_path.write_text(json.dumps(malformed))
+    status_path = state / "status.json"
+    status = json.loads(status_path.read_text())
+    status["evidence"]["benchmark"]["sha256"] = runtime._sha256_file(benchmark_path)
+    status_path.write_text(json.dumps(status))
+    with pytest.raises(runtime.RuntimeContractError, match="exactly ordered 1/2/4"):
         runtime.load_runtime_status(state, package_root=package)
 
 

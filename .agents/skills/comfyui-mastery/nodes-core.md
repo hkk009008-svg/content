@@ -12,7 +12,7 @@ schema at the pinned revisions is authoritative.
 | `VAELoader` | `vae_name` | VAE | Loads the pinned FLUX.2 VAE |
 | `CLIPTextEncode` | `clip`, `text` | CONDITIONING | Encodes the bounded prompt |
 | `ConditioningZeroOut` | `conditioning` | CONDITIONING | Creates the negative branch required by the candidate |
-| `ReferenceLatent` | `conditioning`, `latent` | CONDITIONING | Adds one approved image latent; chains for 1–10 references |
+| `ReferenceLatent` | `conditioning`, `latent` | CONDITIONING | Adds one approved image latent; chains for 1–4 references |
 
 Model filenames and loader choices are fixed in
 `deploy/windows-flux2-klein/workflow.py` and `models.json`. Do not substitute a

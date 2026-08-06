@@ -15,6 +15,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 HEX_LENGTH = 64
+MAX_REFERENCE_IMAGES = 4
+VALIDATION_REFERENCE_COUNTS = (1, 2, MAX_REFERENCE_IMAGES)
 EXPECTED_BOUND_FILES = frozenset(
     {
         "Benchmark-Candidate.ps1",
@@ -499,8 +501,10 @@ def validate_workflow(
         if counts[class_name] != 1:
             errors.append(f"workflow requires exactly one {class_name}")
     references = counts["LoadImage"]
-    if not 1 <= references <= 10:
-        errors.append("workflow requires 1..10 reference images")
+    if not 1 <= references <= MAX_REFERENCE_IMAGES:
+        errors.append(
+            f"workflow requires 1..{MAX_REFERENCE_IMAGES} reference images"
+        )
     if counts["ImageScaleToTotalPixels"] != references or counts["VAEEncode"] != references:
         errors.append("each reference requires one scale and VAE encode node")
     if counts["ReferenceLatent"] != references * 2:
@@ -807,8 +811,10 @@ def validate_package(root: Path = ROOT) -> Mapping[str, Any]:
         raise CandidateContractError("source revision pins drifted")
     validate_object_info(object_info)
     builder = _load_workflow_builder(root)
+    if builder.__globals__.get("MAX_REFERENCE_IMAGES") != MAX_REFERENCE_IMAGES:
+        raise CandidateContractError("workflow reference-image limit drifted")
     graph_results: dict[str, Mapping[str, Any]] = {}
-    for reference_count in (1, 2, 10):
+    for reference_count in VALIDATION_REFERENCE_COUNTS:
         reference_images = [
             f"reference-{index}.png" for index in range(1, reference_count + 1)
         ]

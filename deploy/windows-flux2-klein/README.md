@@ -17,7 +17,7 @@ Current truth:
   has not been executed
 
 A green static preflight means only that the checked-in manifests, builder
-outputs for 1, 2, and 10 staged reference images, and pinned `/object_info`
+outputs for 1, 2, and 4 staged reference images, and pinned `/object_info`
 schema agree. It cannot promote this candidate.
 
 ## Pinned upstream basis
@@ -55,14 +55,13 @@ custom nodes. The caller must provide:
 - a non-empty prompt;
 - a fixed unsigned 64-bit seed;
 - one of the fixed aspect ratios in `ASPECT_DIMENSIONS`; and
-- 1–10 already-uploaded, unique reference filenames.
+- 1–4 already-uploaded, unique reference filenames.
 
 Each reference is scaled to one-megapixel class, VAE encoded, then attached to
 both positive and zeroed-negative conditioning with native `ReferenceLatent`
 nodes. Sampling is fixed to Euler, CFG 1.0, batch 1, and the distilled four-step
-`Flux2Scheduler` path. Ten is this candidate's bounded multi-reference safety
-envelope, aligned with the broader FLUX.2 documentation; it is not a measured
-local capacity claim.
+`Flux2Scheduler` path. Four is the official FLUX.2 Klein multi-reference limit,
+not a locally inferred capacity ceiling.
 
 ## Guarded Windows installation
 
@@ -165,7 +164,7 @@ After a passing fixed probe, pass its immutable evidence path explicitly:
 ```
 
 The benchmark rejects stale or failed probe evidence, then runs reference
-counts `1`, `2`, and `10` strictly sequentially. Each case repeats all live
+counts `1`, `2`, and `4` strictly sequentially. Each case repeats all live
 schema/queue guards, makes exactly one submission, requires a decoded fixed-size
 output, and records latency plus consistent RTX VRAM samples. `benchmark_passed`
 means this exact three-case capacity contract completed without overlap, OOM,
@@ -173,7 +172,7 @@ or decode/schema failure. It intentionally invents no hidden latency SLA; the
 measured latency remains visible in evidence for an operator decision.
 
 Only a bound passing benchmark atomically advances `status.json` to `ready`.
-Its immutable summary binds the exact canary hash and every 1/2/10 case
+Its immutable summary binds the exact canary hash and every 1/2/4 case
 evidence, workflow, output, latency, and VRAM result. `runtime.py` exposes
 `load_runtime_status(...)` as the fail-closed reader: it rejects path escapes,
 hash drift, missing/wrong-state evidence, stale manifests/workflows, and a
@@ -201,7 +200,7 @@ unapproved output dimensions. It also requires the direct official VAE and
 unexecuted, official-source Qwen derivation contract. It imports the bound
 builder and validates flat
 graphs at the minimum, ordinary multi-reference, and maximum candidate bounds
-(1, 2, and 10 references). The committed `/object_info` fixture models ten
+(1, 2, and 4 references). The committed `/object_info` fixture models four
 already-staged filenames. Runtime revalidates the worker's actual schema after
 upload and requires each submitted name to be present there.
 
@@ -233,7 +232,7 @@ errors. Do not label static schema validation as `ready`.
 Setup → GPU workers displays the authenticated image capability. Setup → Image
 enables Local FLUX.2 only for the exact live `ready` record with startup,
 execution, benchmark, hash, and license evidence intact. Production dispatch
-accepts 1–10 approved references and binds the Comfy prompt ID to the durable
+accepts 1–4 approved references and binds the Comfy prompt ID to the durable
 project attempt ledger through download and publication. Explicit local
 selection fails closed; an ambiguous accepted job becomes `UNKNOWN` and blocks
 automatic replacement work until reconciled.

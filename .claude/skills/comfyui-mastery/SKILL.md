@@ -88,7 +88,7 @@ execution/acceptance evidence; never relabel old evidence as current.
 
 FLUX.2 may run only in state `ready`; installation alone is
 `not_installed`, and a passing fixed probe without the sequential
-1/2/10-reference capacity run is `needs_benchmark`. LivePortrait requires its
+1/2/4-reference capacity run is `needs_benchmark`. LivePortrait requires its
 pinned startup execution proof and role-bound readiness digest.
 
 ## Submission discipline

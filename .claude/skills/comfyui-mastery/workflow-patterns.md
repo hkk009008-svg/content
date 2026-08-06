@@ -14,7 +14,7 @@ VAELoader(flux2-klein-vae)
   -> CLIPTextEncode(prompt)
   -> ConditioningZeroOut(negative)
 
-for each of 1..10 references:
+for each of 1..4 references:
   LoadImage -> ImageScaleToTotalPixels -> VAEEncode
     -> ReferenceLatent(positive)
     -> ReferenceLatent(negative)
@@ -32,7 +32,7 @@ EmptyFlux2LatentImage(fixed width/height)
 Caller-controlled inputs are limited to:
 
 - non-empty prompt, at most 4096 characters;
-- one to ten safe, unique remote reference filenames;
+- one to four safe, unique remote reference filenames;
 - unsigned 64-bit seed;
 - one aspect ratio from the builder's fixed dimension table; and
 - a bounded safe output prefix.

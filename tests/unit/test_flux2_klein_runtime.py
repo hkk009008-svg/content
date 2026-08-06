@@ -166,7 +166,7 @@ def test_non_ready_state_never_uploads_or_submits(tmp_path, state):
     assert not list(tmp_path.glob(".comfy-*.tmp"))
 
 
-@pytest.mark.parametrize("reference_count", [1, 10])
+@pytest.mark.parametrize("reference_count", [1, 4])
 def test_ready_state_uploads_bounded_refs_then_uses_durable_job_only(
     monkeypatch, tmp_path, reference_count
 ):
@@ -253,10 +253,22 @@ def test_invalid_reference_count_fails_before_network(tmp_path):
     def forbidden_client(*_args, **_kwargs):
         raise AssertionError("invalid local input reached the network")
 
-    with pytest.raises(ValueError, match="1..10"):
+    with pytest.raises(ValueError, match=r"1\.\.4"):
         flux2.run_flux2_klein_image_job(
             prompt="candidate",
             reference_image_paths=[],
+            output_path=str(tmp_path / "result.png"),
+            seed=0,
+            aspect_ratio="1:1",
+            cost_tracker=_DurableAuthority(),
+            settings_obj=_settings(),
+            client_factory=forbidden_client,
+        )
+
+    with pytest.raises(ValueError, match=r"1\.\.4"):
+        flux2.run_flux2_klein_image_job(
+            prompt="candidate",
+            reference_image_paths=_references(tmp_path, 5),
             output_path=str(tmp_path / "result.png"),
             seed=0,
             aspect_ratio="1:1",

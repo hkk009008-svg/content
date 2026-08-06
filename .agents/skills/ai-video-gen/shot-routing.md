@@ -51,7 +51,7 @@ Image provider selection is separate from shot classification:
   credential and approved character reference are available. A safely rejected
   result may continue through guarded local/cloud fallbacks.
 - `local_flux2_klein` explicitly selects the local worker. It requires one to
-  ten approved references, a `ready` authenticated capability, and durable job
+  four approved references, a `ready` authenticated capability, and durable job
   authority. Any missing requirement blocks; it does not silently spend on a
   cloud replacement.
 

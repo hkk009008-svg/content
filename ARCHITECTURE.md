@@ -107,7 +107,7 @@ backends:
   credential and required reference are present. After a safely terminal
   outcome, an eligible Ready local worker may be used, followed by the guarded
   FAL/Pollinations cascade.
-- `local_flux2_klein`: explicit local selection. It requires 1–10 unique,
+- `local_flux2_klein`: explicit local selection. It requires 1–4 unique,
   approved on-disk references and exact live worker readiness. It is pinned and
   fail-closed: the application does not silently replace it with a cloud image
   provider.
@@ -128,7 +128,7 @@ The UI enables Local FLUX.2 only when all of the following are true:
 - state is `ready`;
 - startup readiness and execution proof are true;
 - the fixed execution canary passed;
-- the sequential 1/2/10-reference benchmark passed;
+- the sequential 1/2/4-reference benchmark passed;
 - candidate, workflow, model, revision, and runtime-contract hashes match; and
 - license review state is approved.
 

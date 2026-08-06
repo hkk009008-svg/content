@@ -42,6 +42,359 @@ def test_generated_jpeg_download_is_bounded_mime_checked_and_validated(
     assert callable(captured["content_validator"])
 
 
+def test_local_flux2_uses_only_four_references_in_stable_precedence(
+    tmp_path, monkeypatch
+):
+    from cinema.context import PipelineContext
+    from performance.flux2_klein import Flux2KleinJobResult
+
+    references = []
+    for index in range(7):
+        path = tmp_path / f"reference-{index}.jpg"
+        path.write_bytes(f"reference-{index}".encode("ascii"))
+        references.append(str(path))
+    output = str(tmp_path / "result.jpg")
+    captured = {}
+
+    monkeypatch.setattr(pca, "has_paid_attempt_authority", lambda _tracker: True)
+    monkeypatch.setattr(
+        "performance.worker_readiness.require_flux2_worker_ready",
+        lambda _settings: {"state": "ready"},
+    )
+
+    def _run_local(**kwargs):
+        captured.update(kwargs)
+        return Flux2KleinJobResult(
+            prompt_id="prompt-1",
+            output={"filename": "result.jpg"},
+            history={},
+            published_path=output,
+        )
+
+    monkeypatch.setattr(
+        "performance.flux2_klein.run_flux2_klein_image_job",
+        _run_local,
+    )
+    result = pca.generate_ai_broll(
+        "preserve the approved characters",
+        output,
+        character_image=references[0],
+        multi_angle_refs=[references[1], references[0]],
+        secondary_char_refs=[
+            {
+                "reference": references[2],
+                "multi_angle_refs": [references[3]],
+            },
+            {
+                "reference": references[4],
+                "multi_angle_refs": [references[5]],
+            },
+        ],
+        continuity_reference=references[6],
+        ctx=PipelineContext(
+            global_settings={"identity_backend": "local_flux2_klein"}
+        ),
+        cost_tracker=object(),
+    )
+
+    assert result == pca.ImageGenResult(output, "FLUX2_KLEIN_LOCAL")
+    assert captured["reference_image_paths"] == references[:4]
+
+
+def test_local_controller_metadata_and_forwarded_refs_share_one_allocation(
+    tmp_path, monkeypatch
+):
+    """The controller must not promise characters absent from the graph."""
+
+    import cinema.shots.controller as controller_module
+    from cinema.shots.controller import ShotController
+    from cost_tracker import CostTracker
+
+    references = {}
+    for name in (
+        "primary.jpg",
+        "primary-angle.jpg",
+        "secondary.jpg",
+        "secondary-angle.jpg",
+        "third.jpg",
+        "continuity.jpg",
+    ):
+        path = tmp_path / name
+        path.write_bytes(name.encode("ascii"))
+        references[name] = str(path)
+
+    shot = {
+        "id": "shot_1_0",
+        "plan_status": "approved",
+        "characters_in_frame": ["char_a", "char_b", "char_c"],
+        "primary_character": "char_a",
+        "camera": "medium_shot",
+        "target_api": "AUTO",
+    }
+    scene = {
+        "id": "scene_1",
+        "title": "T",
+        "action": "A",
+        "location_id": None,
+        "shots": [shot],
+    }
+    project = {
+        "id": "proj_1",
+        "scenes": [scene],
+        "characters": [],
+        "objects": [],
+        "locations": [],
+        "global_settings": {"identity_backend": "local_flux2_klein"},
+    }
+    continuity_config = {
+        "primary_reference": references["primary.jpg"],
+        "multi_angle_refs": [
+            references["primary.jpg"],  # canonical-path duplicate
+            references["primary-angle.jpg"],
+        ],
+        "secondary_chars": [
+            {
+                "char_id": "char_b",
+                "reference": references["secondary.jpg"],
+                "multi_angle_refs": [references["secondary-angle.jpg"]],
+            },
+            {
+                "char_id": "char_c",
+                "reference": references["third.jpg"],
+            },
+        ],
+        "continuity_reference": references["continuity.jpg"],
+    }
+
+    host = MagicMock()
+    host._refresh_project_snapshot.return_value = project
+    lifecycle = MagicMock()
+    runstate = MagicMock()
+    runstate.shot_results = {}
+    core = MagicMock()
+    core.project = project
+    core.project_dir = str(tmp_path)
+    core.continuity.enhance_shot_prompt.return_value = {
+        "prompt": "base prompt",
+        "continuity_config": continuity_config,
+    }
+    core.cost_tracker = CostTracker(
+        db_path=str(tmp_path / "local-allocation.db"),
+        budget_usd=2.0,
+    )
+    ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+    ctrl._take_output_path = MagicMock(return_value=str(tmp_path / "keyframe.jpg"))
+    ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
+    ctrl._mutate_shot = lambda shot_id, mutator: mutator(scene, shot).value
+    captured = {}
+
+    def _capture_generation(*args, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(controller_module, "generate_ai_broll", _capture_generation)
+    try:
+        result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
+    finally:
+        core.cost_tracker.close()
+
+    assert result == {"success": False, "error": "Image generation failed"}
+    assert captured["character_image"] == references["primary.jpg"]
+    assert captured["multi_angle_refs"] == [references["primary-angle.jpg"]]
+    assert captured["secondary_char_refs"] == [
+        {
+            "char_id": "char_b",
+            "reference": references["secondary.jpg"],
+            "identity_anchor": "",
+            "fidelity": "reference",
+            "multi_angle_refs": [references["secondary-angle.jpg"]],
+        }
+    ]
+    assert captured["continuity_reference"] is None
+    assert captured["preallocated_flux2_reference_paths"] == (
+        references["primary.jpg"],
+        references["primary-angle.jpg"],
+        references["secondary.jpg"],
+        references["secondary-angle.jpg"],
+    )
+    metadata = captured["artifact_metadata"]["identity_strategy"]
+    assert metadata["flux2_reference_paths"] == [
+        references["primary.jpg"],
+        references["primary-angle.jpg"],
+        references["secondary.jpg"],
+        references["secondary-angle.jpg"],
+    ]
+    assert [item["char_id"] for item in metadata["conditioned_chars"]] == [
+        "char_a",
+        "char_b",
+    ]
+    assert metadata["unconditioned_chars"] == ["char_c"]
+
+
+def test_preallocated_local_reference_contract_blocks_all_drift_before_worker(
+    tmp_path, monkeypatch
+):
+    """Exact controller allocations are validated, never silently rewritten."""
+
+    from cinema.context import PipelineContext
+
+    primary = tmp_path / "primary.jpg"
+    primary.write_bytes(b"primary")
+    secondary = tmp_path / "secondary.jpg"
+    secondary.write_bytes(b"secondary")
+    symlink = tmp_path / "primary-link.jpg"
+    symlink.symlink_to(primary)
+    missing = tmp_path / "missing.jpg"
+
+    readiness = MagicMock(return_value={"state": "ready"})
+    run_local = MagicMock()
+    monkeypatch.setattr(
+        "performance.worker_readiness.require_flux2_worker_ready",
+        readiness,
+    )
+    monkeypatch.setattr(
+        "performance.flux2_klein.run_flux2_klein_image_job",
+        run_local,
+    )
+    context = PipelineContext(
+        global_settings={"identity_backend": "local_flux2_klein"}
+    )
+    inputs = {
+        "character_image": str(primary),
+        "secondary_char_refs": [{"char_id": "char_b", "reference": str(secondary)}],
+    }
+    invalid_contracts = [
+        (str(missing),),
+        (str(symlink),),
+        (str(primary), str(primary)),
+        (f"{tmp_path}/./primary.jpg", str(secondary)),
+        (str(primary),),  # Valid path, but not the complete decomposed allocation.
+    ]
+
+    for index, contract in enumerate(invalid_contracts):
+        recovery = {}
+        result = pca.generate_ai_broll(
+            "preserve the approved characters",
+            str(tmp_path / f"blocked-{index}.jpg"),
+            ctx=context,
+            cost_tracker=object(),
+            preallocated_flux2_reference_paths=contract,
+            _recovery_out=recovery,
+            **inputs,
+        )
+
+        assert result is None
+        assert recovery["code"] in {
+            "local_reference_contract_invalid",
+            "local_reference_contract_mismatch",
+        }
+
+    readiness.assert_not_called()
+    run_local.assert_not_called()
+
+
+def test_controller_deleted_preallocated_secondary_blocks_before_worker(
+    tmp_path, monkeypatch
+):
+    """A reference disappearing after strategy resolution cannot shrink the run."""
+
+    import cinema.shots.controller as controller_module
+    from cinema.shots.controller import ShotController
+    from cost_tracker import CostTracker
+
+    primary = tmp_path / "primary.jpg"
+    primary.write_bytes(b"primary")
+    secondary = tmp_path / "secondary.jpg"
+    secondary.write_bytes(b"secondary")
+    shot = {
+        "id": "shot_1_0",
+        "plan_status": "approved",
+        "characters_in_frame": ["char_a", "char_b"],
+        "primary_character": "char_a",
+        "camera": "medium_shot",
+        "target_api": "AUTO",
+    }
+    scene = {
+        "id": "scene_1",
+        "title": "T",
+        "action": "A",
+        "location_id": None,
+        "shots": [shot],
+    }
+    project = {
+        "id": "proj_1",
+        "scenes": [scene],
+        "characters": [],
+        "objects": [],
+        "locations": [],
+        "global_settings": {"identity_backend": "local_flux2_klein"},
+    }
+    continuity_config = {
+        "primary_reference": str(primary),
+        "secondary_chars": [
+            {"char_id": "char_b", "reference": str(secondary)}
+        ],
+    }
+
+    host = MagicMock()
+    host._refresh_project_snapshot.return_value = project
+    lifecycle = MagicMock()
+    runstate = MagicMock()
+    runstate.shot_results = {}
+    core = MagicMock()
+    core.project = project
+    core.project_dir = str(tmp_path)
+    core.continuity.enhance_shot_prompt.return_value = {
+        "prompt": "base prompt",
+        "continuity_config": continuity_config,
+    }
+    core.cost_tracker = CostTracker(
+        db_path=str(tmp_path / "deleted-reference.db"),
+        budget_usd=2.0,
+    )
+    ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+    ctrl._take_output_path = MagicMock(return_value=str(tmp_path / "keyframe.jpg"))
+    ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
+    ctrl._mutate_shot = lambda shot_id, mutator: mutator(scene, shot).value
+
+    real_resolver = controller_module._resolve_identity_strategy
+
+    def _resolve_then_delete(*args, **kwargs):
+        strategy = real_resolver(*args, **kwargs)
+        secondary.unlink()
+        return strategy
+
+    readiness = MagicMock(return_value={"state": "ready"})
+    run_local = MagicMock()
+    monkeypatch.setattr(
+        controller_module,
+        "_resolve_identity_strategy",
+        _resolve_then_delete,
+    )
+    monkeypatch.setattr(
+        "performance.worker_readiness.require_flux2_worker_ready",
+        readiness,
+    )
+    monkeypatch.setattr(
+        "performance.flux2_klein.run_flux2_klein_image_job",
+        run_local,
+    )
+
+    try:
+        result = ctrl.generate_keyframe_take("scene_1", "shot_1_0")
+    finally:
+        core.cost_tracker.close()
+
+    assert result["success"] is False
+    assert result["deferred_job"]["provider_status"] == (
+        "local_reference_contract_invalid"
+    )
+    assert not (tmp_path / "keyframe.jpg").exists()
+    assert shot.get("keyframe_takes", []) == []
+    readiness.assert_not_called()
+    run_local.assert_not_called()
+
+
 @pytest.fixture
 def stub_fal(monkeypatch):
     """Stub the lazily-imported `fal_client` + the image download so

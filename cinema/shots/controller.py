@@ -674,58 +674,136 @@ def _resolve_identity_strategy(shot, settings, cc):
     are promised identity conditioning through approved reference assets.
     """
     from cinema.shots.strategy import (
-        IdentityStrategy, CharIdentitySpec,
+        IdentityStrategy, CharIdentitySpec, allocate_flux2_references,
         REFERENCE_PRIMARY_ONLY, REFERENCE_MULTI_CHAR, NO_IDENTITY_ASSET,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
     primary_ref = cc.get("primary_reference")
-    secondary = cc.get("secondary_chars") or []
-
-    if not in_frame or not primary_ref:
-        return IdentityStrategy(
-            mechanism_tag=NO_IDENTITY_ASSET,
-            primary_char_id=primary_char_id,
-            unconditioned_chars=list(in_frame),
-        )
 
     # Both supported image routes condition on approved references; actual
     # provider provenance is recorded separately after generation.
     is_gemini_multiref = (settings.get("identity_backend") or "gemini_multiref") == "gemini_multiref"
 
-    conditioned = [CharIdentitySpec(
-        char_id=primary_char_id, reference=primary_ref,
-        identity_anchor=cc.get("identity_anchor", ""),
-        multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
-        fidelity="reference",
-    )]
-    conditioned_ids = {primary_char_id}
+    # Preserve the established Gemini decision contract. Its provider budget
+    # is character-based here and its own adapter owns image selection.
+    if is_gemini_multiref:
+        if not in_frame or not primary_ref:
+            return IdentityStrategy(
+                mechanism_tag=NO_IDENTITY_ASSET,
+                primary_char_id=primary_char_id,
+                unconditioned_chars=list(in_frame),
+            )
 
-    if secondary:
-        if is_gemini_multiref:
+        conditioned = [CharIdentitySpec(
+            char_id=primary_char_id, reference=primary_ref,
+            identity_anchor=cc.get("identity_anchor", ""),
+            multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
+            fidelity="reference",
+        )]
+        conditioned_ids = {primary_char_id}
+        secondary = cc.get("secondary_chars") or []
+        if secondary:
             # Nano Banana budgets REFERENCE IMAGES, not characters — cap the
             # combined primary+secondary character count against the shared
             # GEMINI_MULTIREF_MAX_REFS ceiling (1 slot already spent on the
             # primary) instead of the Kontext-tier flat 2-secondary cap, which
             # doesn't apply to this mechanism.
             from gemini_image_native import GEMINI_MULTIREF_MAX_REFS
+
             secondary_cap = max(0, GEMINI_MULTIREF_MAX_REFS - 1)
-        else:
-            # Local FLUX.2 accepts at most ten total reference images; reserve
-            # one primary-character slot before its flat reference truncation.
-            secondary_cap = 9
-        for entry in secondary[:secondary_cap]:
-            conditioned.append(CharIdentitySpec(
-                char_id=entry["char_id"], reference=entry["reference"],
-                identity_anchor=entry.get("identity_anchor", ""),
-                # V-5: without this, the Task-7 allocator's
-                # entry.get("multi_angle_refs") is ALWAYS empty via this path
-                # and secondaries can never fill their slots.
-                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
-                fidelity="reference",
-            ))
-            conditioned_ids.add(entry["char_id"])
+            for entry in secondary[:secondary_cap]:
+                conditioned.append(CharIdentitySpec(
+                    char_id=entry["char_id"], reference=entry["reference"],
+                    identity_anchor=entry.get("identity_anchor", ""),
+                    multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
+                    fidelity="reference",
+                ))
+                conditioned_ids.add(entry["char_id"])
         tag = REFERENCE_MULTI_CHAR if len(conditioned) > 1 else REFERENCE_PRIMARY_ONLY
+        return IdentityStrategy(
+            mechanism_tag=tag,
+            primary_char_id=primary_char_id,
+            conditioned_chars=conditioned,
+            unconditioned_chars=[c for c in in_frame if c not in conditioned_ids],
+        )
+
+    # Local FLUX.2 budgets actual graph images rather than character records.
+    # Allocate once from the provider's documented precedence and derive every
+    # downstream promise from those selected regular files.
+    from performance.flux2_klein import MAX_REFERENCE_IMAGES
+
+    primary_angles = tuple(cc.get("multi_angle_refs") or ())
+    primary_spec = None
+    if primary_char_id in in_frame and (primary_ref or primary_angles):
+        primary_spec = CharIdentitySpec(
+            char_id=primary_char_id,
+            reference=primary_ref or "",
+            identity_anchor=cc.get("identity_anchor", ""),
+            multi_angle_refs=primary_angles,
+            fidelity="reference",
+        )
+    secondary_specs = []
+    seen_secondary_ids = {primary_char_id}
+    for entry in (cc.get("secondary_chars") or []):
+        if not isinstance(entry, dict):
+            continue
+        char_id = entry.get("char_id")
+        if (
+            not isinstance(char_id, str)
+            or not char_id
+            or char_id not in in_frame
+            or char_id in seen_secondary_ids
+        ):
+            continue
+        seen_secondary_ids.add(char_id)
+        secondary_specs.append(CharIdentitySpec(
+            char_id=char_id,
+            reference=entry.get("reference") or "",
+            identity_anchor=entry.get("identity_anchor", ""),
+            multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
+            fidelity="reference",
+        ))
+    allocation = allocate_flux2_references(
+        primary=primary_spec,
+        secondaries=secondary_specs,
+        continuity_reference=cc.get("continuity_reference"),
+        cap=MAX_REFERENCE_IMAGES,
+    )
+    allocated_primary = next(
+        (
+            spec
+            for spec in allocation.conditioned_chars
+            if spec.char_id == primary_char_id
+        ),
+        None,
+    )
+    if allocated_primary is None:
+        # A secondary reference cannot stand in for a missing primary identity
+        # asset. Keep the former fail-closed identity promise while still
+        # allowing an approved continuity image to act as a non-character
+        # graph input for the explicit local route.
+        continuity_allocation = allocate_flux2_references(
+            primary=None,
+            continuity_reference=cc.get("continuity_reference"),
+            cap=MAX_REFERENCE_IMAGES,
+        )
+        return IdentityStrategy(
+            mechanism_tag=NO_IDENTITY_ASSET,
+            primary_char_id=primary_char_id,
+            unconditioned_chars=list(in_frame),
+            flux2_reference_paths=continuity_allocation.reference_paths,
+            flux2_continuity_reference=(
+                continuity_allocation.continuity_reference
+            ),
+        )
+
+    conditioned = list(allocation.conditioned_chars)
+    conditioned_ids = {spec.char_id for spec in conditioned}
+    if not conditioned:
+        tag = NO_IDENTITY_ASSET
+    elif len(conditioned) > 1:
+        tag = REFERENCE_MULTI_CHAR
     else:
         tag = REFERENCE_PRIMARY_ONLY
 
@@ -734,6 +812,8 @@ def _resolve_identity_strategy(shot, settings, cc):
         primary_char_id=primary_char_id,
         conditioned_chars=conditioned,
         unconditioned_chars=[c for c in in_frame if c not in conditioned_ids],
+        flux2_reference_paths=allocation.reference_paths,
+        flux2_continuity_reference=allocation.continuity_reference,
     )
 
 
@@ -1660,14 +1740,45 @@ class ShotController:
                 take_id=attempt_id,
             )
 
+        if _identity_backend == "local_flux2_klein":
+            allocated_primary = next(
+                (
+                    spec
+                    for spec in strategy.conditioned_chars
+                    if spec.char_id == strategy.primary_char_id
+                ),
+                None,
+            )
+            generation_primary_ref = (
+                allocated_primary.reference if allocated_primary is not None else None
+            )
+            generation_primary_angles = (
+                list(allocated_primary.multi_angle_refs)
+                if allocated_primary is not None
+                else []
+            )
+            generation_continuity_ref = (
+                strategy.flux2_continuity_reference or None
+            )
+        else:
+            generation_primary_ref = primary_ref
+            generation_primary_angles = cc.get("multi_angle_refs", [])
+            generation_continuity_ref = cc.get("continuity_reference")
+
+        identity_validation_ref = (
+            generation_primary_ref
+            if _identity_backend == "local_flux2_klein"
+            else primary_ref
+        )
+
         recovery: dict = {}
         result = generate_ai_broll(
             full_prompt,
             img_path,
             seed=cc.get("scene_seed"),
-            character_image=primary_ref,
-            continuity_reference=cc.get("continuity_reference"),
-            multi_angle_refs=cc.get("multi_angle_refs", []),
+            character_image=generation_primary_ref,
+            continuity_reference=generation_continuity_ref,
+            multi_angle_refs=generation_primary_angles,
             identity_anchor=identity_anchor_override,
             negative_prompt=negative_override,
             secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None,
@@ -1682,6 +1793,11 @@ class ShotController:
             project_snapshot=project,
             project_root=self.project_dir,
             artifact_metadata=take.get("metadata"),
+            preallocated_flux2_reference_paths=(
+                strategy.flux2_reference_paths
+                if _identity_backend == "local_flux2_klein"
+                else None
+            ),
         )
         if not result:
             # The provider cascade can fail after an earlier provider already
@@ -1812,7 +1928,7 @@ class ShotController:
         take["metadata"]["mechanism_actually_used"] = actual
 
         identity_score = 0.0
-        if primary_ref:
+        if identity_validation_ref:
             from phase_c_vision import _get_shared_validator
             # Project-wide `identity_strictness` setting overrides the per-shot
             # `identity_threshold` so the operator can raise/lower the bar
@@ -1825,7 +1941,7 @@ class ShotController:
             # absent-setting fallback (per-shot identity_threshold). [Pair-A: confirm.]
             threshold = _finite_or(strictness, cc.get("identity_threshold", 0.70))
             id_result = _get_shared_validator().validate_image(
-                img_path, primary_ref,
+                img_path, identity_validation_ref,
                 character_id=primary_char_id,
                 threshold=threshold,
                 cost_tracker=self.cost_tracker,

@@ -23,7 +23,7 @@ Keyframes have two supported project selections:
 - `gemini_multiref` is the default. Gemini Image runs when configured; a
   safely rejected result may continue through the guarded local/cloud
   cascade.
-- `local_flux2_klein` is an explicit local route. It requires 1–10 approved
+- `local_flux2_klein` is an explicit local route. It requires 1–4 approved
   regular-file references, durable job authority, and a fully ready local
   worker. If any requirement is missing, it fails closed; it does not silently
   spend on another provider.
@@ -54,11 +54,11 @@ Source of truth: `deploy/windows-flux2-klein/` and
 `performance/flux2_klein.py`.
 
 - Fixed four-step distilled workflow, Euler sampler, CFG 1.0.
-- One to ten unique approved references, each represented through the
+- One to four unique approved references, each represented through the
   candidate's `ReferenceLatent` chain.
 - Fixed supported aspect ratios/dimensions from the hash-bound workflow.
 - Candidate package, workflow, models, revisions, install evidence, fixed
-  execution probe, and sequential 1/2/10-reference benchmark must all match.
+  execution probe, and sequential 1/2/4-reference benchmark must all match.
 - State is one of `not_installed`, `needs_benchmark`, `ready`, `blocked`, or
   `offline`. Only `ready` may dispatch.
 - Dispatch always uses the durable prompt ledger even though local provider

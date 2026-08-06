@@ -6,7 +6,7 @@ not prove that the output depicts the intended person.
 
 ## FLUX.2 reference conditioning
 
-The hash-bound FLUX.2 Klein builder accepts one to ten unique approved regular
+The hash-bound FLUX.2 Klein builder accepts one to four unique approved regular
 files. Each remote reference follows this fixed chain:
 
 ```text
@@ -20,7 +20,7 @@ LoadImage
 Reference chains are appended in caller order. The caller collects the primary
 character reference, approved multi-angle references, additional-character
 references, and one approved continuity reference, deduplicates them, and caps
-the list at ten.
+the list at four.
 
 There is no mutable per-character weight in this graph. Do not manufacture a
 weight, splice an untracked node, or claim that two references have spatially

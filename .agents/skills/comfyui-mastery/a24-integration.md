@@ -44,7 +44,7 @@ phase_c_assembly.generate_ai_broll()
   -> explicit/default image-backend policy
   -> require_flux2_worker_ready()
   -> ComfyUIClient authenticated capability request
-  -> upload 1..10 approved unique references
+  -> upload 1..4 approved unique references
   -> performance.flux2_klein builds through the hash-bound candidate
   -> durable prompt reservation/recovery and single submission
   -> history/output validation
@@ -61,9 +61,9 @@ FLUX.2 UNet + Qwen text encoder + VAE
   -> CFGGuider (1.0) -> SamplerCustomAdvanced -> VAEDecode -> SaveImage
 ```
 
-The candidate accepts 1–10 references and only the fixed aspect dimensions in
+The candidate accepts 1–4 references and only the fixed aspect dimensions in
 the builder. Its package, source revisions, model hashes, install record,
-fixed execution proof, and sequential 1/2/10-reference benchmark are all part
+fixed execution proof, and sequential 1/2/4-reference benchmark are all part
 of readiness. Only state `ready` dispatches.
 
 ## LivePortrait performance flow

@@ -30,20 +30,20 @@
     ]
   },
   "bindings": {
-    "Benchmark-Candidate.ps1": "55809cf4391fc12a904e0afc30670afa2fd7d98dadf4a6e4607ea2e4f0dc7eee",
+    "Benchmark-Candidate.ps1": "a7ffa7bcca5e3dc0ed746571d4f652f1f48682e1fcc7fb70c117989e575228b1",
     "Install-Candidate.ps1": "827bdaa4b398a9cfe600ab036f114881c38a6f54f0f57dae7cbd073cbc6ef1e2",
     "PROVENANCE.md": "25b1af56ee5bf1cf16c9133987e668380da2a597661128bbd3a6bd31bc3d03e4",
     "Probe-Candidate.ps1": "fe03a52bb1a6ff5b0a7d984f85edeec170396243f2a8cecb07e2fdddb9f71a21",
-    "README.md": "d251b396ed523d2368dca672580b7ca2df97db35aaffb33da46f39432b427a63",
-    "fixtures/object_info.json": "c6f10ea09b2260e5ea797924dfaa5472e9cf0ae0cb24cbc945e0829a3a4a6e81",
+    "README.md": "dba4e42542e74b246bb2844eaad77e08002b139512219210a31746ed4574c8dc",
+    "fixtures/object_info.json": "a24fa096ffe96d2e8367a28a85e3c1f9ab47a8c6af4d89d57906a8e7a995f043",
     "fixtures/reference.json": "a326b06f857ca1ac456c15a918d75f752908a250633b74aedea60f95acd4ea4d",
     "fixtures/reference.png.b64": "b52587e2eb72d4e1458f4f77466482e5a76e26d815247729c940d08d350c8276",
     "install.py": "45fc8c72806f41e9d8cea5b2859636667c1825379396362556615b60c946246f",
     "merge_qwen_encoder.py": "0233c636b3915ad4c103c570ecbe0b81ed306f57e3d716c8142cb8a5851d788c",
     "models.json": "f35145f0fdc8d35a810b6905ccfc9358baa18d86c3abdfac23b373fd7e95018f",
-    "preflight.py": "8b4d516b6ae8bc65535ecb774afe893099ab84dfb492dc8bce111244dbda7acb",
+    "preflight.py": "2b804c829580c6793488d7d22035f4d70a293b3cb8486938fc89f450cf7cda79",
     "revisions.json": "a2dd0f168cd711985bb041beb1ad6fa2ee0fe6536bb216805700fe573dd5e12f",
-    "runtime.py": "846712f1bc89c898a722102b3896415957e3a95b4b8496e7093a8dfdc2eda7aa",
-    "workflow.py": "36f678709f6af1267208391145666a1dd62ef2a8292309231f7ffacf2b10821d"
+    "runtime.py": "17c81a8128ec6ee897f9ea98dd6fe38f6209332cb38390d65dc6c6d053c5d01d",
+    "workflow.py": "f05cd319099ea0c07be6bf6bb8953cea345af154b4b23a86f08c06e180c30148"
   }
 }

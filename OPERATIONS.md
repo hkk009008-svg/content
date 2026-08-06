@@ -127,7 +127,7 @@ The Windows packages are:
 - [deploy/windows-liveportrait-worker/README.md](deploy/windows-liveportrait-worker/README.md)
   for the authenticated unified gateway and LivePortrait capability.
 - [deploy/windows-flux2-klein/README.md](deploy/windows-flux2-klein/README.md)
-  for FLUX.2 installation, fixed probe, and 1/2/10-reference benchmark.
+  for FLUX.2 installation, fixed probe, and 1/2/4-reference benchmark.
 
 ### Readiness sequence
 
@@ -135,7 +135,7 @@ The Windows packages are:
 2. Verify the `performance-liveportrait` fixed execution proof.
 3. Run the FLUX.2 guarded installer against the pinned package.
 4. Run exactly one fixed FLUX.2 execution probe.
-5. Run the sequential 1-, 2-, and 10-reference benchmark.
+5. Run the sequential 1-, 2-, and 4-reference benchmark.
 6. Start/restart the unified gateway with its FLUX.2 state root.
 7. Install the restricted worker-control key described by the LivePortrait
    package; Setup → GPU workers then exposes `Start Windows worker` only while

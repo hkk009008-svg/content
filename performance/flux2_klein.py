@@ -30,6 +30,9 @@ from performance.worker_readiness import (
 )
 
 
+MAX_REFERENCE_IMAGES = 4
+
+
 @dataclass(frozen=True)
 class Flux2KleinJobResult:
     prompt_id: str
@@ -52,6 +55,10 @@ def _workflow_module(deploy_root: Path) -> ModuleType:
     if not callable(getattr(module, "build_flux2_klein_workflow", None)):
         raise PerformanceWorkerUnavailable(
             "The tracked FLUX.2 workflow builder is unavailable."
+        )
+    if getattr(module, "MAX_REFERENCE_IMAGES", None) != MAX_REFERENCE_IMAGES:
+        raise PerformanceWorkerUnavailable(
+            "The tracked FLUX.2 reference-image limit has drifted."
         )
     return module
 
@@ -115,8 +122,10 @@ def _local_references(paths: Sequence[str]) -> tuple[list[str], list[str]]:
     if isinstance(paths, (str, bytes)) or not isinstance(paths, Sequence):
         raise ValueError("reference_image_paths must be a sequence")
     values = [str(value) for value in paths]
-    if not 1 <= len(values) <= 10:
-        raise ValueError("reference_image_paths must contain 1..10 items")
+    if not 1 <= len(values) <= MAX_REFERENCE_IMAGES:
+        raise ValueError(
+            f"reference_image_paths must contain 1..{MAX_REFERENCE_IMAGES} items"
+        )
     resolved: list[str] = []
     fingerprints: list[str] = []
     for value in values:

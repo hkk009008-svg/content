@@ -17,7 +17,7 @@ MODEL_FILENAME = "flux-2-klein-4b-fp8.safetensors"
 TEXT_ENCODER_FILENAME = "qwen_3_4b.safetensors"
 VAE_FILENAME = "flux2-klein-vae-bf16.safetensors"
 DISTILLED_STEPS = 4
-MAX_REFERENCE_IMAGES = 10
+MAX_REFERENCE_IMAGES = 4
 
 # Fixed, reviewable 1-megapixel-class canvases. Every dimension is divisible
 # by 16, matching EmptyFlux2LatentImage's pinned core contract.
@@ -55,7 +55,7 @@ def build_flux2_klein_workflow(
 ) -> dict[str, dict[str, Any]]:
     """Build a fixed-seed, four-step, 1..N reference API workflow.
 
-    ``N`` is bounded to the official FLUX.2 multi-reference envelope of ten to
+    ``N`` is bounded to the official FLUX.2 Klein envelope of four to
     prevent an operator mistake from constructing an unbounded latent graph.
     The returned object is directly suitable as ComfyUI's ``prompt`` value.
     """
