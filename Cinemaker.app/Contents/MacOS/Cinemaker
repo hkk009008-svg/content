@@ -1,30 +1,68 @@
 #!/bin/bash
 # Cinemaker — start the Content cinema pipeline web server and open the UI.
 #
-# Lives INSIDE the repo (Content/Cinemaker.app) so the repo root is derived
-# from the bundle's own location: the launcher keeps working if the whole
-# folder is moved or renamed, which is the same portability property slice 10
-# gave the project's media paths.
+# The tracked bundle lives inside the repository.  A copy installed in
+# ~/Applications carries Contents/Resources/repository-path, so both launch
+# locations resolve the same live checkout without embedding it in this file.
 set -euo pipefail
 
 BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-ROOT="$(dirname "$BUNDLE")"
+ROOT_POINTER="$BUNDLE/Contents/Resources/repository-path"
+fail() {
+  printf 'Cinemaker: %s\n' "$1" >&2
+  # Headless checks need the same executable path without opening a modal.
+  # Finder launches never set this variable, so user-facing failures still
+  # surface in a dialog.
+  if [ "${CINEMAKER_SUPPRESS_DIALOG:-0}" = "1" ]; then
+    exit 1
+  fi
+  CINEMAKER_ERROR="$1" /usr/bin/osascript \
+    -e 'display alert "Cinemaker" message (system attribute "CINEMAKER_ERROR") as critical' \
+    >/dev/null 2>&1 || true
+  exit 1
+}
+if [ -f "$ROOT_POINTER" ]; then
+  ROOT=""
+  if ! IFS= read -r ROOT < "$ROOT_POINTER"; then
+    [ -n "$ROOT" ] \
+      || fail "The installed Content repository pointer is empty or unreadable. Re-run scripts/install_cinemaker_shortcut.py."
+  fi
+  case "$ROOT" in
+    /*) ;;
+    *) fail "The installed Content repository pointer is invalid. Re-run scripts/install_cinemaker_shortcut.py." ;;
+  esac
+  ROOT="$(cd "$ROOT" 2>/dev/null && pwd -P)" \
+    || fail "The Content repository moved or is unavailable. Re-run scripts/install_cinemaker_shortcut.py from its current location."
+else
+  ROOT="$(dirname "$BUNDLE")"
+fi
 cd "$ROOT"
 
 PY="$ROOT/.venv/bin/python"
 LOG="$ROOT/logs/cinemaker-launch.log"
 mkdir -p "$(dirname "$LOG")"
-
-fail() {
-  # No terminal is attached when launched from Finder, so surface errors in a
-  # dialog rather than dying silently.
-  /usr/bin/osascript -e "display alert \"Cinemaker\" message \"$1\" as critical" >/dev/null 2>&1 || true
-  exit 1
-}
+{ echo; echo "=== $(date) — Cinemaker launch from $ROOT ==="; } >> "$LOG"
 
 [ -x "$PY" ] || fail "Python venv not found at .venv/bin/python — run: python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
 [ -f "$ROOT/web_server.py" ] || fail "web_server.py not found in $ROOT"
-[ -d "$ROOT/web/dist" ] || fail "web/dist is missing — run: npm --prefix web run build"
+
+# Fresh-start cleanup intentionally removes ignored build output. Recreate it
+# here so a correct cleanup can never strand the Finder/Applications shortcut.
+if [ ! -f "$ROOT/web/dist/index.html" ]; then
+  NPM=""
+  for candidate in /opt/homebrew/bin/npm /usr/local/bin/npm /usr/bin/npm; do
+    if [ -x "$candidate" ]; then
+      NPM="$candidate"
+      break
+    fi
+  done
+  [ -n "$NPM" ] || fail "The web UI needs to be rebuilt, but npm was not found. Install Node.js and try again. See $LOG"
+  [ -f "$ROOT/web/package.json" ] || fail "web/package.json not found in $ROOT. See $LOG"
+  export PATH="$(dirname "$NPM"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+  echo "web/dist is absent; rebuilding the production UI." >> "$LOG"
+  "$NPM" --prefix "$ROOT/web" run build >> "$LOG" 2>&1 \
+    || fail "The Content UI build failed. See $LOG"
+fi
 
 # Already running? Just focus the existing instance instead of starting a second.
 if /usr/bin/curl -s -o /dev/null -m 1 "http://localhost:8080/" ; then
@@ -32,7 +70,6 @@ if /usr/bin/curl -s -o /dev/null -m 1 "http://localhost:8080/" ; then
   exit 0
 fi
 
-{ echo; echo "=== $(date) — Cinemaker launch from $ROOT ==="; } >> "$LOG"
 "$PY" web_server.py >> "$LOG" 2>&1 &
 SERVER_PID=$!
 

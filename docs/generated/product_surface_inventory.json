@@ -99,6 +99,22 @@
       "url_template": "/api/projects/{1}/locations/{2}"
     },
     {
+      "backend_route_ids": [],
+      "expanded_wrapper": "apiGet",
+      "id": "frontend-operation:123e6be6d7ce735e",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/runtime/gpu-worker-control",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 246,
+        "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/runtime/gpu-worker-control"
+    },
+    {
       "backend_route_ids": [
         "route:api_assemble_screen:d86fff4fbd563fc1"
       ],
@@ -655,7 +671,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 163,
+        "line": 245,
         "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
       },
       "transport_id": null,
@@ -1627,6 +1643,22 @@
     },
     {
       "backend_route_ids": [],
+      "expanded_wrapper": "apiRequest",
+      "id": "frontend-operation:d734e2a1afeef032",
+      "kind": "unknown_wrapper_call",
+      "method": null,
+      "path_shape": "/api/runtime/gpu-worker-control/start",
+      "query_keys": [],
+      "route_match": "unknown",
+      "source": {
+        "line": 332,
+        "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
+      },
+      "transport_id": null,
+      "url_template": "/api/runtime/gpu-worker-control/start"
+    },
+    {
+      "backend_route_ids": [],
       "expanded_wrapper": "cancelAttempt",
       "id": "frontend-operation:da45eaf2a0c48743",
       "kind": "unknown_wrapper_call",
@@ -2565,7 +2597,7 @@
       "path_shape": "/",
       "rule": "/",
       "source": {
-        "line": 1139,
+        "line": 1141,
         "path": "web_server.py"
       }
     },
@@ -2577,7 +2609,7 @@
       "path_shape": "/api/config",
       "rule": "/api/config",
       "source": {
-        "line": 1324,
+        "line": 1326,
         "path": "web_server.py"
       }
     },
@@ -2589,7 +2621,7 @@
       "path_shape": "/api/cost-estimate",
       "rule": "/api/cost-estimate",
       "source": {
-        "line": 1500,
+        "line": 1502,
         "path": "web_server.py"
       }
     },
@@ -2601,7 +2633,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 1573,
+        "line": 1575,
         "path": "web_server.py"
       }
     },
@@ -2613,7 +2645,7 @@
       "path_shape": "/api/projects",
       "rule": "/api/projects",
       "source": {
-        "line": 1578,
+        "line": 1580,
         "path": "web_server.py"
       }
     },
@@ -2625,7 +2657,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 2099,
+        "line": 2101,
         "path": "web_server.py"
       }
     },
@@ -2637,7 +2669,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1616,
+        "line": 1618,
         "path": "web_server.py"
       }
     },
@@ -2649,7 +2681,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1999,
+        "line": 2001,
         "path": "web_server.py"
       }
     },
@@ -2661,7 +2693,7 @@
       "path_shape": "/api/projects/{1}",
       "rule": "/api/projects/<pid>",
       "source": {
-        "line": 1907,
+        "line": 1909,
         "path": "web_server.py"
       }
     },
@@ -2673,7 +2705,7 @@
       "path_shape": "/api/projects/{1}/apply-language-defaults",
       "rule": "/api/projects/<pid>/apply-language-defaults",
       "source": {
-        "line": 1390,
+        "line": 1392,
         "path": "web_server.py"
       }
     },
@@ -2685,7 +2717,7 @@
       "path_shape": "/api/projects/{1}/assemble",
       "rule": "/api/projects/<pid>/assemble",
       "source": {
-        "line": 5854,
+        "line": 5856,
         "path": "web_server.py"
       }
     },
@@ -2697,7 +2729,7 @@
       "path_shape": "/api/projects/{1}/assemble/re-assemble",
       "rule": "/api/projects/<pid>/assemble/re-assemble",
       "source": {
-        "line": 6053,
+        "line": 6055,
         "path": "web_server.py"
       }
     },
@@ -2709,7 +2741,7 @@
       "path_shape": "/api/projects/{1}/assemble/screen",
       "rule": "/api/projects/<pid>/assemble/screen",
       "source": {
-        "line": 5878,
+        "line": 5880,
         "path": "web_server.py"
       }
     },
@@ -2721,7 +2753,7 @@
       "path_shape": "/api/projects/{1}/cancel",
       "rule": "/api/projects/<pid>/cancel",
       "source": {
-        "line": 4855,
+        "line": 4857,
         "path": "web_server.py"
       }
     },
@@ -2733,7 +2765,7 @@
       "path_shape": "/api/projects/{1}/capability-scorecard",
       "rule": "/api/projects/<pid>/capability-scorecard",
       "source": {
-        "line": 1624,
+        "line": 1626,
         "path": "web_server.py"
       }
     },
@@ -2745,7 +2777,7 @@
       "path_shape": "/api/projects/{1}/characters",
       "rule": "/api/projects/<pid>/characters",
       "source": {
-        "line": 2712,
+        "line": 2714,
         "path": "web_server.py"
       }
     },
@@ -2757,7 +2789,7 @@
       "path_shape": "/api/projects/{1}/characters/pending-creation",
       "rule": "/api/projects/<pid>/characters/pending-creation",
       "source": {
-        "line": 2641,
+        "line": 2643,
         "path": "web_server.py"
       }
     },
@@ -2769,7 +2801,7 @@
       "path_shape": "/api/projects/{1}/characters/pending-creation",
       "rule": "/api/projects/<pid>/characters/pending-creation",
       "source": {
-        "line": 2620,
+        "line": 2622,
         "path": "web_server.py"
       }
     },
@@ -2781,7 +2813,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 3190,
+        "line": 3192,
         "path": "web_server.py"
       }
     },
@@ -2793,7 +2825,7 @@
       "path_shape": "/api/projects/{1}/characters/{2}",
       "rule": "/api/projects/<pid>/characters/<cid>",
       "source": {
-        "line": 3065,
+        "line": 3067,
         "path": "web_server.py"
       }
     },
@@ -2805,7 +2837,7 @@
       "path_shape": "/api/projects/{1}/checkpoint",
       "rule": "/api/projects/<pid>/checkpoint",
       "source": {
-        "line": 4687,
+        "line": 4689,
         "path": "web_server.py"
       }
     },
@@ -2817,7 +2849,7 @@
       "path_shape": "/api/projects/{1}/cleanup",
       "rule": "/api/projects/<pid>/cleanup",
       "source": {
-        "line": 6247,
+        "line": 6249,
         "path": "web_server.py"
       }
     },
@@ -2829,7 +2861,7 @@
       "path_shape": "/api/projects/{1}/cost-live",
       "rule": "/api/projects/<pid>/cost-live",
       "source": {
-        "line": 6367,
+        "line": 6369,
         "path": "web_server.py"
       }
     },
@@ -2841,7 +2873,7 @@
       "path_shape": "/api/projects/{1}/disk-usage",
       "rule": "/api/projects/<pid>/disk-usage",
       "source": {
-        "line": 6267,
+        "line": 6269,
         "path": "web_server.py"
       }
     },
@@ -2853,7 +2885,7 @@
       "path_shape": "/api/projects/{1}/export",
       "rule": "/api/projects/<pid>/export",
       "source": {
-        "line": 6416,
+        "line": 6418,
         "path": "web_server.py"
       }
     },
@@ -2865,7 +2897,7 @@
       "path_shape": "/api/projects/{1}/file",
       "rule": "/api/projects/<pid>/file",
       "source": {
-        "line": 4975,
+        "line": 4977,
         "path": "web_server.py"
       }
     },
@@ -2877,7 +2909,7 @@
       "path_shape": "/api/projects/{1}/generate",
       "rule": "/api/projects/<pid>/generate",
       "source": {
-        "line": 4604,
+        "line": 4606,
         "path": "web_server.py"
       }
     },
@@ -2889,7 +2921,7 @@
       "path_shape": "/api/projects/{1}/locations",
       "rule": "/api/projects/<pid>/locations",
       "source": {
-        "line": 3915,
+        "line": 3917,
         "path": "web_server.py"
       }
     },
@@ -2901,7 +2933,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 4044,
+        "line": 4046,
         "path": "web_server.py"
       }
     },
@@ -2913,7 +2945,7 @@
       "path_shape": "/api/projects/{1}/locations/{2}",
       "rule": "/api/projects/<pid>/locations/<lid>",
       "source": {
-        "line": 3963,
+        "line": 3965,
         "path": "web_server.py"
       }
     },
@@ -2925,7 +2957,7 @@
       "path_shape": "/api/projects/{1}/objects",
       "rule": "/api/projects/<pid>/objects",
       "source": {
-        "line": 3747,
+        "line": 3749,
         "path": "web_server.py"
       }
     },
@@ -2937,7 +2969,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 3895,
+        "line": 3897,
         "path": "web_server.py"
       }
     },
@@ -2949,7 +2981,7 @@
       "path_shape": "/api/projects/{1}/objects/{2}",
       "rule": "/api/projects/<pid>/objects/<oid>",
       "source": {
-        "line": 3817,
+        "line": 3819,
         "path": "web_server.py"
       }
     },
@@ -2961,7 +2993,7 @@
       "path_shape": "/api/projects/{1}/paid-attempts/{2}/cancel",
       "rule": "/api/projects/<pid>/paid-attempts/<attempt_id>/cancel",
       "source": {
-        "line": 6381,
+        "line": 6383,
         "path": "web_server.py"
       }
     },
@@ -2973,7 +3005,7 @@
       "path_shape": "/api/projects/{1}/pause",
       "rule": "/api/projects/<pid>/pause",
       "source": {
-        "line": 5637,
+        "line": 5639,
         "path": "web_server.py"
       }
     },
@@ -2985,7 +3017,7 @@
       "path_shape": "/api/projects/{1}/pipeline-state",
       "rule": "/api/projects/<pid>/pipeline-state",
       "source": {
-        "line": 5657,
+        "line": 5659,
         "path": "web_server.py"
       }
     },
@@ -2997,7 +3029,7 @@
       "path_shape": "/api/projects/{1}/preview/{2}",
       "rule": "/api/projects/<pid>/preview/<sid>",
       "source": {
-        "line": 6425,
+        "line": 6427,
         "path": "web_server.py"
       }
     },
@@ -3009,7 +3041,7 @@
       "path_shape": "/api/projects/{1}/proceed-assembly",
       "rule": "/api/projects/<pid>/proceed-assembly",
       "source": {
-        "line": 5855,
+        "line": 5857,
         "path": "web_server.py"
       }
     },
@@ -3021,7 +3053,7 @@
       "path_shape": "/api/projects/{1}/queue/abandon",
       "rule": "/api/projects/<pid>/queue/abandon",
       "source": {
-        "line": 4891,
+        "line": 4893,
         "path": "web_server.py"
       }
     },
@@ -3033,7 +3065,7 @@
       "path_shape": "/api/projects/{1}/resume",
       "rule": "/api/projects/<pid>/resume",
       "source": {
-        "line": 5647,
+        "line": 5649,
         "path": "web_server.py"
       }
     },
@@ -3045,7 +3077,7 @@
       "path_shape": "/api/projects/{1}/scenes",
       "rule": "/api/projects/<pid>/scenes",
       "source": {
-        "line": 4063,
+        "line": 4065,
         "path": "web_server.py"
       }
     },
@@ -3057,7 +3089,7 @@
       "path_shape": "/api/projects/{1}/scenes/reorder",
       "rule": "/api/projects/<pid>/scenes/reorder",
       "source": {
-        "line": 4282,
+        "line": 4284,
         "path": "web_server.py"
       }
     },
@@ -3069,7 +3101,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 4267,
+        "line": 4269,
         "path": "web_server.py"
       }
     },
@@ -3081,7 +3113,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}",
       "rule": "/api/projects/<pid>/scenes/<sid>",
       "source": {
-        "line": 4089,
+        "line": 4091,
         "path": "web_server.py"
       }
     },
@@ -3093,7 +3125,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/decompose",
       "rule": "/api/projects/<pid>/scenes/<sid>/decompose",
       "source": {
-        "line": 4344,
+        "line": 4346,
         "path": "web_server.py"
       }
     },
@@ -3105,7 +3137,7 @@
       "path_shape": "/api/projects/{1}/scenes/{2}/generate-dialogue",
       "rule": "/api/projects/<pid>/scenes/<sid>/generate-dialogue",
       "source": {
-        "line": 4302,
+        "line": 4304,
         "path": "web_server.py"
       }
     },
@@ -3117,7 +3149,7 @@
       "path_shape": "/api/projects/{1}/screening/approve",
       "rule": "/api/projects/<pid>/screening/approve",
       "source": {
-        "line": 5964,
+        "line": 5966,
         "path": "web_server.py"
       }
     },
@@ -3129,7 +3161,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}",
       "rule": "/api/projects/<pid>/shots/<shot_id>",
       "source": {
-        "line": 5513,
+        "line": 5515,
         "path": "web_server.py"
       }
     },
@@ -3141,7 +3173,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/correct",
       "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
       "source": {
-        "line": 5818,
+        "line": 5820,
         "path": "web_server.py"
       }
     },
@@ -3153,7 +3185,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
       "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
       "source": {
-        "line": 5839,
+        "line": 5841,
         "path": "web_server.py"
       }
     },
@@ -3165,7 +3197,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
       "source": {
-        "line": 5284,
+        "line": 5286,
         "path": "web_server.py"
       }
     },
@@ -3177,7 +3209,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
       "source": {
-        "line": 5070,
+        "line": 5072,
         "path": "web_server.py"
       }
     },
@@ -3189,7 +3221,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/recovery/resolve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/recovery/resolve",
       "source": {
-        "line": 5099,
+        "line": 5101,
         "path": "web_server.py"
       }
     },
@@ -3201,7 +3233,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
       "source": {
-        "line": 5134,
+        "line": 5136,
         "path": "web_server.py"
       }
     },
@@ -3213,7 +3245,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
       "source": {
-        "line": 5261,
+        "line": 5263,
         "path": "web_server.py"
       }
     },
@@ -3225,7 +3257,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance",
       "rule": "/api/projects/<pid>/shots/<sid>/performance",
       "source": {
-        "line": 3705,
+        "line": 3707,
         "path": "web_server.py"
       }
     },
@@ -3237,7 +3269,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/generate",
       "source": {
-        "line": 5168,
+        "line": 5170,
         "path": "web_server.py"
       }
     },
@@ -3249,7 +3281,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/skip",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/skip",
       "source": {
-        "line": 5211,
+        "line": 5213,
         "path": "web_server.py"
       }
     },
@@ -3261,7 +3293,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
       "source": {
-        "line": 5146,
+        "line": 5148,
         "path": "web_server.py"
       }
     },
@@ -3273,7 +3305,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
       "source": {
-        "line": 5043,
+        "line": 5045,
         "path": "web_server.py"
       }
     },
@@ -3285,7 +3317,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
       "source": {
-        "line": 5056,
+        "line": 5058,
         "path": "web_server.py"
       }
     },
@@ -3297,7 +3329,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/prompt",
       "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
       "source": {
-        "line": 5476,
+        "line": 5478,
         "path": "web_server.py"
       }
     },
@@ -3309,7 +3341,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
       "source": {
-        "line": 5758,
+        "line": 5760,
         "path": "web_server.py"
       }
     },
@@ -3321,7 +3353,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
       "source": {
-        "line": 5404,
+        "line": 5406,
         "path": "web_server.py"
       }
     },
@@ -3333,7 +3365,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/restart",
       "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
       "source": {
-        "line": 5706,
+        "line": 5708,
         "path": "web_server.py"
       }
     },
@@ -3345,7 +3377,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
       "source": {
-        "line": 5296,
+        "line": 5298,
         "path": "web_server.py"
       }
     },
@@ -3357,7 +3389,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/upload-driving-video",
       "rule": "/api/projects/<pid>/shots/<sid>/upload-driving-video",
       "source": {
-        "line": 3376,
+        "line": 3378,
         "path": "web_server.py"
       }
     },
@@ -3369,7 +3401,7 @@
       "path_shape": "/api/projects/{1}/stream",
       "rule": "/api/projects/<pid>/stream",
       "source": {
-        "line": 4780,
+        "line": 4782,
         "path": "web_server.py"
       }
     },
@@ -3381,7 +3413,7 @@
       "path_shape": "/api/projects/{1}/style-rules",
       "rule": "/api/projects/<pid>/style-rules",
       "source": {
-        "line": 4402,
+        "line": 4404,
         "path": "web_server.py"
       }
     },
@@ -3393,7 +3425,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:path>",
       "source": {
-        "line": 1144,
+        "line": 1146,
         "path": "web_server.py"
       }
     },
@@ -3405,7 +3437,7 @@
       "path_shape": "/{1}",
       "rule": "/<path:filename>",
       "source": {
-        "line": 105,
+        "line": 106,
         "path": "web_server.py"
       }
     }
@@ -3481,6 +3513,18 @@
     },
     {
       "domain": "frontend",
+      "expression": "`${CONTROL_ENDPOINT}/start`",
+      "id": "unresolved:04878f282edac898",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiRequest",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 332,
+        "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
       "expression": "config",
       "id": "unresolved:05e919e5ae5879ee",
       "kind": "unknown_wrapper_call",
@@ -3501,6 +3545,18 @@
       "source": {
         "line": 119,
         "path": "web/src/components/pipeline/PromptEditor.tsx"
+      }
+    },
+    {
+      "domain": "frontend",
+      "expression": "CONTROL_ENDPOINT",
+      "id": "unresolved:080d6f491fa00457",
+      "kind": "unknown_wrapper_call",
+      "owner": "apiGet",
+      "reason": "imported wrapper call",
+      "source": {
+        "line": 246,
+        "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
       }
     },
     {
@@ -3894,7 +3950,7 @@
       "kind": "register_blueprint",
       "reason": "register_blueprint is outside the recognized static decorator subset",
       "source": {
-        "line": 113,
+        "line": 114,
         "path": "web_server.py"
       }
     },
@@ -3905,7 +3961,7 @@
       "kind": "register_blueprint",
       "reason": "register_blueprint is outside the recognized static decorator subset",
       "source": {
-        "line": 114,
+        "line": 115,
         "path": "web_server.py"
       }
     },
@@ -4372,7 +4428,7 @@
       "kind": "register_blueprint",
       "reason": "register_blueprint is outside the recognized static decorator subset",
       "source": {
-        "line": 112,
+        "line": 113,
         "path": "web_server.py"
       }
     },
@@ -4516,7 +4572,7 @@
       "owner": "apiGet",
       "reason": "imported wrapper call",
       "source": {
-        "line": 163,
+        "line": 245,
         "path": "web/src/components/setup/inspector/GpuWorkersSection.tsx"
       }
     },
@@ -4566,6 +4622,17 @@
       "source": {
         "line": 108,
         "path": "web/src/components/edit/ShotBin.tsx"
+      }
+    },
+    {
+      "domain": "backend",
+      "expression": "app.register_blueprint(gpu_worker_control_api)",
+      "id": "unresolved:d3116946d1de683e",
+      "kind": "register_blueprint",
+      "reason": "register_blueprint is outside the recognized static decorator subset",
+      "source": {
+        "line": 116,
+        "path": "web_server.py"
       }
     },
     {

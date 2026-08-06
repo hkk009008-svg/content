@@ -102,6 +102,7 @@ from pipeline_jobs import (
 from web_observability import observability_api
 from web_artifacts import artifact_api
 from web_gpu_workers import gpu_workers_api
+from web_gpu_worker_control import gpu_worker_control_api
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # CORS allowlist comes from settings.web_cors_origins. Default is
 # localhost-only ("http://localhost:8080" + "http://localhost:5173" for
@@ -112,6 +113,7 @@ CORS(app, origins=list(env_settings.web_cors_origins))
 app.register_blueprint(observability_api)
 app.register_blueprint(artifact_api)
 app.register_blueprint(gpu_workers_api)
+app.register_blueprint(gpu_worker_control_api)
 
 # ---------------------------------------------------------------------------
 # Broadcast-safe SSE event fan-out with replay (Slice 11a)

@@ -226,7 +226,7 @@ class Settings:
             firecrawl_api_key=_env("FIRECRAWL_API_KEY"),
             tavily_api_key=_env("TAVILY_API_KEY"),
             comfyui_server_url=_optional_env("COMFYUI_SERVER_URL"),
-            comfyui_api_key=_env("COMFYUI_API_KEY"),
+            comfyui_api_key=_secret_env("COMFYUI_API_KEY"),
             performance_comfyui_server_url=_optional_env(
                 "PERFORMANCE_COMFYUI_SERVER_URL"
             ),

@@ -227,7 +227,8 @@ or an archived version of each deliverable. Packaging:
 The React shell has four primary pages:
 
 - Setup: supported provider settings, reference controls, voice/audio policy,
-  budgets, auto-approve settings, and live GPU worker readiness.
+  budgets, auto-approve settings, live GPU worker readiness, and a guarded
+  start-only Windows task control.
 - Edit: shot and take editing, generation inputs, diagnostics, and corrections.
 - Run: queue state, progress, gates, telemetry, provider analytics/health, and
   searchable traces.
@@ -254,6 +255,10 @@ cover critical Setup, Run, trace, health, worker, review, and packaging surfaces
 - CORS uses an explicit local-origin allowlist; wildcard origins are rejected.
 - GPU gateways are bearer-authenticated, loopback/tunnel oriented, role-bound,
   and expose only allowlisted readiness fields.
+- Windows launch control is loopback/same-origin/token bound and invokes a
+  separate forced-command SSH key that permits only fixed `status` and `start`
+  actions. Browser input cannot select a host, task, path, or command. Stop is
+  absent until queue drain and accepted-prompt recovery semantics exist.
 
 ## 12. Verification contract
 

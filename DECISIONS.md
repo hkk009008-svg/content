@@ -4434,3 +4434,64 @@ recovery contract.
 Cross-ref: `performance/live_portrait.py`; `performance/worker_readiness.py`;
 `cinema/shots/controller.py`; `web_server.py`;
 `deploy/windows-liveportrait-worker/`.
+
+## ADR-087 — Make the app shortcut self-healing and Windows GPU launch explicit
+
+Date: 2026-08-06
+
+Status: Accepted.
+
+Context. A correct fresh-start cleanup removed ignored `web/dist` output and
+made the tracked macOS app bundle fail before it could write a launch log. The
+Windows task was intentionally stopped, while the only Mac SSH key authorized
+on its administrator account could also open a general shell. Coupling GPU
+startup to every application launch would contend unexpectedly with Unreal,
+Claude, or another desktop workload.
+
+Decision. Install a per-user `~/Applications/Cinemaker.app` copy carrying a
+mode-0600 pointer to the live repository. The launcher creates its log first and
+rebuilds missing production UI output before starting the loopback server. Keep
+Windows startup explicit in Setup. The Flask route accepts only an empty JSON
+object from a loopback same-origin UI with a process token, derives the fixed
+destination from the locked tunnel LaunchAgent, and uses a separate private
+key. On Windows that key is forced to exact `status` or `start`; the pre-existing
+tunnel key is restricted to forwarding only `127.0.0.1:8189`. Remote start is
+refused while the GPU is busy. The task has no login trigger or automatic
+restart, so all starts pass the same admission gate. An effective source-bound
+Windows sshd policy permits only local-direction TCP forwarding to
+`127.0.0.1:8189` and disables stream-local forwarding. Do not expose Stop until admission drain,
+queue-idle proof, and accepted-prompt recovery are implemented.
+
+Deployment acceptance is two-sided: Windows validates the service identity,
+protected files, effective sshd policy, and enabled/default-block firewall
+profiles; the Mac must then authenticate with the dedicated control key and
+observe role-bound readiness through the reconnected loopback tunnel. A TCP
+`Established` socket is not authentication evidence.
+
+The task registrar constructs a fresh Task Scheduler COM definition, clears its
+trigger collection, suppresses registration-trigger execution, and verifies the
+installed COM, CIM, and exported-XML views before enabling UI launch. An unsafe
+pre-existing triggered definition is quarantined before the GPU preflight and
+rollback restores prior task XML only in a disabled state. A separately
+protected launch contract binds the exact task action, principal, settings, and
+supervisor SHA-256; the forced command revalidates the COM definition and XML on
+every status/start and runs the verified COM object rather than an unchecked
+same-name task.
+
+The pinned Windows worker disables ComfyUI DynamicVRAM after a native access
+violation was captured in the LivePortrait model-transfer call on the RTX 5070
+Ti. The worker uses the legacy estimate-based loader, retains async offload, and
+must renew its bound benchmark plus clean-restart proof under that exact startup
+contract. ComfyUI's SQLite database is explicitly placed in the runtime-owned
+user directory rather than its pinned source checkout.
+
+Consequences. Cleanup no longer breaks the normal app shortcut, and opening
+Content never silently claims the RTX GPU. The Setup surface reports task
+startup separately from role-bound gateway readiness. Compromise of either Mac
+worker key no longer grants a general Windows administrator command channel.
+
+Cross-ref: `Cinemaker.app/Contents/MacOS/Cinemaker`;
+`scripts/install_cinemaker_shortcut.py`; `web_gpu_worker_control.py`;
+`web/src/components/setup/inspector/GpuWorkersSection.tsx`;
+`deploy/windows-liveportrait-worker/Control-Worker.ps1`;
+`deploy/windows-liveportrait-worker/Install-WorkerControl.ps1`.

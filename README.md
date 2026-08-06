@@ -48,6 +48,16 @@ npm run dev
 Open `http://localhost:3000`. The frontend proxies `/api` to the loopback Flask
 server.
 
+For the Finder/Spotlight production launcher, install the tracked app once:
+
+```bash
+.venv/bin/python scripts/install_cinemaker_shortcut.py
+```
+
+Open `Cinemaker` from `~/Applications`. The launcher serves the production UI
+on `http://localhost:8080` and automatically rebuilds ignored `web/dist` output
+when a fresh-start cleanup removed it.
+
 Before a production session, run:
 
 ```bash
@@ -88,8 +98,9 @@ The application includes the seven production controls exposed in the UI:
 7. Project-scoped searchable structured traces with secret-safe fields.
 
 Run shows queue state, provider health, costs, and traces. Preview exposes
-artifact versions and client packaging. Setup exposes GPU readiness and only
-enables the local image route after live proof.
+artifact versions and client packaging. Setup exposes GPU readiness, a guarded
+start-only Windows worker control, and only enables the local image route after
+live proof.
 
 ## Stack
 

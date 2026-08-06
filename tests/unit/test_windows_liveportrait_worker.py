@@ -128,6 +128,7 @@ def test_dependency_selection_excludes_noncommercial_and_gpu_onnx_paths() -> Non
     assert not any(line.startswith(("insightface==", "onnxruntime-gpu==")) for line in lock_lines)
     assert sum(line.startswith("opencv-") for line in lock_lines) == 1
     assert "opencv-contrib-python==4.11.0.86" in lock_lines
+    assert "blake3==1.0.9" in lock_lines
 
 
 def test_powershell_network_and_secret_invariants() -> None:
@@ -141,6 +142,11 @@ def test_powershell_network_and_secret_invariants() -> None:
     assert '"--listen", "127.0.0.1"' in start
     assert '"--port", "8188"' in start
     assert '"--port", "8189"' in start
+    assert '"--disable-dynamic-vram"' in start
+    assert start.count('"--disable-dynamic-vram"') == 1
+    assert '"--enable-dynamic-vram"' not in start
+    assert '"--database-url", $databaseUrl' in start
+    assert '$databasePath = (Join-Path $userRoot "comfyui.db").Replace' in start
     assert '"--upstream", "http://127.0.0.1:8188"' in start
     assert '"COMFYUI_API_KEY" = $plainToken' in start
     assert "Remove-Item -LiteralPath $sentinel" in start
@@ -222,12 +228,48 @@ def test_powershell_network_and_secret_invariants() -> None:
     assert "-RemoteAddress $MacIPAddress" in register
     assert "-LocalPort 22" in register
     assert "8188" not in register and "8189" not in register
-    assert "New-ScheduledTaskTrigger -AtLogOn" in register
-    assert "-RunLevel Limited" in register
-    assert "-MultipleInstances IgnoreNew" in register
+    assert "New-ScheduledTaskTrigger" not in register
+    assert "Register-ScheduledTask" not in register
+    assert '$taskDefinition.Triggers.Clear()' in register
+    assert '[int]$taskDefinition.Triggers.Count -ne 0' in register
+    assert '$taskFolder.RegisterTaskDefinition(' in register
+    candidate_registration = """    [void]$taskFolder.RegisterTaskDefinition(
+        $TaskName,
+        $taskDefinition,
+        (0x6 -bor 0x20),"""
+    assert register.count(candidate_registration) == 1
+    candidate_registration_index = register.index(candidate_registration)
+    assert register.index('$previousTask = $taskFolder.GetTask($TaskName)') < candidate_registration_index
+    assert register.index(
+        '[IO.File]::WriteAllText($taskRecoveryPath, $previousTaskXml'
+    ) < candidate_registration_index
+    assert register.index('$previousTask.Enabled = $false') < candidate_registration_index
+    assert register.index("-PreflightOnly") < candidate_registration_index
+    assert register.index('$taskMutationAttempted = $true') < candidate_registration_index
+    assert register.index('try {\n    if ($exactRules.Count -eq 0)') < candidate_registration_index
+    assert candidate_registration_index < register.index(
+        '} catch {\n    $registrationFailure = $_',
+        candidate_registration_index,
+    )
+    assert 'candidate task and firewall were not installed' in register
+    assert '(0x6 -bor 0x20)' in register
+    assert '0x6 -bor 0x8 -bor 0x20' in register
+    assert 'Export-ScheduledTask -TaskName $TaskName -TaskPath "\\"' in register
+    assert 'SelectNodes("/t:Task/t:Triggers/*", $namespace)' in register
+    assert 'Resolve-PrincipalSid' in register
+    assert 'task-registration-recovery.xml' in register
+    assert "-RestartCount" not in register
+    assert "-RestartInterval" not in register
+    assert '$taskDefinition.Principal.RunLevel = 0' in register
+    assert '$taskDefinition.Settings.MultipleInstances = 2' in register
+    assert '$taskDefinition.Settings.RestartCount' not in register
     assert "Disable-NetFirewallRule" not in register
     assert "will not mutate non-package firewall rules" in register
     assert "-PolicyStore ActiveStore" in register
+    assert "Assert-EffectiveFirewallProfiles" in register
+    assert "Get-Service -Name MpsSvc" in register
+    assert '[string]$_.Enabled -ne "True"' in register
+    assert '[string]$_.DefaultInboundAction -ne "Block"' in register
     assert '$value -eq "Any"' in register
     assert '$value -match "^(\\d+)-(\\d+)$"' in register
     assert "Test-RuleExactlyAllowsMacSsh" in register
@@ -245,9 +287,115 @@ def test_powershell_network_and_secret_invariants() -> None:
     assert "last-preflight.json" in register
     assert "Test-Worker.ps1" not in register
     assert register.index("Get-NetFirewallRule") < register.index("-PreflightOnly")
-    assert "$firewallCreated" in register
-    assert "if ($firewallCreated)" in register
+    assert "$firewallCreated" not in register
+    assert "$createdFirewallRule = New-NetFirewallRule" in register
+    assert "$createdFirewallRule | Remove-NetFirewallRule" in register
+    assert "Remove-NetFirewallRule -DisplayName" not in register
     assert "Remove-NetFirewallRule" in register
+
+    control = scripts["Control-Worker.ps1"]
+    assert '$TaskName = "Content LivePortrait Worker"' in control
+    assert '$requested -eq "status"' in control
+    assert '$requested -ne "start"' in control
+    assert "Start-ScheduledTask" not in control
+    assert '$launch.registered_task.Run($null)' in control
+    assert 'worker-control-contract.json' in control
+    assert 'Assert-ProtectedPath -Path $ContractPath -Kind File' in control
+    assert 'start_script_sha256' in control
+    assert 'Get-FileHash -LiteralPath $startScript -Algorithm SHA256' in control
+    assert 'Get-VerifiedWorkerTask' in control
+    assert 'New-Object -ComObject "Schedule.Service"' in control
+    assert '.GetTask($TaskName)' in control
+    assert '[int]$definition.Triggers.Count -ne 0' in control
+    assert '[int]$definition.Settings.RestartCount -ne 0' in control
+    assert '[int]$definition.Settings.MultipleInstances' in control
+    assert '[int]$definition.Principal.LogonType' in control
+    assert '[int]$definition.Principal.RunLevel' in control
+    assert '[string]$action.Arguments -cne [string]$contract.arguments' in control
+    assert 'SelectNodes("/t:Task/t:Triggers/*", $namespace)' in control
+    assert 'SelectNodes("/t:Task/t:Settings/t:RestartOnFailure", $namespace)' in control
+    assert 'SelectNodes("/t:Task/t:Actions/t:Exec", $namespace)' in control
+    assert 'if ($after.state -eq "running")' in control
+    assert '} elseif ($after.state -eq "stopped") {' in control
+    assert '$after.state = "failed"' in control
+    assert "for ($attempt = 0; $attempt -lt 6; $attempt++)" in control
+    assert "Stop-ScheduledTask" not in control
+    assert "Invoke-Expression" not in control
+    assert "gpu_busy" in control
+    assert '$GpuUtilizationBusyThreshold = 50' in control
+    assert '$GpuSampleCount = 3' in control
+    assert '$sustainedUtilization' in control
+
+    control_installer = scripts["Install-WorkerControl.ps1"]
+    assert "Tunnel and control keys must be different" in control_installer
+    assert 'permitopen=`"127.0.0.1:8189`"' in control_installer
+    assert "permitlisten" not in control_installer.lower()
+    assert "restrict,port-forwarding" in control_installer
+    assert '"    AllowTcpForwarding local"' in control_installer
+    assert '"    AllowStreamLocalForwarding no"' in control_installer
+    assert '"    PermitOpen 127.0.0.1:8189"' in control_installer
+    assert "Assert-EffectiveForwardingBoundary" in control_installer
+    assert "Assert-SshdServiceContract" in control_installer
+    assert 'Name=\'sshd\'' in control_installer
+    assert '"LocalSystem", "NT AUTHORITY\\LocalSystem"' in control_installer
+    assert 'if ($settings["allowtcpforwarding"] -ne "local")' in control_installer
+    assert 'if ($settings["allowstreamlocalforwarding"] -ne "no")' in control_installer
+    assert 'command=`"powershell.exe -NoProfile -NonInteractive' in control_installer
+    assert '-File $quotedControlCommand`",restrict' in control_installer
+    assert "administrators_authorized_keys" in control_installer
+    assert 'content-tunnel|content-worker-control' in control_installer
+    assert "[IO.File]::Replace($keysTemp, $authorizedKeys, $keysBackup, $true)" in control_installer
+    assert "[IO.File]::Replace($configTemp, $sshdConfig, $configBackup, $true)" in control_installer
+    assert "Assert-ExactAdminAcl" in control_installer
+    assert "AreAccessRulesProtected" in control_installer
+    assert "SpecialFolder]::CommonApplicationData" in control_installer
+    assert 'Join-Path $commonApplicationData "ContentWorkerControl"' in control_installer
+    assert 'worker-control-contract.json' in control_installer
+    assert '$installedContract' in control_installer
+    assert '$contractTemp' in control_installer
+    assert '$contractBackup' in control_installer
+    assert '$contractReplaced' in control_installer
+    assert 'start_script_sha256' in control_installer
+    assert '[IO.File]::ReadAllText($installedContract) -cne $contractText' in control_installer
+    assert 'Assert-ExactAdminAcl -Path $installedContract -Kind File' in control_installer
+    assert '$firstMatch = [regex]::Match($baseConfig' in control_installer
+    assert "Stop-SshdCleanly" in control_installer
+    assert "Start-SshdCleanly" in control_installer
+    assert "Wait-FreshMacSshConnection" not in control_installer
+    assert "External Mac control-key and local-tunnel checks are required" in control_installer
+    assert "SSH_CONNECTION" in control_installer
+    assert "authorizedkeysfile" in control_installer
+    assert "$preserveRecoveryArtifacts = $true" in control_installer
+    assert "Preserved recovery paths" in control_installer
+    assert "restore sshd_config" in control_installer
+    assert "restore administrator keys" in control_installer
+    assert "restore worker control" in control_installer
+    assert "$authorityRollbackSucceeded = $false" in control_installer
+    assert "if ($configReplaced -and $authorityRollbackSucceeded)" in control_installer
+    assert control_installer.index(
+        "Assert-SshdServiceContract -Sshd $sshd"
+    ) < control_installer.index(
+        "Set-ExactAdminAcl -Path $sshRoot -Kind Directory"
+    )
+    assert control_installer.index(
+        "    $sshdTransactionStarted = $true\n    Stop-SshdCleanly"
+    ) < control_installer.index(
+        "[IO.File]::Replace($configTemp, $sshdConfig, $configBackup, $true)"
+    )
+    assert control_installer.index(
+        "[IO.File]::Replace($configTemp, $sshdConfig, $configBackup, $true)"
+    ) < control_installer.index(
+        "[IO.File]::Replace($controlTemp, $installedControl, $controlBackup, $true)"
+    ) < control_installer.index(
+        "[IO.File]::Replace($keysTemp, $authorizedKeys, $keysBackup, $true)"
+    )
+    assert control_installer.index(
+        "[IO.File]::Replace($keysBackup, $authorizedKeys, $null, $true)"
+    ) < control_installer.index(
+        "[IO.File]::Replace($controlBackup, $installedControl, $null, $true)"
+    ) < control_installer.index(
+        "[IO.File]::Replace($configBackup, $sshdConfig, $null, $true)"
+    )
 
 
 def _valid_benchmark_evidence() -> dict:

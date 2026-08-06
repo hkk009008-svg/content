@@ -78,17 +78,29 @@ loopback tunnel, commonly `http://127.0.0.1:18189`:
 
 ```dotenv
 COMFYUI_SERVER_URL=http://127.0.0.1:18189
-COMFYUI_API_KEY=<same-strong-random-token>
+COMFYUI_API_KEY_FILE=/absolute/path/to/a/mode-0600-token-file
 PERFORMANCE_COMFYUI_SERVER_URL=http://127.0.0.1:18189
-PERFORMANCE_COMFYUI_API_KEY=<same-strong-random-token>
+PERFORMANCE_COMFYUI_API_KEY_FILE=/absolute/path/to/the-same-mode-0600-token-file
 ```
 
 The two resolved credentials must be identical when the endpoint is shared.
-`PERFORMANCE_COMFYUI_API_KEY_FILE` is supported for the performance role, but
-the image-role credential must still resolve to that same value. Leave the
-URLs unset until the gateway is installed and its exact capabilities are ready.
+Direct API-key variables remain supported and outrank their `_FILE` forms.
+Leave the URLs unset until the gateway is installed and its exact capabilities
+are ready.
 
 ## 4. Run and stop
+
+Install or refresh the per-user production shortcut:
+
+```bash
+.venv/bin/python scripts/install_cinemaker_shortcut.py
+```
+
+Open `Cinemaker` from `~/Applications` or Spotlight. The app-bound launcher
+starts the loopback backend at `http://localhost:8080`, opens the browser only
+after it answers, writes `logs/cinemaker-launch.log`, and automatically runs
+the production web build if `web/dist` was removed. It does not start the
+Windows GPU task automatically.
 
 Production-style backend:
 
@@ -125,8 +137,14 @@ The Windows packages are:
 4. Run exactly one fixed FLUX.2 execution probe.
 5. Run the sequential 1-, 2-, and 10-reference benchmark.
 6. Start/restart the unified gateway with its FLUX.2 state root.
-7. In Setup → GPU workers, refresh until both roles show their truthful states.
-8. In Setup → Image, select Local FLUX.2 only after it becomes enabled.
+7. Install the restricted worker-control key described by the LivePortrait
+   package; Setup → GPU workers then exposes `Start Windows worker` only while
+   the fixed task is stopped and the GPU is idle.
+8. From the Mac, require a successful dedicated-control-key `status`, then start
+   the worker from Setup and refresh until both roles show their truthful states.
+   This is the end-to-end authentication and tunnel proof; an established TCP
+   socket alone is not sufficient.
+9. In Setup → Image, select Local FLUX.2 only after it becomes enabled.
 
 Before steps 3–6, stop any other workload using the RTX GPU—including game
 builds, model inference, rendering, or another ComfyUI session. Installation is
@@ -137,6 +155,10 @@ The shared worker has one ComfyUI queue. Both application adapters persist and
 resume exact prompt IDs; this prevents duplicate jobs but does not create
 parallel GPU capacity. Keep `PIPELINE_QUEUE_CONCURRENCY=1` until you have a
 measured reason to increase project concurrency.
+
+The UI intentionally has no Stop control. Stop the task from Windows only after
+the queue is known idle; stopping after prompt acceptance can create an
+ambiguous outcome that must be reconciled instead of retried.
 
 ### Operator-visible states
 

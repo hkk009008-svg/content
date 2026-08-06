@@ -655,6 +655,29 @@ export interface GpuWorkersResponse {
   checked_at: string
 }
 
+export type GpuWorkerControlState =
+  | 'unavailable'
+  | 'stopped'
+  | 'starting'
+  | 'running'
+  | 'failed'
+  | 'unknown'
+
+/** Safe projection from the Mac-side fixed worker-launch controller.
+ *  SSH identity, destination, task name, and commands never reach the UI. */
+export interface GpuWorkerControlResponse {
+  schema_version: 1
+  state: GpuWorkerControlState
+  can_start: boolean
+  gpu_busy: boolean
+  message: string
+  checked_at: string
+  control_token?: string
+  gpu_used_mib?: number
+  gpu_utilization_percent?: number
+  last_task_result?: number
+}
+
 export interface AppConfig {
   camera_motions: string[]
   visual_effects: string[]

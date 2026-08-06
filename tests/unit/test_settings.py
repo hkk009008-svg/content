@@ -108,6 +108,26 @@ class TestNewSettingsFields:
 
         assert Settings.from_env().performance_comfyui_api_key == "f" * 64
 
+    def test_image_comfyui_secret_can_come_from_locked_file(
+        self, monkeypatch, tmp_path
+    ):
+        secret = tmp_path / "shared-worker-token"
+        secret.write_text("i" * 64 + "\n", encoding="utf-8")
+        secret.chmod(0o600)
+        monkeypatch.delenv("COMFYUI_API_KEY", raising=False)
+        monkeypatch.setenv("COMFYUI_API_KEY_FILE", str(secret))
+
+        assert Settings.from_env().comfyui_api_key == "i" * 64
+
+    def test_direct_image_secret_outranks_file(self, monkeypatch, tmp_path):
+        secret = tmp_path / "shared-worker-token"
+        secret.write_text("file-secret", encoding="utf-8")
+        secret.chmod(0o600)
+        monkeypatch.setenv("COMFYUI_API_KEY", "direct-secret")
+        monkeypatch.setenv("COMFYUI_API_KEY_FILE", str(secret))
+
+        assert Settings.from_env().comfyui_api_key == "direct-secret"
+
     def test_direct_performance_secret_outranks_file(self, monkeypatch, tmp_path):
         secret = tmp_path / "performance-token"
         secret.write_text("file-secret", encoding="utf-8")

@@ -324,6 +324,13 @@ try {
     New-Item -ItemType Directory -Path $stateRoot, $inputRoot, $outputRoot, $tempRoot, $logRoot, $userRoot, $cacheRoot -Force | Out-Null
     Remove-Item -LiteralPath $sentinel -Force -ErrorAction SilentlyContinue
 
+    # The pinned comfy-aimdo DynamicVRAM hook produced a native Windows access
+    # violation while LivePortrait moved its modules to the RTX 5070 Ti. Keep
+    # this worker on ComfyUI's legacy estimate-based loader; the benchmark and
+    # restart proof below bind the resulting performance and memory behavior.
+    $databasePath = (Join-Path $userRoot "comfyui.db").Replace('\', '/')
+    $databaseUrl = "sqlite:///$databasePath"
+
     $comfyArguments = @(
         (Join-Path $comfyRoot "main.py"),
         "--listen", "127.0.0.1",
@@ -332,7 +339,9 @@ try {
         "--input-directory", $inputRoot,
         "--output-directory", $outputRoot,
         "--temp-directory", $tempRoot,
-        "--user-directory", $userRoot
+        "--user-directory", $userRoot,
+        "--database-url", $databaseUrl,
+        "--disable-dynamic-vram"
     )
     if ($Benchmark) {
         # Benchmark evidence is invalid if ComfyUI reuses the warm-up graph.
@@ -409,8 +418,9 @@ try {
         return
     }
 
-    # Keep the at-logon worker lightweight while other desktop GPU work is
-    # active. The execution proof remains durable; models reload on demand.
+    # Keep the manually started worker lightweight while other desktop GPU
+    # work is active. The execution proof remains durable; models reload on
+    # demand.
     Invoke-RestMethod `
         -Uri "http://127.0.0.1:8188/free" `
         -Method Post `
