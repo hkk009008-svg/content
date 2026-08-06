@@ -1102,6 +1102,68 @@ def get_reference_image(project: dict, char_id: str) -> Optional[str]:
     return None
 
 
+IDENTITY_REFERENCE_PROTOCOLS = frozenset({"identity-benchmark-v1"})
+
+
+def get_identity_reference_paths(
+    project: dict,
+    char_id: str,
+    protocol_id: str,
+) -> List[tuple[str, str]]:
+    """Resolve the frozen four-reference Identity Lab subject set.
+
+    The v1 comparison protocol selects the canonical reference first, followed
+    by persisted approved multi-angle references and then user uploads, stopping
+    at four distinct stored paths. Missing selected entries are intentionally
+    returned so the experiment store fails closed while opening them. Legacy
+    absolute paths are re-rooted through the same authoritative resolver used by
+    production character readers.
+    """
+
+    if protocol_id not in IDENTITY_REFERENCE_PROTOCOLS:
+        raise ValueError("Unsupported Identity Lab protocol")
+    char = get_character(project, char_id)
+    if not char:
+        return []
+    result: List[tuple[str, str]] = []
+    canonical_value = char.get("canonical_reference")
+    uploads = char.get("reference_images", [])
+    if not isinstance(uploads, list):
+        uploads = []
+    if not isinstance(canonical_value, str) or not canonical_value:
+        canonical_value = next(
+            (value for value in uploads if isinstance(value, str) and value),
+            "",
+        )
+    if canonical_value:
+        result.append(("canonical", _resolve_stored_media_path(project, canonical_value)))
+    angles = char.get("multi_angle_refs", [])
+    if isinstance(angles, list):
+        result.extend(
+            ("angle", _resolve_stored_media_path(project, value))
+            for value in angles
+            if isinstance(value, str) and value
+        )
+    result.extend(
+        ("reference", _resolve_stored_media_path(project, value))
+        for value in uploads
+        if isinstance(value, str) and value
+    )
+    # Preserve protocol ordering while collapsing a canonical image repeated in
+    # reference_images under a different role. Distinct paths containing the
+    # same bytes are rejected by the store's SHA-256 binding authority.
+    selected: List[tuple[str, str]] = []
+    seen_paths = set()
+    for role, path in result:
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        selected.append((role, path))
+        if len(selected) == 4:
+            break
+    return selected
+
+
 def build_identity_anchor(character: dict) -> str:
     """
     Build a fixed, immutable identity string for a character.

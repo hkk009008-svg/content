@@ -11,7 +11,7 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
  * not touch the provider again.
  */
 
-export type Page = 'setup' | 'edit' | 'run' | 'capability'
+export type Page = 'setup' | 'edit' | 'run' | 'identity' | 'capability'
 
 export interface PageContextValue {
   page: Page

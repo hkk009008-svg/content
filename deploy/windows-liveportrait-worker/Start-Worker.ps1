@@ -309,6 +309,12 @@ $logRoot = Join-Path $InstallRoot "logs"
 $userRoot = Join-Path $InstallRoot "user"
 $cacheRoot = Join-Path $InstallRoot "cache"
 $probeContract = Join-Path $InstallRoot "probes\probe.json"
+$loraStateRoot = Join-Path $env:ProgramData "Content\IdentityLab\flux2-lora"
+$loraPackageRoot = Join-Path $loraStateRoot "package"
+$loraCandidate = Join-Path $loraPackageRoot "candidate.json"
+$loraRunner = Join-Path $loraPackageRoot "train.py"
+$loraPython = Join-Path $loraStateRoot "runtime\venv\Scripts\python.exe"
+$loraComfyRoot = Join-Path $comfyRoot "models\loras"
 $comfyProcess = $null
 $gatewayProcess = $null
 $workerJob = $null
@@ -436,19 +442,40 @@ try {
     try {
         $plainToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)
         if ($plainToken.Length -lt 32) { throw "Decrypted gateway token is invalid" }
+        $gatewayArguments = @(
+            (Join-Path $packageRoot "gateway.py"),
+            "--listen", "127.0.0.1",
+            "--port", "8189",
+            "--upstream", "http://127.0.0.1:8188",
+            "--sentinel", $sentinel,
+            "--revisions", (Join-Path $packageRoot "revisions.json"),
+            "--models", (Join-Path $packageRoot "models.json"),
+            "--probe-contract", $probeContract,
+            "--flux2-state-root", $Flux2StateRoot
+        )
+        $loraInstallFiles = @($loraCandidate, $loraRunner, $loraPython)
+        $loraInstalledFiles = @($loraInstallFiles | Where-Object {
+            Test-Path -LiteralPath $_ -PathType Leaf
+        })
+        if ($loraInstalledFiles.Count -notin @(0, $loraInstallFiles.Count)) {
+            throw "Character LoRA installation is incomplete"
+        }
+        if ($loraInstalledFiles.Count -eq $loraInstallFiles.Count) {
+            $loraCandidateSha256 = (
+                Get-FileHash -LiteralPath $loraCandidate -Algorithm SHA256
+            ).Hash.ToLowerInvariant()
+            $gatewayArguments += @(
+                "--lora-state-root", $loraStateRoot,
+                "--lora-python", $loraPython,
+                "--lora-runner", $loraRunner,
+                "--lora-comfy-root", $loraComfyRoot,
+                "--lora-candidate-sha256", $loraCandidateSha256,
+                "--lora-process-death-guaranteed"
+            )
+        }
         $gatewayProcess = Start-LoggedProcess `
             -Executable $python `
-            -Arguments @(
-                (Join-Path $packageRoot "gateway.py"),
-                "--listen", "127.0.0.1",
-                "--port", "8189",
-                "--upstream", "http://127.0.0.1:8188",
-                "--sentinel", $sentinel,
-                "--revisions", (Join-Path $packageRoot "revisions.json"),
-                "--models", (Join-Path $packageRoot "models.json"),
-                "--probe-contract", $probeContract,
-                "--flux2-state-root", $Flux2StateRoot
-            ) `
+            -Arguments $gatewayArguments `
             -WorkingDirectory $packageRoot `
             -LogPrefix (Join-Path $logRoot "gateway") `
             -WorkerJob $workerJob `

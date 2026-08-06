@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "capability": "identity-flux2-klein-lora",
+  "candidate_state": "not_installed",
+  "readiness": {
+    "state": "not_installed",
+    "startup_ready": false,
+    "execution_proven": false,
+    "training_canary": "not_run",
+    "inference_canary": "not_run",
+    "blocker_code": "candidate_runtime_not_installed"
+  },
+  "storage": {
+    "root": "%PROGRAMDATA%/Content/IdentityLab/flux2-lora",
+    "package": "package",
+    "accepted_input": "jobs/<32-lowercase-hex-job-id>/input",
+    "runtime": "runtime",
+    "evidence": "jobs/<32-lowercase-hex-job-id>/evidence"
+  },
+  "training": {
+    "reference_count": 4,
+    "caption_count": 4,
+    "trigger_token": "hkkperson",
+    "resolution": [512],
+    "buckets": true,
+    "batch_size": 1,
+    "rank": 16,
+    "alpha": 16,
+    "dtype": "bf16",
+    "quantize": true,
+    "quantize_te": true,
+    "low_vram": true,
+    "gradient_checkpointing": true,
+    "cache_latents_to_disk": true,
+    "optimizer": "adamw8bit",
+    "seed": 0,
+    "steps": 500
+  },
+  "resources": {
+    "operating_system": "Windows",
+    "architecture": "AMD64",
+    "python": "3.12",
+    "gpu_name_contains": "RTX 5070 Ti",
+    "minimum_ram_bytes": 34359738368,
+    "minimum_free_disk_bytes": 42949672960,
+    "minimum_vram_mib": 15000,
+    "minimum_free_vram_mib": 13500,
+    "maximum_gpu_utilization_percent": 5
+  },
+  "upstreams": {
+    "ai_toolkit": {
+      "repository": "https://github.com/ostris/ai-toolkit.git",
+      "commit": "1e1418b22cf4373ec2b90b64ea3b343b031175ff",
+      "launcher": "run.py",
+      "requirements_lock_sha256": "32c43d35aff72e1eae652017a7cae97a1734ee76db92b358ef2eee33823d22a2",
+      "license": "MIT"
+    },
+    "training_base": {
+      "repository": "black-forest-labs/FLUX.2-klein-base-4B",
+      "revision": "a3b4f4849157f664bdbc776fd7453c2783562f4d",
+      "transformer": "flux-2-klein-base-4b.safetensors",
+      "expected_bytes": 7751105712,
+      "sha256": "9c5fed22b76baea749d88fc2abe3ad53245e7b21a0d353a762665eea00043b92",
+      "license": "Apache-2.0"
+    },
+    "training_vae": {
+      "repository": "ai-toolkit/flux2_vae",
+      "revision": "3f679cf232e6d91d28396522d9502c31e8f7ccbe",
+      "file": "ae.safetensors",
+      "expected_bytes": 336211292,
+      "sha256": "868fe7b343cc8f3a19dbcfcafbc3d5f888802be3f89bd81b65b3621a066ce8f3"
+    },
+    "inference_base": {
+      "repository": "black-forest-labs/FLUX.2-klein-4b-fp8",
+      "revision": "5b4408e59397a4a37ccb46afe426d8ed86379441",
+      "file": "flux-2-klein-4b-fp8.safetensors",
+      "expected_bytes": 4070624520,
+      "sha256": "97ed34fe0567e436200f2faee3939b88f2b5d99f8af2a4dc16532c4245c0ccb6",
+      "license": "Apache-2.0"
+    },
+    "qwen": {
+      "repository": "Qwen/Qwen3-4B",
+      "revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+      "tree_sha256": "d4dbd58159f555388d7d382f84afd079cc0f3a0c3d3d30a6a209fc5f66d21ef0",
+      "files": [
+        {"path": "config.json", "expected_bytes": 726, "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a"},
+        {"path": "generation_config.json", "expected_bytes": 239, "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"},
+        {"path": "merges.txt", "expected_bytes": 1671853, "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"},
+        {"path": "model-00001-of-00003.safetensors", "expected_bytes": 3957900840, "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223"},
+        {"path": "model-00002-of-00003.safetensors", "expected_bytes": 3987450520, "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5"},
+        {"path": "model-00003-of-00003.safetensors", "expected_bytes": 99630640, "sha256": "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1"},
+        {"path": "model.safetensors.index.json", "expected_bytes": 32819, "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2"},
+        {"path": "tokenizer_config.json", "expected_bytes": 9732, "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"},
+        {"path": "vocab.json", "expected_bytes": 2776833, "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"}
+      ]
+    }
+  },
+  "inference": {
+    "node": "LoraLoaderModelOnly",
+    "reference_count": 0,
+    "seed": 0,
+    "steps": 4,
+    "sampler": "euler",
+    "cfg": 1.0,
+    "width": 1024,
+    "height": 1024,
+    "strength_model": 1.0
+  },
+  "bindings": {
+    "Benchmark-Candidate.ps1": "493e815780608101c7bb50d0833ef089c9dc54abebc9577297a277a0b8c0d0ac",
+    "Install-Candidate.ps1": "2eeea063550afc6b47cb1aded44c556483cee25b30fe56f809659531a0a1c7a9",
+    "README.md": "4f4e76745ebb460d4ee3cc90c269728535336b22202b1855b3b0438cf3a7bd02",
+    "benchmark.py": "c7ceb3e579b8678511142a099c539e92cfd6d4259e61ea4edb0a9e94eecdfaea",
+    "contract.py": "b01e08cfb3302e9546f994328f7e8756a9b87dd8fd2adcd3d79e0ff5de11f3b1",
+    "inference.py": "2ef2b78b9e44f9056d121fbbed94cf8e7f5742e4ed2a7cf8f33e2879646ab237",
+    "install.py": "e9dcfd8bbbde47eec68322995abfc37e11a3a61c7da9359ba87fba5d761f2868",
+    "preflight.py": "39fd75f9c9a21661c636f7456e826c4c7bddfced96511e8886042f5f724ae104",
+    "requirements.in": "bf4786ffe839c3981fdda9135bbff9eb6e1c16083f1fda64956a02f4fbd97a7a",
+    "requirements.lock": "32c43d35aff72e1eae652017a7cae97a1734ee76db92b358ef2eee33823d22a2",
+    "train.py": "5dbab1dbff2c1019bfc2d8854328de883d469c09426bedb8bed715fd37bffc61"
+  }
+}

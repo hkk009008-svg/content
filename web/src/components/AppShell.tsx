@@ -7,6 +7,7 @@ import PostRunSummary from './console/PostRunSummary'
 import SetupPage from './pages/SetupPage'
 import EditPage from './pages/EditPage'
 import RunPage from './pages/RunPage'
+import IdentityLabPage from './pages/IdentityLabPage'
 import CapabilityPage from './pages/CapabilityPage'
 
 /**
@@ -98,6 +99,7 @@ const TABS: { id: Page; glyph: string; label: string }[] = [
   { id: 'setup', glyph: '◧', label: 'Setup' },
   { id: 'edit', glyph: '✂', label: 'Edit' },
   { id: 'run', glyph: '▷', label: 'Run' },
+  { id: 'identity', glyph: '◉', label: 'Identity' },
   { id: 'capability', glyph: '▤', label: 'Capability' },
 ]
 
@@ -278,6 +280,8 @@ export default function AppShell({
             pipelineLoadingLabel={pipelineLoadingLabel}
           />
         )
+      case 'identity':
+        return <IdentityLabPage project={project} apiBase={apiBase} />
       case 'capability':
         return <CapabilityPage project={project} />
     }

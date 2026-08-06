@@ -185,6 +185,7 @@ class Settings:
     # Paths
     project_root: Path
     experiments_db_path: str
+    identity_experiment_db_path: str  # Durable project-scoped Identity Lab
     pipeline_job_db_path: str    # Durable full-project queue
     pipeline_queue_concurrency: int
     cinema_trace_db_path: str    # Searchable structured trace index
@@ -233,6 +234,10 @@ class Settings:
             performance_comfyui_api_key=_secret_env("PERFORMANCE_COMFYUI_API_KEY"),
             project_root=_PROJECT_ROOT,
             experiments_db_path=_env("EXPERIMENTS_DB_PATH", "data/experiments.db"),
+            identity_experiment_db_path=(
+                _env("IDENTITY_EXPERIMENT_DB_PATH", "data/identity_experiments.db").strip()
+                or "data/identity_experiments.db"
+            ),
             pipeline_job_db_path=(
                 _env("PIPELINE_JOB_DB_PATH", "data/pipeline_jobs.db").strip()
                 or "data/pipeline_jobs.db"

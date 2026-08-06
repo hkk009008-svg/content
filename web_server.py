@@ -103,6 +103,13 @@ from web_observability import observability_api
 from web_artifacts import artifact_api
 from web_gpu_workers import gpu_workers_api
 from web_gpu_worker_control import gpu_worker_control_api
+from web_identity_experiments import (
+    configure_identity_project_guard,
+    identity_character_has_active_experiment,
+    identity_experiment_api,
+    identity_project_has_active_experiment,
+)
+from web_project_operation_lock import project_operation_lock
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 # CORS allowlist comes from settings.web_cors_origins. Default is
 # localhost-only ("http://localhost:8080" + "http://localhost:5173" for
@@ -114,6 +121,7 @@ app.register_blueprint(observability_api)
 app.register_blueprint(artifact_api)
 app.register_blueprint(gpu_workers_api)
 app.register_blueprint(gpu_worker_control_api)
+app.register_blueprint(identity_experiment_api)
 
 # ---------------------------------------------------------------------------
 # Broadcast-safe SSE event fan-out with replay (Slice 11a)
@@ -440,15 +448,6 @@ _pipeline_job_store = PipelineJobStore()
 _pipeline_job_dispatcher: PipelineJobDispatcher | None = None
 _pipeline_dispatcher_lock = threading.Lock()
 
-# Every project mutation/direct-stage route and the generation admission
-# boundary share this file lock.  The queue itself is cross-process SQLite;
-# process-local sets alone cannot stop worker A deleting a project while
-# worker B admits it.  Reusing one FileLock instance per canonical path keeps
-# same-thread nested test/route probes re-entrant while independent threads and
-# processes still contend on the filesystem lock.
-_project_operation_locks: dict[str, FileLock] = {}
-_project_operation_locks_lock = threading.Lock()
-
 # Review-gate stages where the pipeline worker thread is BLOCKED at
 # lifecycle.wait_for_gate (cinema/lifecycle.py:172-188 polling Event.wait
 # loop), not actively running steps. The pid remains in _running_pipelines
@@ -665,6 +664,16 @@ def _reserve_project_admin(pid: str) -> bool:
 def _release_project_admin(pid: str) -> None:
     with _pipelines_lock:
         _project_admin_in_flight.discard(pid)
+
+
+# Identity Lab blueprint routes are imported before the shared reservation
+# primitives are defined. Bind them now so every mutating Identity request
+# participates in the same admission/admin exclusion used by project writes.
+configure_identity_project_guard(
+    _reserve_project_admin,
+    _release_project_admin,
+    timeout=HTTP_PROJECT_TIMEOUT,
+)
 
 
 def _reserve_project_stage(pid: str) -> bool:
@@ -1055,40 +1064,33 @@ def _pipeline_action_authority(pid: str) -> tuple[bool, list[str]]:
 
 
 def _project_lock_guard(fn):
-    def _operation_lock(pid: str) -> FileLock | None:
-        if not is_safe_project_id(pid):
-            return None
-        project_root = os.path.dirname(os.path.abspath(get_project_dir(pid)))
-        os.makedirs(project_root, exist_ok=True)
-        path = os.path.join(project_root, f".{pid}.operation.lock")
-        with _project_operation_locks_lock:
-            lock = _project_operation_locks.get(path)
-            if lock is None:
-                lock = FileLock(
-                    path,
-                    timeout=HTTP_PROJECT_TIMEOUT,
-                    mode=0o600,
-                    thread_local=True,
-                )
-                _project_operation_locks[path] = lock
-            return lock
-
     @wraps(fn)
     def wrapper(*args, **kwargs):
         pid = kwargs.get("pid")
         if not isinstance(pid, str) and args:
             pid = args[0]
         try:
-            lock = _operation_lock(pid) if isinstance(pid, str) else None
-            if lock is None:
+            if not isinstance(pid, str):
                 return fn(*args, **kwargs)
-            try:
-                with lock:
-                    return fn(*args, **kwargs)
-            except FileLockTimeout as exc:
-                raise ProjectLockError(pid, HTTP_PROJECT_TIMEOUT) from exc
+            with project_operation_lock(pid, timeout=HTTP_PROJECT_TIMEOUT):
+                return fn(*args, **kwargs)
         except ProjectLockError as exc:
             return _project_locked_response(exc)
+
+    return wrapper
+
+
+def _project_admin_guard(fn):
+    """Hold the process-local admin reservation for one complete mutation."""
+
+    @wraps(fn)
+    def wrapper(pid, *args, **kwargs):
+        if not _reserve_project_admin(pid):
+            return _project_busy_response(pid)
+        try:
+            return fn(pid, *args, **kwargs)
+        finally:
+            _release_project_admin(pid)
 
     return wrapper
 
@@ -2104,6 +2106,24 @@ def api_delete_project(pid):
     if not _reserve_project_admin(pid):
         return _project_busy_response(pid)
     try:
+        try:
+            identity_active = identity_project_has_active_experiment(pid)
+        except Exception:
+            logger.exception(
+                "Identity Lab deletion fence could not be verified",
+                extra={"pid": pid},
+            )
+            return jsonify({
+                "error": "Project deletion is blocked because Identity Lab state could not be verified",
+                "code": "identity_lab_fence_unavailable",
+                "retryable": False,
+            }), 409
+        if identity_active:
+            return jsonify({
+                "error": "Project has an active Identity Lab experiment",
+                "code": "identity_experiment_active",
+                "retryable": False,
+            }), 409
         if not delete_project(pid, timeout=HTTP_PROJECT_TIMEOUT):
             return jsonify({"error": "Project not found"}), 404
 
@@ -3066,12 +3086,9 @@ def api_add_character(pid):
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["PUT"])
 @_project_lock_guard
+@_project_admin_guard
 def api_update_character(pid, cid):
     """Update an existing character's fields. Supports JSON or multipart (for file uploads)."""
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
-
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -3086,6 +3103,26 @@ def api_update_character(pid, cid):
     char = next((c for c in project["characters"] if c["id"] == cid), None)
     if not char:
         return jsonify({"error": "Character not found"}), 404
+
+    if request.files.getlist("reference_images"):
+        try:
+            identity_active = identity_character_has_active_experiment(pid, cid)
+        except Exception:
+            logger.exception(
+                "Identity Lab character-mutation fence could not be verified",
+                extra={"pid": pid, "character_id": cid},
+            )
+            return jsonify({
+                "error": "Reference replacement is blocked because Identity Lab state could not be verified",
+                "code": "identity_lab_fence_unavailable",
+                "retryable": False,
+            }), 409
+        if identity_active:
+            return jsonify({
+                "error": "Character has an active Identity Lab experiment",
+                "code": "identity_experiment_active",
+                "retryable": False,
+            }), 409
 
     # Accept both JSON and form data
     if request.is_json:
@@ -3191,14 +3228,31 @@ def api_update_character(pid, cid):
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["DELETE"])
 @_project_lock_guard
+@_project_admin_guard
 def api_remove_character(pid, cid):
-    busy_response = _reject_if_project_busy(pid)
-    if busy_response:
-        return busy_response
-
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
+    if not any(character.get("id") == cid for character in project.get("characters", [])):
+        return jsonify({"error": "Character not found"}), 404
+    try:
+        identity_active = identity_character_has_active_experiment(pid, cid)
+    except Exception:
+        logger.exception(
+            "Identity Lab character-deletion fence could not be verified",
+            extra={"pid": pid, "character_id": cid},
+        )
+        return jsonify({
+            "error": "Character deletion is blocked because Identity Lab state could not be verified",
+            "code": "identity_lab_fence_unavailable",
+            "retryable": False,
+        }), 409
+    if identity_active:
+        return jsonify({
+            "error": "Character has an active Identity Lab experiment",
+            "code": "identity_experiment_active",
+            "retryable": False,
+        }), 409
     if remove_character(project, cid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Character not found"}), 404

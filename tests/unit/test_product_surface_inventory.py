@@ -274,6 +274,54 @@ app.register_blueprint(Blueprint("bp", __name__))
     }
 
 
+def test_backend_resolves_the_direct_local_blueprint_shape(tmp_path: Path) -> None:
+    root = _repo(
+        tmp_path,
+        """
+from flask import Flask
+from identity_routes import identity_api
+app = Flask(__name__, static_folder=None)
+app.register_blueprint(identity_api)
+""",
+    )
+    (root / "identity_routes.py").write_text(
+        """
+from flask import Blueprint
+identity_api = Blueprint("identity_api", __name__)
+
+@identity_api.get("/api/projects/<pid>/identity")
+def detail(pid):
+    pass
+
+@identity_api.post("/api/projects/<pid>/identity")
+def create(pid):
+    pass
+""",
+        encoding="utf-8",
+    )
+
+    result = _build(root)
+
+    assert {
+        (row["handler"], row["method"], row["rule"], row["kind"])
+        for row in result["routes"]
+    } == {
+        (
+            "identity_api.detail",
+            "GET",
+            "/api/projects/<pid>/identity",
+            "flask_blueprint_route",
+        ),
+        (
+            "identity_api.create",
+            "POST",
+            "/api/projects/<pid>/identity",
+            "flask_blueprint_route",
+        ),
+    }
+    assert result["unresolved"] == []
+
+
 def test_frontend_fetch_constants_templates_query_eventsource_and_matching(
     tmp_path: Path,
 ) -> None:

@@ -25,6 +25,10 @@ describe('PageContext', () => {
     act(() => result.current.setFocusScene('scene-42'))
     expect(result.current.focusScene).toBe('scene-42')
     expect(result.current.page).toBe('edit') // unaffected
+
+    act(() => result.current.setPage('identity'))
+    expect(result.current.page).toBe('identity')
+    expect(result.current.focusScene).toBe('scene-42')
   })
 
   it('resetForNewProject() resets page to Setup and clears focusScene (Slice 8b PID boundary)', () => {
