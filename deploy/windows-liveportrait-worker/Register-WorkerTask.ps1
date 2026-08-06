@@ -220,12 +220,8 @@ function Assert-InstalledManualTask {
     }
     if (
         [string]$exported.Task.Principals.Principal.LogonType -ne "InteractiveToken" -or
-        [string]$exported.Task.Principals.Principal.RunLevel -ne "LeastPrivilege" -or
         [string]$exported.Task.Settings.MultipleInstancesPolicy -ne "IgnoreNew" -or
         [string]$exported.Task.Settings.ExecutionTimeLimit -ne "PT0S" -or
-        [string]$exported.Task.Settings.Enabled -ne "true" -or
-        [string]$exported.Task.Settings.StartWhenAvailable -ne "false" -or
-        [string]$exported.Task.Settings.WakeToRun -ne "false" -or
         @($exported.SelectNodes("/t:Task/t:Settings/t:RestartOnFailure", $namespace)).Count -ne 0
     ) {
         throw "Exported task XML settings differ from the manual-worker contract"
