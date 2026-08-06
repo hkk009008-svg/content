@@ -139,6 +139,29 @@ may truthfully report `not_installed`, `needs_benchmark`, `blocked`, or
 The local route persists its prompt ID. An ambiguous submit, completion, or
 download stops replacement work until reconciliation.
 
+Identity Lab reuses that route rather than creating another GPU client.
+`web_identity_experiments.py` admits one fixed five-cell comparison,
+`identity/experiment_store.py` keeps its compact durable state, and
+`identity/native_comparison.py` runs native 1/2/4, text-only, and character-LoRA
+cells sequentially through the existing durable-attempt and artifact-version
+stores. `identity/lora_training.py` owns deterministic four-reference training
+admission; `identity/lora_inference.py` loads the hash-bound Windows graph and
+runs both zero-reference arms. LoRA is available only after the current
+training evidence and causal text-only/adapter benchmark pass. Local identity
+scoring may be `UNKNOWN`; it never falls through to a paid vision service. A
+fresh installed candidate is exposed as `Canary`: the first exact four-reference
+job trains and runs the fixed benchmark automatically. The list API exposes the
+ordered four-image preflight tuple; create requires its fingerprint and the
+store rechecks it against the immutable snapshots. Ambiguous or post-dispatch
+unreconciled work remains non-ready and non-duplicated.
+
+PuLID is catalogued as blocked, not simulated by another method.
+`deploy/windows-pulid-flux2` performs a bounded safetensors-header audit and can
+never report production readiness. The published checkpoint, runtime loading,
+and face-model license are incompatible with this production route. A future
+replacement must first pin real runtime code; the repository deliberately does
+not invent its projection tensor shapes.
+
 ### 5.2 Continuity and identity
 
 [domain/continuity_engine.py](domain/continuity_engine.py) supplies three

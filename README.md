@@ -81,6 +81,18 @@ cd web && npm test -- --run && npm run build
 - Identity validation uses the shared GhostFaceNet validator and approved
   project reference images. Removed image-training and provider-tuning
   controls are not stored, rendered, or dispatched.
+- Identity Lab runs one durable five-cell comparison: native FLUX.2 with one,
+  two, and four approved references, followed by a fixed text-only control and
+  character-LoRA arm. LoRA appears available only when the exact Windows
+  trainer, adapter publication, native FLUX.2 runtime, and causal two-arm
+  inference benchmark all match the tracked candidate; before the first proof,
+  an installed train-capable candidate is explicitly labeled `Canary`, and the
+  UI shows the exact four selected images and hashes before consent. Submission
+  is bound to that ordered fingerprint, and the first consent-bound run performs
+  training plus benchmark automatically. The published
+  PuLID-FLUX2 checkpoint/runtime remains rejected offline for incompatible
+  dimensions/namespaces, random fallback, and its noncommercial face-model
+  dependency; no replacement projection shapes are guessed.
 
 ## Durable production controls
 

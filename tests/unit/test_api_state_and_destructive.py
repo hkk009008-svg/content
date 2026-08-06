@@ -3,6 +3,7 @@ tests/unit/test_api_state_and_destructive.py — Regression tests for destructiv
 and state-machine endpoints in web_server.py (Tier 1 Batch B).
 """
 
+import io
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -102,6 +103,20 @@ def test_api_delete_project_not_found(mock_delete, client):
     mock_delete.assert_called_once()
 
 
+@patch("web_server.identity_project_has_active_experiment", return_value=True)
+@patch("web_server.delete_project")
+def test_api_delete_project_rejects_queued_identity_work(
+    mock_delete,
+    _mock_identity_active,
+    client,
+):
+    response = client.delete("/api/projects/test_pid")
+
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "identity_experiment_active"
+    mock_delete.assert_not_called()
+
+
 @patch("web_server.load_project", return_value={"id": "test_pid"})
 @patch("web_server.delete_project")
 def test_api_delete_project_reservation_blocks_generation_start(
@@ -163,6 +178,45 @@ def test_api_generation_reserves_before_project_load_blocks_delete(
     assert "test_pid" not in _running_pipelines
     assert "test_pid" not in _project_queue_accept_in_flight
     assert isolated_store.get(response.get_json()["job_id"]) is not None
+
+
+@patch("web_server.identity_character_has_active_experiment", return_value=True)
+@patch(
+    "web_server.load_project",
+    return_value={"id": "test_pid", "characters": [{"id": "character-a"}]},
+)
+def test_character_reference_replacement_rejects_active_identity_work(
+    _mock_load,
+    _mock_identity_active,
+    client,
+):
+    response = client.put(
+        "/api/projects/test_pid/characters/character-a",
+        data={"reference_images": (io.BytesIO(b"new-reference"), "new.png")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "identity_experiment_active"
+
+
+@patch("web_server.remove_character")
+@patch("web_server.identity_character_has_active_experiment", return_value=True)
+@patch(
+    "web_server.load_project",
+    return_value={"id": "test_pid", "characters": [{"id": "character-a"}]},
+)
+def test_character_delete_rejects_active_identity_work(
+    _mock_load,
+    _mock_identity_active,
+    mock_remove,
+    client,
+):
+    response = client.delete("/api/projects/test_pid/characters/character-a")
+
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "identity_experiment_active"
+    mock_remove.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

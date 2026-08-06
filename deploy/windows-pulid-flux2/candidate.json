@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "capability": "identity-pulid-flux2-klein-4b",
+  "status": {
+    "usage": "evaluation_only",
+    "compatibility": "incompatible",
+    "license": "license_blocked",
+    "production_ready": false,
+    "execution_available": false,
+    "benchmark_state": "ineligible",
+    "blocker_codes": [
+      "published_checkpoint_hidden_size_mismatch",
+      "checkpoint_runtime_namespace_mismatch",
+      "runtime_random_fallback_declared",
+      "runtime_strict_load_disabled",
+      "runtime_injection_map_unresolved",
+      "replacement_projection_contract_unresolved",
+      "face_model_noncommercial"
+    ]
+  },
+  "pins": {
+    "flux2_source": {
+      "repository": "black-forest-labs/flux2",
+      "commit": "50fe5162777813d869182b139e83b10743caef15",
+      "architecture": {
+        "hidden_size": 3072,
+        "double_blocks": 5,
+        "single_blocks": 20
+      }
+    },
+    "node_source": {
+      "repository": "iFayens/ComfyUI-PuLID-Flux2",
+      "commit": "3a0a3f5f18260fc914f96a8c7f0f23c835e881cd",
+      "architecture": {
+        "hidden_size": 3072,
+        "double_blocks": 5,
+        "single_blocks": 20
+      },
+      "runtime_namespaces": [
+        "double_ca",
+        "single_ca"
+      ],
+      "strict_state_dict": false,
+      "injection_map": null,
+      "random_fallbacks": [
+        "dimension_mismatch_projection_initialization",
+        "klein_runtime_injector_initialization"
+      ]
+    },
+    "published_model": {
+      "repository": "Fayens/Pulid-Flux2",
+      "revision": "550167db98d7169bfc83f9aa8225bd0da70f2d6b",
+      "artifacts": [
+        {
+          "id": "v1",
+          "expected_bytes": 1364389800,
+          "sha256": "5fe643927aa398f0ffefa4f9796675c2c7d116e78aa96b2416d4d0f54c63fc10"
+        },
+        {
+          "id": "v2",
+          "expected_bytes": 1364389800,
+          "sha256": "d5d291cb054eb6eceb25e3b46eff8f05f7b58f8f19a89ec76ba730a6ba8935bb"
+        }
+      ],
+      "observed_header": {
+        "tensor_count": 119,
+        "dtypes": {
+          "F32": 119
+        },
+        "id_former.latents": [
+          1,
+          4,
+          4096
+        ],
+        "model_hidden_size": 4096,
+        "legacy_namespaces": {
+          "pulid_ca_double": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "pulid_ca_single": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      }
+    },
+    "face_model": {
+      "provider": "InsightFace",
+      "artifact": "AntelopeV2",
+      "license_state": "noncommercial_research_only",
+      "commercial_use_approved": false,
+      "artifact_sha256": null,
+      "license_evidence": "Official pretrained-model terms require separate licensing for commercial use.",
+      "license_evidence_sha256": null
+    }
+  },
+  "replacement_gate": {
+    "state": "unresolved",
+    "target": "FLUX.2-klein-4B",
+    "known_target_architecture": {
+      "hidden_size": 3072,
+      "double_blocks": 5,
+      "single_blocks": 20
+    },
+    "unresolved": [
+      "pinned_replacement_runtime_implementation",
+      "attention_heads_and_context_width",
+      "projection_tensor_shapes",
+      "exact_runtime_injection_map",
+      "compatible_checkpoint",
+      "commercially_permissible_face_model"
+    ],
+    "requirements": [
+      "derive_shapes_from_the_pinned_replacement_runtime",
+      "strict_state_dict_with_zero_missing_or_unexpected_injection_keys",
+      "no_random_weight_fallbacks",
+      "hash_bound_runtime_injection_map",
+      "commercially_permissible_face_model_with_artifact_and_license_hashes",
+      "independent_effect_control_execution_and_benchmark"
+    ]
+  }
+}

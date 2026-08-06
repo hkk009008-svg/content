@@ -46,6 +46,7 @@ class TestNewSettingsFields:
 
     def test_durable_queue_and_trace_defaults_are_typed(self, monkeypatch):
         for name in (
+            "IDENTITY_EXPERIMENT_DB_PATH",
             "PIPELINE_JOB_DB_PATH",
             "PIPELINE_QUEUE_CONCURRENCY",
             "CINEMA_TRACE_DB_PATH",
@@ -54,6 +55,7 @@ class TestNewSettingsFields:
         ):
             monkeypatch.delenv(name, raising=False)
         s = Settings.from_env()
+        assert s.identity_experiment_db_path == "data/identity_experiments.db"
         assert s.pipeline_job_db_path == "data/pipeline_jobs.db"
         assert s.pipeline_queue_concurrency == 1
         assert s.cinema_trace_db_path == "data/telemetry.db"

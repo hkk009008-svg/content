@@ -128,6 +128,9 @@ The Windows packages are:
   for the authenticated unified gateway and LivePortrait capability.
 - [deploy/windows-flux2-klein/README.md](deploy/windows-flux2-klein/README.md)
   for FLUX.2 installation, fixed probe, and 1/2/4-reference benchmark.
+- [deploy/windows-flux2-lora/README.md](deploy/windows-flux2-lora/README.md)
+  for the fixed four-reference character-LoRA trainer and automatic causal
+  text-only/adapter benchmark.
 
 ### Readiness sequence
 
@@ -145,6 +148,9 @@ The Windows packages are:
    This is the end-to-end authentication and tunnel proof; an established TCP
    socket alone is not sufficient.
 9. In Setup → Image, select Local FLUX.2 only after it becomes enabled.
+10. Install the pinned character-LoRA package, then restart the guarded worker
+    so the unified gateway loads its exact package/runtime paths. This install
+    does not train or benchmark anything by itself.
 
 Before steps 3–6, stop any other workload using the RTX GPU—including game
 builds, model inference, rendering, or another ComfyUI session. Installation is
@@ -267,6 +273,31 @@ bypass the UI by editing project JSON.
 Reconcile the exact durable prompt ID and worker history/output. Do not submit
 a replacement image locally or through a cloud fallback until the accepted job
 is proven terminal and its artifact disposition is known.
+
+### Run an Identity Lab comparison
+
+Give the character four distinct approved reference images and wait until the
+shared image worker reports Ready. After the exact LoRA package is installed,
+Identity labels an unproven but train-capable candidate `Canary`, not Ready.
+Select the character, confirm authorized local use of that character's four
+displayed references, and run the comparison. If any selected image changes
+after review, submission is rejected until the new ordered fingerprint is
+reviewed and confirmed. The gateway unloads idle Comfy models,
+trains the one fixed 500-step job, automatically runs the sequential
+text-only/adapter benchmark, and exposes the adapter only after both proofs
+pass. The experiment retains native 1/2/4, text-only, and LoRA results plus
+local scores; an unavailable scorer is displayed as `UNKNOWN`.
+
+If a cell is blocked, restore the exact readiness proof and use Resume. An
+explicit resume can retry only that deterministic job ID: one proven pre-start
+failure, one supported checkpoint, or one proven pre-submission benchmark
+failure. An ambiguous submit remains `UNKNOWN` and is not replaced. Cancel
+prevents follow-on cells but does not kill an already-running local training
+process. PuLID
+remains ineligible while the offline gate reports the published
+checkpoint/runtime mismatch, unresolved replacement implementation, or a
+noncommercial/unresolved face-model license. Do not run a GPU benchmark to
+bypass a static blocker.
 
 ### Paid provider is pending or UNKNOWN
 

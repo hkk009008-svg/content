@@ -148,6 +148,18 @@ def test_powershell_network_and_secret_invariants() -> None:
     assert '"--database-url", $databaseUrl' in start
     assert '$databasePath = (Join-Path $userRoot "comfyui.db").Replace' in start
     assert '"--upstream", "http://127.0.0.1:8188"' in start
+    assert '"Content\\IdentityLab\\flux2-lora"' in start
+    assert '"runtime\\venv\\Scripts\\python.exe"' in start
+    assert '"models\\loras"' in start
+    assert '"--lora-state-root", $loraStateRoot' in start
+    assert '"--lora-python", $loraPython' in start
+    assert '"--lora-runner", $loraRunner' in start
+    assert '"--lora-comfy-root", $loraComfyRoot' in start
+    assert '"--lora-candidate-sha256", $loraCandidateSha256' in start
+    assert '"--lora-process-death-guaranteed"' in start
+    assert "Get-FileHash -LiteralPath $loraCandidate -Algorithm SHA256" in start
+    assert "Character LoRA installation is incomplete" in start
+    assert "-Arguments $gatewayArguments" in start
     assert '"COMFYUI_API_KEY" = $plainToken' in start
     assert "Remove-Item -LiteralPath $sentinel" in start
     assert '"--user-directory", $userRoot' in start

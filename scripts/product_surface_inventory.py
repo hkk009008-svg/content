@@ -180,6 +180,115 @@ def _methods(node: ast.AST | None) -> list[str] | None:
         values.append(item.value.upper())
     return sorted(set(values)) if all(value in HTTP_METHODS for value in values) else None
 
+
+def _direct_local_blueprint_routes(
+    root: Path,
+    server_tree: ast.Module,
+    registration: ast.Call,
+) -> list[dict[str, Any]] | None:
+    """Resolve the one simple Blueprint shape used by this repository.
+
+    This is intentionally small: a directly imported local Blueprint, a plain
+    ``Blueprint(name, __name__)`` assignment, and literal route decorators.
+    Anything more dynamic remains unresolved instead of growing a Python
+    interpreter inside the inventory tool.
+    """
+
+    if len(registration.args) != 1 or registration.keywords:
+        return None
+    argument = registration.args[0]
+    if not isinstance(argument, ast.Name):
+        return None
+    imports = [
+        (node.module, alias.name)
+        for node in server_tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
+        for alias in node.names
+        if alias.name != "*" and (alias.asname or alias.name) == argument.id
+    ]
+    if len(imports) != 1:
+        return None
+    module_name, symbol = imports[0]
+    module_path = root.joinpath(*module_name.split(".")).with_suffix(".py")
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved_module = module_path.resolve(strict=True)
+        resolved_module.relative_to(resolved_root)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError):
+        return None
+    if resolved_module != module_path or not module_path.is_file():
+        return None
+    source = module_path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(module_path))
+    constructors = {
+        alias.asname or alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "flask"
+        for alias in node.names
+        if alias.name == "Blueprint"
+    }
+    definitions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == symbol
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id in constructors
+        and len(node.value.args) == 2
+        and not node.value.keywords
+    ]
+    if len(definitions) != 1:
+        return None
+    relative_path = module_path.relative_to(root).as_posix()
+    routes: list[dict[str, Any]] = []
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not (
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and isinstance(decorator.func.value, ast.Name)
+                and decorator.func.value.id == symbol
+            ):
+                continue
+            attr = decorator.func.attr
+            if attr not in SHORTHANDS | {"route"}:
+                continue
+            rule_node = decorator.args[0] if len(decorator.args) == 1 else None
+            rule = (
+                rule_node.value
+                if isinstance(rule_node, ast.Constant) and isinstance(rule_node.value, str)
+                else None
+            )
+            if rule is None:
+                return None
+            if attr == "route":
+                methods_node = next(
+                    (keyword.value for keyword in decorator.keywords if keyword.arg == "methods"),
+                    None,
+                )
+                declared = ["GET"] if methods_node is None else _methods(methods_node)
+            else:
+                declared = [attr.upper()] if not decorator.keywords else None
+            if declared is None:
+                return None
+            for method in declared:
+                routes.append(
+                    {
+                        "handler": f"{symbol}.{node.name}",
+                        "kind": "flask_blueprint_route",
+                        "method": method,
+                        "path_shape": _positional(rule),
+                        "rule": rule,
+                        "source": _source(relative_path, decorator.lineno),
+                    }
+                )
+    return routes
+
 def _backend(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     path = root / "web_server.py"
     source = path.read_text(encoding="utf-8")
@@ -237,10 +346,24 @@ def _backend(root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                     "path_shape": _positional(rule), "rule": rule,
                     "source": _source("web_server.py", decorator.lineno),
                 })
+    resolved_blueprints: set[int] = set()
     for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        if (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "app"
+            and call.func.attr == "register_blueprint"
+        ):
+            blueprint_routes = _direct_local_blueprint_routes(root, tree, call)
+            if blueprint_routes is not None:
+                routes.extend(blueprint_routes)
+                resolved_blueprints.add(id(call))
+                continue
         if not isinstance(call.func, ast.Attribute) or call.func.attr not in {
             "add_url_rule", "register_blueprint"
         }:
+            continue
+        if id(call) in resolved_blueprints:
             continue
         kind = call.func.attr
         _unknown(

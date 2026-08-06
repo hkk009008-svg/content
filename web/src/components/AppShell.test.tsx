@@ -6,7 +6,7 @@ import type { Project, ProgressEvent } from '../types/project'
 
 // Isolate the shell's chrome + page-routing from the network-heavy real
 // pages. SetupPage mounts six panels (some fetch on mount); RunPage pulls the
-// full stage-rail/review/screening/monitor/telemetry tree; CapabilityPage
+// full stage-rail/review/screening/monitor/telemetry tree; IdentityLabPage and CapabilityPage
 // renders the console. Mock them to simple markers. EditPage is left REAL
 // (it's a lightweight LoadingState) so the tab-switch assertion exercises a
 // genuine page.
@@ -18,6 +18,9 @@ vi.mock('./pages/RunPage', () => ({
 }))
 vi.mock('./pages/CapabilityPage', () => ({
   default: () => <div data-testid="mock-capability">capability-page</div>,
+}))
+vi.mock('./pages/IdentityLabPage', () => ({
+  default: () => <div data-testid="mock-identity">identity-page</div>,
 }))
 
 const project: Project = {
@@ -99,12 +102,21 @@ function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> =
 }
 
 describe('AppShell', () => {
-  it('renders the four page-bar tabs', () => {
+  it('renders the five page-bar tabs', () => {
     renderShell()
     expect(screen.getByRole('button', { name: /Setup/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Run/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Identity/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Capability/ })).toBeInTheDocument()
+  })
+
+  it('opens the Identity Lab from its page-bar tab', () => {
+    renderShell()
+
+    fireEvent.click(screen.getByRole('button', { name: /Identity/ }))
+
+    expect(screen.getByTestId('mock-identity')).toBeInTheDocument()
   })
 
   it('uses a provider-neutral local GPU legend', () => {
