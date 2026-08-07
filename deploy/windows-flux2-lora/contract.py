@@ -73,6 +73,12 @@ EXPECTED_PACKAGE_FILES = frozenset(
     }
 )
 REFERENCE_NAMES = tuple(f"reference-{index:02d}" for index in range(1, 5))
+# Files the pinned ai-toolkit writes into the job input directory at run time.
+# They are tolerated by validate_input_manifest and by nothing else: they are
+# never hashed, never part of the manifest, and never treated as references.
+# Keep this set minimal and named -- a wildcard here would let arbitrary content
+# into a consent-sealed directory.
+RUNTIME_INPUT_ARTIFACTS = frozenset({".aitk_size.json"})
 FIXED_CAPTIONS = tuple(
     f"portrait photograph of hkkperson person, identity reference view {index}"
     for index in range(1, 5)
@@ -723,7 +729,20 @@ def validate_input_manifest(state_root: Path, job_id: object) -> dict[str, Any]:
         entries = list(paths["input"].iterdir())
     except OSError as exc:
         raise ContractError("training input directory is unavailable") from exc
-    if {entry.name for entry in entries} != expected_input_names:
+    # ai-toolkit's dataset loader writes .aitk_size.json into folder_path
+    # unconditionally, and folder_path IS this manifest-sealed input directory
+    # (the training config points `datasets[0].folder_path` at paths["input"]).
+    # An exact-set check therefore fails AFTER a training run completes -- at
+    # harvest -- and then on every retry at admission, leaving the job
+    # permanently unharvestable and unretryable.
+    #
+    # Tolerate that one named runtime artefact and nothing else. Consent binding
+    # is unchanged: the four references and four captions must still all be
+    # present, every entry must still be a regular non-symlink file, and each
+    # reference is still hash-checked against the manifest below. A missing
+    # reference or any other extra path still raises, because subtracting the
+    # tolerated name cannot turn a wrong set into the expected one.
+    if {entry.name for entry in entries} - RUNTIME_INPUT_ARTIFACTS != expected_input_names:
         raise ContractError("training input tree contains an unmanifested path")
     for entry in entries:
         info = entry.lstat()
