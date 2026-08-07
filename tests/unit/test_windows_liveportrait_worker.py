@@ -1286,3 +1286,61 @@ def test_source_status_allowlist_rejects_ignored_executable_and_config() -> None
     assert preflight.unexpected_source_changes(
         "liveportrait-kj", ["!! config.yaml", "?? payload.py"], set()
     ) == ["!! config.yaml", "?? payload.py"]
+
+
+def test_published_lora_adapter_does_not_brick_the_next_worker_start() -> None:
+    """The worker's own published adapter must not fail the purity guard.
+
+    ComfyUI's LoraLoaderModelOnly resolves adapters only under its own
+    models/loras, so the gateway's publish target is necessarily inside the
+    checkout this guard sweeps. On 2026-08-08 the campaign's first fully
+    successful LoRA cycle published an adapter at 02:51 and every worker start
+    after it died in verify_revisions — before any model, GPU, or ComfyUI check
+    ran. Two individually correct mechanisms in direct contradiction.
+    """
+
+    preflight = _load_module("windows_liveportrait_published_adapter", "preflight.py")
+    digest = "4c79cfc4" + "a" * 56
+    published = f"!! models/loras/identity-lora-{digest}.safetensors"
+
+    assert preflight.unexpected_source_changes("comfyui", [published], set()) == []
+
+
+def test_models_loras_tolerance_is_the_published_shape_only() -> None:
+    """Widening a security guard is only safe if the widening is narrow.
+
+    The 64 hex characters ARE the adapter's SHA-256 and gateway.py refuses to
+    publish under any other name, so a file admitted here has already had its
+    content bound to its name by the publisher. Anything else dropped into
+    models/loras must still fail the guard — these are the negative controls
+    that make the tolerance meaningful rather than a hole.
+    """
+
+    preflight = _load_module("windows_liveportrait_adapter_negatives", "preflight.py")
+    digest = "b" * 64
+    rejected = [
+        # Not the published shape.
+        "!! models/loras/evil.safetensors",
+        "!! models/loras/identity-lora-.safetensors",
+        f"!! models/loras/identity-lora-{'c' * 63}.safetensors",
+        f"!! models/loras/identity-lora-{'d' * 65}.safetensors",
+        f"!! models/loras/identity-lora-{'E' * 64}.safetensors",
+        f"!! models/loras/identity-lora-{digest}.safetensors.partial",
+        f"!! models/loras/identity-lora-{digest}.pt",
+        # Right name, wrong directory.
+        f"!! custom_nodes/identity-lora-{digest}.safetensors",
+        f"!! models/loras/nested/identity-lora-{digest}.safetensors",
+        # Right name, but TRACKED or UNTRACKED rather than ignored: the guard
+        # only ever tolerated ignored artifacts, and a tracked change to the
+        # checkout is drift no matter what it is called.
+        f"?? models/loras/identity-lora-{digest}.safetensors",
+        f" M models/loras/identity-lora-{digest}.safetensors",
+    ]
+
+    assert preflight.unexpected_source_changes("comfyui", rejected, set()) == rejected
+
+    # The tolerance is scoped to the ComfyUI component alone.
+    other = f"!! models/loras/identity-lora-{digest}.safetensors"
+    assert preflight.unexpected_source_changes("liveportrait-kj", [other], set()) == [
+        other
+    ]

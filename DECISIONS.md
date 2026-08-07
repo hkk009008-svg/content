@@ -4613,3 +4613,77 @@ first run of that instrument reported one orphan (`location_research`) and was
 wrong — it excluded `web_server.py` wholesale to skip the validator table and
 so hid the real consumer at `web_server.py:4023`. The corrected instrument
 validates itself against that known consumer before trusting any result.
+
+## ADR-090 — The published LoRA adapter is expected inside the ComfyUI checkout
+
+Date: 2026-08-08
+
+Status: Accepted.
+
+Context. Defect #13, an interaction defect between two individually correct
+mechanisms, diagnosed on the Windows worker.
+
+ComfyUI's `LoraLoaderModelOnly` resolves adapters only beneath its own
+`models/loras`, so the gateway's publish target (`--lora-comfy-root`) is
+necessarily INSIDE the ComfyUI git checkout. The worker's preflight sweeps that
+same checkout with `git status --ignored --porcelain --untracked-files=all` and
+fails on any line outside a small allowlist, which tolerated nested custom-node
+repositories, the three `SHARED_FLUX_MODEL_PATHS`, and `models/liveportrait/`.
+
+The campaign's first fully successful LoRA cycle therefore bricked the worker.
+Job `8c8db4b3` ran 02:42-02:52 on 2026-08-08, succeeded with `exit_code: 0`,
+and published `identity-lora-4c79cfc4….safetensors` at 02:51:26. Every worker
+start after that died in `verify_revisions` — the FIRST check in `main()`,
+before models, GPU, or any ComfyUI contact:
+
+```
+NOT READY: comfyui: source has tracked or untracked changes: !! models/loras/identity-lora-4c79cfc4….safetensors
+exit=1
+```
+
+The failure was invisible from the Mac. The supervisor runs preflight inline, so
+its stderr went to the Task Scheduler void and no log on disk contained it; the
+Mac's control allowlist is `{status, start}` with no log fetch, so all it could
+observe was `state: running, gpu_used_mib: 194` followed by `state: stopped,
+last_task_result: 1`. The Windows seat reproduced it with the supervisor's exact
+invocation and zero GPU commitment.
+
+Decision. `unexpected_source_changes` in the WORKER package's `preflight.py`
+tolerates one additional shape for the `comfyui` component only:
+`!! models/loras/identity-lora-<64 hex>.safetensors`.
+
+The tolerance is a name shape and nothing more. The 64 hex characters are the
+adapter's SHA-256 and the gateway refuses to publish under any other name, but
+that binding happens at publish time — preflight rehashes nothing, so a
+hand-planted file with a well-formed name would pass. That residual gap is
+accepted deliberately and is strictly narrower than tolerances this guard
+already grants: the shared FLUX model paths and the entire `models/liveportrait`
+tree are admitted by path with no name or content constraint at all. Preflight
+is a drift detector, not an anti-tamper sandbox; anyone able to plant a file in
+the install root can also edit preflight itself.
+
+Rejected alternative: moving the publish target outside the checkout via
+ComfyUI's extra-model-paths mechanism. It is architecturally cleaner — the
+checkout stays pristine and the guard stays strict — but it touches gateway
+arguments and worker configuration, and the enabling config file needs its own
+tolerance somewhere. Larger blast radius for the same outcome. Revisit if the
+publish surface grows beyond one file shape.
+
+Deleting the published adapter would also restore startup and was explicitly NOT
+done: it is the campaign's only successfully published artifact.
+
+Consequences. This is worker-package scope. `deploy/windows-flux2-lora/` is the
+LoRA candidate package pinned by `LORA_PACKAGE_FILES`, and it contains its own
+`preflight.py`; the file changed here is
+`deploy/windows-liveportrait-worker/preflight.py`, outside that digest. Picking
+up the fix is a worker reinstall, not a candidate re-pin, and `Start-Worker.ps1`
+is untouched. A third same-named file exists at
+`deploy/windows-flux2-klein/preflight.py` — verify the path before editing.
+
+Evidence. `tests/unit/test_windows_liveportrait_worker.py` — 22 tests. The
+negative controls carry the weight: wrong extension, 63 and 65 hex digits,
+uppercase hex, a `.partial` suffix, a nested subdirectory, the right name under
+the wrong component, and `??`/` M` status rather than `!!` all still fail the
+guard. Reversion control: removing the tolerance fails
+`test_published_lora_adapter_does_not_brick_the_next_worker_start`.
+Full suite 5589 passed, 4 skipped in 404.54s.

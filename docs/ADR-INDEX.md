@@ -95,3 +95,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-087 | Make the app shortcut self-healing and Windows GPU launch explicit |
 | ADR-088 | Cinemaker launch brings the Windows worker up alongside the UI |
 | ADR-089 | One reference per character is the measured FLUX.2 default |
+| ADR-090 | The published LoRA adapter is expected inside the ComfyUI checkout |
