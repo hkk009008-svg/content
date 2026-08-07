@@ -1316,6 +1316,19 @@ def collect_resource_snapshot(state_root: Path) -> dict[str, Any]:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        # Decode explicitly and never fail on it. `-I` implies `-E`, so the child
+        # does NOT inherit PYTHONUTF8 even though the gateway sets it: the child
+        # writes in the host ANSI code page (949 on the target host) while the
+        # parent decodes UTF-8. The resulting UnicodeDecodeError is raised inside
+        # subprocess's reader thread, printed, and then SWALLOWED, leaving
+        # stderr as None -- neither text nor an exception -- so the
+        # `(python_result.stderr or "")` below produced an EMPTY diagnostic.
+        #
+        # That defeats this function's own error handling exactly when it is
+        # needed. An ASCII traceback decodes fine; a Windows-localized message,
+        # which is what the DLL-load failure class emits, does not.
+        encoding="utf-8",
+        errors="replace",
         shell=False,
         check=False,
         timeout=180,
@@ -1405,6 +1418,14 @@ def sample_gpu_memory_used_bytes() -> int:
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        # Same reason as the CUDA probe above: without an explicit codec a
+        # decode failure leaves stdout as None, and the caller's
+        # `result.stdout.splitlines()` then raises AttributeError rather than
+        # ContractError. This function is called every 0.25s from the training
+        # supervisor, where an unexpected exception type used to escape the poll
+        # loop and orphan the trainer.
+        encoding="utf-8",
+        errors="replace",
         shell=False,
         check=False,
         timeout=10,
