@@ -168,6 +168,7 @@ Before any network or GPU submission:
 | Prompt structure | `prompt-engineering.md` |
 | Lip sync, upscaling, and assembly | `post-processing.md` |
 | Local ComfyUI graphs/readiness | `../comfyui-mastery/SKILL.md` |
+| Windows worker ops (start/install/traps) | `../windows-worker-ops/SKILL.md` |
 
 ## Source map
 

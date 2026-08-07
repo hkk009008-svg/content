@@ -117,5 +117,6 @@ GPU workloads before canaries, benchmarks, or worker startup.
 | Current loader/sampler/latent nodes | `nodes-core.md` |
 | Reference conditioning and identity evidence | `nodes-face-identity.md` |
 | LivePortrait/video nodes | `nodes-video.md` |
+| Worker start/install/unstick mechanics, host matrix | `../windows-worker-ops/SKILL.md` |
 | Image scaling/validation nodes | `nodes-image-processing.md` |
 | Generic utility nodes | `nodes-utility.md` |
