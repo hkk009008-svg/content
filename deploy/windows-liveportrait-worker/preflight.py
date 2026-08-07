@@ -113,6 +113,28 @@ SHARED_FLUX_MODEL_PATHS = frozenset(
     }
 )
 
+# A LoRA adapter this worker's own gateway published. ComfyUI's
+# LoraLoaderModelOnly resolves adapters only under its own models/loras, so the
+# publish target is necessarily INSIDE the ComfyUI checkout that the purity
+# guard below sweeps. Without this, the first successful LoRA cycle bricks every
+# subsequent worker start: the adapter published at 02:51 on 2026-08-08 made
+# verify_revisions fail on every launch thereafter, before any model, GPU, or
+# ComfyUI check ran. Two individually correct mechanisms, contradicting.
+#
+# The tolerance is a NAME SHAPE, and only that. The 64 hex characters are the
+# adapter's SHA-256 and gateway.py refuses to publish under any other name
+# (`name != f"identity-lora-{digest}.safetensors"`), but that binding happens at
+# PUBLISH time — nothing here rehashes the file, so a hand-planted file with a
+# well-formed name would pass. That residual gap is accepted deliberately and is
+# strictly narrower than tolerances this guard already grants: the shared FLUX
+# model paths and the whole models/liveportrait tree are admitted by path with
+# no name or content constraint at all. Preflight is a drift detector, not an
+# anti-tamper sandbox — anyone able to plant a file in the install root can also
+# edit this file. Widen no further without revisiting that reasoning.
+PUBLISHED_ADAPTER_RE = re.compile(
+    r"models/loras/identity-lora-[0-9a-f]{64}\.safetensors\Z"
+)
+
 
 def unexpected_source_changes(
     component_id: Any,
@@ -141,6 +163,11 @@ def unexpected_source_changes(
                 line == "!! models/liveportrait"
                 or line.startswith("!! models/liveportrait/")
             )
+        )
+        and not (
+            component_id == "comfyui"
+            and line.startswith("!! ")
+            and PUBLISHED_ADAPTER_RE.fullmatch(line[3:])
         )
     ]
 
