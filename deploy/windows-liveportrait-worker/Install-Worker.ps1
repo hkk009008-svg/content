@@ -43,12 +43,29 @@ function Assert-PinnedRepositoryClean {
             "!! models/vae/flux2-klein-vae-bf16.safetensors"
         )
     }
+    # A LoRA adapter this worker's own gateway published. ComfyUI's
+    # LoraLoaderModelOnly resolves adapters only beneath its own models/loras,
+    # so the publish target is necessarily inside the checkout this guard
+    # sweeps. preflight.py gained this tolerance in ADR-090, but the INSTALLER
+    # keeps its own copy of the rule -- so on 2026-08-08 the fix for "a
+    # published adapter bricks the next worker start" could not itself be
+    # installed on a machine in the state it fixes. Two copies of one rule, one
+    # of them updated. Keep them in step, or hoist a shared allowlist.
+    #
+    # -cmatch, not -match: PowerShell's -match is case-INSENSITIVE and would
+    # admit uppercase hex that the Python guard rejects. The 64 characters are
+    # the adapter's SHA-256 and the gateway publishes lowercase only. \z is the
+    # absolute-end anchor (\Z in .NET still allows a trailing newline).
     $unexpected = @($statusLines | Where-Object {
         $_ -and
         $_ -notin $allowedUntracked -and
         -not (
             [string]$Component.id -eq "comfyui" -and
             ($_ -eq "!! models/liveportrait" -or $_.StartsWith("!! models/liveportrait/"))
+        ) -and
+        -not (
+            [string]$Component.id -eq "comfyui" -and
+            $_ -cmatch '^!! models/loras/identity-lora-[0-9a-f]{64}\.safetensors\z'
         )
     })
     if ($unexpected.Count -gt 0) {
