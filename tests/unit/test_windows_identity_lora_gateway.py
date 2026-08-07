@@ -253,8 +253,23 @@ def validate_gateway_admission(state_root, job_id, candidate_sha256):
     return {"job_id": job_id, "candidate_sha256": candidate_sha256}
 
 def validate_gateway_training_result(
-    state_root, job_id, *, expected_activity_lease_sha256, comfy_lora_root=None
+    state_root,
+    job_id,
+    *,
+    expected_activity_lease_sha256,
+    comfy_lora_root=None,
+    flux2_state_root=None,
 ):
+    # Wiring pin: the real validator derives the FLUX.2 root from ambient
+    # LOCALAPPDATA when this is None, which in the gateway's own process is
+    # the wrong environment (it rejected a fully PASSED 500-step run,
+    # 2026-08-08). Every gateway call must pass its CONFIGURED root
+    # explicitly; a regression to ambient derivation fails every scenario
+    # test here rather than the next completed training run.
+    if flux2_state_root is None or not Path(flux2_state_root).is_absolute():
+        raise AssertionError(
+            "gateway must pass its configured flux2_state_root explicitly"
+        )
     root = Path(state_root)
     job = root / "jobs" / job_id
     candidate = package_digest(root / "package")
@@ -312,12 +327,14 @@ def validate_gateway_benchmark_result(
     expected_training_activity_lease_sha256,
     expected_benchmark_activity_lease_sha256,
     comfy_lora_root=None,
+    flux2_state_root=None,
 ):
     training = validate_gateway_training_result(
         state_root,
         job_id,
         expected_activity_lease_sha256=expected_training_activity_lease_sha256,
         comfy_lora_root=comfy_lora_root,
+        flux2_state_root=flux2_state_root,
     )
     job = Path(state_root) / "jobs" / job_id
     evidence = job / "evidence"
