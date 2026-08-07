@@ -706,7 +706,14 @@ def run(job_id: str, *, resume: bool = False) -> dict[str, object]:
             return_code=0,
             elapsed_seconds=elapsed,
             peak_vram_bytes=peak_vram,
-            telemetry_complete=True,
+            # The MEASURED value, never a literal True. Before incomplete
+            # telemetry stopped failing clean exits, this path was unreachable
+            # with telemetry_complete=False and a hardcoded True was
+            # accidentally correct; now a clean exit with a sampling hiccup
+            # lands here, and hardcoding would record complete telemetry that
+            # never happened. peak_vram_bytes is a lower bound whenever this
+            # flag is False, and the evidence must say so.
+            telemetry_complete=telemetry_complete,
             package_sha256=package_sha,
             manifest_sha256=api_manifest["sha256"],
             input_manifest_sha256=admitted["sha256"],

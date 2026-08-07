@@ -1677,3 +1677,110 @@ def test_toolkit_log_tail_read_is_bounded(tmp_path):
 )
 def test_training_failure_classification_is_bounded(message, expected):
     assert contract.classify_failure(1, message) == expected
+
+
+def test_runtime_artifacts_tolerated_and_symlink_cache_rejected(tmp_path):
+    # ai-toolkit writes .aitk_size.json and (via cache_latents_to_disk /
+    # cache_text_embeddings) the _latent_cache and _t_e_cache directories into
+    # the sealed input dir. Admission must tolerate exactly those, and only as
+    # regular file / real directories — a symlinked cache would let content
+    # outside the sealed tree masquerade as local.
+    _write_job(tmp_path)
+    input_root = tmp_path / "jobs" / JOB_ID / "input"
+    (input_root / ".aitk_size.json").write_bytes(b"{}")
+    (input_root / "_latent_cache").mkdir()
+    (input_root / "_t_e_cache").mkdir()
+
+    assert contract.validate_input_manifest(tmp_path, JOB_ID)["manifest"]
+
+    shutil.rmtree(input_root / "_latent_cache")
+    outside = tmp_path / "outside-the-sealed-tree"
+    outside.mkdir()
+    (input_root / "_latent_cache").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(contract.ContractError, match="not a real directory"):
+        contract.validate_input_manifest(tmp_path, JOB_ID)
+
+
+class _FakeTrainerProcess:
+    def __init__(self, poll_sequence):
+        self._polls = list(poll_sequence)
+        self.killed = False
+        self.waited = False
+
+    def poll(self):
+        return self._polls.pop(0) if self._polls else self._polls_exhausted()
+
+    @staticmethod
+    def _polls_exhausted():
+        raise AssertionError("poll called more often than the test scripted")
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        return -9
+
+
+def _patch_toolkit_launch(monkeypatch, process):
+    monkeypatch.setattr(train, "toolkit_command", lambda paths: ["trainer"])
+    monkeypatch.setattr(train, "fixed_child_environment", lambda paths: {})
+    monkeypatch.setattr(
+        train.subprocess, "Popen", lambda *args, **kwargs: process
+    )
+
+
+def test_run_toolkit_clean_exit_with_failed_telemetry_returns_measured_flag(
+    tmp_path, monkeypatch
+):
+    # One nvidia-smi hiccup across a multi-hour run must not be able to fail a
+    # clean exit: _run_toolkit must survive a NON-ContractError from the
+    # sampler and report the MEASURED telemetry flag (False) alongside
+    # return_code 0 — the caller records it as evidence, so a hardcoded True
+    # would claim complete telemetry that never happened.
+    samples = iter(
+        [1024, train.subprocess.TimeoutExpired(cmd="nvidia-smi", timeout=10)]
+    )
+
+    def sampler():
+        value = next(samples)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    process = _FakeTrainerProcess([None, 0, 0])
+    _patch_toolkit_launch(monkeypatch, process)
+    monkeypatch.setattr(train, "sample_gpu_memory_used_bytes", sampler)
+    monkeypatch.setattr(train.time, "sleep", lambda seconds: None)
+
+    return_code, _elapsed, peak, telemetry_complete = train._run_toolkit(
+        {"toolkit": tmp_path}, tmp_path / "runner.log"
+    )
+
+    assert return_code == 0
+    assert peak == 1024
+    assert telemetry_complete is False
+    assert process.killed is False  # exited on its own; reap must not fire
+
+
+def test_run_toolkit_reaps_child_when_loop_exits_abnormally(
+    tmp_path, monkeypatch
+):
+    # If ANYTHING escapes the poll loop (here: an interrupt during sleep), the
+    # finally block must kill and reap the live trainer — the pre-fix shape
+    # left the ai-toolkit child running and holding VRAM with no supervisor.
+    process = _FakeTrainerProcess([None, None])
+    _patch_toolkit_launch(monkeypatch, process)
+    monkeypatch.setattr(train, "sample_gpu_memory_used_bytes", lambda: 1)
+
+    def interrupted_sleep(seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(train.time, "sleep", interrupted_sleep)
+
+    with pytest.raises(KeyboardInterrupt):
+        train._run_toolkit({"toolkit": tmp_path}, tmp_path / "runner.log")
+
+    assert process.killed is True
+    assert process.waited is True

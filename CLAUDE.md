@@ -3,7 +3,7 @@
 **Truth lives in `ARCHITECTURE.md` at the repo root.** This file (CLAUDE.md)
 is the *process layer* — the impact-analysis method, multi-task orchestration, session
 discipline. `ARCHITECTURE.md` is the *truth layer* — verified facts about the
-pipeline, with file:line references and a §15 smoke test. When they disagree
+pipeline, with file:line references and a §12 smoke test. When they disagree
 about facts, `ARCHITECTURE.md` wins.
 
 Both files drift from the actual code between sessions. Before doing any
@@ -29,7 +29,7 @@ you know the task*. Everything task-specific lives in linked docs, pulled on dem
 ## R-START — session-start checklist
 Scope: both
 Trigger: start of every session, before non-trivial work.
-Action: (1) Run the §15 smoke block — `.venv/bin/python scripts/ci_smoke.py`; if it
+Action: (1) Run the §12 smoke block — `.venv/bin/python scripts/ci_smoke.py`; if it
 fails, the doc is stale OR the working tree is broken — fix one before proceeding.
 (2) Skim `ARCHITECTURE.md` §2 topology; spot-check `ls cinema/ cinema/phases/
 cinema/review/ cinema/shots/` and `wc -l cinema_pipeline.py web_server.py
@@ -68,7 +68,18 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Current leadership critique + forward direction | [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md) |
 | Test-coverage gaps + prioritized test proposal | [docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md](docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md) |
 | Execute a roadmap session (operator manual, why + how + acceptance) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
-| Past handoffs (historical) | [docs/archive/](docs/archive/) |
+| Find any doc / handoff series / ADR (navigation, generated stats) | [docs/INDEX.md](docs/INDEX.md) |
+| One-line index of every ADR | [docs/ADR-INDEX.md](docs/ADR-INDEX.md) |
+| Past handoffs (241 live at `docs/HANDOFF-*`; archive/ = superseded strata) | [docs/INDEX.md](docs/INDEX.md) §4 |
+| Identity Lab campaign lessons (16-defect ledger, patterns P1–P12) | [docs/RETRO-2026-08-07-identity-lab.md](docs/RETRO-2026-08-07-identity-lab.md) |
+| Copy this harness to a new repo | [docs/HARNESS-TRANSFER-BUNDLE.md](docs/HARNESS-TRANSFER-BUNDLE.md) |
+
+When Windows-worker, deploy-package, or cross-machine work is named, load the
+matching skill first: `.claude/skills/windows-worker-ops` (ops + traps),
+`digest-repin-cycle` (any edit under `deploy/windows-*`),
+`cross-machine-handoff` (briefs), `post-incident-retrospective` (after
+incidents/campaigns). Portable disciplines live globally:
+`~/.claude/skills/check-artifact-that-runs`, `falsify-first-debugging`.
 
 Don't duplicate ARCHITECTURE.md content in this file. Record load-bearing subsystem
 facts in `ARCHITECTURE.md`; for decisions (with rationale), append to `DECISIONS.md`
