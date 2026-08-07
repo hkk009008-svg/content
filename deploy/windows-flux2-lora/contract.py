@@ -79,6 +79,24 @@ REFERENCE_NAMES = tuple(f"reference-{index:02d}" for index in range(1, 5))
 # Keep this set minimal and named -- a wildcard here would let arbitrary content
 # into a consent-sealed directory.
 RUNTIME_INPUT_ARTIFACTS = frozenset({".aitk_size.json"})
+# Cache DIRECTORIES the pinned ai-toolkit creates inside the same sealed input
+# directory. Name tolerance alone cannot admit these: the entry loop in
+# validate_input_manifest requires every entry to be a regular file, so a
+# directory is rejected by `not S_ISREG` however the name set is written.
+#
+# They exist because this contract asks for them --
+#   cache_latents_to_disk: True  (dataset level)                -> _latent_cache
+#   cache_text_embeddings: True  (train level, copied into every raw dataset by
+#     BaseSDTrainProcess before DatasetConfig is constructed)   -> _t_e_cache
+# so the training config and the input validator were requesting opposite
+# things: one writes into the directory the other seals. Without this, a run
+# that trains to completion fails at harvest and every retry then fails at
+# admission, leaving the job permanently unharvestable and unretriable.
+#
+# Contents are never hashed, never manifested, never treated as references. Only
+# the directory itself is tolerated, only by exact name, and only when it is a
+# real directory rather than a symlink.
+RUNTIME_INPUT_ARTIFACT_DIRS = frozenset({"_latent_cache", "_t_e_cache"})
 FIXED_CAPTIONS = tuple(
     f"portrait photograph of hkkperson person, identity reference view {index}"
     for index in range(1, 5)
@@ -742,10 +760,17 @@ def validate_input_manifest(state_root: Path, job_id: object) -> dict[str, Any]:
     # reference is still hash-checked against the manifest below. A missing
     # reference or any other extra path still raises, because subtracting the
     # tolerated name cannot turn a wrong set into the expected one.
-    if {entry.name for entry in entries} - RUNTIME_INPUT_ARTIFACTS != expected_input_names:
+    tolerated = RUNTIME_INPUT_ARTIFACTS | RUNTIME_INPUT_ARTIFACT_DIRS
+    if {entry.name for entry in entries} - tolerated != expected_input_names:
         raise ContractError("training input tree contains an unmanifested path")
     for entry in entries:
         info = entry.lstat()
+        if entry.name in RUNTIME_INPUT_ARTIFACT_DIRS:
+            # Tolerated caches must be real directories. A symlink here would let
+            # content outside the sealed input tree masquerade as a local cache.
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise ContractError("training input cache is not a real directory")
+            continue
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise ContractError("training input tree contains a non-regular path")
     manifest_bytes = _regular_bytes(paths["manifest"], root=paths["input"])
