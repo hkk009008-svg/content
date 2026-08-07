@@ -59,6 +59,15 @@ _release_project_mutation = lambda _pid: None
 _project_mutation_timeout = 2.0
 _dispatcher: IdentityExperimentDispatcher | None = None
 _dispatcher_lock = threading.Lock()
+# The gateway's readiness handler re-validates the pinned LoRA package inventory
+# and rehashes the FLUX.2 evidence chain before answering, so it is deliberately
+# slow.  Measured against the live Windows gateway over the SSH tunnel on
+# 2026-08-08: 3.02s / 3.03s / 3.04s, all HTTP 200 `ready`, while an unauthorized
+# request on the same tunnel returned in 0.01s (the cost is the handler, not the
+# network).  The previous 2.0s budget was below the endpoint's real cost, so a
+# healthy gateway was reported to the UI as unavailable on every render.
+_LORA_READINESS_CONNECT_TIMEOUT = 1.0
+_LORA_READINESS_READ_TIMEOUT = 8.0
 
 
 def _lora_method_card() -> dict[str, Any]:
@@ -73,8 +82,8 @@ def _lora_method_card() -> dict[str, Any]:
         readiness = LoraTrainingClient(
             endpoint.server_url,
             endpoint.api_key,
-            connect_timeout=1.0,
-            read_timeout=2.0,
+            connect_timeout=_LORA_READINESS_CONNECT_TIMEOUT,
+            read_timeout=_LORA_READINESS_READ_TIMEOUT,
         ).get_readiness(candidate_sha256)
     except (OSError, ValueError, LoraTrainingError):
         return {

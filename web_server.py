@@ -5044,6 +5044,12 @@ def _send_project_media(real_path: str, *, migrated: bool):
     """
     mimetype, _ = mimetypes.guess_type(real_path)
     response = send_file(real_path, mimetype=mimetype or "application/octet-stream")
+    # The fallback is deliberately unhelpful rather than guessed from content:
+    # this route serves user-supplied media, and a sniffed type is how an
+    # uploaded file gets rendered as HTML in the user's own origin. `nosniff`
+    # makes the conservative label binding, so an unrecognized extension stays
+    # an opaque download instead of becoming whatever the bytes look like.
+    response.headers["X-Content-Type-Options"] = "nosniff"
     if migrated:
         response.headers["X-Media-Migrated"] = "1"
     return response

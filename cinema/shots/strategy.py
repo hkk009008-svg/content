@@ -39,12 +39,32 @@ class Flux2ReferenceAllocation:
     continuity_reference: str = ""
 
 
+DEFAULT_PER_CHARACTER_REFERENCES = 1
+"""How many references one character contributes to a FLUX.2 graph.
+
+Measured on the Identity Lab v1 protocol (GhostFaceNet, 0.70 gate), same
+prompt and seed, single subject:
+
+    1 reference   0.791  PASS   <- best
+    2 references  0.766  PASS
+    4 references  0.499  FAIL
+
+Klein averages its reference conditioning rather than accumulating it, so a
+character's own profile/three-quarter angles pull the result away from the
+frontal canonical instead of reinforcing it. Extra angles of the SAME person
+are what degrade; the overall ``cap`` still governs how many DISTINCT
+characters a multi-character shot may condition, which this measurement says
+nothing about. Raise per-character allocation deliberately, not by default.
+"""
+
+
 def allocate_flux2_references(
     *,
     primary: Optional[CharIdentitySpec],
     secondaries: Sequence[CharIdentitySpec] = (),
     continuity_reference: object = None,
     cap: int = 4,
+    per_character_cap: int = DEFAULT_PER_CHARACTER_REFERENCES,
 ) -> Flux2ReferenceAllocation:
     """Select the exact regular files supplied to the local FLUX.2 graph.
 
@@ -55,10 +75,22 @@ def allocate_flux2_references(
     at ``cap``.  This mirrors the final regular-file/uniqueness contract in
     :mod:`performance.flux2_klein` while making allocation reusable by both
     the identity router and graph dispatcher.
+
+    ``per_character_cap`` bounds how many of one character's own images may be
+    selected — see :data:`DEFAULT_PER_CHARACTER_REFERENCES` for the measurement
+    behind its default of 1.  Angle references remain generated and persisted
+    because the video providers in :mod:`phase_c_ffmpeg` consume them; this cap
+    governs only what reaches the local FLUX.2 still-image graph.
     """
 
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
         raise ValueError("FLUX.2 reference cap must be a positive integer")
+    if (
+        isinstance(per_character_cap, bool)
+        or not isinstance(per_character_cap, int)
+        or per_character_cap < 1
+    ):
+        raise ValueError("FLUX.2 per-character cap must be a positive integer")
 
     selected: list[str] = []
     seen: set[str] = set()
@@ -95,7 +127,7 @@ def allocate_flux2_references(
             continue
         chosen: list[str] = []
         for candidate in (spec.reference, *spec.multi_angle_refs):
-            if len(selected) >= cap:
+            if len(selected) >= cap or len(chosen) >= per_character_cap:
                 break
             canonical = _select(candidate)
             if canonical:

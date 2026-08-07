@@ -98,7 +98,18 @@ def test_local_flux2_uses_only_four_references_in_stable_precedence(
     )
 
     assert result == pca.ImageGenResult(output, "FLUX2_KLEIN_LOCAL")
-    assert captured["reference_image_paths"] == references[:4]
+    # Still four images in fixed precedence, but no character spends two slots
+    # on itself (ADR-089: 1 ref 0.791 PASS vs 4 refs 0.499 FAIL). The same
+    # budget now reaches all three characters AND the continuity image, where
+    # it previously stopped after two characters' canonical+angle pairs.
+    assert captured["reference_image_paths"] == [
+        references[0],  # primary canonical
+        references[2],  # secondary-1 canonical
+        references[4],  # secondary-2 canonical
+        references[6],  # continuity
+    ]
+    assert references[1] not in captured["reference_image_paths"]
+    assert references[3] not in captured["reference_image_paths"]
 
 
 def test_local_controller_metadata_and_forwarded_refs_share_one_allocation(
@@ -199,36 +210,51 @@ def test_local_controller_metadata_and_forwarded_refs_share_one_allocation(
         core.cost_tracker.close()
 
     assert result == {"success": False, "error": "Image generation failed"}
+    # The promise and the graph still describe the same allocation — that is
+    # what this guards. Under ADR-089's per-character cap of 1, no character
+    # spends a second slot on its own angle, so the four-image budget now
+    # covers all three in-frame characters plus continuity. char_c is no
+    # longer promised-but-absent; it is genuinely conditioned.
     assert captured["character_image"] == references["primary.jpg"]
-    assert captured["multi_angle_refs"] == [references["primary-angle.jpg"]]
+    assert captured["multi_angle_refs"] == []
     assert captured["secondary_char_refs"] == [
         {
             "char_id": "char_b",
             "reference": references["secondary.jpg"],
             "identity_anchor": "",
             "fidelity": "reference",
-            "multi_angle_refs": [references["secondary-angle.jpg"]],
-        }
+            "multi_angle_refs": [],
+        },
+        {
+            "char_id": "char_c",
+            "reference": references["third.jpg"],
+            "identity_anchor": "",
+            "fidelity": "reference",
+            "multi_angle_refs": [],
+        },
     ]
-    assert captured["continuity_reference"] is None
+    assert captured["continuity_reference"] == references["continuity.jpg"]
     assert captured["preallocated_flux2_reference_paths"] == (
         references["primary.jpg"],
-        references["primary-angle.jpg"],
         references["secondary.jpg"],
-        references["secondary-angle.jpg"],
+        references["third.jpg"],
+        references["continuity.jpg"],
     )
     metadata = captured["artifact_metadata"]["identity_strategy"]
     assert metadata["flux2_reference_paths"] == [
         references["primary.jpg"],
-        references["primary-angle.jpg"],
         references["secondary.jpg"],
-        references["secondary-angle.jpg"],
+        references["third.jpg"],
+        references["continuity.jpg"],
     ]
     assert [item["char_id"] for item in metadata["conditioned_chars"]] == [
         "char_a",
         "char_b",
+        "char_c",
     ]
-    assert metadata["unconditioned_chars"] == ["char_c"]
+    assert metadata["unconditioned_chars"] == []
+    assert references["primary-angle.jpg"] not in metadata["flux2_reference_paths"]
+    assert references["secondary-angle.jpg"] not in metadata["flux2_reference_paths"]
 
 
 def test_preallocated_local_reference_contract_blocks_all_drift_before_worker(

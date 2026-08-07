@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -340,6 +341,64 @@ def test_shared_image_card_projects_offline_without_leaking_transport(
     assert image["state"] == "offline"
     assert image["blocker_code"] == "worker_offline"
     assert "private failure" not in str(image)
+
+
+def _browser_worker_states() -> set[str]:
+    """The `GpuWorkerState` union the browser type guard actually accepts."""
+
+    source = (
+        Path(__file__).resolve().parents[2] / "web" / "src" / "types" / "project.ts"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"export type GpuWorkerState =\n((?:\s*\|\s*'[a-z_]+'\n)+)", source
+    )
+    assert match, "web/src/types/project.ts no longer declares GpuWorkerState"
+    states = set(re.findall(r"'([a-z_]+)'", match.group(1)))
+    assert states, "GpuWorkerState union parsed empty"
+    return states
+
+
+def test_projected_image_states_are_declared_in_the_browser_union() -> None:
+    assert web_gpu_workers._PROJECTED_IMAGE_STATES <= _browser_worker_states()
+
+
+def test_unreachable_capability_route_never_projects_a_transport_state(
+    monkeypatch, tmp_path
+):
+    """A 404 on the capability route must not leak `absent` into the projection.
+
+    `_gateway_readiness` reports transport outcomes ("absent" for 404,
+    "not_ready" for 503) that are not part of the browser's `GpuWorkerState`
+    union.  Passing one through made `isWorker` reject the entry, so the whole
+    image worker vanished from the list instead of reporting as blocked.
+    """
+
+    _FakeClient.constructed = []
+    _FakeClient.capabilities = ComfyUITransportError("not found", status_code=404)
+    _FakeClient.stats = {
+        "system": {"os": "nt"},
+        "devices": [{
+            "name": "NVIDIA GeForce RTX 5070 Ti",
+            "vram_total": 16 * 1024**3,
+            "vram_free": 12 * 1024**3,
+        }],
+    }
+    _FakeClient.queue = {"queue_running": [], "queue_pending": []}
+    monkeypatch.setattr(web_gpu_workers, "ComfyUIClient", _FakeClient)
+    app = _app(monkeypatch, _settings(
+        tmp_path,
+        comfyui_server_url="http://localhost:18189",
+        comfyui_api_key="s" * 32,
+        performance_comfyui_server_url="http://127.0.0.1:18189",
+        performance_comfyui_api_key="s" * 32,
+    ))
+
+    with app.test_client() as client:
+        image = client.get("/api/runtime/gpu-workers").get_json()["workers"][0]
+
+    assert image["role"] == "image"
+    assert image["state"] in _browser_worker_states()
+    assert image["state"] == "blocked"
 
 
 def test_shared_worker_forged_capability_state_fails_closed(monkeypatch, tmp_path):

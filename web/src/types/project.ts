@@ -1,12 +1,21 @@
+/** A persisted character record as the backend actually returns it.
+ *
+ *  `voice_id`, `physical_traits`, and `embedding_cache` are written by later
+ *  steps of character creation (voice assignment, trait capture, embedding
+ *  pre-compute) and are absent on a record that has not reached them — a real
+ *  persisted project here carries six keys, not eight.  They are optional so
+ *  the type describes what arrives rather than what the happy path produces;
+ *  callers already guard with `c.voice_id || ''`. */
 export interface Character {
   id: string
   name: string
   description: string
   reference_images: string[]
   canonical_reference: string
-  voice_id: string
-  physical_traits: string
-  embedding_cache: string
+  voice_id?: string
+  physical_traits?: string
+  embedding_cache?: string
+  multi_angle_refs?: string[]
 }
 
 export interface Location {
