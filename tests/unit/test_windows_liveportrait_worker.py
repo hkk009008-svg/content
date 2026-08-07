@@ -6,6 +6,7 @@ import importlib.util
 import json
 import base64
 from pathlib import Path
+import re
 import sys
 from types import SimpleNamespace
 
@@ -1304,6 +1305,61 @@ def test_published_lora_adapter_does_not_brick_the_next_worker_start() -> None:
     published = f"!! models/loras/identity-lora-{digest}.safetensors"
 
     assert preflight.unexpected_source_changes("comfyui", [published], set()) == []
+
+
+def test_installer_and_preflight_agree_on_the_published_adapter() -> None:
+    """Two copies of one rule must accept and reject the same set.
+
+    The installer keeps its own purity guard (`Assert-PinnedRepositoryClean`)
+    separate from preflight's. On 2026-08-08 ADR-090 updated only preflight, so
+    the fix for "a published adapter bricks the next worker start" could not
+    itself be installed on a machine in the state it fixes — the installer
+    threw on the very file the fix exists to tolerate.
+
+    pwsh is not available on the development host, so rather than assert the
+    text is present (which passes even if the pattern is wrong), this extracts
+    the PowerShell pattern and runs it against the SAME vectors as the Python
+    guard. .NET and Python agree on every construct used here; `\\z` is the
+    absolute-end anchor in .NET, spelled `\\Z` in Python.
+    """
+
+    preflight = _load_module("windows_liveportrait_installer_parity", "preflight.py")
+    installer = (ROOT / "Install-Worker.ps1").read_text(encoding="utf-8")
+
+    match = re.search(
+        r"\$_\s+(-c?match)\s+'(\^!! models/loras/[^']+)'", installer
+    )
+    assert match, "installer no longer carries a published-adapter tolerance"
+    operator, raw_pattern = match.group(1), match.group(2)
+    # The OPERATOR is part of the contract, so it is parsed and compared rather
+    # than checked for presence in the text: PowerShell's -match is
+    # case-INSENSITIVE and would admit uppercase hex that the Python guard
+    # rejects, making the two copies of this rule disagree on their first
+    # divergent input.
+    assert operator == "-cmatch", f"case-insensitive operator in installer: {operator}"
+
+    ps_pattern = re.compile(raw_pattern.replace(r"\z", r"\Z"))
+    digest = "f" * 64
+
+    accepted = f"!! models/loras/identity-lora-{digest}.safetensors"
+    rejected = [
+        "!! models/loras/evil.safetensors",
+        f"!! models/loras/identity-lora-{'c' * 63}.safetensors",
+        f"!! models/loras/identity-lora-{'d' * 65}.safetensors",
+        f"!! models/loras/identity-lora-{'E' * 64}.safetensors",
+        f"!! models/loras/identity-lora-{digest}.safetensors.partial",
+        f"!! models/loras/nested/identity-lora-{digest}.safetensors",
+        f"?? models/loras/identity-lora-{digest}.safetensors",
+    ]
+
+    # The installer's pattern.
+    assert ps_pattern.fullmatch(accepted)
+    for line in rejected:
+        assert not ps_pattern.fullmatch(line), f"installer would admit: {line}"
+
+    # Preflight's, on the identical vectors.
+    assert preflight.unexpected_source_changes("comfyui", [accepted], set()) == []
+    assert preflight.unexpected_source_changes("comfyui", rejected, set()) == rejected
 
 
 def test_models_loras_tolerance_is_the_published_shape_only() -> None:
