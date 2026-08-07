@@ -373,9 +373,19 @@ def install() -> dict[str, Any]:
         # refs/main is not part of the hashed qwen tree, so neither form moves a
         # digest.
         expected_ref = QWEN_REVISION.encode("ascii")
-        if ref.exists() or ref.is_symlink():
-            if ref.read_bytes().strip() != expected_ref:
+        if ref.is_symlink():
+            raise ContractError("Qwen cache ref is a symlink")
+        if ref.exists():
+            current = ref.read_bytes()
+            if current.strip() != expected_ref:
                 raise ContractError("Qwen cache ref drifted")
+            if current != expected_ref:
+                # REPAIR, do not merely tolerate. An earlier installer wrote this
+                # file with a trailing newline. Accepting it because .strip()
+                # matches would leave the cache permanently unusable offline --
+                # the strip that lets validation pass is exactly what hides the
+                # byte huggingface_hub chokes on. Same revision, canonical bytes.
+                ref.write_bytes(expected_ref)
         else:
             ref.write_bytes(expected_ref)
 
@@ -436,9 +446,28 @@ def install() -> dict[str, Any]:
             "resource_preflight": resource,
         }
         evidence_path = state_root / "evidence" / "install.json"
-        if evidence_path.exists() or evidence_path.is_symlink():
-            if json.loads(evidence_path.read_text(encoding="utf-8")) != evidence:
+        if evidence_path.is_symlink():
+            raise ContractError("installed evidence is a symlink")
+        if evidence_path.exists():
+            # Compare IDENTITY, refresh TELEMETRY. resource_preflight embeds
+            # free_disk_bytes, free_vram_mib and gpu_utilization_percent, which
+            # move between runs, so a whole-dict equality check could essentially
+            # never pass on a re-install even with a byte-identical package --
+            # it reported "installed evidence drifted" for a disk that had merely
+            # filled up a little. Everything that identifies WHAT was installed
+            # is still compared exactly; only the machine readings are rewritten.
+            previous = json.loads(evidence_path.read_text(encoding="utf-8"))
+            if not isinstance(previous, Mapping):
+                raise ContractError("installed evidence is not an object")
+            volatile = "resource_preflight"
+            if {k: v for k, v in previous.items() if k != volatile} != {
+                k: v for k, v in evidence.items() if k != volatile
+            }:
                 raise ContractError("installed evidence drifted")
+            evidence_path.write_text(
+                json.dumps(evidence, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
         else:
             write_json_new(evidence_path, evidence, root=state_root)
         return evidence
