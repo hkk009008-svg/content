@@ -4687,3 +4687,89 @@ the wrong component, and `??`/` M` status rather than `!!` all still fail the
 guard. Reversion control: removing the tolerance fails
 `test_published_lora_adapter_does_not_brick_the_next_worker_start`.
 Full suite 5589 passed, 4 skipped in 404.54s.
+
+## ADR-091 — ADR-089's default is right where it was measured, and only there
+
+Date: 2026-08-08
+
+Status: Accepted. Amends the scope of ADR-089; does not reverse it.
+
+Context. ADR-089 defaulted the local FLUX.2 graph to one reference per
+character on the Identity Lab's five-cell result. That measurement used a
+single prompt, and a generous one: `BENCHMARK_PROMPT` contains "the same
+person", "preserve exact facial identity", and "realistic skin texture". The
+Windows seat then rendered a director-style shot and reported the face as
+recognizably adjacent but visibly wrong — "him, at a flattering angle, fifteen
+pounds lighter" — with the hypothesis that a frontal canonical cannot carry an
+off-angle target pose.
+
+`scripts/adr089_prompt_battery.py` tested that: six prompts ordered easiest to
+hardest, each rendered at one reference and at the pre-ADR-089 behaviour, all
+scored by the validator the Identity Lab used (GhostFaceNet, 0.70 gate, seed 0,
+16:9). `logs/` is untracked, so the numbers are recorded here.
+
+| case | 1 ref | 3 refs | verdict |
+| --- | --- | --- | --- |
+| anchor (the lab's own prompt) | **0.791** | 0.772 | both PASS |
+| neutral_portrait | **0.761** | 0.738 | both PASS |
+| medium_action | 0.648 | **0.679** | both FAIL |
+| wide_small_face | **0.576** | 0.562 | both FAIL |
+| profile_angled | 0.569 | **0.609** | both FAIL |
+| low_light_motion | 0.562 | **0.564** | both FAIL |
+
+The anchor returned 0.790768838726396 against the lab's stored
+0.790768838726396 — identical to fifteen decimal places, so the run is
+comparable and the instrument is validated before any other row is read.
+
+Findings.
+
+1. **ADR-089 holds where it was measured.** One reference wins both frontal
+   portrait cases, and both pass the gate. The 0.499 four-reference failure and
+   the decision that followed it remain correct for frontal targets.
+
+2. **The generalisation past that was unearned.** Three cases favour the older
+   behaviour: medium_action (+0.031) and profile_angled (+0.040) are real;
+   low_light_motion (+0.002) is noise and is not counted as a reversal. The
+   pattern matches the Windows seat's hypothesis exactly — reference
+   conditioning holds identity when the target pose matches the reference pose
+   and loses grip when it does not.
+
+3. **The reference count is second-order, and this is the finding that
+   matters.** Every non-portrait case fails the 0.70 gate in BOTH arms, at
+   0.562-0.679. The whole one-versus-many argument is a +/-0.04 dispute
+   conducted 0.05-0.14 below the threshold. Optimising it further would be
+   optimising the wrong variable.
+
+Decision. Keep `DEFAULT_PER_CHARACTER_REFERENCES = 1`. It is the best available
+default: it wins the cases that pass, and on the cases that fail it loses by
+margins far smaller than the gap to the gate. Reverting would trade a measured
+frontal win for no realistic-shot benefit.
+
+Narrow the claim. ADR-089 is a decision about FRONTAL targets. It is not
+evidence that one reference is better in general, and this ADR is the record
+that the wider reading was tested and did not hold.
+
+Consequences and open work, in priority order.
+
+- **The design the data actually supports is pose matching, not a count.** A
+  three-quarter shot should receive the three-quarter reference; a frontal shot
+  the canonical. That explains all six rows, where neither fixed arm explains
+  more than three. Not built.
+- **The character LoRA is untested off-angle and is the largest open lever.**
+  It scored 0.676 against one reference's 0.791 on the benchmark — but that is
+  the single condition where reference conditioning is strongest, and a LoRA
+  carries identity in weights rather than in a reference image, so it has no
+  frontal-only limitation by construction. If it holds near 0.65-0.70 where
+  reference conditioning sits at 0.56, the correct rule becomes "one reference
+  for frontal close-ups, LoRA elsewhere". Untested.
+- `DISTILLED_STEPS = 4` is very low. Raising it requires re-pinning the
+  workflow digest, so it is a change and not a knob. Untested.
+- PuLID remains the highest identity ever measured here at 0.8779 and remains
+  unavailable: the published adapter is 4096-wide against Klein 4B's 3072.
+
+Scope limits, stated so a later reader does not over-read this. One subject,
+one seed, one render per cell; the two real reversals are single measurements,
+not distributions. In a 16:9 shot the face occupies a much smaller crop than in
+the lab's portrait framing, so the scorer has less signal per pixel — some of
+the absolute drop is measurement difficulty rather than identity loss, and this
+run cannot separate the two.

@@ -26,7 +26,7 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 - HANDOFF date span: 2026-05-24 .. 2026-07-07
 - docs/archive recursive file count: 146
 - docs/superpowers: plans=52, specs=37, briefs=22
-- ADR entries in DECISIONS.md: 90 (template heading excluded)
+- ADR entries in DECISIONS.md: 91 (template heading excluded)
 <!-- END GENERATED -->
 
 ## 1. Active singletons (read these directly)
