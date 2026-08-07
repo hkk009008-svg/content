@@ -76,15 +76,31 @@ POWERSHELL_COVERAGE = {
     "windows-flux2-lora/Install-Candidate.ps1": "source-text",
 }
 
-# Substring-assertion budget for the test files that only read PowerShell text.
-# These numbers are a debt ceiling, not a target. Lowering one means real
-# coverage replaced text matching; raising one means the debt grew and needs an
-# explicit decision.
+# Substring-assertion budget: assertions that match text against another
+# language's source, which can only fail when someone edits the matched string.
+#
+# These ceilings originally counted EVERY assert in each file, which made the
+# guard dishonest in the direction that matters -- it charged a file for adding
+# *behavioural* assertions. It fired on test_windows_identity_lora_gateway.py
+# when two real assertions were added, a file holding 0 source-text assertions
+# out of 225. A control that penalises good tests to keep a bad-test counter
+# flat is the same defect class this module exists to catch, so it now counts
+# only the pattern it names.
+#
+# Lowering a number means real coverage replaced text matching. Raising one
+# means the debt grew and needs an explicit decision in the same commit.
 SOURCE_TEXT_ASSERTION_BUDGET = {
-    "test_windows_liveportrait_worker.py": 367,
-    "test_windows_flux2_klein_candidate.py": 61,
-    "test_windows_identity_lora_gateway.py": 223,
+    "test_windows_liveportrait_worker.py": 256,
+    "test_windows_flux2_klein_candidate.py": 4,
+    "test_windows_identity_lora_gateway.py": 0,
 }
+
+# `assert <expr> in <bare identifier>` -- the identifier being a variable that
+# holds script source text. Deliberately excludes `in {...}` / `in [...]` /
+# `in (...)`, which are membership checks over real values.
+_SOURCE_TEXT_ASSERT = re.compile(
+    r"^\s*assert\b.*\bin\s+[a-z_][a-z0-9_]*\s*(?:,.*)?$", re.M
+)
 
 
 def _powershell_scripts() -> dict[str, str]:
@@ -151,7 +167,7 @@ def test_source_text_assertion_debt_does_not_grow() -> None:
         path = TESTS / name
         if not path.exists():
             continue
-        actual = len(re.findall(r"^\s*assert\b", path.read_text(encoding="utf-8"), re.M))
+        actual = len(_SOURCE_TEXT_ASSERT.findall(path.read_text(encoding="utf-8")))
         if actual > ceiling:
             over_budget.append(f"{name}: {actual} > {ceiling}")
 

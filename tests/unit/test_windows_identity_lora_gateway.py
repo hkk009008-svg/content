@@ -788,10 +788,20 @@ def test_same_job_race_launches_once_and_materializes_fixed_package_input(
             "LOCALAPPDATA",
             "TEMP",
             "TMP",
+            "MPLCONFIGDIR",
             "PYTHONUTF8",
             "PYTHONDONTWRITEBYTECODE",
             "CONTENT_LORA_ACTIVITY_LEASE_SHA256",
         }
+        # MPLCONFIGDIR must be non-empty and absolute or it fails open silently.
+        # matplotlib tests `if configdir:` -- truthiness, so "" re-arms the exact
+        # Path.home() crash this variable exists to prevent -- and resolves a
+        # relative value against cwd, which is the digest-pinned package dir.
+        # Asserting the value and not merely the key is what makes this a
+        # control: the key alone would still pass with an empty string.
+        matplotlib_config = launch_options["env"]["MPLCONFIGDIR"]
+        assert matplotlib_config
+        assert Path(matplotlib_config).is_absolute()
         assert launch_options["env"]["LOCALAPPDATA"] == str(
             gateway.flux2_state_root.parent
         )

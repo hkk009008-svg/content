@@ -1299,6 +1299,23 @@ class AuthenticatedGateway:
             "LOCALAPPDATA": str(self.flux2_state_root.parent),
             "TEMP": temporary,
             "TMP": temporary,
+            # matplotlib is a DIRECT_RUNTIME_IMPORTS entry and calls Path.home()
+            # at import time to locate ~/.matplotlib. This allowlist deliberately
+            # withholds USERPROFILE/HOME/HOMEDRIVE/HOMEPATH, so on Windows that
+            # raises RuntimeError("Could not determine home directory") and kills
+            # the runner inside contract.py's CUDA probe -- which reports it as a
+            # CUDA failure, because the probe imports all 47 modules eagerly.
+            #
+            # MPLCONFIGDIR is matplotlib's documented escape hatch and is the
+            # minimal fix: measured on the target host, all 47 imports succeed
+            # with it set while Path.home() still raises, so the scrub is intact
+            # and matplotlib is the only import-time home consumer.
+            #
+            # Must be NON-EMPTY and ABSOLUTE. matplotlib/__init__.py:520 tests
+            # `if configdir:` (truthiness -- an empty string silently re-arms the
+            # same crash) and :530 resolves a relative value against cwd, which
+            # is set to the digest-pinned package directory.
+            "MPLCONFIGDIR": str(self.lora_state_root / "mplconfig"),
             "PYTHONUTF8": "1",
             "PYTHONDONTWRITEBYTECODE": "1",
             "CONTENT_LORA_ACTIVITY_LEASE_SHA256": activity_lease_sha256,
