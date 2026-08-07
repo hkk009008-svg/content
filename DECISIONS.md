@@ -4573,12 +4573,21 @@ still governs how many DISTINCT characters a multi-character shot conditions —
 the measurement is single-subject and says nothing about that. The knob stays
 settable for a deliberate caller.
 
-Angle references remain generated and persisted. The video providers in
-`phase_c_ffmpeg` and `phase_c_assembly` read `multi_angle_refs` directly from
-the character record; this bounds only what reaches the local FLUX.2
-still-image graph. The Identity Lab keeps its 1/2/4 cells so the comparison
-stays reproducible, and the page now shows the measured table beside the
-results rather than leaving the default unexplained.
+Angle references remain generated and persisted, and two distinct consumers
+still read `multi_angle_refs` directly from the character record: the video
+providers in `phase_c_ffmpeg` (85 video-API markers there; `phase_c_assembly`
+has zero — it is the IMAGE path, and an earlier revision of this ADR wrongly
+called it a video provider), and `phase_c_assembly`'s own Gemini and FAL image
+fallbacks. This cap bounds only what reaches the local FLUX.2 still-image
+graph. The Identity Lab keeps its 1/2/4 cells so the comparison stays
+reproducible, and the page now shows the measured table beside the results
+rather than leaving the default unexplained.
+
+Scope. `identity_backend` defaults to `gemini_multiref`, so a default project
+reaches this allocation only when the Gemini route is unavailable and phase C
+falls through to local FLUX.2, or when the operator has selected
+`local_flux2_klein` outright. This changes what the local backend renders, not
+what every project renders.
 
 The LoRA method is DEMOTED, not deleted: it stays selectable with its score
 visible, so a later session does not "restore" it as a regression fix. PuLID
