@@ -205,7 +205,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 415,
+        "line": 426,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -770,7 +770,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 133,
+        "line": 144,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -868,7 +868,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 249,
+        "line": 260,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -1301,7 +1301,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 535,
+        "line": 574,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -1577,7 +1577,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 289,
+        "line": 300,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -1626,7 +1626,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 271,
+        "line": 282,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -1691,7 +1691,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 168,
+        "line": 179,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       },
       "transport_id": null,
@@ -2857,7 +2857,7 @@
       "path_shape": "/api/projects/{1}/assemble",
       "rule": "/api/projects/<pid>/assemble",
       "source": {
-        "line": 5931,
+        "line": 5937,
         "path": "web_server.py"
       }
     },
@@ -2869,7 +2869,7 @@
       "path_shape": "/api/projects/{1}/assemble/re-assemble",
       "rule": "/api/projects/<pid>/assemble/re-assemble",
       "source": {
-        "line": 6130,
+        "line": 6136,
         "path": "web_server.py"
       }
     },
@@ -2881,7 +2881,7 @@
       "path_shape": "/api/projects/{1}/assemble/screen",
       "rule": "/api/projects/<pid>/assemble/screen",
       "source": {
-        "line": 5955,
+        "line": 5961,
         "path": "web_server.py"
       }
     },
@@ -2989,7 +2989,7 @@
       "path_shape": "/api/projects/{1}/cleanup",
       "rule": "/api/projects/<pid>/cleanup",
       "source": {
-        "line": 6324,
+        "line": 6330,
         "path": "web_server.py"
       }
     },
@@ -3001,7 +3001,7 @@
       "path_shape": "/api/projects/{1}/cost-live",
       "rule": "/api/projects/<pid>/cost-live",
       "source": {
-        "line": 6444,
+        "line": 6450,
         "path": "web_server.py"
       }
     },
@@ -3037,7 +3037,7 @@
       "path_shape": "/api/projects/{1}/disk-usage",
       "rule": "/api/projects/<pid>/disk-usage",
       "source": {
-        "line": 6344,
+        "line": 6350,
         "path": "web_server.py"
       }
     },
@@ -3049,7 +3049,7 @@
       "path_shape": "/api/projects/{1}/export",
       "rule": "/api/projects/<pid>/export",
       "source": {
-        "line": 6493,
+        "line": 6499,
         "path": "web_server.py"
       }
     },
@@ -3061,7 +3061,7 @@
       "path_shape": "/api/projects/{1}/file",
       "rule": "/api/projects/<pid>/file",
       "source": {
-        "line": 5052,
+        "line": 5058,
         "path": "web_server.py"
       }
     },
@@ -3085,7 +3085,7 @@
       "path_shape": "/api/projects/{1}/identity-experiments",
       "rule": "/api/projects/<pid>/identity-experiments",
       "source": {
-        "line": 378,
+        "line": 387,
         "path": "web_identity_experiments.py"
       }
     },
@@ -3097,7 +3097,7 @@
       "path_shape": "/api/projects/{1}/identity-experiments",
       "rule": "/api/projects/<pid>/identity-experiments",
       "source": {
-        "line": 404,
+        "line": 413,
         "path": "web_identity_experiments.py"
       }
     },
@@ -3109,7 +3109,7 @@
       "path_shape": "/api/projects/{1}/identity-experiments/{2}",
       "rule": "/api/projects/<pid>/identity-experiments/<experiment_id>",
       "source": {
-        "line": 463,
+        "line": 472,
         "path": "web_identity_experiments.py"
       }
     },
@@ -3121,7 +3121,7 @@
       "path_shape": "/api/projects/{1}/identity-experiments/{2}/cancel",
       "rule": "/api/projects/<pid>/identity-experiments/<experiment_id>/cancel",
       "source": {
-        "line": 480,
+        "line": 489,
         "path": "web_identity_experiments.py"
       }
     },
@@ -3133,7 +3133,7 @@
       "path_shape": "/api/projects/{1}/identity-experiments/{2}/resume",
       "rule": "/api/projects/<pid>/identity-experiments/<experiment_id>/resume",
       "source": {
-        "line": 498,
+        "line": 507,
         "path": "web_identity_experiments.py"
       }
     },
@@ -3217,7 +3217,7 @@
       "path_shape": "/api/projects/{1}/paid-attempts/{2}/cancel",
       "rule": "/api/projects/<pid>/paid-attempts/<attempt_id>/cancel",
       "source": {
-        "line": 6458,
+        "line": 6464,
         "path": "web_server.py"
       }
     },
@@ -3229,7 +3229,7 @@
       "path_shape": "/api/projects/{1}/pause",
       "rule": "/api/projects/<pid>/pause",
       "source": {
-        "line": 5714,
+        "line": 5720,
         "path": "web_server.py"
       }
     },
@@ -3241,7 +3241,7 @@
       "path_shape": "/api/projects/{1}/pipeline-state",
       "rule": "/api/projects/<pid>/pipeline-state",
       "source": {
-        "line": 5734,
+        "line": 5740,
         "path": "web_server.py"
       }
     },
@@ -3253,7 +3253,7 @@
       "path_shape": "/api/projects/{1}/preview/{2}",
       "rule": "/api/projects/<pid>/preview/<sid>",
       "source": {
-        "line": 6502,
+        "line": 6508,
         "path": "web_server.py"
       }
     },
@@ -3265,7 +3265,7 @@
       "path_shape": "/api/projects/{1}/proceed-assembly",
       "rule": "/api/projects/<pid>/proceed-assembly",
       "source": {
-        "line": 5932,
+        "line": 5938,
         "path": "web_server.py"
       }
     },
@@ -3301,7 +3301,7 @@
       "path_shape": "/api/projects/{1}/resume",
       "rule": "/api/projects/<pid>/resume",
       "source": {
-        "line": 5724,
+        "line": 5730,
         "path": "web_server.py"
       }
     },
@@ -3385,7 +3385,7 @@
       "path_shape": "/api/projects/{1}/screening/approve",
       "rule": "/api/projects/<pid>/screening/approve",
       "source": {
-        "line": 6041,
+        "line": 6047,
         "path": "web_server.py"
       }
     },
@@ -3397,7 +3397,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}",
       "rule": "/api/projects/<pid>/shots/<shot_id>",
       "source": {
-        "line": 5590,
+        "line": 5596,
         "path": "web_server.py"
       }
     },
@@ -3409,7 +3409,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/correct",
       "rule": "/api/projects/<pid>/shots/<shot_id>/correct",
       "source": {
-        "line": 5895,
+        "line": 5901,
         "path": "web_server.py"
       }
     },
@@ -3421,7 +3421,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/diagnose",
       "rule": "/api/projects/<pid>/shots/<shot_id>/diagnose",
       "source": {
-        "line": 5916,
+        "line": 5922,
         "path": "web_server.py"
       }
     },
@@ -3433,7 +3433,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/final/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve",
       "source": {
-        "line": 5361,
+        "line": 5367,
         "path": "web_server.py"
       }
     },
@@ -3445,7 +3445,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/generate",
       "source": {
-        "line": 5147,
+        "line": 5153,
         "path": "web_server.py"
       }
     },
@@ -3457,7 +3457,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/recovery/resolve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/recovery/resolve",
       "source": {
-        "line": 5176,
+        "line": 5182,
         "path": "web_server.py"
       }
     },
@@ -3469,7 +3469,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/keyframes/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve",
       "source": {
-        "line": 5211,
+        "line": 5217,
         "path": "web_server.py"
       }
     },
@@ -3481,7 +3481,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/motion/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/motion/generate",
       "source": {
-        "line": 5338,
+        "line": 5344,
         "path": "web_server.py"
       }
     },
@@ -3505,7 +3505,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/generate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/generate",
       "source": {
-        "line": 5245,
+        "line": 5251,
         "path": "web_server.py"
       }
     },
@@ -3517,7 +3517,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/skip",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/skip",
       "source": {
-        "line": 5288,
+        "line": 5294,
         "path": "web_server.py"
       }
     },
@@ -3529,7 +3529,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/performance/{3}/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve",
       "source": {
-        "line": 5223,
+        "line": 5229,
         "path": "web_server.py"
       }
     },
@@ -3541,7 +3541,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/approve",
       "source": {
-        "line": 5120,
+        "line": 5126,
         "path": "web_server.py"
       }
     },
@@ -3553,7 +3553,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/plan/reject",
       "rule": "/api/projects/<pid>/shots/<shot_id>/plan/reject",
       "source": {
-        "line": 5133,
+        "line": 5139,
         "path": "web_server.py"
       }
     },
@@ -3565,7 +3565,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/prompt",
       "rule": "/api/projects/<pid>/shots/<shot_id>/prompt",
       "source": {
-        "line": 5553,
+        "line": 5559,
         "path": "web_server.py"
       }
     },
@@ -3577,7 +3577,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/regenerate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/regenerate",
       "source": {
-        "line": 5835,
+        "line": 5841,
         "path": "web_server.py"
       }
     },
@@ -3589,7 +3589,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/reject-auto-approve",
       "rule": "/api/projects/<pid>/shots/<shot_id>/reject-auto-approve",
       "source": {
-        "line": 5481,
+        "line": 5487,
         "path": "web_server.py"
       }
     },
@@ -3601,7 +3601,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/restart",
       "rule": "/api/projects/<pid>/shots/<shot_id>/restart",
       "source": {
-        "line": 5783,
+        "line": 5789,
         "path": "web_server.py"
       }
     },
@@ -3613,7 +3613,7 @@
       "path_shape": "/api/projects/{1}/shots/{2}/takes/{3}/iterate",
       "rule": "/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate",
       "source": {
-        "line": 5373,
+        "line": 5379,
         "path": "web_server.py"
       }
     },
@@ -3697,7 +3697,7 @@
       "path_shape": "/api/runtime/gpu-workers",
       "rule": "/api/runtime/gpu-workers",
       "source": {
-        "line": 485,
+        "line": 497,
         "path": "web_gpu_workers.py"
       }
     },
@@ -3863,7 +3863,7 @@
       "owner": "fileUrl",
       "reason": "imported wrapper call",
       "source": {
-        "line": 535,
+        "line": 574,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -3899,7 +3899,7 @@
       "owner": "apiPost",
       "reason": "imported wrapper call",
       "source": {
-        "line": 271,
+        "line": 282,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -4175,7 +4175,7 @@
       "owner": "apiGet",
       "reason": "imported wrapper call",
       "source": {
-        "line": 168,
+        "line": 179,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -4319,7 +4319,7 @@
       "owner": "apiGet",
       "reason": "imported wrapper call",
       "source": {
-        "line": 289,
+        "line": 300,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -4667,7 +4667,7 @@
       "owner": "apiPost",
       "reason": "imported wrapper call",
       "source": {
-        "line": 249,
+        "line": 260,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -4751,7 +4751,7 @@
       "owner": "fileUrl",
       "reason": "imported wrapper call",
       "source": {
-        "line": 415,
+        "line": 426,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },
@@ -4955,7 +4955,7 @@
       "owner": "apiGet",
       "reason": "imported wrapper call",
       "source": {
-        "line": 133,
+        "line": 144,
         "path": "web/src/components/pages/IdentityLabPage.tsx"
       }
     },

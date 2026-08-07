@@ -113,9 +113,16 @@ def test_single_character_uses_provider_neutral_primary_reference(backend, tmp_p
     context = _context(multi_angle_refs=("/refs/a-profile.jpg",))
     expected_reference = "/refs/a.jpg"
     expected_angle = "/refs/a-profile.jpg"
+    # Local FLUX.2 conditions on the canonical alone by default: measured
+    # 1 ref 0.791 PASS vs 4 refs 0.499 FAIL, because Klein averages its
+    # references. Gemini does not go through that allocation and is unchanged,
+    # which is exactly what makes the primary reference provider-NEUTRAL while
+    # the angle budget is provider-owned.
+    expected_angles: tuple[str, ...] = (expected_angle,)
     if backend == "local_flux2_klein":
         expected_reference = _reference(tmp_path, "a.jpg")
         expected_angle = _reference(tmp_path, "a-profile.jpg")
+        expected_angles = ()
         context.update(
             primary_reference=expected_reference,
             multi_angle_refs=[expected_angle],
@@ -134,9 +141,11 @@ def test_single_character_uses_provider_neutral_primary_reference(backend, tmp_p
             reference=expected_reference,
             identity_anchor="character a",
             fidelity="reference",
-            multi_angle_refs=(expected_angle,),
+            multi_angle_refs=expected_angles,
         )
     ]
+    if backend == "local_flux2_klein":
+        assert strategy.flux2_reference_paths == (expected_reference,)
 
 
 def test_multi_character_strategy_preserves_reference_provenance(tmp_path):
@@ -161,9 +170,13 @@ def test_multi_character_strategy_preserves_reference_provenance(tmp_path):
         "char_a",
         "char_1",
     ]
-    assert strategy.secondary_specs[0].multi_angle_refs == (
-        secondary_angle,
-    )
+    # Provenance is preserved per CHARACTER, which is what this guards; the
+    # secondary's own angle is no longer spent on the graph (per-character cap
+    # of 1), so each conditioned character contributes exactly its canonical.
+    assert strategy.secondary_specs[0].reference == secondary
+    assert strategy.secondary_specs[0].multi_angle_refs == ()
+    assert strategy.flux2_reference_paths == (primary, secondary)
+    assert secondary_angle not in strategy.flux2_reference_paths
     assert strategy.unconditioned_chars == ["char_unregistered"]
 
 
@@ -194,14 +207,20 @@ def test_gemini_and_local_caps_are_explicit(tmp_path):
     )
 
     assert len(gemini.conditioned_chars) == GEMINI_MULTIREF_MAX_REFS
-    # Four IMAGE slots: primary canonical, secondary-1 canonical + angle,
-    # then secondary-2 canonical. This is three conditioned characters, not
-    # the old and incorrect four-character budget.
-    assert len(local.conditioned_chars) == 3
+    # Still four IMAGE slots, but no character spends two of them on itself:
+    # one canonical each for the primary and secondaries 1-3. Capping
+    # per-character references at the measured best of 1 therefore conditions
+    # MORE distinct characters inside the same budget than the old scheme,
+    # which burned a slot on secondary-1's angle and left char_3 out.
+    assert len(local.conditioned_chars) == 4
+    assert len(local.flux2_reference_paths) == 4
+    assert all(
+        spec.multi_angle_refs == () for spec in local.conditioned_chars
+    )
     assert gemini.mechanism_tag == local.mechanism_tag == REFERENCE_MULTI_CHAR
     assert len(gemini.unconditioned_chars) == len(in_frame) - GEMINI_MULTIREF_MAX_REFS
-    assert len(local.unconditioned_chars) == len(in_frame) - 3
-    assert local.unconditioned_chars[0] == "char_3"
+    assert len(local.unconditioned_chars) == len(in_frame) - 4
+    assert local.unconditioned_chars[0] == "char_4"
 
 
 def test_local_allocation_deduplicates_and_ignores_missing_refs(tmp_path):
@@ -233,20 +252,68 @@ def test_local_allocation_deduplicates_and_ignores_missing_refs(tmp_path):
         },
     )
 
+    # char_a contributes its canonical only. char_b's canonical is missing, so
+    # its angle still stands in — the per-character cap counts SELECTED images,
+    # so it never turns a recoverable character into an unconditioned one.
+    # char_c's "reference" is a directory and is ignored either way.
     assert strategy.flux2_reference_paths == (
         primary,
-        primary_angle,
         secondary_angle,
         continuity,
     )
+    assert primary_angle not in strategy.flux2_reference_paths
     assert [spec.char_id for spec in strategy.conditioned_chars] == [
         "char_a",
         "char_b",
     ]
-    assert strategy.conditioned_chars[0].multi_angle_refs == (primary_angle,)
+    assert strategy.conditioned_chars[0].multi_angle_refs == ()
     assert strategy.conditioned_chars[1].reference == secondary_angle
     assert strategy.unconditioned_chars == ["char_c"]
     assert strategy.flux2_continuity_reference == continuity
+
+
+def test_one_character_never_spends_two_flux2_slots_on_itself(tmp_path):
+    """The per-character default is 1, and raising it must be deliberate.
+
+    Identity Lab v1 (GhostFaceNet, 0.70 gate, same prompt and seed, single
+    subject): 1 reference 0.791 PASS, 2 references 0.766 PASS, 4 references
+    0.499 FAIL. Klein averages reference conditioning, so a character's own
+    angles pull away from its frontal canonical. Angles stay generated and
+    persisted for the video providers in phase_c_ffmpeg; this bounds only what
+    reaches the local FLUX.2 still-image graph.
+    """
+
+    from cinema.shots.strategy import (
+        DEFAULT_PER_CHARACTER_REFERENCES,
+        allocate_flux2_references,
+    )
+
+    assert DEFAULT_PER_CHARACTER_REFERENCES == 1
+
+    canonical = _reference(tmp_path, "canonical.jpg")
+    angles = tuple(
+        _reference(tmp_path, f"angle-{index}.jpg") for index in range(1, 4)
+    )
+    spec = CharIdentitySpec(
+        char_id="char_a",
+        reference=canonical,
+        identity_anchor="character a",
+        multi_angle_refs=angles,
+    )
+
+    allocation = allocate_flux2_references(primary=spec, secondaries=())
+    assert allocation.reference_paths == (canonical,)
+    assert allocation.conditioned_chars[0].multi_angle_refs == ()
+
+    # The knob still exists for a deliberate caller — the default is a measured
+    # choice, not a hard limit.
+    widened = allocate_flux2_references(
+        primary=spec, secondaries=(), per_character_cap=4
+    )
+    assert widened.reference_paths == (canonical, *angles)
+
+    with pytest.raises(ValueError):
+        allocate_flux2_references(primary=spec, per_character_cap=0)
 
 
 def test_local_fifth_character_is_unconditioned_at_four_image_cap(tmp_path):

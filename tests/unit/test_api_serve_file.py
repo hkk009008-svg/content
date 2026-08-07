@@ -248,4 +248,24 @@ def test_api_serve_file_mime_unknown_extension_falls_back_to_octet_stream(client
     assert response.mimetype == "application/octet-stream"
 
 
+def test_api_serve_file_forbids_content_sniffing(client, mock_project_dir):
+    """The conservative MIME label must be binding, not a hint.
+
+    This route serves user-supplied media. Without `nosniff` a browser may
+    ignore `application/octet-stream` and render the bytes as whatever they
+    look like — which is how an uploaded file becomes HTML in the user's own
+    origin. The header must be present on recognized types too, so the
+    protection does not depend on which extension happened to be uploaded.
+    """
+    unknown = mock_project_dir / "test.unknownext"
+    unknown.write_bytes(b"<html><script>alert(1)</script></html>")
+    known = mock_project_dir / "known.png"
+    known.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    for path in (unknown, known):
+        response = client.get(f"/api/projects/proj-1/file?path={path}")
+        assert response.status_code == 200
+        assert response.headers.get("X-Content-Type-Options") == "nosniff"
+
+
 

@@ -4495,3 +4495,112 @@ Cross-ref: `Cinemaker.app/Contents/MacOS/Cinemaker`;
 `web/src/components/setup/inspector/GpuWorkersSection.tsx`;
 `deploy/windows-liveportrait-worker/Control-Worker.ps1`;
 `deploy/windows-liveportrait-worker/Install-WorkerControl.ps1`.
+
+## ADR-088 — Cinemaker launch brings the Windows worker up alongside the UI
+
+Date: 2026-08-08
+
+Status: Accepted. Amends the "Windows GPU launch explicit" half of ADR-087.
+
+Context. ADR-087 kept Windows GPU startup explicit because coupling it to app
+launch "would contend unexpectedly with Unreal, Claude, or another desktop
+workload." The user-principal now wants one shortcut to bring BOTH sides up
+ready to use. The contention concern is enforced by mechanism, not by the
+manual step: the remote admission gate refuses `start` while the GPU is busy,
+and the Mac-side channel remains allowlisted to exactly {status, start}.
+
+Decision. The Cinemaker launcher gains a backgrounded, fail-soft
+`start_windows_worker` step on both launch paths (fresh start and
+already-running focus): it issues `start` only when live status reads
+`stopped` with `can_start: true`, logs every other outcome to the launch log,
+and never blocks, delays, or fails the Mac launch on any Windows-side error
+(tunnel down, PC off, GPU busy). No change to the control-channel surface, the
+Windows admission gate, or the task's absent login trigger — a busy GPU still
+refuses exactly as ADR-087 specified.
+
+Consequences. One double-click yields a usable system when the PC is idle;
+when it is not, behavior is identical to ADR-087 minus one manual click later.
+The launcher's headless test suite (8 tests) passes unchanged and `bash -n` is
+clean; the installed ~/Applications copy was refreshed via
+scripts/install_cinemaker_shortcut.py.
+
+Evidence. The launcher's `start_windows_worker` block was extracted verbatim
+from `Cinemaker.app/Contents/MacOS/Cinemaker` and run against the live worker.
+It declined correctly and returned exit 0, so a busy GPU cannot fail a Mac
+launch. `logs/` is untracked, so the produced line is quoted here rather than
+cited by path:
+
+```
+cinemaker: windows worker not started; status: {"can_start": false,
+"gpu_busy": true, "gpu_used_mib": 9966, "gpu_utilization_percent": 0,
+"last_task_result": 267009, "message": "The Windows worker task is running;
+readiness is checked separately.", "schema_version": 1, "state": "running"}
+```
+
+## ADR-089 — One reference per character is the measured FLUX.2 default
+
+Date: 2026-08-08
+
+Status: Accepted.
+
+Context. The Identity Lab v1 protocol completed all five cells against the
+Windows RTX 5070 Ti worker — same prompt, same seed, GhostFaceNet scoring
+against the 0.70 gate:
+
+| Cell | Score | Verdict |
+| --- | --- | --- |
+| native, 1 reference | **0.791** | PASS |
+| native, 2 references | 0.766 | PASS |
+| FLUX.2 character LoRA | 0.676 | FAIL |
+| text-only control | 0.513 | FAIL |
+| native, 4 references | 0.499 | FAIL |
+
+FLUX.2 Klein averages its reference conditioning rather than accumulating it,
+so a character's own profile and three-quarter angles pull the result away
+from the frontal canonical. One frontal photo beats four mixed angles at 1/3.4
+the latency, and beats a trained LoRA. The LoRA is not inert — it scored
++0.163 over the text-only control, so it did learn identity — it simply loses
+to a single good reference.
+
+Production shipped the opposite of the measured best: both call sites of
+`allocate_flux2_references` passed `cap=MAX_REFERENCE_IMAGES` (4) with no
+per-character bound, so a single-character shot with a canonical plus three
+generated angles filled every graph slot with the 0.499 configuration.
+
+Decision. `allocate_flux2_references` gains `per_character_cap`, defaulting to
+`DEFAULT_PER_CHARACTER_REFERENCES = 1`. The overall `cap` is unchanged and
+still governs how many DISTINCT characters a multi-character shot conditions —
+the measurement is single-subject and says nothing about that. The knob stays
+settable for a deliberate caller.
+
+Angle references remain generated and persisted. The video providers in
+`phase_c_ffmpeg` and `phase_c_assembly` read `multi_angle_refs` directly from
+the character record; this bounds only what reaches the local FLUX.2
+still-image graph. The Identity Lab keeps its 1/2/4 cells so the comparison
+stays reproducible, and the page now shows the measured table beside the
+results rather than leaving the default unexplained.
+
+The LoRA method is DEMOTED, not deleted: it stays selectable with its score
+visible, so a later session does not "restore" it as a regression fix. PuLID
+stays as a permanently-blocked card because that card is the only remaining
+record of why (a 4096-wide published adapter against Klein 4B's 3072).
+
+Consequences. Within the same four-image budget, no character spends two slots
+on itself, so a crowded shot conditions MORE distinct characters than before —
+the four-character case that previously left `char_3` unconditioned now
+reaches it. A character whose canonical is missing still falls back to its
+angle, because the cap counts selected images rather than candidates.
+
+Evidence. `tests/unit/test_identity_strategy_router.py` — 11 tests, including
+`test_one_character_never_spends_two_flux2_slots_on_itself`, which pins the
+default, exercises the widened knob, and rejects a zero cap. Reversion control:
+restoring `DEFAULT_PER_CHARACTER_REFERENCES = 4` fails it with `assert 4 == 1`.
+
+Parameter pruning was measured rather than assumed, and found almost nothing to
+cut: of the 39 settings keys the setup UI writes, **zero** lack a runtime
+consumer. The eight keys without a PATCH validator are `ObjectPanel.tsx`
+product fields written through the object endpoints, not global settings. The
+first run of that instrument reported one orphan (`location_research`) and was
+wrong — it excluded `web_server.py` wholesale to skip the validator table and
+so hid the real consumer at `web_server.py:4023`. The corrected instrument
+validates itself against that known consumer before trusting any result.

@@ -87,6 +87,17 @@ const BLOCKING_STATES = new Set<ExperimentState>(['queued', 'running', 'unknown'
 const RESUMABLE_STATES = new Set<ExperimentState>(['failed', 'blocked', 'unknown'])
 const POLL_MS = 1000
 
+/** The completed v1 comparison, kept visible so the shipped default is a
+ *  reviewable measurement rather than an unexplained setting. Same prompt and
+ *  seed throughout; GhostFaceNet scoring against a 0.70 gate. */
+const MEASURED_BASELINE = [
+  { label: '1 reference', score: 0.791, verdict: 'PASS', note: 'production default' },
+  { label: '2 references', score: 0.766, verdict: 'PASS', note: '' },
+  { label: 'Character LoRA', score: 0.676, verdict: 'FAIL', note: '' },
+  { label: 'Text-only control', score: 0.513, verdict: 'FAIL', note: '' },
+  { label: '4 references', score: 0.499, verdict: 'FAIL', note: '' },
+] as const
+
 function experimentTime(value: number | string): string {
   const date = new Date(typeof value === 'number' ? value * 1000 : value)
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
@@ -502,6 +513,34 @@ export default function IdentityLabPage({ project, apiBase }: Props) {
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-3 rounded border border-line bg-panel px-3 py-3">
+                <h3 className="font-mono text-[10px] uppercase tracking-wide text-mut">
+                  Measured baseline · GhostFaceNet, 0.70 gate, same prompt and seed
+                </h3>
+                <ul className="mt-2 grid gap-1 sm:grid-cols-2 xl:grid-cols-5">
+                  {MEASURED_BASELINE.map((row) => (
+                    <li
+                      key={row.label}
+                      className="flex items-baseline justify-between gap-2 text-[10px]"
+                    >
+                      <span className="text-mut">{row.label}</span>
+                      <span
+                        className={row.verdict === 'PASS' ? 'font-mono text-tx' : 'font-mono text-mut'}
+                      >
+                        {row.score.toFixed(3)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-[10px] text-mut">
+                  Klein averages its references, so one frontal photo beats four mixed
+                  angles and beats a trained LoRA. Local FLUX.2 therefore conditions on
+                  one reference per character by default; 2 and 4 stay available here for
+                  comparison, and angle references are still generated for the video
+                  providers.
+                </p>
               </div>
 
               {!selected ? (

@@ -396,6 +396,52 @@ def test_lora_method_exposes_only_the_fresh_bootstrap_as_canary(monkeypatch) -> 
     assert "automatically prove" in card["reason"]
 
 
+def test_lora_readiness_budget_clears_the_measured_gateway_cost(monkeypatch) -> None:
+    """The readiness budget must exceed what the gateway actually costs.
+
+    Measured against the live Windows gateway over the SSH tunnel on 2026-08-08:
+    3.02s / 3.03s / 3.04s, all HTTP 200 `ready`.  An unauthorized request on the
+    same tunnel answered in 0.01s, so the cost is the handler, not the network.
+    A budget below that turns a healthy gateway into `lora_readiness_unavailable`
+    on every render, which is exactly what shipped.
+    """
+
+    import web_identity_experiments
+
+    measured_gateway_seconds = 3.04
+    kwargs: list[dict[str, float]] = []
+
+    monkeypatch.setattr(
+        web_identity_experiments,
+        "resolve_performance_comfyui",
+        lambda _settings: SimpleNamespace(
+            shared_endpoint=True,
+            usable=True,
+            server_url="http://127.0.0.1:18189",
+            api_key="s" * 32,
+        ),
+    )
+
+    class Client:
+        def __init__(self, *_args, **client_kwargs):
+            kwargs.append(client_kwargs)
+
+        def get_readiness(self, candidate):
+            return SimpleNamespace(
+                state="ready",
+                blocker_code="",
+                candidate_sha256=candidate,
+                job_submission_ready=True,
+            )
+
+    monkeypatch.setattr(web_identity_experiments, "LoraTrainingClient", Client)
+
+    assert web_identity_experiments._lora_method_card()["state"] == "available"
+    assert len(kwargs) == 1
+    assert kwargs[0]["read_timeout"] > measured_gateway_seconds
+    assert kwargs[0]["connect_timeout"] > 0
+
+
 def test_lora_method_stays_blocked_without_shared_worker_contract(monkeypatch) -> None:
     import web_identity_experiments
 

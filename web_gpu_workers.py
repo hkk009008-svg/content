@@ -28,6 +28,7 @@ from performance.comfyui_endpoint import resolve_performance_comfyui
 from performance.flux2_klein import flux2_required_node_classes
 from performance.live_portrait_workflow import LIVE_PORTRAIT_REQUIRED_NODE_CLASSES
 from performance.worker_readiness import (
+    FLUX2_OPERATOR_STATES,
     IMAGE_CAPABILITY,
     PerformanceWorkerUnavailable,
     WORKER_ROLE,
@@ -40,6 +41,14 @@ logger = logging.getLogger(__name__)
 gpu_workers_api = Blueprint("gpu_workers_api", __name__)
 
 _PERFORMANCE_NODE_CLASSES = LIVE_PORTRAIT_REQUIRED_NODE_CLASSES
+# The browser projection carries only the tracked worker-state vocabulary that
+# web/src/types/project.ts declares.  `_gateway_readiness` also reports internal
+# transport outcomes — "absent" for a 404 and "not_ready" for a 503 — which carry
+# no capability record and are not part of that vocabulary.  Passing one through
+# made the UI's `isWorker` type guard reject the entry and silently drop the
+# whole worker from the list, so an unreachable contract route presented as a
+# missing worker rather than a blocked one.
+_PROJECTED_IMAGE_STATES = FLUX2_OPERATOR_STATES
 
 
 @dataclass(frozen=True)
@@ -320,8 +329,11 @@ def _probe_worker(spec: _WorkerSpec, settings_obj: object = settings) -> dict[st
 
         if spec.role == "image" and gateway.state != "ready":
             capability = gateway.capability or {}
+            projected_state = (
+                gateway.state if gateway.state in _PROJECTED_IMAGE_STATES else "blocked"
+            )
             status.update(
-                state=gateway.state,
+                state=projected_state,
                 startup_ready=capability.get("startup_ready", False),
                 execution_proven=capability.get("execution_proven", False),
                 benchmark_state=capability.get("benchmark_state", "unknown"),
@@ -352,7 +364,7 @@ def _probe_worker(spec: _WorkerSpec, settings_obj: object = settings) -> dict[st
                 ),
             }
             status["message"] = messages.get(
-                gateway.state, "FLUX.2 is not ready for local image work."
+                projected_state, "FLUX.2 is not ready for local image work."
             )
             return status
 

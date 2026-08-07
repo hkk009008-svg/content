@@ -93,3 +93,5 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-085 | Bind the LivePortrait canary to the local Windows worker and fence PuLID prompt IDs |
 | ADR-086 | Retire SadTalker Mode-B and require explicit driving performances |
 | ADR-087 | Make the app shortcut self-healing and Windows GPU launch explicit |
+| ADR-088 | Cinemaker launch brings the Windows worker up alongside the UI |
+| ADR-089 | One reference per character is the measured FLUX.2 default |

@@ -64,12 +64,38 @@ if [ ! -f "$ROOT/web/dist/index.html" ]; then
     || fail "The Content UI build failed. See $LOG"
 fi
 
-# Already running? Just focus the existing instance instead of starting a second.
+# Bring the Windows GPU worker up alongside the UI so both sides are ready to
+# use (user decision 2026-08-08, amending ADR-087's explicit-start default —
+# see the ADR that records this amendment in DECISIONS.md). ADR-087's actual
+# safety property is preserved unchanged: the remote admission gate refuses
+# `start` while the GPU is busy, so this can never contend with a live desktop
+# workload; it can only start an idle worker. Backgrounded and fail-soft — a
+# Windows-side failure is logged, never surfaced as a launch failure, and
+# never delays the Mac UI.
+start_windows_worker() {
+  "$PY" - <<'PYEOF' >> "$LOG" 2>&1 || true
+import json
+import web_gpu_worker_control as w
+try:
+    status = w._remote_control("status")
+    if status.get("state") == "stopped" and status.get("can_start"):
+        result = w._remote_control("start")
+        print("cinemaker: windows worker start:", json.dumps(result, sort_keys=True))
+    else:
+        print("cinemaker: windows worker not started; status:", json.dumps(status, sort_keys=True))
+except Exception as exc:  # tunnel down, key missing, PC off — all non-fatal
+    print(f"cinemaker: windows worker unreachable ({type(exc).__name__}): {exc}")
+PYEOF
+}
+
+# Already running? Focus the existing instance — but still bring the worker up.
 if /usr/bin/curl -s -o /dev/null -m 1 "http://localhost:8080/" ; then
+  start_windows_worker &
   /usr/bin/open "http://localhost:8080"
   exit 0
 fi
 
+start_windows_worker &
 "$PY" web_server.py >> "$LOG" 2>&1 &
 SERVER_PID=$!
 

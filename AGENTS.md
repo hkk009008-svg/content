@@ -124,13 +124,23 @@ you know the task*. Everything task-specific lives in linked docs, pulled on dem
 ## R-START — session-start checklist
 Scope: both
 Trigger: start of every session, before non-trivial work.
-Action: (1) Run the §15 smoke block in `ARCHITECTURE.md` (`scripts/ci_smoke.py`); if
+Action: (1) Run the §12 smoke block in `ARCHITECTURE.md` (`scripts/ci_smoke.py`); if
 it fails, the doc is stale OR the working tree is broken — fix one before proceeding.
 (2) Skim `ARCHITECTURE.md` §2 topology; spot-check `ls cinema/ cinema/phases/
 cinema/review/ cinema/shots/` and `wc -l cinema_pipeline.py web_server.py
-phase_c_ffmpeg.py`. (3) `git log --oneline -20`; if a commit touched a module
-documented in `ARCHITECTURE.md` since its `*Last verified:*` footer, re-read that
-section against the code. (4) If you find a stale claim, fix `ARCHITECTURE.md` first,
+phase_c_ffmpeg.py`. (3) Derive the drift set from Git, not from a hand-maintained
+footer — `ARCHITECTURE.md` carries no `*Last verified:*` footers, so any
+footer-based check is inert:
+
+```bash
+ARCH=$(env -u GIT_INDEX_FILE git log -1 --format=%H -- ARCHITECTURE.md)
+env -u GIT_INDEX_FILE git log --oneline "$ARCH"..HEAD -- \
+  cinema/ identity/ performance/ web_server.py cinema_pipeline.py phase_c_ffmpeg.py
+```
+
+Every commit it lists touched a documented module after `ARCHITECTURE.md` was
+last updated; re-read the matching section against the code. An empty list is the
+only clean result. (4) If you find a stale claim, fix `ARCHITECTURE.md` first,
 in the same commit (or a `docs:` prep commit right before) the task lands.
 Evidence: smoke output captured; the fixing commit when a claim was stale.
 Details: docs/protocol/agents/core.md

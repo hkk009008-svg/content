@@ -50,7 +50,13 @@ METHOD_CATALOG = (
         "method": "flux2_character_lora",
         "label": "FLUX.2 character LoRA",
         "state": "blocked",
-        "reason": "The pinned local trainer is not installed and execution-proven on the Windows worker.",
+        # Shown only when no usable shared worker endpoint is configured, so the
+        # gateway cannot be asked anything at all. It must not assert what the
+        # trainer's state IS: the pinned trainer has since been installed and
+        # passed its Windows canary, and this text outlived that fact unnoticed
+        # because a too-short readiness timeout kept the card from ever
+        # rendering its live states.
+        "reason": "No usable shared Windows worker endpoint is configured, so the pinned LoRA trainer cannot be reached.",
         "blocker_code": "lora_runtime_not_proven",
     },
     {
