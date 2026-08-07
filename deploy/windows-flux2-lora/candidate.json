@@ -111,12 +111,12 @@
     "Install-Candidate.ps1": "2eeea063550afc6b47cb1aded44c556483cee25b30fe56f809659531a0a1c7a9",
     "README.md": "4f4e76745ebb460d4ee3cc90c269728535336b22202b1855b3b0438cf3a7bd02",
     "benchmark.py": "c7ceb3e579b8678511142a099c539e92cfd6d4259e61ea4edb0a9e94eecdfaea",
-    "contract.py": "35b3388bddc69c3d67ca1159c7c0d3a77f48d766c764f1eeb13d3cecfb38859f",
+    "contract.py": "ad13194044c7c78b8357f3b9f8d1e8bea44ec8258895036248f7838a59fdd353",
     "inference.py": "2ef2b78b9e44f9056d121fbbed94cf8e7f5742e4ed2a7cf8f33e2879646ab237",
     "install.py": "f35f7af12ced2bc94be9aa7bbe5f1fa7732ff72146bf4d073737756f0613bb39",
     "preflight.py": "39fd75f9c9a21661c636f7456e826c4c7bddfced96511e8886042f5f724ae104",
     "requirements.in": "f4d7dce7137cd6ea5d8031c8c6f6198665dc5371b095e4142aa7f798b767b5c5",
     "requirements.lock": "39c099b4d0ce70582115d31280da77b3b7e36eaee5a7fef1637a140c473695a0",
-    "train.py": "5dbab1dbff2c1019bfc2d8854328de883d469c09426bedb8bed715fd37bffc61"
+    "train.py": "5a894f4a3468ca74c63394153ddf883dd62e1d33fb399196ccf6d264161ea7d7"
   }
 }

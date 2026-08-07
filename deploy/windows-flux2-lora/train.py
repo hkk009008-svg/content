@@ -366,16 +366,35 @@ def _run_toolkit(paths: dict[str, Path], log_path: Path) -> tuple[int, float, in
             stderr=subprocess.STDOUT,
             shell=False,
         )
-        while True:
-            try:
-                peak = max(peak, sample_gpu_memory_used_bytes())
-                samples += 1
-            except ContractError:
-                telemetry_complete = False
-            return_code = process.poll()
-            if return_code is not None:
-                break
-            time.sleep(0.25)
+        try:
+            while True:
+                try:
+                    peak = max(peak, sample_gpu_memory_used_bytes())
+                    samples += 1
+                except Exception:
+                    # Deliberately broad. Telemetry is observational and must
+                    # never escape this loop. sample_gpu_memory_used_bytes can
+                    # raise subprocess.TimeoutExpired (nvidia-smi is given 10s
+                    # and can stall under heavy GPU load) or AttributeError
+                    # (stdout is None when the child's stream fails to decode).
+                    # Neither is a ContractError, so the previous narrow handler
+                    # let them propagate out of the loop AND out of the `with`,
+                    # after which nothing polled, waited on, or killed the
+                    # ai-toolkit child: it kept running and holding VRAM with no
+                    # supervisor, across a multi-hour run.
+                    telemetry_complete = False
+                return_code = process.poll()
+                if return_code is not None:
+                    break
+                time.sleep(0.25)
+        finally:
+            # Never leave the trainer orphaned, however this block is left.
+            if process.poll() is None:
+                process.kill()
+                try:
+                    process.wait(timeout=60)
+                except subprocess.TimeoutExpired:
+                    pass
     return return_code, time.perf_counter() - started, peak, telemetry_complete and samples > 0
 
 
@@ -583,11 +602,25 @@ def run(job_id: str, *, resume: bool = False) -> dict[str, object]:
         ):
             return_code = return_code or 4
             blocker = "resume_state_not_loaded"
-        elif not telemetry_complete:
-            return_code = return_code or 4
-            blocker = "telemetry_incomplete"
         elif return_code != 0:
             blocker = classify_failure(return_code, bounded_log)
+        elif not telemetry_complete:
+            # Incomplete telemetry no longer discards a run that exited 0.
+            #
+            # telemetry_complete latches False on a single sampling failure and
+            # is never reset, while the sampler fires every 0.25s -- tens of
+            # thousands of nvidia-smi invocations across a multi-hour run. This
+            # branch used to sit ABOVE the return_code check, so `return_code or
+            # 4` turned a clean exit into exit 4 with blocker
+            # "telemetry_incomplete", wrote a `failed` terminal with adapter=None
+            # and returned before harvest. One transient nvidia-smi hiccup threw
+            # away a fully trained adapter that was sitting on disk.
+            #
+            # Nothing is hidden by relaxing it: telemetry_complete is recorded
+            # in the evidence either way, so a reader can already see that the
+            # peak_vram_bytes figure is a lower bound rather than a measurement.
+            # Losing the adapter never made that flag more honest.
+            blocker = None
         else:
             blocker = None
 
