@@ -555,7 +555,7 @@ def _benchmark_api(metadata: dict, *, identical_pixels: bool = False):
 
 @pytest.fixture
 def proven_inference_runtime(monkeypatch):
-    def runtime():
+    def runtime(flux2_state_root=None):
         return {
             "runtime_contract_sha256": RUNTIME_SHA,
             "status_sha256": "8" * 64,
@@ -1784,3 +1784,27 @@ def test_run_toolkit_reaps_child_when_loop_exits_abnormally(
 
     assert process.killed is True
     assert process.waited is True
+
+
+def test_inference_runtime_explicit_root_never_consults_ambient_env(
+    tmp_path, monkeypatch
+):
+    # The gateway validates training results IN-PROCESS, where LOCALAPPDATA is
+    # the real user profile — not the doctored value it injects into train.py's
+    # child. Ambient derivation there resolved the wrong ContentFlux2Klein root
+    # and rejected a fully PASSED 500-step run (2026-08-08). With an explicit
+    # root, the validator must never touch LOCALAPPDATA or the Windows-only
+    # gate: deleting the env var must change nothing, and the failure (no
+    # runtime at the given root on this machine) must be a ContractError about
+    # the runtime — not about the environment.
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+
+    with pytest.raises(contract.ContractError) as excinfo:
+        contract.validate_inference_runtime(tmp_path / "ContentFlux2Klein")
+    message = str(excinfo.value)
+    assert "LOCALAPPDATA" not in message
+    assert "Windows-only" not in message
+
+    # A relative explicit root is refused before any filesystem access.
+    with pytest.raises(contract.ContractError, match="absolute"):
+        contract.validate_inference_runtime(Path("relative/flux2"))

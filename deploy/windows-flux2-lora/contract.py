@@ -573,7 +573,19 @@ def inference_state_root() -> Path:
     return Path(local_app_data) / "ContentFlux2Klein"
 
 
-def validate_inference_runtime() -> dict[str, str]:
+def validate_inference_runtime(
+    flux2_state_root: Path | None = None,
+) -> dict[str, str]:
+    # flux2_state_root=None derives the root from ambient LOCALAPPDATA, which
+    # is correct ONLY in a process whose environment was built for training
+    # (the gateway injects LOCALAPPDATA=<flux2 parent> into the train.py
+    # child). The gateway itself validates results IN-PROCESS, where
+    # LOCALAPPDATA still points at the real user profile -- so deriving from
+    # ambient env there resolved C:\Users\...\ContentFlux2Klein, found no
+    # status.json, and rejected a fully PASSED 500-step run as
+    # runner_preflight_failed (2026-08-08, first run to ever reach this
+    # validator). An in-process caller MUST pass its configured root
+    # explicitly; ambient derivation is for the child environment only.
     """Bind LoRA use to the separately proven, ready FLUX.2 runtime."""
 
     package_root = (
@@ -594,7 +606,12 @@ def validate_inference_runtime() -> dict[str, str]:
         loader = namespace.get("load_runtime_status")
         if not callable(loader):
             raise ContractError("pinned inference runtime loader is missing")
-        state_root = inference_state_root()
+        if flux2_state_root is None:
+            state_root = inference_state_root()
+        else:
+            if not isinstance(flux2_state_root, Path) or not flux2_state_root.is_absolute():
+                raise ContractError("explicit FLUX.2 state root must be an absolute path")
+            state_root = flux2_state_root
         status = loader(state_root, package_root=package_root, verify_evidence=True)
     except ContractError:
         raise
@@ -2148,6 +2165,7 @@ def validate_gateway_training_result(
     *,
     expected_activity_lease_sha256: str,
     comfy_lora_root: Path | None = None,
+    flux2_state_root: Path | None = None,
 ) -> dict[str, Any]:
     if not isinstance(expected_activity_lease_sha256, str) or not HEX64.fullmatch(
         expected_activity_lease_sha256
@@ -2158,7 +2176,7 @@ def validate_gateway_training_result(
     )
     job_id = admission["job_id"]
     paths = job_paths(state_root, job_id)
-    runtime = validate_inference_runtime()
+    runtime = validate_inference_runtime(flux2_state_root)
     terminal_path = paths["evidence"] / "terminal.json"
     started_path = paths["evidence"] / "started.json"
     resume_started_path = paths["evidence"] / "resume-started.json"
@@ -2369,12 +2387,14 @@ def validate_gateway_benchmark_result(
     expected_training_activity_lease_sha256: str,
     expected_benchmark_activity_lease_sha256: str,
     comfy_lora_root: Path | None = None,
+    flux2_state_root: Path | None = None,
 ) -> dict[str, Any]:
     training = validate_gateway_training_result(
         state_root,
         job_id,
         expected_activity_lease_sha256=expected_training_activity_lease_sha256,
         comfy_lora_root=comfy_lora_root,
+        flux2_state_root=flux2_state_root,
     )
     if not HEX64.fullmatch(str(expected_benchmark_activity_lease_sha256)):
         raise ContractError("expected benchmark activity lease is malformed")

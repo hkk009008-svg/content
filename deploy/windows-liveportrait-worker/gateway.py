@@ -1003,6 +1003,13 @@ class AuthenticatedGateway:
                 state["execution_activity_lease_sha256"]
             ),
             comfy_lora_root=self.lora_comfy_root if published else None,
+            # The gateway validates IN-PROCESS, where LOCALAPPDATA is the real
+            # user profile -- not the doctored value it injects into train.py's
+            # child environment. Ambient derivation here resolved the wrong
+            # ContentFlux2Klein root and rejected a fully passed 500-step run
+            # as runner_preflight_failed (2026-08-08). Always pass the
+            # configured root explicitly.
+            flux2_state_root=self.flux2_state_root,
         )
         if (
             result.get("job_id") != job_dir.name
@@ -1038,6 +1045,9 @@ class AuthenticatedGateway:
             ),
             expected_benchmark_activity_lease_sha256=benchmark_lease,
             comfy_lora_root=self.lora_comfy_root,
+            # Same in-process/child-environment split as the training result:
+            # the configured root, never ambient LOCALAPPDATA.
+            flux2_state_root=self.flux2_state_root,
         )
         if (
             result.get("job_id") != job_dir.name
