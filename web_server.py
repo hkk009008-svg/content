@@ -4,6 +4,27 @@ Dashboard API with SSE streaming for real-time generation progress.
 Serves the React frontend and exposes all project/character/location/scene endpoints.
 """
 
+# IMPORT ORDER CONTRACT -- this must stay the first import in this module.
+#
+# TensorFlow and PyArrow both vendor Abseil (lts_20250814) and export the same
+# symbols. macOS binds the first-loaded copy process-wide, and pandas pulls
+# PyArrow in (pandas/compat/pyarrow.py) long before deepface pulls TensorFlow
+# (deepface/DeepFace.py). When that happens, TensorFlow's
+# absl::Notification::WaitForNotification() waits on libarrow's Abseil while the
+# notification is signalled in TensorFlow's own -- the wake-up can never arrive.
+#
+# Measured on this machine: identity scoring hung indefinitely at 0% CPU with
+# the main thread in Mutex::Block via libarrow.2400.dylib, and no timeout exists
+# on that path, so an experiment cell stays "running" forever. With TensorFlow
+# imported first the same scoring call completes in 3.6s.
+#
+# Guarded because TensorFlow is an optional dependency: environments without
+# deepface must still start the server.
+try:  # pragma: no cover - depends on whether deepface/TensorFlow is installed
+    import tensorflow  # noqa: F401  (imported for load order, not for use)
+except Exception:  # pragma: no cover - absence is fine; collision is not
+    pass
+
 import atexit
 import hashlib
 import logging

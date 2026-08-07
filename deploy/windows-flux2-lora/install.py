@@ -356,11 +356,28 @@ def install() -> dict[str, Any]:
             raise ContractError("installed Qwen tree digest drifted")
         ref = hf_home / "hub" / "models--Qwen--Qwen3-4B" / "refs" / "main"
         _real_directory(ref.parent)
+        # Write refs/main with NO trailing newline. huggingface_hub writes this
+        # file bare and reads it back with `revision = f.read()` -- no .strip()
+        # (file_download.py try_to_load_from_cache) -- then joins
+        # snapshots/<revision>/<filename>. A trailing newline therefore points at
+        # "snapshots/<rev>\n/config.json", which cannot exist, and every offline
+        # lookup raises LocalEntryNotFoundError even though the snapshot is
+        # present and hash-verified. ai-toolkit reaches Qwen by repo id
+        # (flux2_klein_model.py defaults flux2_klein_te_path to "Qwen/Qwen3-4B"),
+        # so this breaks training on a machine with no network access.
+        #
+        # It was invisible because contract.py:1107 .strip()s before comparing:
+        # the verification half of this package could not see the byte the
+        # install half wrote. Accept either form when re-validating an existing
+        # cache so upgrading in place does not raise "Qwen cache ref drifted";
+        # refs/main is not part of the hashed qwen tree, so neither form moves a
+        # digest.
+        expected_ref = QWEN_REVISION.encode("ascii")
         if ref.exists() or ref.is_symlink():
-            if ref.read_bytes() != (QWEN_REVISION + "\n").encode("ascii"):
+            if ref.read_bytes().strip() != expected_ref:
                 raise ContractError("Qwen cache ref drifted")
         else:
-            ref.write_bytes((QWEN_REVISION + "\n").encode("ascii"))
+            ref.write_bytes(expected_ref)
 
         _copy_package(state_root / "package")
         _copy_inference_package(state_root / "inference-package")
