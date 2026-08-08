@@ -448,3 +448,80 @@ def order_for_coverage(
     ]
     faceless = [r for r in remaining if _faceless(r)]
     return ordered + photos + others + faceless
+
+
+def compose_shot_reference_set(
+    *,
+    character_reference: str = "",
+    character_angles: Sequence[str] = (),
+    object_refs: Mapping[str, Sequence[str]] | None = None,
+    primary_object: str = "",
+) -> tuple[str, list[str]]:
+    """Decide what conditions one shot's still, given faces and products.
+
+    Returns ``(conditioning_image, ordered_references)`` for the still stage.
+
+    THE RULE IS "NO CONTEST", AND THAT IS THE WHOLE POINT
+    ----------------------------------------------------
+    A face present in the shot keeps every slot it already had. Objects fill
+    reference slots ONLY when no character reference exists for the shot, so
+    nothing a product gains is taken from a person.
+
+    That restraint is not timidity, it is the absence of a measurement. Slots
+    are scarce and unequal — 4 on the fal/Veo path, 6 through
+    ``_allocate_ref_slots``, 8 alongside a Seedance keyframe — and no experiment
+    in this repository says whether a product photo or a third facial angle is
+    worth more in a contested slot. What IS measured is that reference budgets
+    behave non-monotonically: Identity Lab scored one reference at 0.791 and
+    four at 0.499 on the same prompt and seed, because Klein AVERAGES its
+    conditioning. Adding an image is not free, so adding one on a guess is not
+    conservative.
+
+    Where there is no face, there is no trade. ``phase_c_assembly`` gates its
+    entire reference-conditioned route on ``if character_image and
+    os.path.exists(character_image)``, so a product shot with no character in
+    frame reaches the generator as PLAIN TEXT — a logo rendered from the words
+    "the brand mark reads ACME", which is where glyph fidelity dies. Handing
+    that empty slot to the product's own photograph costs nothing and is the
+    single largest available improvement to product fidelity.
+
+    The primary object leads, because slot 0 is a semantic position downstream:
+    ``phase_c_ffmpeg`` uploads reference 0 as Kling's frontal image, and
+    ``_fal_flux_fallback`` addresses reference 1 as the identity block.
+    """
+
+    angles = [path for path in (character_angles or ()) if path]
+    if character_reference:
+        # A face owns the shot. Objects are still carried on the config for the
+        # prompt layer; they take nothing here.
+        return character_reference, canonical_first(character_reference, angles)
+    if angles:
+        # No canonical but real angle references — still a face shot.
+        return angles[0], list(dict.fromkeys(angles))
+
+    ordered: list[str] = []
+    refs = object_refs or {}
+    for object_id in ([primary_object] if primary_object else []) + [
+        key for key in refs if key != primary_object
+    ]:
+        for path in refs.get(object_id) or ():
+            if path and path not in ordered:
+                ordered.append(path)
+    if not ordered:
+        return "", []
+    return ordered[0], ordered
+
+
+def canonical_first(canonical: Optional[str], refs: Sequence[str]) -> list[str]:
+    """Put the canonical at slot 0 without duplicating it.
+
+    Lives here rather than only in ``domain.continuity_engine`` so the
+    composition rule above stays importable without pulling in project I/O.
+    """
+
+    ordered = [ref for ref in refs if ref]
+    if not canonical:
+        return list(dict.fromkeys(ordered))
+    return [canonical] + [
+        ref for ref in dict.fromkeys(ordered) if ref != canonical
+    ]

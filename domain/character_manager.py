@@ -1284,6 +1284,52 @@ def get_reference_image(project: dict, char_id: str) -> Optional[str]:
     return None
 
 
+def get_object_reference_paths(project: dict, object_id: str) -> List[str]:
+    """Resolve a product's reference images, canonical first.
+
+    `make_object`'s docstring says objects are "first-class subjects with
+    reference-image conditioning" — but no resolver existed, so an object's
+    uploaded photographs reached NO image or video provider. The only reader of
+    `project["objects"]` on the generation path serialises the record's fields
+    into a PROMPT (llm/prompt_optimizer.py:768-779): brand, material, surface,
+    texture_anchor, branding_constraints, scale_reference. All described in
+    words; the product itself never shown.
+
+    That substitution fails hardest exactly where a product must not drift. A
+    logo is typography, and glyph fidelity is the first thing a re-render
+    loses. A glossy surface IS its reflected environment. Absolute scale has no
+    prior at all — "fits in an adult hand" is a sentence, not a measurement the
+    model can see.
+
+    Canonical leads for the same reason it does for characters: slot 0 carries a
+    semantic role downstream, where phase_c_ffmpeg uploads the first reference
+    as the frontal image.
+    """
+
+    obj = next(
+        (
+            o for o in project.get("objects", [])
+            if isinstance(o, dict) and o.get("id") == object_id
+        ),
+        None,
+    )
+    if not obj:
+        return []
+    canonical = _resolve_stored_media_path(project, obj.get("canonical_reference", ""))
+    uploads = [
+        _resolve_stored_media_path(project, path)
+        for path in (obj.get("reference_images") or [])
+        if isinstance(path, str) and path
+    ]
+    ordered: List[str] = []
+    if canonical and os.path.exists(canonical):
+        ordered.append(canonical)
+    for path in uploads:
+        if path and path not in ordered and os.path.exists(path):
+            ordered.append(path)
+    return ordered
+
+
 IDENTITY_REFERENCE_PROTOCOLS = frozenset({"identity-benchmark-v1"})
 
 

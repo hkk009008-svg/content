@@ -16,6 +16,7 @@ from typing import Optional, List, Dict, Sequence
 
 from domain.project_manager import get_character, get_location
 from domain.character_manager import (
+    get_object_reference_paths,
     get_character_embedding, get_reference_image, get_multi_angle_refs,
     get_identity_anchor, IDENTITY_THRESHOLD, IDENTITY_THRESHOLD_LENIENT,
 )
@@ -28,25 +29,18 @@ except ImportError:
     DEEPFACE_AVAILABLE = False
 
 
-def canonical_first(canonical: Optional[str], refs: Sequence[str]) -> List[str]:
-    """Return *refs* with *canonical* leading, exactly once, order preserved.
-
-    Slot 0 of a reference list carries a SEMANTIC ROLE downstream and nothing
-    else establishes it. `phase_c_ffmpeg.py` iterates `multi_angle_refs[:N]`
-    with no canonical prepended, and uploads `valid_refs[0]` as Kling's FRONTAL
-    IMAGE. Before this normalisation, slot 0 was whatever the character record
-    happened to list first — on this project, a left profile, so Kling was told
-    a profile was the frontal view.
-
-    Normalising in one place means the record's own ordering stops being
-    load-bearing, and a reordering elsewhere can no longer mislabel a frontal.
-    Idempotent: a list that already leads with the canonical is unchanged.
-    """
-
-    ordered = [ref for ref in refs if ref]
-    if not canonical:
-        return ordered
-    return [canonical] + [ref for ref in ordered if ref != canonical]
+# Slot 0 of a reference list carries a SEMANTIC ROLE downstream and nothing
+# else establishes it. `phase_c_ffmpeg.py` iterates `multi_angle_refs[:N]` with
+# no canonical prepended, and uploads `valid_refs[0]` as Kling's FRONTAL IMAGE.
+# Before this normalisation, slot 0 was whatever the character record happened
+# to list first — on this project, a left profile, so Kling was told a profile
+# was the frontal view.
+#
+# The rule lives in the PURE module so `compose_shot_reference_set` can apply
+# the identical ordering without importing this one (numpy, DeepFace, project
+# I/O). Re-exported here because every existing caller and test imports it from
+# this module, and two copies of an ordering rule is how they drift apart.
+from domain.reference_set import canonical_first  # noqa: E402  (re-export)
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +498,27 @@ class ContinuityEngine:
                 ),
                 "identity_anchor": get_identity_anchor(self.project, cid),
             })
+
+        # Product references, which reached NO provider before this. The only
+        # generation-path reader of project["objects"] serialises the record
+        # into a PROMPT (llm/prompt_optimizer.py:768-779) — brand, material,
+        # surface, texture_anchor, scale — so a logo was described in words and
+        # never shown. `make_object`'s own docstring claims "reference-image
+        # conditioning"; no resolver existed to deliver it.
+        #
+        # Carried on the config but NOT merged into the character reference
+        # list. Slots are scarce (4 on the Veo/fal path, 6-9 on Kontext) and
+        # every one an object takes is one a face loses. Which subject wins a
+        # contested slot is a real trade with no measurement behind it yet, so
+        # the data is made available and the policy is left to a deliberate
+        # decision rather than smuggled in as a side effect of plumbing.
+        object_refs: Dict[str, List[str]] = {}
+        for object_id in (shot.get("objects_in_frame") or []):
+            paths = get_object_reference_paths(self.project, object_id)
+            if paths:
+                object_refs[object_id] = paths
+        continuity_config["object_refs"] = object_refs
+        continuity_config["primary_object"] = shot.get("primary_object", "")
 
         # Assemble final prompt
         enhanced["prompt"] = ". ".join(filter(None, prompt_parts))

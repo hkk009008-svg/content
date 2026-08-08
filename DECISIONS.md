@@ -4946,3 +4946,90 @@ roughly one:
 The third is the highest-value fix and had no owner: it decides whether a shot
 passes, and it is currently biased against the footage worth keeping. Not built;
 recorded here so it is not rediscovered.
+
+---
+
+## ADR-093 — A product fills only the reference slots no face was using
+
+Date: 2026-08-08
+
+Status: Accepted. Implements Phase 4.1 of
+`docs/PLAN-reference-sets-2026-08-08.md`. Scoped to the STILL stage; the motion
+stage is explicitly deferred below.
+
+Context. `make_object`'s docstring has claimed since it was written that objects
+are "first-class subjects with reference-image conditioning". No resolver ever
+existed. The only reader of `project["objects"]` on the generation path is
+`cinema/shots/controller.py:1639-1641`, which hands the records to
+`llm/prompt_optimizer.py:766-777`; that serialises brand, material, surface,
+texture_anchor, branding_constraints and scale_reference into PROMPT TEXT and
+touches no image key. A user uploads product photographs through
+`web_server.py:4001-4018`, they are stored, and no image or video provider has
+ever seen one.
+
+Text substitutes worst exactly where a product must not drift. A logo is
+typography and glyph fidelity is the first casualty of a re-render. A glossy
+surface IS its reflected environment, which no adjective carries. Absolute scale
+has no visual prior at all — "fits in an adult hand" is a sentence, not a
+measurement a model can see.
+
+The obstacle was never plumbing, it was the slot budget. Reference capacity is
+small and unequal — 4 on the fal/Veo path, 6 through `_allocate_ref_slots`, 8
+alongside a Seedance keyframe — and every slot a product takes is one a face
+loses. Nothing in this repository measures that trade. What IS measured is that
+reference budgets are non-monotonic: Identity Lab scored one reference at 0.791
+and four at 0.499 on the same prompt and seed, because Klein averages its
+conditioning rather than accumulating it (ADR-089). Adding an image is not free,
+so adding one on a guess is not the conservative choice.
+
+Decision. Objects fill reference slots ONLY when the shot has no character
+reference. A shot containing a character keeps every slot it had, byte for byte.
+
+The uncontested case is not a small residue. `phase_c_assembly.py:1027` gates its
+entire reference-conditioned route on `if character_image and
+os.path.exists(character_image)`, and the Gemini route at `:388-392` carries the
+same condition. So a product shot with no character in frame has always reached
+the generator as plain text, with an empty conditioning slot beside it. Handing
+that slot to the product's own photograph costs no face anything.
+
+`domain/reference_set.py::compose_shot_reference_set` owns the rule; the primary
+object leads, because slot 0 is a semantic position downstream (`phase_c_ffmpeg`
+uploads reference 0 as Kling's frontal image).
+
+Two consequences had to be wired deliberately, not left to fall out:
+
+1. **The pre-spend gate prices what the composition selects.** Supplying a
+   conditioning image is exactly what chooses the route, and
+   `controller.py:1567` priced `FLUX_KONTEXT if primary_ref else FLUX_PRO`.
+   Composing at dispatch while pricing from `primary_reference` would reserve
+   FLUX_PRO and then bill FLUX_KONTEXT. The composition is therefore computed
+   once, ABOVE the gate, and the gate and the dispatch read that one value.
+   Pinned by `test_object_reference_prices_kontext_and_reaches_the_generator`,
+   which was confirmed to FAIL when the dispatch line alone is reverted
+   (observed: gate `FLUX_KONTEXT`, dispatch `character_image=None`).
+2. **`identity_validation_ref` stays on `primary_reference`.** It selects
+   whether a FACE validator runs and what it compares against. Pointing it at
+   the composed value to "match dispatch" would score a widget against a face
+   embedder and fail every product shot on a gate that has no opinion about
+   products. Pinned by a negative control with a paired positive control, after
+   the first version of that test was found vacuous — it patched a method name
+   that does not exist.
+
+Deliberately NOT delivered, and why:
+
+- **The motion stage.** Providers disagree about what a reference means there.
+  Kling and Seedance keep the keyframe and add references beside it, but VEO
+  REPLACES the keyframe when references exist (`phase_c_ffmpeg.py:2132-2134`
+  uploads the keyframe only when the reference list is empty), so feeding it
+  studio product shots would discard the composed frame. Kling's prompt also
+  addresses reference 0 as "@Element1 maintains rigid facial bone structure".
+  The still is where a product's appearance is decided and motion preserves the
+  keyframe, so the still stage is where the leverage is; motion needs per-
+  provider work with a measurement behind it.
+- **Local FLUX.2.** Its graph reads `strategy.flux2_reference_paths`, allocated
+  separately. `Flux2ReferenceAllocation` exists precisely so persisted metadata
+  and the graph's input list cannot describe different conditioning promises;
+  adding objects there means teaching the allocator about them, not overwriting
+  the value beside it.
+- **The contested slot.** Left undecided on purpose. Deciding it needs an
+  experiment, not a preference.

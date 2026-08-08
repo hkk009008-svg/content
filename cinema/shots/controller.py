@@ -107,6 +107,7 @@ from domain.optimizer_cache import (
     sanitize_optimizer_spec,
 )
 from domain.provider_catalog import RuntimeSnapshot
+from domain.reference_set import compose_shot_reference_set
 from domain.video_engine_policy import (
     VideoCandidateResult,
     build_runtime_snapshot,
@@ -1551,6 +1552,28 @@ class ShotController:
         cc = enhanced.get("continuity_config", {})
         primary_ref = cc.get("primary_reference")
 
+        # Compose the still stage's reference set ONCE, here, above the gate.
+        #
+        # A product in frame with no character used to reach the generator as
+        # plain text — phase_c_assembly gates its entire reference-conditioned
+        # route on ``if character_image and os.path.exists(character_image)``,
+        # so a logo was rendered from a sentence describing it. Objects now fill
+        # that empty slot, and ONLY that one: a shot with a character keeps every
+        # slot it had (see compose_shot_reference_set for why the contested case
+        # is left undecided).
+        #
+        # It must be computed before the pre-spend gate rather than at dispatch,
+        # because supplying a conditioning image is exactly what selects the
+        # route the gate prices. Reading `primary_ref` below while dispatch read
+        # a composed value would reserve FLUX_PRO and then bill FLUX_KONTEXT —
+        # a gate priced from a different source than the call it guards.
+        _shot_conditioning_ref, _shot_reference_set = compose_shot_reference_set(
+            character_reference=primary_ref or "",
+            character_angles=cc.get("multi_angle_refs") or (),
+            object_refs=cc.get("object_refs") or {},
+            primary_object=cc.get("primary_object") or "",
+        )
+
         # Pre-spend budget gate. Price the first route this exact project can
         # actually enter; do not reserve a retired backend or a credential-
         # absent provider. Local FLUX.2 has no marginal API charge, while its
@@ -1559,12 +1582,14 @@ class ShotController:
         if _identity_backend == "local_flux2_klein":
             _image_engine_estimate = "FLUX2_KLEIN_LOCAL"
         elif (
-            primary_ref
+            _shot_conditioning_ref
             and (env_settings.google_api_key or env_settings.gemini_api_key)
         ):
             _image_engine_estimate = "GEMINI_IMAGE"
         elif env_settings.fal_key:
-            _image_engine_estimate = "FLUX_KONTEXT" if primary_ref else "FLUX_PRO"
+            _image_engine_estimate = (
+                "FLUX_KONTEXT" if _shot_conditioning_ref else "FLUX_PRO"
+            )
         else:
             _image_engine_estimate = "POLLINATIONS"
         if self.cost_tracker.would_exceed(_image_engine_estimate):
@@ -1761,10 +1786,20 @@ class ShotController:
                 strategy.flux2_continuity_reference or None
             )
         else:
-            generation_primary_ref = primary_ref
-            generation_primary_angles = cc.get("multi_angle_refs", [])
+            # The composed set, so the call matches the route the gate priced.
+            # Local FLUX.2 above is deliberately excluded: its graph reads
+            # `strategy.flux2_reference_paths`, allocated separately, and
+            # Flux2ReferenceAllocation exists precisely so persisted metadata and
+            # the graph's input list cannot describe different conditioning.
+            # Adding objects there means teaching the allocator about them, not
+            # overwriting the value beside it.
+            generation_primary_ref = _shot_conditioning_ref or None
+            generation_primary_angles = _shot_reference_set
             generation_continuity_ref = cc.get("continuity_reference")
 
+        # Stays on `primary_ref`, NOT the composed value. This selects whether a
+        # FACE validator runs and what it compares against; a product photograph
+        # is not a face and must never be handed to one.
         identity_validation_ref = (
             generation_primary_ref
             if _identity_backend == "local_flux2_klein"
