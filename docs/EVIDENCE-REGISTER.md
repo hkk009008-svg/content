@@ -100,8 +100,24 @@ per ADR-092 it cannot rank these and has no opinion about rooms.
 shot whose character had references. Leading with it should preserve the
 approved composition.
 
-**Status: REASONED — but this one has an unusually clean falsifier**, because the
-question "did the keyframe reach the model?" leaves a direct trace.
+**Status: MEASURED 2026-08-09 — SUPPORTS the claim.** Artifact:
+`logs/evidence/20260808T155057Z/manifest.json`.
+
+    shot   structure: led   withheld   floor      palette: led   withheld
+    a                0.203    -0.004   0.109               0.835     0.357
+    b                0.289     0.110   0.077               0.829     0.525
+
+The withheld arm sits AT OR BELOW the unrelated floor on structure, and the
+palette separation is larger and more consistent than the structural one —
+0.83 both shots for the keyframe-led arm against 0.36/0.53 withheld. Read
+together: VEO takes the LOOK of the keyframe strongly and its LAYOUT only
+loosely, which is what a reference-conditioned model should do and is why both
+metrics are reported.
+
+Confirmed by eye, which outranks both numbers: the keyframe-led frame 0 is
+recognisably the same kitchen, wardrobe and light as the approved keyframe. The
+withheld frame 0 is a different room, different lighting, and a different
+person.
 
 **Falsifier.** Extract frame 0 of the generated clip and compare it to the
 approved keyframe with `structure_match`. If the keyframe-led arm is not
