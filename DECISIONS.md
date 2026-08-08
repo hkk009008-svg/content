@@ -5527,3 +5527,61 @@ wrong, both found only by issuing a real request: VEO 4→3, Kontext 6→4. Ever
 remaining cap in this repository (`[:8]` Seedance, 8 for Gemini, Kling's
 `valid_refs[1:4]`) is an unverified figure of the same kind, and each can fail
 in the same silent, cascade-absorbed way.
+
+---
+
+## ADR-101 — The subject's real photographs were MPO, and Gemini silently dropped every one
+
+Date: 2026-08-09
+
+Status: Accepted.
+
+MEASURED 2026-08-09. All four REAL photographs in project 42c74e230519 decode as
+MPO (Multi-Picture Object — the container an iPhone writes for HDR/burst), and
+`gemini_image_native` refuses them:
+
+    [GEMINI-IMAGE] Skipping invalid reference '...': unsupported reference
+    image format 'MPO'
+
+    4 of 10 references silently dropped by the DEFAULT image backend
+
+The four dropped are exactly the photographs of the subject. The six that
+survived are all Kontext-generated panels — derivatives, and derivatives of an
+MPO canonical that Kontext happens to accept. So Gemini, the default route, had
+NEVER SEEN A REAL PHOTOGRAPH OF THE PERSON it was asked to depict.
+
+Two providers disagreed about identical bytes and only one of them said so. The
+message is logged and nothing acts on it: the pipeline reported ten references,
+carried on at full confidence, and degraded exactly the input the entire
+identity system rests on.
+
+Decision. `normalise_reference_image` re-encodes anything that is not JPEG/PNG/
+WEBP to baseline JPEG at the single storage chokepoint in
+`create_character_with_images`, and applies EXIF orientation while it is there.
+It falls back to an exact copy when re-encoding fails: a reference that arrives
+unchanged is recoverable, one that does not arrive is not.
+`scripts/repair_reference_formats.py` repairs what is already on disk — a
+character created before this keeps its MPO files forever, and no amount of
+re-rendering makes Gemini look at them. It is dry-run by default and preserves
+every original as `*.mpo-original`; these are the operator's own photographs and
+there is no second copy.
+
+MEASURED EFFECT, on the shot that started this. Same prompt, same character:
+
+    before ADR-100 (Kontext 6 -> hard 422 -> FLUX text-to-image, no refs)
+        a woman. Not the subject. Not anyone.
+    after ADR-100  (Kontext 4 accepted, FLUX_KONTEXT wins)
+        the subject, identity 0.5399
+    after this ADR (10/10 references reach Gemini, up from 6)
+        the subject, identity 0.6333
+
+The orientation half is hygiene, not a fix, and is recorded as such: correcting
+EXIF alone moves the identity score by at most 0.004 (0.556 -> 0.552). It is done
+here only because this is the one place every reference passes through.
+
+WHAT THIS SAYS ABOUT THE PRECEDING SIX MONTHS. Three independent defects stacked
+on the same path, and each one degraded quality silently while the pipeline
+reported success: Kontext rejecting >4 images, the cascade absorbing that into an
+unconditioned text-to-image fallback, and Gemini dropping every real photograph
+of the subject. None was visible from the code. All three were found by issuing
+real requests and reading what came back.

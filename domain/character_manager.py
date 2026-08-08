@@ -524,6 +524,53 @@ def _finalize_character_reference_artifacts(
     return result
 
 
+def normalise_reference_image(src: str, dst: str) -> str:
+    """Store a reference as baseline JPEG, upright, or copy it unchanged.
+
+    MEASURED 2026-08-09: all four of this project's REAL photographs are MPO
+    (Multi-Picture Object — what an iPhone writes for HDR/burst), and the Gemini
+    route SILENTLY SKIPS them:
+
+        [GEMINI-IMAGE] Skipping invalid reference '...': unsupported reference
+        image format 'MPO'
+
+    Gemini is the default image backend. So it had never seen a real photograph
+    of the subject — only the six Kontext-generated derivatives, which are
+    themselves edits of an MPO canonical that Kontext happens to accept. Two
+    providers disagreed about the same bytes and only one of them said so, and
+    the pipeline carried on at full confidence with a reference set containing
+    no real photograph of the person it is meant to depict.
+
+    Also applies EXIF orientation. Those same four files carry orientation 5 —
+    stored sideways and mirrored — and only identity/lora_training.py corrected
+    it anywhere in the repo. Measured separately, orientation does NOT move the
+    identity score (0.556 -> 0.552), so this is hygiene rather than a fix; it is
+    done here because this is the one place every reference passes through, and
+    a file that decodes upright everywhere removes a whole class of question.
+
+    Falls back to an exact copy if the image cannot be re-encoded. A reference
+    that reaches the project unchanged is recoverable; one that does not arrive
+    at all is not.
+    """
+
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(src) as opened:
+            fmt = opened.format
+            if fmt in ("JPEG", "PNG", "WEBP"):
+                shutil.copy2(src, dst)
+                return dst
+            upright = ImageOps.exif_transpose(opened).convert("RGB")
+            upright.save(dst, format="JPEG", quality=95)
+            print(f"   [REF] Normalised {fmt} -> JPEG: {os.path.basename(dst)}")
+            return dst
+    except Exception as exc:
+        print(f"   [REF] Could not normalise ({exc}); storing the original bytes")
+        shutil.copy2(src, dst)
+        return dst
+
+
 def create_character_with_images(
     project: dict,
     name: str,
@@ -616,14 +663,14 @@ def create_character_with_images(
     char_path = _char_dir(pid, cid)
     project_dir = get_project_dir(pid)
 
-    # 1. Copy reference images into project
+    # 1. Copy reference images into project, NORMALISED to baseline JPEG.
     stored_refs = []
     if reference_image_paths:
         for i, src in enumerate(reference_image_paths):
             if os.path.exists(src):
                 ext = os.path.splitext(src)[1] or ".jpg"
                 dst = os.path.join(char_path, f"ref_{i}{ext}")
-                shutil.copy2(src, dst)
+                normalise_reference_image(src, dst)
                 stored_refs.append(dst)
                 print(f"   [REF] Stored reference image: {dst}")
 

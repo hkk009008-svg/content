@@ -106,3 +106,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-098 | The approved keyframe was discarded by fal VEO; motion prompts stop asserting a face |
 | ADR-099 | fal VEO accepts three reference images, not four; the old slice was unreachable |
 | ADR-100 | Kontext accepts four images, not six; adding references broke identity |
+| ADR-101 | The subject's real photographs were MPO, and Gemini silently dropped every one |
