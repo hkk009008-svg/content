@@ -15,8 +15,22 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The browser must not decide whether identity passed. It used to compare
+  // `score < 0.7` and print "recommend reject" — a fourth threshold, ignoring
+  // both the project's identity_strictness and the shot-typed table in
+  // identity/types.py (wide standard is 0.55, not 0.70).
+  //
+  // Worse, ADR-092: the scorer INVERTS RANK on off-angle views. A real
+  // photograph of the subject in profile scores 0.556 and "fails", while a
+  // generated panel the subject confirmed is NOT him scored 0.570. Every shot
+  // where a character turns lands in that band, so the old banner recommended
+  // rejecting correct footage — and a rejection costs a re-render.
+  //
+  // The score is still worth SHOWING; it is a frontal-only signal and is
+  // presented as one, with no recommended action. The server owns the verdict.
   const score = shot.identity_score
-  const lowScore = score != null && score < 0.7
+  const hasScore = score != null
+  const belowFrontalBand = hasScore && (score as number) < 0.65
 
   const handleApprove = async () => {
     setLoading(true)
@@ -46,9 +60,28 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
 
   return (
     <div className="flex flex-col gap-2 mt-2">
-      {lowScore && (
-        <div className="text-eyebrow text-fail bg-fail/10 px-2 py-1 rounded">
-          Low identity similarity ({Math.round((score || 0) * 100)}%) — recommend reject
+      {hasScore && (
+        <div
+          className={
+            belowFrontalBand
+              ? 'text-eyebrow text-warn bg-warn/10 px-2 py-1 rounded'
+              : 'text-eyebrow text-mut bg-panel px-2 py-1 rounded'
+          }
+        >
+          Identity similarity {Math.round((score as number) * 100)}%
+          {belowFrontalBand && (
+            <>
+              {' — '}
+              <span title={
+                'Measured against the single frontal reference image. This scorer '
+                + 'cannot resolve turned-away views: a real photograph of the '
+                + 'subject in profile scores 0.556 and would read as a failure. '
+                + 'Judge this take by eye.'
+              }>
+                cannot be judged for a turned pose
+              </span>
+            </>
+          )}
         </div>
       )}
 

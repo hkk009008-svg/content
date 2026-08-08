@@ -13,7 +13,7 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 ## Strata stats (generated)
 
 <!-- BEGIN GENERATED (scripts/gen_doc_index.py) -->
-- docs/ top level: 316 entries (310 files, 6 subdirs: archive, generated, protocol, superpowers, templates, test-cells)
+- docs/ top level: 317 entries (311 files, 6 subdirs: archive, generated, protocol, superpowers, templates, test-cells)
 - HANDOFF-* : 241
 - BRIEF-* : 13
 - PROPOSAL-* : 10
@@ -22,7 +22,7 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 - SPEC-* : 2
 - STRATEGIC_REVIEW-* : 2
 - RUNBOOK-* : 2
-- singletons (no series prefix): 28
+- singletons (no series prefix): 29
 - HANDOFF date span: 2026-05-24 .. 2026-07-07
 - docs/archive recursive file count: 146
 - docs/superpowers: plans=52, specs=37, briefs=22
