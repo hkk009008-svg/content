@@ -96,20 +96,6 @@ def test_an_unknown_hypothesis_id_is_refused_rather_than_ignored(capsys) -> None
     assert "unknown hypothesis ids" in capsys.readouterr().out
 
 
-def test_a_matching_authorisation_reaches_execution_and_says_it_is_unwired(
-    capsys,
-) -> None:
-    """The honest state today: priced, validated, and not yet able to render.
-
-    Returning 0 here would claim the evidence was gathered.
-    """
-
-    assert main([
-        "--run", "H4", "--authorize-usd", "1.00", "--skip-instrument-check",
-    ]) == 3
-    assert "NOT WIRED YET" in capsys.readouterr().out
-
-
 def test_the_instrument_check_can_refuse(monkeypatch, capsys) -> None:
     """Without --skip-instrument-check the harness runs the metric validation
     first, and a failure there stops planning as well as running.
@@ -125,3 +111,101 @@ def test_the_instrument_check_can_refuse(monkeypatch, capsys) -> None:
     )
     assert harness.main(["--plan"]) == 2
     assert "Refusing to plan or run on unvalidated instruments" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Money rounds UP to the cent, and the printed figure is the one compared
+# ---------------------------------------------------------------------------
+
+def test_the_printed_total_is_the_amount_that_will_be_accepted(capsys) -> None:
+    """A real defect this pinned: the plan printed "$1.13" while comparing
+    against 1.134, so following its own printed instruction was REFUSED — with
+    a message claiming both numbers were $1.13.
+
+    Money is denominated in cents. The total is ceilinged to the cent so the
+    authorised amount can never be LESS than what the run may spend, and the
+    comparison uses that same number.
+    """
+
+    import re
+
+    main(["--plan", "--skip-instrument-check"])
+    printed = capsys.readouterr().out
+    match = re.search(r"--authorize-usd (\d+\.\d{2})", printed)
+    assert match, printed
+    quoted = float(match.group(1))
+
+    # The exact amount the plan told the operator to pass must be accepted.
+    assert main([
+        "--run", "H4", "--authorize-usd", f"{_h4_total():.2f}",
+        "--skip-instrument-check", "--dry-run",
+    ]) == 0
+    assert quoted >= _raw_total() - 1e-9, "quoted less than the true cost"
+
+
+def _raw_total() -> float:
+    return sum(h.usd for h in build_plan())
+
+
+def _h4_total() -> float:
+    import math
+    h4 = next(h for h in build_plan() if h.id == "H4")
+    return math.ceil(h4.usd * 100) / 100
+
+
+def test_a_cent_under_the_ceilinged_total_is_still_refused() -> None:
+    """Ceiling is a safety direction, not a slack allowance."""
+
+    assert main([
+        "--run", "H4", "--authorize-usd", f"{_h4_total() - 0.01:.2f}",
+        "--skip-instrument-check",
+    ]) == 1
+
+
+def test_an_unwired_hypothesis_refuses_instead_of_silently_doing_nothing(capsys) -> None:
+    """Exiting 0 with no render would read exactly like a run that happened."""
+
+    h3 = next(h for h in build_plan() if h.id == "H3")
+    import math
+    assert main([
+        "--run", "H3", "--authorize-usd", f"{math.ceil(h3.usd * 100) / 100:.2f}",
+        "--skip-instrument-check",
+    ]) == 3
+    assert "have no render path yet" in capsys.readouterr().out
+
+
+def test_the_dry_run_resolves_real_assets_and_spends_nothing(capsys) -> None:
+    """Proves the wiring reaches real references BEFORE any money moves —
+    a run that fails on a missing asset after paying for keyframes is the
+    expensive way to learn the project was not ready."""
+
+    assert main([
+        "--run", "H4", "--authorize-usd", f"{_h4_total():.2f}",
+        "--skip-instrument-check", "--dry-run",
+    ]) == 0
+    output = capsys.readouterr().out
+    assert "no provider call made" in output
+    assert '"references_available"' in output
+
+
+# ---------------------------------------------------------------------------
+# The H4 verdict must be able to disagree with the change it is testing
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rows,expected", [
+    ([{"led": 0.85, "withheld": 0.12, "floor": 0.10}], "SUPPORTS"),
+    ([{"led": 0.85, "withheld": 0.80, "floor": 0.10}], "REFUTES"),
+    ([{"led": 0.85, "withheld": 0.45, "floor": 0.10}], "PARTIAL"),
+    ([{"led": 0.85, "withheld": 0.84, "floor": 0.83}], "INCONCLUSIVE"),
+])
+def test_the_verdict_can_reach_every_outcome(rows, expected) -> None:
+    """A verdict function that can only agree with its author proves nothing.
+
+    REFUTES is the one that matters: it fires when the withheld arm scores close
+    to the keyframe-led arm, which would mean reference ORDER is not what
+    carries composition and the ADR-098 fix is inert.
+    """
+
+    from evidence_cells.h4_veo_keyframe import verdict
+
+    assert verdict(rows)["reading"].startswith(expected)

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -39,6 +40,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "scripts"))
 
 
 @dataclass(frozen=True)
@@ -76,6 +78,24 @@ def _costs() -> dict:
     return API_COST_USD
 
 
+def _still_engine(cost: dict) -> str:
+    """Which image route a keyframe will actually take, priced the way the
+    controller decides it (cinema/shots/controller.py:1558-1575).
+
+    Guessing FLUX_KONTEXT while the project is configured for Gemini would quote
+    a price the run does not incur — in either direction, which is the problem.
+    """
+
+    from config.settings import settings as env_settings
+    if env_settings.google_api_key or env_settings.gemini_api_key:
+        return "GEMINI_IMAGE"
+    return "FLUX_KONTEXT" if env_settings.fal_key else "POLLINATIONS"
+
+
+def _still_unit(cost: dict) -> float:
+    return cost[_still_engine(cost)]
+
+
 def build_plan() -> list[Hypothesis]:
     """The register, as executable cells.
 
@@ -99,10 +119,16 @@ def build_plan() -> list[Hypothesis]:
                       "the approved keyframe than the references-only arm",
             decided_by="structure_match(frame_0, approved_keyframe)",
             cells=[
+                # ONE keyframe per shot, SHARED by both arms. Generating one per
+                # arm would confound the thing under test with ordinary
+                # generation variance, so this is a shared cost and is priced
+                # once rather than twice.
+                Cell("H4", "shared_keyframes", _still_engine(cost), _still_unit(cost), 2,
+                     "one approved keyframe per shot, fed to both arms"),
                 Cell("H4", "keyframe_led", "VEO", veo, 2,
                      "current code: keyframe leads image_urls"),
                 Cell("H4", "references_only", "VEO", veo, 2,
-                     "pre-fix behaviour: faces only, keyframe withheld"),
+                     "pre-fix behaviour reconstructed: faces only, keyframe withheld"),
             ],
         ),
         Hypothesis(
@@ -191,6 +217,51 @@ def build_plan() -> list[Hypothesis]:
     ]
 
 
+_WIRED = {"H4"}
+"""Hypotheses with a render path. The rest are priced and specified only.
+
+Kept explicit so `--run H3` refuses loudly instead of silently doing nothing and
+exiting 0, which reads exactly like a run that happened."""
+
+
+def _execute(selected: set[str], project_id: str, *, dry_run: bool) -> int:
+    """Render the selected wired cells and write a citable artifact."""
+
+    import time as _time
+    from evidence_cells import h4_veo_keyframe
+
+    run_id = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime())
+    out_dir = REPO / "logs" / "evidence" / run_id
+    print(f"\nrun id : {run_id}")
+    print(f"output : {out_dir.relative_to(REPO)}")
+
+    manifests = []
+    for hypothesis_id in sorted(selected):
+        if hypothesis_id == "H4":
+            manifest = h4_veo_keyframe.render_and_measure(
+                project_id, out_dir / "H4", dry_run=dry_run,
+            )
+            manifests.append(manifest)
+
+    if dry_run:
+        print("\nDRY RUN — assets resolved, no provider call made, nothing spent.")
+        for manifest in manifests:
+            print(json.dumps(manifest, indent=2))
+        return 0
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    artifact = out_dir / "manifest.json"
+    artifact.write_text(json.dumps(manifests, indent=2), encoding="utf-8")
+    print(f"\nartifact: {artifact.relative_to(REPO)}")
+    for manifest in manifests:
+        reading = (manifest.get("verdict") or {}).get("reading", "no verdict")
+        print(f"\n{manifest['hypothesis']}: {reading}")
+        print(json.dumps(manifest.get("verdict", {}), indent=2))
+    print("\nRead the frames before believing the numbers. The operator's eye "
+          "outranks every metric in docs/EVIDENCE-REGISTER.md.")
+    return 0
+
+
 def _metrics_are_validated() -> tuple[bool, str]:
     """Refuse to plan or run on unvalidated instruments.
 
@@ -221,10 +292,16 @@ def print_plan(plan: list[Hypothesis], selected: set[str] | None) -> float:
                   f"{cell.calls} x ${cell.unit_usd:.2f} = ${cell.usd:6.2f}   {cell.what}")
         print(f"    subtotal  : ${hypothesis.usd:.2f}\n")
         total += hypothesis.usd
+    # Rounded UP to the cent, and the comparison uses this same number.
+    # It printed "$1.13" while comparing against 1.134, so following its own
+    # instruction was refused. Money is denominated in cents; ceiling is the
+    # safe direction, because the authorised amount must never be LESS than
+    # what the run can spend.
+    total = math.ceil(total * 100) / 100
     print(f"TOTAL: ${total:.2f}")
     print("\nTo execute, re-run with --run <IDS> --authorize-usd "
           f"{total:.2f}  (the amount must match this plan exactly)")
-    return round(total, 4)
+    return total
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -235,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="comma-separated hypothesis ids to execute (COSTS MONEY)")
     parser.add_argument("--authorize-usd", type=float, default=None,
                         help="must equal the planned total for the selected ids")
+    parser.add_argument("--project", default="42c74e230519",
+                        help="project id supplying the character and references")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="resolve assets and print what WOULD render; spends nothing")
     parser.add_argument("--skip-instrument-check", action="store_true",
                         help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -262,16 +343,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.authorize_usd is None:
         print("\nREFUSED: --run selects paid work. Pass --authorize-usd to proceed.")
         return 1
-    if abs(args.authorize_usd - total) > 1e-6:
+    if abs(round(args.authorize_usd, 2) - total) > 1e-9:
         print(f"\nREFUSED: authorised ${args.authorize_usd:.2f} but this plan costs "
               f"${total:.2f}. The amounts must match exactly — a plan that changed "
               f"since you priced it must be re-read, not re-approved.")
         return 1
 
-    print("\nEXECUTION IS NOT WIRED YET. The plan above is complete and priced, "
-          "and the metrics are validated, but no cell has been given a render "
-          "path. Nothing was spent.")
-    return 3
+    unwired = sorted(selected - _WIRED)
+    if unwired:
+        print(f"\nREFUSED: {unwired} have no render path yet. Wired: "
+              f"{sorted(_WIRED)}. Nothing was spent.")
+        return 3
+
+    return _execute(selected, args.project, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

@@ -115,7 +115,24 @@ everything the still stage produced.
 **Instrument.** `structure_match(frame_0, approved_keyframe)`, plus
 `palette_match` for lighting carry-over.
 
-**Cost.** 2 arms × 2 shots × VEO $0.25 = **$1.00**
+**The floor is measured, not chosen.** A third comparison scores each clip's
+frame 0 against the OTHER shot's keyframe — a pair unrelated by construction. So
+"markedly higher" is a distance from a measured floor rather than a threshold
+someone picked, and the verdict can come back INCONCLUSIVE when the floor is not
+far enough below the led arm to separate the arms at all.
+
+**Cost.** 2 shared keyframes + 4 clips = **$1.14**. One keyframe per shot,
+reused by BOTH arms: generating one per arm would confound the thing under test
+with ordinary generation variance.
+
+**Status of the wiring: WIRED.** `--run H4 --dry-run` resolves the real
+character and its 10 on-disk references without spending anything.
+
+The `references_only` arm is a RECONSTRUCTION — that behaviour was deleted by
+ADR-098, so it is rebuilt as a direct call to the same endpoint with the
+`image_urls` the old branch would have produced. A control for removed behaviour
+must be reconstructed or there is no control; what matters is that it is small,
+visible, and declared.
 
 ---
 
@@ -209,8 +226,11 @@ from a coverage-ordered set.
     # Plan only. Spends nothing, prints every cell and the total.
     .venv/bin/python scripts/evidence_harness.py --plan
 
+    # Prove the wiring reaches real assets. Still spends nothing.
+    .venv/bin/python scripts/evidence_harness.py --run H4 --authorize-usd 1.14 --dry-run
+
     # Execute. The authorised amount must match the plan exactly.
-    .venv/bin/python scripts/evidence_harness.py --run H4 --authorize-usd 1.00
+    .venv/bin/python scripts/evidence_harness.py --run H4 --authorize-usd 1.14
 
 Results land in `logs/evidence/<run-id>/` as a manifest, per-cell metrics, and a
 contact sheet — because the operator's eye outranks every number in this file.
