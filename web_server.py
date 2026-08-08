@@ -112,6 +112,13 @@ from config.settings import settings as env_settings
 from paid_provider import PaidCallBudgetBlocked, PaidCallDeferred, PaidCallUnbilled
 from performance._net import validate_video_artifact
 from cinema.artifact_versions import ArtifactVersionError
+from domain.reference_set import (
+    coverage as reference_coverage,
+    derive_legacy_fields,
+    make_reference,
+    order_for_coverage,
+    synthesize_identity_refs,
+)
 from cinema.artifact_indexing import record_auxiliary_version
 from pipeline_jobs import (
     JobExecutionContext,
@@ -3245,6 +3252,130 @@ def api_update_character(pid, cid):
     if not updated_char:
         return jsonify({"error": "Character not found"}), 404
     return jsonify({"updated": True, "character": updated_char})
+
+
+@app.route("/api/projects/<pid>/characters/<cid>/references", methods=["PATCH"])
+@_project_lock_guard
+@_project_admin_guard
+def api_patch_character_references(pid, cid):
+    """Label, judge, and reorder a character's reference set.
+
+    Until this route existed there was NO way through HTTP to touch
+    `multi_angle_refs` — the only field any video provider reads. It had a
+    single writer, character creation, so a reference added afterwards was
+    invisible to every provider forever. POST/PUT/DELETE on a character all
+    leave it alone (the PUT writes name, description, voice_id,
+    physical_traits, and appends uploads).
+
+    What this route deliberately does NOT do is add or remove files. A
+    reference exists because it was uploaded or generated, both of which have
+    their own paid, validated paths. This route decides what each reference IS
+    (facets), whether it may be used (judged), and in what ORDER — which is the
+    part that actually reaches providers, since every consumer truncates from
+    the front at a different cut.
+
+    Body:
+      {"references": [{"path": str, "yaw"?: str, "expression"?: str,
+                       "light"?: str, "framing"?: str, "origin"?: str,
+                       "source_path"?: str, "judged"?: str, "reason"?: str}],
+       "reorder_for_coverage"?: bool}
+
+    Every patch must name a path already in the set. Unknown paths are refused
+    rather than silently ignored, because a typo would otherwise read as
+    success while changing nothing.
+    """
+
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+    data = request.json or {}
+    patches = data.get("references")
+    if patches is not None and not isinstance(patches, list):
+        return jsonify({"error": "references must be a list"}), 400
+    reorder = bool(data.get("reorder_for_coverage"))
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    Project.model_validate(project)
+
+    def _mutate_project(latest_project: dict):
+        Project.model_validate(latest_project)
+        character = next(
+            (c for c in latest_project["characters"] if c.get("id") == cid), None
+        )
+        if character is None:
+            return None
+
+        # Migration runs read-time, but a mutation must never depend on a read
+        # having happened first.
+        refs = character.get("identity_refs")
+        if not isinstance(refs, list) or not refs:
+            refs = synthesize_identity_refs(character)
+        by_path = {
+            r["path"]: dict(r) for r in refs
+            if isinstance(r, Mapping) and isinstance(r.get("path"), str)
+        }
+
+        unknown: list[str] = []
+        for patch in (patches or []):
+            if not isinstance(patch, Mapping):
+                return {"__error__": "each reference patch must be an object"}
+            path = patch.get("path")
+            if not isinstance(path, str) or path not in by_path:
+                unknown.append(str(path))
+                continue
+            current = by_path[path]
+            by_path[path] = make_reference(
+                path,
+                yaw=patch.get("yaw", current.get("yaw", "unknown")),
+                expression=patch.get(
+                    "expression", current.get("expression", "unknown")
+                ),
+                light=patch.get("light", current.get("light", "unknown")),
+                framing=patch.get("framing", current.get("framing", "unknown")),
+                origin=patch.get("origin", current.get("origin", "unknown")),
+                source_path=patch.get(
+                    "source_path", current.get("source_path", "")
+                ),
+                judged=patch.get("judged", current.get("judged", "unjudged")),
+                reason=patch.get("reason", current.get("reason", "")),
+                roles=current.get("roles") or (),
+            )
+        if unknown:
+            return {"__error__": f"unknown reference paths: {sorted(set(unknown))}"}
+
+        updated = [by_path[r["path"]] for r in refs if r.get("path") in by_path]
+        if reorder:
+            updated = order_for_coverage(updated)
+
+        character["identity_refs"] = updated
+        # The legacy fields stay authoritative for the 71 read sites, so the
+        # projection is rewritten here rather than left to drift. This is the
+        # step that makes a judgement or a reorder actually reach a provider.
+        character.update(derive_legacy_fields(updated))
+        return character
+
+    updated_char = mutate_project(
+        pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project
+    )
+    if not updated_char:
+        return jsonify({"error": "Character not found"}), 404
+    if isinstance(updated_char, dict) and "__error__" in updated_char:
+        return jsonify({"error": updated_char["__error__"]}), 400
+    return jsonify({
+        "updated": True,
+        "identity_refs": updated_char.get("identity_refs", []),
+        "coverage": reference_coverage(updated_char.get("identity_refs", [])),
+        # What each consumer will now actually receive, so truncation is
+        # visible in the response rather than discovered in a render.
+        "delivered": {
+            "kling_frontal": (updated_char.get("multi_angle_refs") or [None])[0],
+            "veo_or_fal_first_4": (updated_char.get("multi_angle_refs") or [])[:4],
+            "reference_to_video_first_8": (
+                updated_char.get("multi_angle_refs") or []
+            )[:8],
+        },
+    })
 
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["DELETE"])

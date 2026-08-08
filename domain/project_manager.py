@@ -21,6 +21,8 @@ from pydantic import ValidationError
 
 from cinema.auto_approve import AutoApproveConfig
 from domain.models import Project
+# Pure, no I/O and no provider imports — safe at module scope here.
+from domain.reference_set import synthesize_identity_refs
 
 logger = logging.getLogger(__name__)
 
@@ -724,6 +726,31 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
     if isinstance(_creative, str) and _creative in _RETIRED_CREATIVE_LLM_IDS:
         settings["creative_llm"] = _RETIRED_CREATIVE_LLM_IDS[_creative]
         changed = True
+
+    # Read-time migration: give every character a labelled `identity_refs` set
+    # synthesised from its three legacy reference fields.
+    #
+    # Purely ADDITIVE. The legacy fields stay authoritative for readers — 71
+    # read sites across 9 files — so nothing downstream changes behaviour, and
+    # a record that already carries the field is left untouched. Migration also
+    # preserves legacy ORDER exactly; reordering for coverage is a separate and
+    # visible decision, never something a read should do silently.
+    #
+    # Why it is needed: `multi_angle_refs` is the only field any provider path
+    # reads, it has a single writer (character creation), and no HTTP route can
+    # touch it — so a reference added later is invisible to every video
+    # provider. The labelled set is what makes references addable, orderable for
+    # coverage, and judgeable by eye, the last being required because the
+    # identity scorer inverts rank off-angle (ADR-092) and cannot rank them.
+    for _character in project["characters"]:
+        if not isinstance(_character, dict):
+            continue
+        if isinstance(_character.get("identity_refs"), list):
+            continue
+        _synthesized = synthesize_identity_refs(_character)
+        if _synthesized:
+            _character["identity_refs"] = _synthesized
+            changed = True
 
     seen_shot_ids: set[str] = set()
     for scene_index, scene in enumerate(project["scenes"]):
