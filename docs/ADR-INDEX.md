@@ -103,3 +103,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-095 | The Reference Sheet shows provenance and delivery, never a score |
 | ADR-096 | A character who depicts nobody can now be created, and costs more |
 | ADR-097 | The previous shot now travels with the next one, at the cost of one face slot |
+| ADR-098 | The approved keyframe was discarded by fal VEO; motion prompts stop asserting a face |

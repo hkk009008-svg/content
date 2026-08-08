@@ -35,6 +35,13 @@ if TYPE_CHECKING:
 # no active cooldown. Process restart also clears state (module-level reset).
 _VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0
 _VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset hourly
+_VEO_REFERENCE_CAP: int = 4
+"""Images fal's veo3.1/reference-to-video receives, keyframe INCLUDED.
+
+Was a bare `[:4]` over the angle references with the approved keyframe outside
+that budget entirely — and, on any shot whose character had references, outside
+the request entirely. Named here so the keyframe and the faces are visibly
+drawing on ONE budget."""
 
 # GEMINI_OMNI gets its OWN cooldown pair — do NOT reuse Veo's. Gemini Developer
 # API Tier-1 bills a rolling $10/10min spend window (not Veo's hourly-reset
@@ -58,6 +65,40 @@ PORTRAIT_CAPABLE = PORTRAIT_CAPABLE_VIDEO_ENGINES
 # API_COST_USD["SEEDANCE"] is a per-~5s figure, so an 8s action clip would
 # otherwise under-record by 38% (money-gate review 2026-07-11).
 SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
+
+
+def _subject_preservation_clause(character_id: str, subject_ref: str = "") -> str:
+    """What the motion prompt should ask to be held still.
+
+    Every motion prompt in this module asserted "maintain rigid facial bone
+    structure — zero face deformation between frames", unconditionally. On a
+    product shot or an establishing shot there is no face, and the instruction
+    is at best noise in the highest-attention position of the prompt and at
+    worst an invitation to put a face where the shot does not want one.
+
+    `character_id` is the primary character the controller resolved
+    (`cc["primary_character"]`); empty means no person is the subject of this
+    shot. That is the same signal the still stage uses to decide whether a
+    product may take a reference slot, so the two stages agree about what the
+    shot is ABOUT.
+
+    The non-face clause still asks for temporal stability — that is what a
+    product shot needs most, since a logo re-rendered per frame is the first
+    thing to swim.
+    """
+
+    who = subject_ref or "The subject"
+    if character_id:
+        return (
+            f"SUBJECT: {who} maintains rigid facial bone structure — zero face "
+            f"deformation between frames. Same hair, skin tone, clothing pattern "
+            f"in every frame."
+        )
+    return (
+        f"SUBJECT: {who} holds its exact shape, proportions, surface finish and "
+        f"markings in every frame. Text, logos and printed detail stay legible "
+        f"and identical — do not redraw, warp or re-letter them."
+    )
 
 # ltx-2-3-pro duration enum (seconds) — MUST stay == ltx_native.LTXVideoAPI.
 # DURATION_SECONDS (https://docs.ltx.io/models; both endpoints share this
@@ -1292,8 +1333,7 @@ def _execute_admitted_video_chain(
                 image_path=image_path,
                 prompt=(
                     f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration. "
-                    f"SUBJECT: Maintain rigid facial bone structure — zero face deformation between frames. "
-                    f"Same hair, skin tone, clothing pattern in every frame. "
+                    f"{_subject_preservation_clause(character_id)} "
                     f"PHYSICS: Natural body movement with weight and momentum, realistic motion blur. "
                     f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, no flickering. "
                     f"QUALITY: Photorealistic cinematic footage, high definition, consistent volumetric lighting."
@@ -2116,10 +2156,34 @@ def _execute_admitted_video_chain(
             try:
                 logger.info("fal.ai Veo 3.1 reference-to-video", extra={"engine": "VEO"})
 
-                # Upload reference images for subject preservation
-                image_urls = []
+                # THE APPROVED KEYFRAME LEADS. The comment here used to read
+                # "Always include the source keyframe" above code that did the
+                # opposite: `if not image_urls` sent the keyframe ONLY when the
+                # character had no references, so on every ordinary shot the
+                # frame the operator approved was discarded and the video was
+                # generated from four face photographs plus prose.
+                #
+                # This is a reference-to-video endpoint, so there is no separate
+                # start-frame slot to lose — every image is a reference, and the
+                # keyframe is simply the highest-information one available. It is
+                # THIS shot: the composition, the lighting, the wardrobe as
+                # rendered, the product and the room from the still stage, and
+                # the character's face as it actually appears here. Everything
+                # the still stage was built to put into that frame reached the
+                # motion stage and was then thrown away.
+                #
+                # Every other motion provider already sends it — Kling as
+                # start_image_url, Seedance as keyframe_url, Gemini Omni as
+                # input_items[0], VEO_NATIVE as the image-to-video start frame
+                # (where reference_images are mutually exclusive with it and
+                # Vertex rejects both, veo_native.py:370-384). This branch was
+                # alone in dropping it.
+                keyframe_url = fal_client.upload_file(image_path)
+                image_urls = [keyframe_url]
                 if multi_angle_refs:
-                    for ref_path in multi_angle_refs[:4]:
+                    # One fewer face than before, because the keyframe now holds
+                    # a slot. The cap is the provider's, not ours.
+                    for ref_path in multi_angle_refs[:_VEO_REFERENCE_CAP - 1]:
                         if os.path.exists(ref_path):
                             try:
                                 image_urls.append(fal_client.upload_file(ref_path))
@@ -2129,16 +2193,12 @@ def _execute_admitted_video_chain(
                                     extra={"engine": "VEO", "ref_path": ref_path, "error": str(e)},
                                 )
 
-                # Always include the source keyframe
-                if not image_urls:
-                    image_urls = [fal_client.upload_file(image_path)]
-
                 veo_prompt = (
                     f"MOTION: Smooth cinematic {camera_motion}, natural acceleration, no sudden jumps. "
-                    f"PRESERVE: Maintain rigid facial bone structure from reference images — "
-                    f"zero face deformation between frames. Same hair, skin tone, clothing texture throughout. "
-                    f"CONSTRAIN: Do not morph facial features. Do not change clothing pattern. "
-                    f"Do not alter skin tone or hair between frames. "
+                    f"{_subject_preservation_clause(character_id, 'The subject of the first reference image')} "
+                    f"CONSTRAIN: The first reference image is THIS shot as approved — keep its "
+                    f"composition, framing, lighting and set. The remaining references show the "
+                    f"same subject from other angles; use them for appearance only. "
                     f"PHYSICS: Natural body weight and momentum, cloth physics, realistic shadows. "
                     f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, no flickering. "
                     f"QUALITY: Photorealistic cinematic footage, natural motion physics, "
@@ -2219,9 +2279,8 @@ def _execute_admitted_video_chain(
                 subject_ref = "@Element1" if has_elements else "The character"
                 kling_prompt = (
                     f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration. "
-                    f"SUBJECT: {subject_ref} maintains rigid facial bone structure — zero face deformation between frames. "
-                    f"Same hair, skin tone, clothing pattern in every frame. "
-                    f"PRESERVE: Do not morph, distort, or alter facial features, eyes, teeth, or hair at any frame. "
+                    f"{_subject_preservation_clause(character_id, subject_ref)} "
+                    f"PRESERVE: Do not morph, distort, or alter the subject between frames. "
                     f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
                     f"consistent gravity, cloth physics responding to movement. "
                     f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, no flickering. "
@@ -2442,8 +2501,7 @@ def _execute_admitted_video_chain(
                 seedance_prompt = (
                     f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration, "
                     f"no abrupt speed changes. "
-                    f"SUBJECT: Maintain rigid facial bone structure — zero face deformation between frames. "
-                    f"Same hair, skin, clothing texture in every frame. "
+                    f"{_subject_preservation_clause(character_id)} "
                     f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
                     f"consistent gravity, cloth physics responding to movement. "
                     f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, "

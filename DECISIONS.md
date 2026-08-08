@@ -5340,3 +5340,69 @@ still: same character, same scene, shots 2-5, arms = {6 faces} vs {5 faces + the
 anchor}, judged on inter-shot appearance consistency rather than on GhostFaceNet
 — which per ADR-092 cannot rank off-angle results and has no opinion about rooms
 at all. Until that runs, this is a reasoned default, not a measured one.
+
+---
+
+## ADR-098 — The approved keyframe was discarded by fal VEO; motion prompts stop asserting a face
+
+Date: 2026-08-08
+
+Status: Accepted.
+
+Finding 1 — the approved keyframe never reached fal VEO. The branch read:
+
+    2120: image_urls = []
+    2125:     image_urls.append(fal_client.upload_file(ref_path))   # multi_angle_refs[:4]
+    2133: if not image_urls:
+    2134:     image_urls = [fal_client.upload_file(image_path)]     # the keyframe
+    2152: "image_urls": image_urls,
+
+with the comment "Always include the source keyframe" sitting directly above
+line 2133. It did the opposite: the keyframe was sent ONLY when the character
+had no references, so on every ordinary shot the frame the operator approved was
+discarded and the video was generated from four face photographs plus prose.
+
+That inverts the assumption the whole still stage rests on. ADR-093 deferred
+object references at the motion stage on the reasoning that "the still is where
+a product's appearance is decided and motion preserves the keyframe" — true of
+every other provider and false here. Composition, lighting, wardrobe as rendered,
+the product and the room from ADR-093/094, and the scene anchor from ADR-097 all
+reached this call and were dropped.
+
+`fal-ai/veo3.1/reference-to-video` has no separate start-frame slot to lose:
+every image is a reference, and the keyframe is simply the highest-information
+one available — it is THIS shot, approved. Enumerated, every other provider
+already sends it:
+
+    KLING_NATIVE   start image        KLING_3_0    start_image_url
+    SEEDANCE       keyframe_url       GEMINI_OMNI  input_items[0]
+    VEO_NATIVE     image-to-video start frame (reference_images are MUTUALLY
+                   EXCLUSIVE with it; Vertex rejects both — veo_native.py:370-384)
+    LTX / RUNWAY_GEN4 / SORA_NATIVE / FAL_SVD   keyframe only, no refs
+
+Decision. The keyframe leads `image_urls` and draws on the SAME 4-image budget
+(`_VEO_REFERENCE_CAP`), so one fewer face reaches VEO and the approved
+composition reaches it at all. The prompt now names it: the first reference is
+this shot as approved, keep its composition and lighting; the rest show the same
+subject from other angles, use them for appearance only.
+
+Finding 2 — every motion prompt asserted a face. All four said "maintain rigid
+facial bone structure — zero face deformation between frames", unconditionally,
+in the prompt's highest-attention position. A product shot and an establishing
+shot have no face. `_subject_preservation_clause` takes the same signal the
+still stage uses (`cc["primary_character"]`, threaded as `character_id`) so both
+stages agree about what the shot is ABOUT, and the non-face clause asks for what
+a product actually needs: shape, proportions, surface finish, and legible
+unaltered text and logos — a logo re-rendered per frame is the first thing to
+swim.
+
+Consequence for ADR-093/094. Objects and locations still need no separate
+motion-stage delivery, but the reason is now true rather than assumed: the
+keyframe carries them, and the keyframe now arrives.
+
+UNMEASURED. That one fewer face reference costs less than the approved
+composition gains is not established here. It is, however, cheaply falsifiable
+and does not need a face embedder: extract frame 0 of the generated clip and
+compare it to the approved keyframe. Before this change that comparison should
+be poor on any shot whose character has references; after it, close. Registered
+as H4 in `docs/EVIDENCE-REGISTER.md`.
