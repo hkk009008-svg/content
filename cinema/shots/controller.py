@@ -1572,6 +1572,7 @@ class ShotController:
             character_angles=cc.get("multi_angle_refs") or (),
             object_refs=cc.get("object_refs") or {},
             primary_object=cc.get("primary_object") or "",
+            location_refs=cc.get("location_refs") or (),
         )
 
         # Pre-spend budget gate. Price the first route this exact project can

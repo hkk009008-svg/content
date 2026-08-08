@@ -292,14 +292,40 @@ def get_location_seed(project: dict, loc_id: str) -> Optional[int]:
 
 
 def get_location_reference(project: dict, loc_id: str) -> Optional[str]:
-    """Get the first available reference image for a location."""
+    """Get the first available reference image for a location.
+
+    Had ZERO non-test callers when ``get_location_reference_paths`` was written
+    below. A user uploaded plates through ``web_server.py:4198-4234``, they were
+    stored and migrated correctly, and no image or video provider ever saw one.
+    """
+    for resolved in get_location_reference_paths(project, loc_id):
+        return resolved
+    return None
+
+
+def get_location_reference_paths(project: dict, loc_id: str) -> List[str]:
+    """Resolve a location's plates, in record order, existing files only.
+
+    A location is the only subject shared by every shot in a scene, so drift
+    there is what makes one scene look like three different rooms. It was also
+    the only subject whose references reached nothing at all: characters had
+    ``multi_angle_refs``, objects had a prompt paragraph, and a location had a
+    resolver with no callers.
+
+    Plural where ``get_location_reference`` is singular, because a room is not
+    established by one photograph — a wall, a window and a floor answer
+    different questions, and the consumer's own cap decides how many survive.
+    """
     loc = get_location(project, loc_id)
     if not loc:
-        return None
+        return []
+    resolved: List[str] = []
     # FIX-REFS: resolve through the slice-10 migration chokepoint before
     # checking existence -- see _resolve_stored_media_path's docstring.
-    for ref in loc.get("reference_images", []):
-        resolved = _resolve_stored_media_path(project, ref)
-        if os.path.exists(resolved):
-            return resolved
-    return None
+    for ref in loc.get("reference_images", []) or []:
+        if not isinstance(ref, str) or not ref:
+            continue
+        path = _resolve_stored_media_path(project, ref)
+        if path and path not in resolved and os.path.exists(path):
+            resolved.append(path)
+    return resolved

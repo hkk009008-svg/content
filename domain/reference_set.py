@@ -450,14 +450,25 @@ def order_for_coverage(
     return ordered + photos + others + faceless
 
 
+MAX_LOCATION_PLATES = 2
+"""How many location plates may enter one shot's uncontested reference set.
+
+Not a measurement — a bound. The smallest downstream cut is 4 (the fal/Veo
+slice), consumers truncate from the front, and a location may hold arbitrarily
+many plates. Without this, a six-plate room would fill an entire budget and push
+the product out of its own product shot.
+"""
+
+
 def compose_shot_reference_set(
     *,
     character_reference: str = "",
     character_angles: Sequence[str] = (),
     object_refs: Mapping[str, Sequence[str]] | None = None,
     primary_object: str = "",
+    location_refs: Sequence[str] = (),
 ) -> tuple[str, list[str]]:
-    """Decide what conditions one shot's still, given faces and products.
+    """Decide what conditions one shot's still, given faces, products and place.
 
     Returns ``(conditioning_image, ordered_references)`` for the still stage.
 
@@ -488,6 +499,18 @@ def compose_shot_reference_set(
     The primary object leads, because slot 0 is a semantic position downstream:
     ``phase_c_ffmpeg`` uploads reference 0 as Kling's frontal image, and
     ``_fal_flux_fallback`` addresses reference 1 as the identity block.
+
+    ORDER WITHIN THE UNCONTESTED SET: SUBJECT BEFORE PLACE
+    ------------------------------------------------------
+    Products precede location plates. A product is the shot's subject and a
+    plate is its container, and slot 0 is read as "the thing this image is
+    about". A shot with neither is where a plate leads — an establishing shot,
+    which is exactly the shot a plate was uploaded for.
+
+    Location plates are capped at two. Providers truncate from the front and
+    the smallest cut here is 4; letting a six-plate location fill the whole
+    budget would push a product out of its own product shot. Two is not
+    measured, it is a bound chosen so the earlier subject always survives.
     """
 
     angles = [path for path in (character_angles or ()) if path]
@@ -507,6 +530,9 @@ def compose_shot_reference_set(
         for path in refs.get(object_id) or ():
             if path and path not in ordered:
                 ordered.append(path)
+    for path in list(location_refs or ())[:MAX_LOCATION_PLATES]:
+        if path and path not in ordered:
+            ordered.append(path)
     if not ordered:
         return "", []
     return ordered[0], ordered

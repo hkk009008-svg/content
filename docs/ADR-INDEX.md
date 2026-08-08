@@ -99,3 +99,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-091 | ADR-089's default is right where it was measured, and only there |
 | ADR-092 | The identity scorer inverts rank on off-angle views; those findings are void |
 | ADR-093 | A product fills only the reference slots no face was using |
+| ADR-094 | Location plates reach a generator; the continuity anchor still does not |

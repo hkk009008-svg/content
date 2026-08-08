@@ -5033,3 +5033,81 @@ Deliberately NOT delivered, and why:
   the value beside it.
 - **The contested slot.** Left undecided on purpose. Deciding it needs an
   experiment, not a preference.
+
+---
+
+## ADR-094 — Location plates reach a generator; the continuity anchor still does not
+
+Date: 2026-08-08
+
+Status: Accepted for the plate delivery. The `continuity_reference` finding
+below is RECORDED, NOT FIXED, and names the decision that fixing it requires.
+
+Context — the dead resolver. `domain/location_manager.get_location_reference`
+had ZERO non-test callers:
+
+    $ grep -rn --include='*.py' "get_location_reference" . | grep -v /.venv/
+    tests/unit/test_character_location_reference_paths.py:16,62,295,394,423,471
+    tests/unit/test_web_reference_write_portable.py:271,274,382,413,416
+    domain/location_manager.py:82,294
+
+A user uploaded plates through `web_server.py:4198-4234`, they were stored,
+they were path-migrated correctly through `_resolve_stored_media_path`, and no
+image or video provider ever saw one. The function existed, was tested, and was
+dead. That is the same shape as ADR-093's objects, one level worse: a location
+did not even get the prompt paragraph an object got.
+
+A location is the only subject every shot in a scene shares, so drift there is
+what makes one scene look like three different rooms — and unlike a face, a room
+has no identity scorer to notice.
+
+Decision. `get_location_reference_paths` resolves a location's plates in record
+order, and the same no-contest rule from ADR-093 applies: plates enter a shot's
+reference set only when no character reference exists. Order within the
+uncontested set is subject before place — products lead, plates follow — because
+slot 0 is read as what the image is ABOUT. A shot with neither is an
+establishing shot, which is exactly the shot a plate was uploaded for, and there
+the plate leads.
+
+`MAX_LOCATION_PLATES = 2` is a bound, not a measurement. The smallest downstream
+cut is 4, consumers truncate from the front, and a location may hold arbitrarily
+many plates; without the bound a six-plate room would evict a product from its
+own product shot by truncation rather than by any decision.
+
+FINDING, recorded and not fixed — the approved previous keyframe reaches no
+hosted provider. `continuity_reference` is documented as "Approved previous
+keyframe, when present" and threaded from `controller.py:1815` into
+`generate_ai_broll`. Inside `phase_c_assembly.py` the name appears exactly three
+times — the parameter, that docstring, and one call to
+`allocate_flux2_references` at :661 — whose result feeds only `local_references`
+and from there only the local FLUX.2 worker. Neither hosted route can even
+accept it:
+
+    _fal_flux_fallback:            prompt, output_filename, seed, character_image,
+                                   multi_angle_refs, identity_anchor, aspect_ratio,
+                                   secondary_char_refs, cost_tracker, shot_id,
+                                   video_id, _recovery_out
+    GeminiImageAPI.generate_image: prompt, output_path, character_image,
+                                   multi_angle_refs, secondary_char_refs,
+                                   aspect_ratio, negative_prompt
+
+(runtime `inspect.signature`, not a grep.) The default backend is
+`gemini_multiref`. So on the default configuration, shot-to-shot visual
+continuity within a scene is carried by the prompt and the seed alone.
+
+Not fixed here because the fix is a decision, not plumbing. Delivering the
+anchor means giving it a slot, and the only uncontested slot is in shots that
+have no other reference — which is nearly every shot after the first once
+objects and locations are wired. Extending the composition that far changes the
+route of a large fraction of all shots at once (see the consequence below), and
+that deserves its own decision rather than falling out of a location change.
+
+Consequence named, pre-existing, now reaching further. `phase_c_assembly.py:700`
+runs the local FLUX.2 job whenever `local_references` is non-empty and the
+worker is ready — regardless of the project's chosen `identity_backend`. Today
+that already means a character shot on a `gemini_multiref` project with a live
+local worker prices GEMINI_IMAGE and runs FLUX2_KLEIN_LOCAL. Wiring objects and
+plates extends that reach to product and establishing shots, which previously
+had no references and so never qualified. The mismatch over-reserves rather than
+under-reserves, and closing it would require the pre-spend gate to probe worker
+readiness before pricing. Recorded so it is not rediscovered as a new defect.

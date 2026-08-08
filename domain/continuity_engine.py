@@ -20,7 +20,9 @@ from domain.character_manager import (
     get_character_embedding, get_reference_image, get_multi_angle_refs,
     get_identity_anchor, IDENTITY_THRESHOLD, IDENTITY_THRESHOLD_LENIENT,
 )
-from domain.location_manager import get_location_prompt, get_location_seed
+from domain.location_manager import (
+    get_location_prompt, get_location_reference_paths, get_location_seed,
+)
 
 try:
     from deepface import DeepFace
@@ -519,6 +521,15 @@ class ContinuityEngine:
                 object_refs[object_id] = paths
         continuity_config["object_refs"] = object_refs
         continuity_config["primary_object"] = shot.get("primary_object", "")
+
+        # Location plates. `get_location_reference` had ZERO non-test callers:
+        # a user uploaded plates through web_server.py:4198-4234, they were
+        # stored and path-migrated correctly, and no provider ever saw one. A
+        # location is the only subject every shot in a scene shares, so drift
+        # there is what makes one scene look like three different rooms.
+        continuity_config["location_refs"] = (
+            get_location_reference_paths(self.project, loc_id) if loc_id else []
+        )
 
         # Assemble final prompt
         enhanced["prompt"] = ". ".join(filter(None, prompt_parts))
