@@ -72,34 +72,44 @@ from domain.character_manager import (  # noqa: E402
     get_character,
 )
 from identity.protocols import BENCHMARK_PROMPT  # noqa: E402
+from identity.types import get_threshold_for_shot  # noqa: E402
 from performance.flux2_klein import run_flux2_klein_image_job  # noqa: E402
 
 
 DEFAULT_PROJECT = "42c74e230519"
 DEFAULT_CHARACTER = "hkkperson"
-IDENTITY_GATE = 0.70
 
 
 @dataclass(frozen=True)
 class Case:
     key: str
     prompt: str
+    shot_type: str
     why: str
 
 
 # Ordered easiest to hardest. The first is the lab's own prompt, kept as an
 # anchor: if it does not reproduce ~0.791 the run is not comparable to anything
 # and the rest of the numbers should be discarded.
+# Each case declares the shot type it describes, because the gate is not a
+# constant: identity/types.py calibrates it per shot type (portrait 0.70,
+# medium 0.65, action 0.60, wide 0.55). The first version of this harness
+# scored every case as "portrait" and produced verdicts that were wrong for
+# four of six cases while the raw scores were right -- the wide establishing
+# shot in particular "failed" a threshold written for close-ups. See ADR-091's
+# correction.
 CASES = (
     Case(
         "anchor",
         BENCHMARK_PROMPT,
+        "portrait",
         "The lab's own prompt. Anchors this run against the 0.791 measurement.",
     ),
     Case(
         "neutral_portrait",
         "Portrait photograph of a person, studio lighting, neutral gray "
         "background, looking directly at the camera.",
+        "portrait",
         "Same framing as the anchor but with every identity-preserving phrase "
         "removed. Isolates how much of the anchor's score came from the words.",
     ),
@@ -108,6 +118,7 @@ CASES = (
         "Medium shot of a man in a charcoal wool coat stepping out of a "
         "bookshop doorway onto a wet city street, late afternoon, overcast "
         "light, shallow depth of field.",
+        "medium",
         "The prompt now spends its weight on wardrobe, setting, and light. "
         "This is the ordinary case a director pass produces.",
     ),
@@ -116,6 +127,7 @@ CASES = (
         "Wide establishing shot of a lone figure crossing an empty concrete "
         "plaza at dusk, city skyline behind, cool blue hour light, figure "
         "small in frame.",
+        "wide",
         "The face occupies few pixels. The hardest case for reference "
         "conditioning, and where a thin identity signal should fail first.",
     ),
@@ -123,6 +135,7 @@ CASES = (
         "profile_angled",
         "Close profile shot of a man looking off to his left, side lighting "
         "from a window, dark background, sharp focus on the eye and jawline.",
+        "portrait",
         "A view the single frontal canonical never shows. If the dropped angle "
         "references were earning anything, it should appear here.",
     ),
@@ -130,6 +143,7 @@ CASES = (
         "low_light_motion",
         "Handheld night shot of a man turning quickly toward the camera under "
         "a streetlight, rain in the air, motion blur, high contrast.",
+        "action",
         "Low light, motion blur, and an off-axis turn at once -- the "
         "compound-stress case.",
     ),
@@ -141,24 +155,32 @@ ARMS = (
 )
 
 
-def _score(image: Path, reference: Path, character_id: str) -> tuple[float | None, str]:
-    """Score with the same validator and settings the Identity Lab used."""
+def _score(
+    image: Path, reference: Path, character_id: str, shot_type: str
+) -> tuple[float | None, str, float]:
+    """Score with the validator the lab used, against THIS shot type's gate.
+
+    The gate is not a constant. Passing "portrait" for a wide establishing shot
+    applies a close-up's threshold to a figure that is a handful of pixels tall
+    and manufactures a failure.
+    """
 
     from identity import validator as validator_module
 
+    gate = get_threshold_for_shot(shot_type)
     if not validator_module.DEEPFACE_AVAILABLE:
-        return None, "unavailable"
+        return None, "unavailable", gate
     validator = validator_module.IdentityValidator(vision_fallback=None)
     result = validator.validate_image(
         str(image),
         str(reference),
         character_id=character_id,
-        shot_type="portrait",
-        threshold=IDENTITY_GATE,
+        shot_type=shot_type,
+        threshold=gate,
     )
     if result.skipped or result.overall_score is None:
-        return None, "unknown"
-    return float(result.overall_score), "passed" if result.passed else "failed"
+        return None, "unknown", gate
+    return float(result.overall_score), "passed" if result.passed else "failed", gate
 
 
 def main() -> int:
@@ -257,12 +279,19 @@ def main() -> int:
 
                 score: float | None = None
                 verdict = "skipped"
+                gate = get_threshold_for_shot(case.shot_type)
                 if not args.skip_scoring:
-                    score, verdict = _score(target, Path(canonical), args.character)
+                    score, verdict, gate = _score(
+                        target, Path(canonical), args.character, case.shot_type
+                    )
                 shown = "—" if score is None else f"{score:.3f}"
-                print(f"   {elapsed:5.1f}s  score={shown}  {verdict}  → {target.name}")
+                print(
+                    f"   {elapsed:5.1f}s  score={shown}  gate={gate:.2f}"
+                    f" ({case.shot_type})  {verdict}  → {target.name}"
+                )
                 rows.append({
                     "case": case.key, "arm": arm, "refs": len(refs),
+                    "shot_type": case.shot_type, "gate": gate,
                     "seconds": round(elapsed, 1), "score": score,
                     "verdict": verdict, "output": target.name,
                 })
@@ -277,8 +306,10 @@ def main() -> int:
                 "canonical": Path(canonical).name,
                 "aspect_ratio": args.aspect,
                 "seed": args.seed,
-                "identity_gate": IDENTITY_GATE,
-                "cases": {case.key: {"prompt": case.prompt, "why": case.why}
+                "cases": {case.key: {"prompt": case.prompt,
+                                     "shot_type": case.shot_type,
+                                     "gate": get_threshold_for_shot(case.shot_type),
+                                     "why": case.why}
                           for case in cases},
                 "results": rows,
             },
@@ -309,9 +340,9 @@ def main() -> int:
 
     print(f"\nwrote {summary}")
     print(
-        "\nRead the images before trusting the table. A score above "
-        f"{IDENTITY_GATE} on a face that looks wrong is still a failure, and "
-        "the scorer cannot see that."
+        "\nRead the images before trusting the table. A score above its gate "
+        "on a face that looks wrong is still a failure, and the scorer cannot "
+        "see that."
     )
     if reversals:
         print(

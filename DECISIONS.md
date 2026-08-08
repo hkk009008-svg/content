@@ -4734,11 +4734,63 @@ Findings.
    conditioning holds identity when the target pose matches the reference pose
    and loses grip when it does not.
 
-3. **The reference count is second-order, and this is the finding that
-   matters.** Every non-portrait case fails the 0.70 gate in BOTH arms, at
-   0.562-0.679. The whole one-versus-many argument is a +/-0.04 dispute
-   conducted 0.05-0.14 below the threshold. Optimising it further would be
-   optimising the wrong variable.
+3. **The reference count is second-order.** The one-versus-many argument is a
+   +/-0.04 dispute, smaller than the effect of framing (finding 5) and far
+   smaller than the effect of pose match (finding 2).
+
+CORRECTION, made before this ADR was pushed. The first draft of this section
+claimed "every non-portrait case fails the 0.70 gate in BOTH arms". That was an
+instrument error, not a result: the harness scored every case with
+`shot_type="portrait"`, while `identity/types.py` already calibrates the gate
+per shot type — portrait 0.70, medium 0.65, action 0.60, wide 0.55. Re-scored
+against the gate each prompt actually describes, the same raw numbers read very
+differently:
+
+| case | shot type | gate | 1 ref | verdict |
+| --- | --- | --- | --- | --- |
+| anchor | portrait | 0.70 | 0.791 | PASS |
+| neutral_portrait | portrait | 0.70 | 0.761 | PASS |
+| medium_action | medium | 0.65 | 0.648 | fail by 0.002 |
+| wide_small_face | wide | 0.55 | 0.576 | PASS |
+| profile_angled | portrait | 0.70 | 0.569 | fail |
+| low_light_motion | action | 0.60 | 0.562 | fail |
+
+Three of six pass rather than two, and the wide shot — the case that looked
+worst on a raw score — comfortably clears the gate written for it. The raw
+scores were never wrong; the verdicts were, because the instrument was set to
+one threshold for every shot type.
+
+4. **The character LoRA does not rescue the off-angle case, and the hypothesis
+   that it would is falsified.** `scripts/adr089_lora_arm_probe.py` ran three
+   arms — one reference, the trained adapter, and the same trigger-token prompt
+   with the adapter removed — all at 1024x1024, seed 0, four steps. The anchor
+   row reproduced the lab's published LoRA numbers (0.676 adapter, 0.513
+   control against 0.6759…/0.5125…), so the probe is calibrated.
+
+| case | gate | 1 ref | lora | control | lora − control | 1 ref |
+| --- | --- | --- | --- | --- | --- | --- |
+| anchor | 0.70 | 0.786 | 0.676 | 0.513 | **+0.163** | PASS |
+| medium_action | 0.65 | 0.661 | 0.569 | 0.495 | +0.073 | PASS |
+| profile_angled | 0.70 | 0.597 | 0.553 | 0.583 | **−0.030** | fail |
+| low_light_motion | 0.60 | 0.664 | 0.670 | 0.539 | +0.131 | PASS |
+
+One reference beats the adapter in three of four cases; the single "win" is
++0.006 and is noise. Decisively, the adapter's own contribution is itself
+POSE-DEPENDENT: +0.163 on the frontal anchor, +0.073 at medium, and −0.030 on
+the profile, where it actively hurts against its own control. The reasoning
+that motivated this probe — that a LoRA carries identity in weights and so has
+no frontal-only limitation — was wrong. It was trained on four largely frontal
+references and learned the same frontal bias, so it fails in exactly the place
+it was hoped to rescue.
+
+5. **Framing moves identity more than either conditioning choice.** The same
+   prompts and seed at 1:1 instead of 16:9, one reference throughout:
+   medium_action 0.648 → 0.661, profile_angled 0.569 → 0.597, and
+   low_light_motion 0.562 → **0.664**. A tighter frame is worth up to +0.102 —
+   several times the +/-0.04 the reference-count debate was fighting over. Part
+   of this is genuine (more face, more signal) and part is measurement (a
+   larger crop for the scorer); this run cannot separate them, but for practical
+   purposes both point the same way.
 
 Decision. Keep `DEFAULT_PER_CHARACTER_REFERENCES = 1`. It is the best available
 default: it wins the cases that pass, and on the cases that fail it loses by
@@ -4751,21 +4803,25 @@ that the wider reading was tested and did not hold.
 
 Consequences and open work, in priority order.
 
-- **The design the data actually supports is pose matching, not a count.** A
-  three-quarter shot should receive the three-quarter reference; a frontal shot
-  the canonical. That explains all six rows, where neither fixed arm explains
-  more than three. Not built.
-- **The character LoRA is untested off-angle and is the largest open lever.**
-  It scored 0.676 against one reference's 0.791 on the benchmark — but that is
-  the single condition where reference conditioning is strongest, and a LoRA
-  carries identity in weights rather than in a reference image, so it has no
-  frontal-only limitation by construction. If it holds near 0.65-0.70 where
-  reference conditioning sits at 0.56, the correct rule becomes "one reference
-  for frontal close-ups, LoRA elsewhere". Untested.
+- **Score against the shot type.** Any future identity gate must use
+  `get_threshold_for_shot`, not a fixed 0.70. Both harnesses here hardcoded
+  `shot_type="portrait"` and produced verdicts that were wrong for four of six
+  cases while the raw scores were right. Fix the harnesses before the next run.
+- **Pose matching is now the best-supported open design.** A three-quarter shot
+  should receive the three-quarter reference; a frontal shot the canonical.
+  `profile_angled` is the only case that fails at BOTH aspect ratios and under
+  every arm — one reference, three references, and the adapter alike — and it
+  is precisely the pose the frontal canonical cannot carry. Not built.
+- **Framing is a real and under-used lever.** Up to +0.102 from 1:1 versus 16:9
+  on the same prompt and seed. For an identity-critical shot, framing tighter
+  is currently worth more than any conditioning choice measured here.
 - `DISTILLED_STEPS = 4` is very low. Raising it requires re-pinning the
   workflow digest, so it is a change and not a knob. Untested.
 - PuLID remains the highest identity ever measured here at 0.8779 and remains
   unavailable: the published adapter is 4096-wide against Klein 4B's 3072.
+- The character LoRA is CLOSED as an off-angle remedy — see finding 4. It stays
+  available and demoted; it is not the answer for non-frontal shots and further
+  effort there should go to pose matching instead.
 
 Scope limits, stated so a later reader does not over-read this. One subject,
 one seed, one render per cell; the two real reversals are single measurements,
