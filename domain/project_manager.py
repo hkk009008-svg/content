@@ -22,7 +22,11 @@ from pydantic import ValidationError
 from cinema.auto_approve import AutoApproveConfig
 from domain.models import Project
 # Pure, no I/O and no provider imports — safe at module scope here.
-from domain.reference_set import synthesize_identity_refs
+from domain.reference_set import (
+    CREATION_KINDS,
+    infer_creation_kind,
+    synthesize_identity_refs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -751,6 +755,19 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
         if _synthesized:
             _character["identity_refs"] = _synthesized
             changed = True
+
+    # Read-time migration: record HOW each character came to exist. The two
+    # kinds obey opposite generation rules — a real person's off-angle panel
+    # must be generated from a photograph at that geometry or it is a stranger,
+    # while a described character's canonical DEFINES them and later panels are
+    # legitimate edits of it. Defaults to the stricter "real".
+    for _character in project["characters"]:
+        if not isinstance(_character, dict):
+            continue
+        if _character.get("creation_kind") in CREATION_KINDS:
+            continue
+        _character["creation_kind"] = infer_creation_kind(_character)
+        changed = True
 
     seen_shot_ids: set[str] = set()
     for scene_index, scene in enumerate(project["scenes"]):

@@ -60,6 +60,26 @@ ORIGIN_KINDS = ("photo", "derived", "invented", "unknown")
 # A human verdict, because off-angle references cannot be judged by score.
 JUDGEMENTS = ("keep", "reject", "unjudged")
 
+# How a character came to exist. The two kinds obey OPPOSITE correctness rules
+# for generation, which is why the distinction has to be recorded rather than
+# inferred at each call site.
+#
+# "real"      — a real person. Generation cannot invent a view the source does
+#               not contain: asked for a profile from a frontal photograph, the
+#               model produced a face the subject rejected, and it scored HIGHER
+#               than the panel that was him. Off-angle panels must be generated
+#               FROM a photograph at that geometry, or they are a stranger.
+# "described" — defined by text. There is no ground truth to violate: panel 1
+#               DEFINES the character and every later panel is an edit of it, so
+#               self-consistency is the only requirement and generating a
+#               profile from the canonical is legitimate.
+#
+# `domain/character_manager.py` states "Characters REQUIRE real uploaded photos
+# (no synthetic generation)" in its module docstring, but that was prose only —
+# the actual gate is `if canonical:`, an any-image test, and a description-only
+# character already creates and persists with no references at all.
+CREATION_KINDS = ("real", "described")
+
 # How the generator's flat panel names map onto the facets. These are the only
 # labels the pipeline has ever written (`_ANGLE_CONFIGS` plus the source-derived
 # panels), so migration can recover real facets for generated references while
@@ -109,6 +129,64 @@ def make_reference(
         "reason": reason if isinstance(reason, str) else "",
         "roles": sorted({r for r in (roles or ()) if isinstance(r, str) and r}),
     }
+
+
+def infer_creation_kind(character: Mapping[str, Any]) -> str:
+    """Best available reading of how an EXISTING character came to exist.
+
+    Migration only. New characters declare their kind at creation; this exists
+    because records predate the field.
+
+    Defaults to "real", deliberately. "real" carries the STRICTER generation
+    rule — off-angle panels must come from a photograph at that geometry — so a
+    wrong guess here refuses a legitimate generation rather than silently
+    admitting an invented face into a reference set. The failure that motivated
+    this whole model was an invented face nobody could detect by score.
+    """
+
+    for path in character.get("reference_images") or []:
+        if isinstance(path, str) and path:
+            return "real"
+    canonical = character.get("canonical_reference")
+    if isinstance(canonical, str) and canonical:
+        return "real"
+    # No image of any kind. Cannot be distinguished from a described character
+    # whose canonical was never generated, so take the stricter reading.
+    return "real"
+
+
+def classify_generated_origin(
+    creation_kind: str, *, requested_yaw: str, source_yaw: str
+) -> str:
+    """Decide whether a generated panel is `derived` or `invented`.
+
+    This is the rule the whole two-kind model exists for, and it would have
+    caught the failure that started it: a "profile" generated from a FRONTAL
+    photograph of a real person is a face the model had no information about.
+    The subject looked at that panel and said it was not him — while it scored
+    0.570, HIGHER than the panel that was him at 0.539. No automatic check
+    based on the image could have separated them; only its PROVENANCE can.
+
+    described: always "derived". Panel 1 defines the character, so there is no
+    ground truth for a later panel to contradict. Generating a profile from the
+    canonical is exactly how a described character acquires one.
+
+    real: "derived" only when the source already carries the geometry being
+    asked for. Changing light or expression at a pose the source shows is an
+    edit of a real view. Changing the YAW is not — the side of a head is not
+    present in a frontal photograph and cannot be recovered from it.
+    """
+
+    if creation_kind == "described":
+        return "derived"
+    requested = _facet(requested_yaw, YAW_CLASSES)
+    source = _facet(source_yaw, YAW_CLASSES)
+    if requested == "unknown" or source == "unknown":
+        # Cannot establish provenance. Say so rather than assert either way —
+        # an unlabelled panel presented as "derived" is the exact laundering
+        # this field exists to prevent.
+        return "unknown"
+    return "derived" if requested == source else "invented"
 
 
 def facets_for_panel(panel_name: str) -> dict[str, str]:

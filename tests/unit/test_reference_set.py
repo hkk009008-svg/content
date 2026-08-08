@@ -296,3 +296,81 @@ def test_normalize_skips_a_character_with_no_references() -> None:
     project = _project_with({"id": "c1", "name": "Nobody"})
     normalize_project_schema(project)
     assert "identity_refs" not in project["characters"][0]
+
+
+# --- creation kinds and the provenance rule --------------------------------
+
+
+def test_the_panel_the_subject_rejected_classifies_as_invented() -> None:
+    """Provenance separates what no image-based check could.
+
+    `angle_profile` was generated from the subject's FRONTAL photograph. He
+    looked at it and said it was not him. It scored 0.570 — HIGHER than
+    `profile_outdoor` at 0.539, which IS him and was generated from his real
+    profile. Nothing about the pixels distinguishes them; only where they came
+    from does.
+    """
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "real", requested_yaw="profile", source_yaw="front"
+    ) == "invented"
+    assert classify_generated_origin(
+        "real", requested_yaw="profile", source_yaw="profile"
+    ) == "derived"
+
+
+def test_a_described_character_may_generate_any_view_from_its_canonical() -> None:
+    """Panel 1 DEFINES the character, so no later panel can contradict it."""
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "described", requested_yaw="profile", source_yaw="front"
+    ) == "derived"
+
+
+def test_changing_light_or_expression_at_a_known_pose_is_derived() -> None:
+    """`lighting_outdoor` scored 0.922 — the highest of any image available."""
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "real", requested_yaw="front", source_yaw="front"
+    ) == "derived"
+
+
+def test_unlabelled_provenance_is_unknown_not_assumed() -> None:
+    """An unlabelled panel presented as "derived" is the laundering this prevents."""
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "real", requested_yaw="profile", source_yaw="unknown"
+    ) == "unknown"
+    assert classify_generated_origin(
+        "real", requested_yaw="unknown", source_yaw="front"
+    ) == "unknown"
+
+
+def test_creation_kind_defaults_to_the_stricter_reading() -> None:
+    """A wrong guess must refuse a legitimate generation, never admit a stranger."""
+
+    from domain.reference_set import infer_creation_kind
+
+    assert infer_creation_kind({"reference_images": ["c/a.jpg"]}) == "real"
+    assert infer_creation_kind({"canonical_reference": "c/a.jpg"}) == "real"
+    assert infer_creation_kind({}) == "real"
+
+
+def test_normalize_records_creation_kind_and_is_idempotent() -> None:
+    from domain.project_manager import normalize_project_schema
+
+    project = _project_with({
+        "id": "c1", "canonical_reference": "c/canon.jpg",
+        "multi_angle_refs": ["c/canon.jpg"], "reference_images": ["c/canon.jpg"],
+    })
+    normalize_project_schema(project)
+    assert project["characters"][0]["creation_kind"] == "real"
+    assert normalize_project_schema(project) is False
