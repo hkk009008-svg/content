@@ -5406,3 +5406,60 @@ and does not need a face embedder: extract frame 0 of the generated clip and
 compare it to the approved keyframe. Before this change that comparison should
 be poor on any shot whose character has references; after it, close. Registered
 as H4 in `docs/EVIDENCE-REGISTER.md`.
+
+---
+
+## ADR-099 — fal VEO accepts three reference images, not four; the old slice was unreachable
+
+Date: 2026-08-09
+
+Status: Accepted. Corrects the cap introduced in ADR-098 and, with it, a defect
+that predates this session.
+
+MEASURED against the live `fal-ai/veo3.1/reference-to-video` endpoint, same
+prompt, same images, one variable:
+
+    4 images -> FAILS, 3 of 3 attempts, error `no_media_generated`
+    3 images -> succeeds
+    2 images -> succeeds
+    1 image  -> succeeds
+
+So the working ceiling is THREE. The `[:4]` slice this replaces was never
+reachable, and that has a consequence larger than the correction: **the original
+code was already broken for any character with four or more references.** It
+sliced `multi_angle_refs[:4]`, sent four images, received `no_media_generated`,
+and cascaded to another engine. On this project the character has ten, so VEO
+has been failing on every shot and the operator saw only that some other
+provider ran.
+
+Why it hid for so long. `no_media_generated` is a SOFT, model-side error, not a
+schema rejection. It reads like the model declining a prompt — "unsafe content,
+a prompt incompatible with the media type, references to missing attachments" —
+rather than like a request that cannot succeed. The cascade is designed to
+absorb exactly that class of failure and move on, which is correct behaviour for
+a flaky provider and precisely wrong for a request that is structurally
+impossible. A provider that always fails is indistinguishable, from inside the
+cascade, from a provider that is merely unlucky today.
+
+Decision. `_VEO_REFERENCE_CAP = 3`, with the measurement attached to the
+constant. With ADR-098's keyframe leading, a VEO shot now sends the approved
+keyframe plus two facial references.
+
+How it was found, which is the part worth keeping. It was not found by reading
+code — I read this branch carefully twice while writing ADR-098 and preserved
+`[:4]` both times, because the slice was in the code and I was only questioning
+what went INTO the four slots, never whether four was reachable. It was found by
+running H4 for real: the cell failed, and isolating the failure by image count
+against the live endpoint produced the table above.
+
+Consequence for the register. H4's `references_only` control arm was specified
+as four face images — the exact failing configuration — so the cell could never
+have completed regardless of how many harness bugs were fixed. The control now
+uses three, the largest count that runs.
+
+Consequence for ADR-089's reasoning, stated because it cuts the other way. That
+ADR argues reference budgets are non-monotonic and adding an image is not free.
+Here an image was not merely unhelpful, it was fatal, and no measurement in this
+repository would have predicted the cliff. Every other provider cap in the code
+(`[:6]` Kontext, `[:8]` Seedance, 8 for Gemini) is still an unverified figure of
+the same kind, and each deserves the same probe before it is trusted.

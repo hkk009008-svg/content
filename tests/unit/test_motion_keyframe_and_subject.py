@@ -166,3 +166,29 @@ def test_a_shot_with_a_character_still_gets_the_face_language(target_api) -> Non
     stub = _run(target_api, multi_angle_refs=["/refs/face.jpg"], character_id="char_1")
     prompt = _arguments(stub)["prompt"]
     assert "facial bone structure" in prompt
+
+
+def test_veo_never_sends_more_images_than_the_endpoint_accepts() -> None:
+    """MEASURED against the live endpoint 2026-08-09, one variable:
+
+        4 images -> FAILS, 3 of 3, `no_media_generated`
+        3 images -> succeeds
+        2 images -> succeeds
+        1 image  -> succeeds
+
+    The `[:4]` this pins replaced was never reachable, which means the ORIGINAL
+    code was already broken for any character with four or more references —
+    four images went out, the soft `no_media_generated` came back, and the
+    cascade quietly used another engine. On this project the character has ten.
+
+    A soft model-side error is why it hid: it reads like the model declining a
+    prompt rather than like a request that cannot succeed.
+    """
+
+    import phase_c_ffmpeg
+
+    assert phase_c_ffmpeg._VEO_REFERENCE_CAP == 3
+    stub = _run("VEO", multi_angle_refs=[f"/refs/face_{i}.jpg" for i in range(10)])
+    urls = _arguments(stub)["image_urls"]
+    assert len(urls) <= 3, f"VEO cannot accept {len(urls)} images"
+    assert urls[0] == "url://keyframe.png"

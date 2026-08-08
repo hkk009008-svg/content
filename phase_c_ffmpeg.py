@@ -35,13 +35,30 @@ if TYPE_CHECKING:
 # no active cooldown. Process restart also clears state (module-level reset).
 _VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0
 _VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset hourly
-_VEO_REFERENCE_CAP: int = 4
+_VEO_REFERENCE_CAP: int = 3
 """Images fal's veo3.1/reference-to-video receives, keyframe INCLUDED.
 
-Was a bare `[:4]` over the angle references with the approved keyframe outside
-that budget entirely — and, on any shot whose character had references, outside
-the request entirely. Named here so the keyframe and the faces are visibly
-drawing on ONE budget."""
+MEASURED against the live endpoint 2026-08-09, same prompt and images, one
+variable:
+
+    4 images -> FAILS, 3 of 3 attempts, `no_media_generated`
+    3 images -> succeeds
+    2 images -> succeeds
+    1 image  -> succeeds
+
+So the working ceiling is THREE, and the `[:4]` this replaces was never
+reachable. That is not a new regression — it means the ORIGINAL code was
+already broken for any character with four or more references: it sliced
+`multi_angle_refs[:4]`, sent four images, got `no_media_generated`, and
+cascaded to another engine. On this project the character has ten, so VEO was
+failing on every shot and the operator saw only that some other provider ran.
+
+The error is a soft `no_media_generated` rather than a schema rejection, which
+is why it never surfaced as a validation bug: it reads like the model declining
+a prompt, not like a request that cannot succeed.
+
+Named here so the keyframe and the faces visibly draw on ONE budget, and so
+this number has a measurement attached rather than a slice someone typed."""
 
 # GEMINI_OMNI gets its OWN cooldown pair — do NOT reuse Veo's. Gemini Developer
 # API Tier-1 bills a rolling $10/10min spend window (not Veo's hourly-reset

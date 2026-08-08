@@ -209,7 +209,12 @@ def _reconstructed_pre_fix_veo_call(fal_client, keyframe, refs, prompt, out_mp4)
     obvious what is being reconstructed and easy to check against the diff.
     """
 
-    image_urls = [fal_client.upload_file(ref) for ref in refs[:4] if os.path.exists(ref)]
+    # THREE, not four: the live endpoint fails at four images
+    # (phase_c_ffmpeg._VEO_REFERENCE_CAP). The old code's `[:4]` was
+    # unreachable, so a faithful control uses the largest count that
+    # actually runs — otherwise the control arm cannot produce a clip
+    # at all and the cell has nothing to compare.
+    image_urls = [fal_client.upload_file(ref) for ref in refs[:3] if os.path.exists(ref)]
     if not image_urls:
         # The one case the old code got right: with no references it did send
         # the keyframe. Reproduce that too, or the control would be an empty call.
