@@ -113,6 +113,7 @@ from paid_provider import PaidCallBudgetBlocked, PaidCallDeferred, PaidCallUnbil
 from performance._net import validate_video_artifact
 from cinema.artifact_versions import ArtifactVersionError
 from domain.reference_set import (
+    CREATION_KINDS,
     coverage as reference_coverage,
     derive_legacy_fields,
     make_reference,
@@ -2197,7 +2198,9 @@ _CHARACTER_DESCRIPTION_MAX_CHARS = 10_000
 _CHARACTER_VOICE_ID_MAX_CHARS = 200
 
 
-def _character_form_metadata_or_error() -> tuple[tuple[str, str, str] | None, str | None]:
+def _character_form_metadata_or_error() -> (
+    tuple[tuple[str, str, str, str] | None, str | None]
+):
     values = (
         ("name", request.form.get("name", "Unnamed Character"), _CHARACTER_NAME_MAX_CHARS),
         ("description", request.form.get("description", ""), _CHARACTER_DESCRIPTION_MAX_CHARS),
@@ -2206,7 +2209,18 @@ def _character_form_metadata_or_error() -> tuple[tuple[str, str, str] | None, st
     for field, value, limit in values:
         if not isinstance(value, str) or len(value) > limit or "\x00" in value:
             return None, f"{field} must be at most {limit} characters and contain no NUL bytes"
-    return (values[0][1], values[1][1], values[2][1]), None
+    # Absent means `real`, which is what every caller before this field meant.
+    # An unrecognised value is REFUSED rather than coerced to the default: the
+    # kinds carry different consent and validation semantics, and silently
+    # downgrading a typo to `real` would apply the stricter-sounding label while
+    # skipping nothing, whereas silently upgrading would create a person under
+    # rules written for a character who depicts nobody.
+    creation_kind = request.form.get("creation_kind", "real")
+    if creation_kind not in CREATION_KINDS:
+        return None, f"creation_kind must be one of {sorted(CREATION_KINDS)}"
+    if creation_kind == "described" and not values[1][1].strip():
+        return None, "a described character needs a description to generate from"
+    return (values[0][1], values[1][1], values[2][1], creation_kind), None
 
 
 def _bounded_character_recovery_text(value, limit: int) -> str:
@@ -2389,6 +2403,7 @@ def _character_recovery_input_fingerprint(
     description: str,
     voice_id: str,
     upload_records: list[dict],
+    creation_kind: str = "real",
 ) -> str:
     safe_uploads = [
         {
@@ -2398,13 +2413,22 @@ def _character_recovery_input_fingerprint(
         }
         for item in upload_records
     ]
+    payload = {
+        "name": name,
+        "description": description,
+        "voice_id": voice_id,
+        "uploads": safe_uploads,
+    }
+    # Keyed only when it is not the default, so a request staged before this
+    # field existed keeps its exact fingerprint and still resumes. Once a kind
+    # IS declared it binds: resuming a `described` request as `real` (or the
+    # reverse) fails the fingerprint check and returns
+    # character_creation_input_mismatch instead of quietly creating the other
+    # kind of character against a paid attempt reserved for the first.
+    if creation_kind != "real":
+        payload["creation_kind"] = creation_kind
     encoded = json.dumps(
-        {
-            "name": name,
-            "description": description,
-            "voice_id": voice_id,
-            "uploads": safe_uploads,
-        },
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -2614,7 +2638,7 @@ def _validated_character_resume_inputs(
     creation_request_id: str,
     pending: dict,
     images: list,
-) -> tuple[tuple[str, str, str, list[str]] | None, str | None]:
+) -> tuple[tuple[str, str, str, list[str], str] | None, str | None]:
     internal = _load_character_recovery_sidecar(pid, creation_request_id)
     if internal is None:
         return None, "missing"
@@ -2622,12 +2646,17 @@ def _validated_character_resume_inputs(
     description = internal.get("description")
     voice_id = internal.get("voice_id")
     upload_records = internal.get("uploads")
+    # Absent on a sidecar staged before the field existed, which is exactly the
+    # `real` flow it was written for.
+    creation_kind = internal.get("creation_kind", "real")
     if not all(isinstance(value, str) for value in (name, description, voice_id)):
+        return None, "corrupt"
+    if creation_kind not in CREATION_KINDS:
         return None, "corrupt"
     if not isinstance(upload_records, list):
         return None, "corrupt"
     fingerprint = _character_recovery_input_fingerprint(
-        name, description, voice_id, upload_records
+        name, description, voice_id, upload_records, creation_kind
     )
     if (
         internal.get("input_fingerprint") != fingerprint
@@ -2638,6 +2667,7 @@ def _validated_character_resume_inputs(
         ("name", name),
         ("description", description),
         ("voice_id", voice_id),
+        ("creation_kind", creation_kind),
     ):
         if key in request.form and request.form.get(key) != stored:
             return None, "metadata_mismatch"
@@ -2648,7 +2678,7 @@ def _validated_character_resume_inputs(
     )
     if image_paths is None:
         return None, "corrupt"
-    return (name, description, voice_id, image_paths), None
+    return (name, description, voice_id, image_paths, creation_kind), None
 
 
 def _pending_character_conflict_response(pending, *, malformed: bool = False):
@@ -2759,6 +2789,57 @@ def api_reconcile_pending_character_creation(pid):
     finally:
         _release_project_admin(pid)
 
+@app.route("/api/projects/<pid>/characters/creation-estimate", methods=["GET"])
+def api_character_creation_estimate(pid):
+    """What creating a character will cost, per kind, before the click.
+
+    DERIVED, not typed. The figures come from the same `API_COST_USD` table and
+    the same `_ANGLE_CONFIGS` tuple that the durable ledger reserves against, so
+    a price change or a sixth angle panel moves this number without anyone
+    remembering to. A constant copied into the browser would have been correct
+    on the day it was written and silently wrong afterwards — and wrong in the
+    direction that matters, since the user authorises the spend from what this
+    says.
+
+    Both kinds are reported whether or not the caller has chosen one, so the
+    page can show the difference rather than only the consequence of a choice
+    already made.
+    """
+
+    from cost_tracker import API_COST_USD
+    from domain.character_manager import _ANGLE_CONFIGS
+
+    angle_count = len(_ANGLE_CONFIGS)
+    angle_unit = API_COST_USD["FLUX_KONTEXT"]
+    canonical_unit = API_COST_USD["FLUX_PRO"]
+    angles = {
+        "engine": "FLUX_KONTEXT",
+        "calls": angle_count,
+        "unit_usd": angle_unit,
+        "what": f"{angle_count} angle and expression panels, edited from the canonical",
+    }
+    return jsonify({
+        "real": {
+            "usd": round(angle_count * angle_unit, 4),
+            "line_items": [angles],
+            "note": "The canonical is one of your uploads, so nothing is paid for it.",
+        },
+        "described": {
+            "usd": round(canonical_unit + angle_count * angle_unit, 4),
+            "line_items": [
+                {
+                    "engine": "FLUX_PRO",
+                    "calls": 1,
+                    "unit_usd": canonical_unit,
+                    "what": "the canonical, generated from your description",
+                },
+                angles,
+            ],
+            "note": "The canonical must be generated first; it defines the character.",
+        },
+    })
+
+
 @app.route("/api/projects/<pid>/characters", methods=["POST"])
 @_project_lock_guard
 def api_add_character(pid):
@@ -2833,7 +2914,7 @@ def api_add_character(pid):
                     "retryable": False,
                     "pending_creation": _public_pending_character_creation(pending),
                 }), 409
-            name, description, voice_id, image_paths = resume_inputs
+            name, description, voice_id, image_paths, creation_kind = resume_inputs
         else:
             metadata, metadata_error = _character_form_metadata_or_error()
             if metadata is None:
@@ -2842,12 +2923,12 @@ def api_add_character(pid):
                     "code": "invalid_character_metadata",
                     "retryable": False,
                 }), 400
-            name, description, voice_id = metadata
+            name, description, voice_id, creation_kind = metadata
             image_paths, upload_records = _stage_character_recovery_uploads(
                 pid, creation_request_id, images
             )
             input_fingerprint = _character_recovery_input_fingerprint(
-                name, description, voice_id, upload_records
+                name, description, voice_id, upload_records, creation_kind
             )
             candidate = _pending_character_payload(
                 creation_request_id,
@@ -2884,6 +2965,7 @@ def api_add_character(pid):
                             "name": name,
                             "description": description,
                             "voice_id": voice_id,
+                            "creation_kind": creation_kind,
                             "uploads": upload_records,
                             "input_fingerprint": input_fingerprint,
                         },
@@ -2920,7 +3002,7 @@ def api_add_character(pid):
                         "retryable": True,
                         "pending_creation": _public_pending_character_creation(pending),
                     }), 409
-                name, description, voice_id, image_paths = resume_inputs
+                name, description, voice_id, image_paths, creation_kind = resume_inputs
 
         # The request-specific file lock extends the in-process admin guard to
         # multiple server workers. A crashed worker releases it automatically;
@@ -2959,6 +3041,7 @@ def api_add_character(pid):
                 commit_timeout=HTTP_PROJECT_TIMEOUT,
                 cost_tracker=core.cost_tracker,
                 creation_request_id=creation_request_id,
+                creation_kind=creation_kind,
                 _recovery_out=recovery,
             )
         except PaidCallBudgetBlocked as exc:

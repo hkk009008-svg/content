@@ -5194,3 +5194,79 @@ broke 19 unrelated `ReviewStage` tests in one step, because a convenience link
 became a hard dependency on `<PageProvider>`. Fixed with `usePageOptional`,
 which returns null outside a provider so the affordance hides; the strict hook
 is unchanged and still throws for pages, with a control test pinning both halves.
+
+---
+
+## ADR-096 — A character who depicts nobody can now be created, and costs more
+
+Date: 2026-08-08
+
+Status: Accepted. Completes Phase 5 and makes ADR's 3.1/3.2 groundwork
+reachable.
+
+Context. Two halves existed and neither connected to the other:
+
+    $ grep -rn --include='*.py' "creation_kind" . | grep -v /.venv/ | grep -v ^./tests/
+    web_identity_experiments.py:436,442      # reads it for a consent check
+    domain/reference_set.py:140,165,186,...  # defines and infers it
+    domain/project_manager.py:767-769        # read-time migration writes it
+
+    $ grep -rn --include='*.py' "generate_canonical_from_description" . | grep -v /.venv/
+    domain/character_manager.py:771          # the definition
+    tests/unit/test_described_character_canonical.py:35,56,66
+
+So `creation_kind` was only ever INFERRED — always "real" — and the text-to-
+image generator had zero non-test callers. A described character was
+unreachable from the browser: nothing let a user declare the kind, and nothing
+called the generator.
+
+Decision. `creation_kind` is declared at creation and threaded through the
+durable paid-work state machine to the domain call. The two kinds are mutually
+exclusive at the domain boundary:
+
+- `described` REFUSES uploads. If photographs of the subject exist, the
+  character is real. A kind that accepted both would let a real person be
+  created under semantics written precisely for a character who depicts nobody
+  — including ADR-3.3's consent rule, which permits a described sheet to train
+  a LoRA because there is no one to consent.
+- `described` REFUSES an empty description. There is nothing to generate panel 1
+  from and no photograph to fall back on; creating anyway persists a subject
+  with no references at all, which is exactly what used to happen.
+- An unrecognised kind normalises to `real`, the stricter of the two — uploads
+  required, no canonical ever generated from text. Defaulting the other way
+  would create a real person under the looser rules. The HTTP route refuses
+  unknown values outright; `_normalise_creation_kind` protects direct callers.
+
+Fingerprints. The kind is keyed into both `_character_creation_fingerprint` and
+`_character_recovery_input_fingerprint` ONLY when it is not `real`. Every
+request staged before this field existed was a real one, and keying it
+unconditionally would change those fingerprints mid-resume —
+`_assert_matching_creation` reads a changed fingerprint as "different character
+inputs" and refuses, turning a recoverable interrupted creation into one an
+operator must reconcile by hand. Once a kind is declared it binds: resuming a
+described request as real, or the reverse, now fails with
+`character_creation_input_mismatch` instead of quietly creating the wrong kind
+of character against a paid attempt reserved for the other.
+
+Cost before the click, DERIVED. `GET /characters/creation-estimate` computes
+both figures from the same `API_COST_USD` table and `_ANGLE_CONFIGS` tuple the
+durable ledger reserves against:
+
+    real       5 x $0.08 (FLUX_KONTEXT angle panels)              = $0.40
+    described  $0.05 (FLUX_PRO canonical) + 5 x $0.08             = $0.45
+
+A constant typed into the browser would have been correct the day it was
+written and silently wrong afterwards — wrong in the direction that matters,
+since the user authorises the spend from what it says. A sixth angle panel or a
+price change moves this number without anyone remembering to.
+
+The UI asks the kind FIRST, before it asks for photographs. Asking for
+photographs and only then whether the person exists invites uploading someone's
+face and then declaring that nobody is depicted. Each branch carries the
+measurement that justifies it: the real branch warns that a profile asked of a
+frontal photograph is a stranger, not a turned version of this person; the
+described branch explains that self-consistency is the only fidelity available
+when there is no one to resemble.
+
+Three end-to-end pins were confirmed to FAIL under reversion of either half of
+the wiring (the domain kwarg, and the fingerprint key).

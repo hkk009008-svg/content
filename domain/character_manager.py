@@ -44,6 +44,7 @@ from paid_provider import (
     run_durable_fal_job,
 )
 from performance._net import safe_download, validate_image_artifact
+from domain.reference_set import CREATION_KINDS
 from domain.project_manager import (
     MutationResult,
     add_character,
@@ -261,6 +262,22 @@ def _normalise_creation_request_id(value: object) -> str:
     return value
 
 
+def _normalise_creation_kind(value: object) -> str:
+    """Coerce an unrecognised kind to `real`, the stricter of the two.
+
+    `real` requires uploads with a face and never generates a canonical from
+    text, so a malformed value defaulting there can only ever be more careful
+    than intended. Defaulting the other way would create a real person under
+    rules written for a character who depicts nobody.
+
+    Lives here so the invariant holds wherever the fingerprint is computed, not
+    only on the path that happens to normalise first. The HTTP route refuses
+    unknown values outright; this is what protects the direct callers.
+    """
+
+    return value if value in CREATION_KINDS else "real"
+
+
 def _character_creation_fingerprint(
     *,
     name: str,
@@ -268,21 +285,31 @@ def _character_creation_fingerprint(
     voice_id: str,
     gender: str,
     reference_image_paths: Optional[List[str]],
+    creation_kind: str = "real",
 ) -> str:
+    creation_kind = _normalise_creation_kind(creation_kind)
     references = []
     for source in reference_image_paths or []:
         if os.path.exists(source):
             references.append(file_fingerprint(source))
-    return request_fingerprint(
-        "character-creation-v1",
-        {
-            "name": name,
-            "description": description,
-            "voice_id": voice_id,
-            "gender": gender,
-            "reference_files": references,
-        },
-    )
+    payload = {
+        "name": name,
+        "description": description,
+        "voice_id": voice_id,
+        "gender": gender,
+        "reference_files": references,
+    }
+    # Present ONLY when it is not the default. Every request in flight before
+    # this field existed was a `real` one, and adding a key unconditionally
+    # would change its fingerprint mid-resume — which `_assert_matching_creation`
+    # reads as "different character inputs" and refuses. Keeping the default
+    # payload byte-identical lets an interrupted upload-based creation still
+    # resume across this change, while a described request gets a distinct
+    # fingerprint and cannot be confused with an upload-based one carrying the
+    # same name and text.
+    if creation_kind != "real":
+        payload["creation_kind"] = creation_kind
+    return request_fingerprint("character-creation-v1", payload)
 
 
 def _character_id_for_request(creation_request_id: str) -> str:
@@ -505,19 +532,45 @@ def create_character_with_images(
     gender: str = "",
     cost_tracker=None,
     creation_request_id: str = "",
+    creation_kind: str = "real",
     _recovery_out: Optional[dict] = None,
 ) -> dict:
     """
-    Creates a character from REAL uploaded photos.
+    Creates a character, from photographs or from a description.
 
-    v2 flow:
-    1. Copy uploaded reference images into project directory
-    2. Validate face detectability (REQUIRED — reject if no face found)
-    3. Set the best face-detected upload as canonical reference
-    4. Generate multi-angle reference sheet (front, 45°, profile, back)
-    5. Assign voice (gender + language-aware), pre-compute embedding
-    6. Store all references for downstream Kling subject binding
+    `creation_kind` decides which, and the two are genuinely different jobs:
+
+    `real` (default) — the character is a person who exists. Photographs pose
+    them; generation only ever varies geometry that was PHOTOGRAPHED. Uploads
+    are required, and the flow is unchanged:
+      1. Copy uploaded reference images into project directory
+      2. Reject any upload containing two or more faces
+      3. Set the best face-detected upload as canonical reference
+      4. Generate the multi-angle sheet from that canonical
+      5. Assign voice, pre-compute embedding
+
+    `described` — nobody is being depicted. The first generated image DEFINES
+    the character, so it cannot be "wrong" about a face and self-consistency is
+    the only requirement. Step 3 has no uploads to choose from, so the canonical
+    is generated from the description instead; steps 4-5 then run UNCHANGED,
+    because the angle panels were always image-conditioned edits. The gap was
+    only ever panel 1.
+
+    Uploads with `described` are refused rather than merged. If photographs of
+    the subject exist, the character is `real` and the stricter rules apply; a
+    kind that accepted both would let a real person be created under the
+    semantics that exist precisely because no real person is involved.
     """
+    creation_kind = _normalise_creation_kind(creation_kind)
+    if creation_kind == "described":
+        if reference_image_paths:
+            raise ValueError(
+                "a described character is created from text, not uploads — "
+                "create it as a real character if photographs exist"
+            )
+        if not (description or "").strip():
+            raise ValueError("a described character needs a description")
+
     pid = project["id"]
     request_id = _normalise_creation_request_id(creation_request_id)
     creation_fingerprint = (
@@ -527,6 +580,7 @@ def create_character_with_images(
             voice_id=voice_id,
             gender=gender,
             reference_image_paths=reference_image_paths,
+            creation_kind=creation_kind,
         )
         if request_id
         else ""
@@ -595,6 +649,24 @@ def create_character_with_images(
 
     # 2. Find canonical (best face) from uploaded images — NO synthetic fallback
     canonical = _find_canonical_from_uploads(character, char_path)
+
+    # 2b. A described character has no uploads to choose from, so panel 1 is
+    #     generated from the text. This is the one generation in the pipeline
+    #     with no image source, and it is only legitimate here: for a described
+    #     character the result is not a likeness of anyone, it IS the character.
+    #     Asking the same generator for a REAL person would produce exactly what
+    #     classify_generated_origin calls "invented" — a plausible stranger.
+    if not canonical and creation_kind == "described":
+        canonical = generate_canonical_from_description(
+            description,
+            char_path,
+            cost_tracker=cost_tracker,
+            video_id=pid,
+            character_id=cid,
+        )
+        character["reference_images"] = []
+
+    character["creation_kind"] = creation_kind
     character["canonical_reference"] = canonical or ""
 
     if not canonical:

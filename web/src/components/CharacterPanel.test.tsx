@@ -522,3 +522,122 @@ describe('CharacterPanel accessibility', () => {
     await expectNoAxeViolations(container)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Describe-first creation. `creation_kind` was written ONLY by read-time
+// migration and always inferred as "real", and
+// `generate_canonical_from_description` had zero non-test callers — so a
+// character who depicts nobody was unreachable from the browser.
+//
+// The two kinds are not presentation variants. A `real` character is a person
+// who exists: photographs pose them, and generation only ever varies geometry
+// that was PHOTOGRAPHED. A `described` character depicts nobody, so panel 1
+// DEFINES them and there is no likeness to be wrong about.
+// ---------------------------------------------------------------------------
+describe('CharacterPanel describe-first creation', () => {
+  const ESTIMATE = {
+    real: { usd: 0.4, note: 'The canonical is one of your uploads.' },
+    described: { usd: 0.45, note: 'The canonical must be generated first.' },
+  }
+
+  function openAddForm(fetchMock = vi.fn(async () => response(ESTIMATE))) {
+    vi.stubGlobal('fetch', fetchMock)
+    const project = makeProject()
+    project.characters = []
+    render(<CharacterPanel project={project} config={null} onRefresh={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add Character' }))
+    return fetchMock
+  }
+
+  it('asks where the character comes from BEFORE asking for photographs', () => {
+    // Order is the point. Asking for photographs first and then whether the
+    // person exists invites uploading someone's face and then declaring that
+    // nobody is depicted.
+    openAddForm()
+    const form = screen.getByText('Where does this character come from?').closest('fieldset')
+    expect(form).not.toBeNull()
+    expect(screen.getByRole('radio', { name: /A real person/i })).toBeTruthy()
+    expect(screen.getByRole('radio', { name: /Described only/i })).toBeTruthy()
+  })
+
+  it('defaults to the stricter kind', () => {
+    openAddForm()
+    expect((screen.getByRole('radio', { name: /A real person/i }) as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('replaces the photo upload with the description for a described character', async () => {
+    openAddForm()
+    expect(screen.getByLabelText(/Reference photos/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Described only/i }))
+
+    // No upload field: a described character created from someone's photograph
+    // would be a real person under rules written for a character who is nobody.
+    expect(screen.queryByLabelText(/Reference photos/i)).toBeNull()
+    expect(screen.getByText(/every angle after it is an edit of that image/i)).toBeTruthy()
+  })
+
+  it('warns a real-person creator that an unphotographed angle is invented', () => {
+    openAddForm()
+    expect(screen.getByText(/has no information about the side of the head and invents one/i)).toBeTruthy()
+  })
+
+  it('prices the click from the server, per kind, on the button itself', async () => {
+    openAddForm()
+    // Twice on purpose: once as a sentence saying what is bought, once on the
+    // button, so the number is present wherever the eye lands before clicking.
+    // Both must move together — a stale one is worse than none.
+    await waitFor(() => expect(screen.getAllByText(/\$0\.40/)).toHaveLength(2))
+    expect(
+      screen.getByRole('button', { name: /Add Character . \$0\.40/ }),
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('radio', { name: /Described only/i }))
+    // Described pays for the canonical an upload gives away free.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Add Character . \$0\.45/ })).toBeTruthy(),
+    )
+    expect(screen.queryByText(/\$0\.40/)).toBeNull()
+  })
+
+  it('will not submit a described character with no description', async () => {
+    openAddForm()
+    fireEvent.change(screen.getByPlaceholderText('Character name'), {
+      target: { value: 'Nemo' },
+    })
+    fireEvent.click(screen.getByRole('radio', { name: /Described only/i }))
+    const submit = screen.getByRole('button', { name: /Add Character/i })
+    expect((submit as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(screen.getByPlaceholderText(/Physical description/i), {
+      target: { value: 'a tall figure in a grey coat' },
+    })
+    expect((submit as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('sends the declared kind with the creation request', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? response({ id: 'char_new' }, true, 201)
+        : response(ESTIMATE),
+    )
+    openAddForm(fetchMock as never)
+
+    fireEvent.change(screen.getByPlaceholderText('Character name'), {
+      target: { value: 'Nemo' },
+    })
+    fireEvent.click(screen.getByRole('radio', { name: /Described only/i }))
+    fireEvent.change(screen.getByPlaceholderText(/Physical description/i), {
+      target: { value: 'a tall figure in a grey coat' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Add Character/i }))
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(call => call[1]?.method === 'POST')
+      expect(post).toBeTruthy()
+      const body = post![1]!.body as FormData
+      expect(body.get('creation_kind')).toBe('described')
+      expect(body.get('description')).toBe('a tall figure in a grey coat')
+    })
+  })
+})

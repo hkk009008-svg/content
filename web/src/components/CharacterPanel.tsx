@@ -69,6 +69,32 @@ async function loadPendingCharacterCreation(projectId: string): Promise<PendingC
   return parsePendingCreationEnvelope(result.data)
 }
 
+/** What one creation will cost, per kind, as the SERVER derives it.
+ *
+ *  Fetched rather than hardcoded. The figures come from the same
+ *  `API_COST_USD` table and `_ANGLE_CONFIGS` tuple the durable ledger reserves
+ *  against, so a price change or a sixth angle panel moves this without anyone
+ *  remembering to. A number typed here would be right the day it was written
+ *  and silently wrong after — wrong in the direction that matters, since the
+ *  user authorises the spend from what it says. */
+interface CreationEstimate {
+  real: { usd: number; note: string }
+  described: { usd: number; note: string }
+}
+
+function parseCreationEstimate(value: unknown): CreationEstimate | null {
+  if (!isRecord(value)) return null
+  const kinds = ['real', 'described'] as const
+  for (const kind of kinds) {
+    const entry = value[kind]
+    if (!isRecord(entry) || typeof entry.usd !== 'number' || !Number.isFinite(entry.usd)) {
+      return null
+    }
+    if (typeof entry.note !== 'string') return null
+  }
+  return value as unknown as CreationEstimate
+}
+
 function newCreationRequestId(): string {
   const bytes = new Uint8Array(16)
   globalThis.crypto.getRandomValues(bytes)
@@ -81,6 +107,13 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', description: '', voice_id: '' })
   const [files, setFiles] = useState<FileList | null>(null)
+  /** `real` — this person exists; photographs pose them, and generation only
+   *  ever varies geometry that was PHOTOGRAPHED. `described` — nobody is
+   *  depicted, so the first generated image DEFINES the character and cannot be
+   *  wrong about a face. Not presentation variants: they carry different
+   *  consent, different validation, and different money. */
+  const [creationKind, setCreationKind] = useState<'real' | 'described'>('real')
+  const [estimate, setEstimate] = useState<CreationEstimate | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const creationRequestId = useRef<string | null>(null)
@@ -118,6 +151,22 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
     return () => { cancelled = true }
   }, [project.id, embeddedPendingKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Fetched when the form opens, not on mount: it is only ever read to price a
+  // click that only exists there, and a failure here must never block creation
+  // — the price simply goes unstated rather than being guessed.
+  useEffect(() => {
+    if (!adding || estimate) return
+    let cancelled = false
+    void apiRequest<unknown>(
+      `${API}/projects/${project.id}/characters/creation-estimate`,
+    ).then((result) => {
+      if (cancelled || !result.ok) return
+      const parsed = parseCreationEstimate(result.data)
+      if (parsed) setEstimate(parsed)
+    })
+    return () => { cancelled = true }
+  }, [adding, estimate, project.id])
+
   const refreshPendingCreation = async (): Promise<PendingCreationLoad> => {
     const loaded = await loadPendingCharacterCreation(project.id)
     setPendingCreationLoad(loaded)
@@ -153,6 +202,10 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
     fd.append('description', form.description)
     fd.append('voice_id', form.voice_id)
     if (durableCreationRequestId) {
+      // Only on CREATE. The edit route has no kind to declare, and the server
+      // binds the kind into the resume fingerprint — sending it on an edit
+      // would be a field the route neither reads nor validates.
+      fd.append('creation_kind', creationKind)
       fd.append('creation_request_id', durableCreationRequestId)
     }
     if (images) {
@@ -503,6 +556,49 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
           {/* Add Character Form */}
           {pendingCreationLoad.kind === 'ready' && pendingCreationLoad.pending === null && (adding ? (
             <div className="bg-app border border-acc/30 rounded-lg p-3 space-y-2">
+              {/* The kind comes FIRST, because it changes what the rest of the
+                  form means. Asking for photographs and then asking whether the
+                  person exists would invite uploading someone's face and then
+                  declaring nobody is depicted. */}
+              <fieldset>
+                <legend className="text-xs text-mut mb-1">Where does this character come from?</legend>
+                <div className="flex gap-2">
+                  {([
+                    {
+                      kind: 'real' as const,
+                      label: 'A real person',
+                      blurb: 'Photographs pose them. Generation only varies angles you actually photographed.',
+                    },
+                    {
+                      kind: 'described' as const,
+                      label: 'Described only',
+                      blurb: 'Nobody is depicted. The first generated image defines them, so it cannot be a wrong likeness.',
+                    },
+                  ]).map(option => (
+                    <label
+                      key={option.kind}
+                      className={[
+                        'flex-1 cursor-pointer rounded border p-2 text-xs',
+                        creationKind === option.kind
+                          ? 'border-acc bg-panel text-tx'
+                          : 'border-line text-mut hover:text-tx',
+                      ].join(' ')}
+                    >
+                      <input
+                        type="radio"
+                        name="creation-kind"
+                        value={option.kind}
+                        checked={creationKind === option.kind}
+                        onChange={() => setCreationKind(option.kind)}
+                        className="sr-only"
+                      />
+                      <span className="block font-medium">{option.label}</span>
+                      <span className="mt-0.5 block leading-snug">{option.blurb}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
               <label htmlFor="new-character-name" className="text-xs text-mut block">
                 Character name
               </label>
@@ -513,24 +609,43 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                 className="w-full bg-panel border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc"
               />
               <label htmlFor="new-character-description" className="text-xs text-mut block">
-                Character description
+                {creationKind === 'described'
+                  ? 'Describe them — this generates the image that defines them'
+                  : 'Character description'}
               </label>
               <textarea
                 id="new-character-description"
                 placeholder="Physical description (hair, build, clothing, age...)"
                 value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                rows={3}
+                rows={creationKind === 'described' ? 5 : 3}
                 className="w-full bg-panel border border-line rounded px-3 py-2 text-sm text-tx placeholder:text-mut focus:outline-none focus:border-acc resize-none"
               />
-              <div>
-                <label htmlFor="new-character-references" className="text-xs text-mut block mb-1">Reference photos (face visible)</label>
-                <input
-                  id="new-character-references"
-                  type="file" accept="image/*" multiple
-                  onChange={e => setFiles(e.target.files)}
-                  className="w-full text-xs text-mut file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-panel file:text-tx file:text-xs file:cursor-pointer"
-                />
-              </div>
+              {creationKind === 'described' ? (
+                <p className="text-xs leading-relaxed text-mut">
+                  No photographs. The description generates one canonical image,
+                  and every angle after it is an edit of that image — so the
+                  character stays consistent with itself, which is the only
+                  fidelity that means anything when there is no one to resemble.
+                  If you have photographs of a real person, choose{' '}
+                  <span className="text-tx">A real person</span> instead: asking
+                  a generator for a face it was never shown produces a stranger.
+                </p>
+              ) : (
+                <div>
+                  <label htmlFor="new-character-references" className="text-xs text-mut block mb-1">Reference photos (face visible)</label>
+                  <input
+                    id="new-character-references"
+                    type="file" accept="image/*" multiple
+                    onChange={e => setFiles(e.target.files)}
+                    className="w-full text-xs text-mut file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-panel file:text-tx file:text-xs file:cursor-pointer"
+                  />
+                  <p className="mt-1 text-xs leading-relaxed text-mut">
+                    Photograph every angle you can. A profile asked of a frontal
+                    photograph is not a turned version of this person — the model
+                    has no information about the side of the head and invents one.
+                  </p>
+                </div>
+              )}
               {config && (
                 <div>
                   <label htmlFor="new-character-voice" className="text-xs text-mut block mb-1">Voice</label>
@@ -554,13 +669,35 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                   </select>
                 </div>
               )}
+              {/* Price BEFORE the click, from the server's own constants.
+                  Creation is paid work reserved through the durable ledger, so
+                  the number the user authorises has to be the number the
+                  ledger will reserve. */}
+              {estimate && (
+                <p className="rounded border border-line bg-panel px-2 py-1.5 text-xs text-mut">
+                  This will spend{' '}
+                  <span className="text-tx">
+                    ${estimate[creationKind].usd.toFixed(2)}
+                  </span>
+                  . {estimate[creationKind].note}
+                </p>
+              )}
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={handleAdd} disabled={submitting || !form.name.trim()}
+                  onClick={handleAdd}
+                  disabled={
+                    submitting
+                    || !form.name.trim()
+                    || (creationKind === 'described' && !form.description.trim())
+                  }
                   className="flex-1 bg-acc hover:bg-acc disabled:opacity-40 py-2 rounded text-white text-sm font-medium"
                 >
-                  {submitting ? 'Creating...' : 'Add Character'}
+                  {submitting
+                    ? 'Creating...'
+                    : estimate
+                      ? `Add Character — $${estimate[creationKind].usd.toFixed(2)}`
+                      : 'Add Character'}
                 </button>
                 <button type="button" onClick={() => { creationRequestId.current = null; setAdding(false) }} className="px-4 py-2 text-mut text-sm hover:text-tx">
                   Cancel

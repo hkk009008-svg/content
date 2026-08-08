@@ -101,3 +101,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-093 | A product fills only the reference slots no face was using |
 | ADR-094 | Location plates reach a generator; the continuity anchor still does not |
 | ADR-095 | The Reference Sheet shows provenance and delivery, never a score |
+| ADR-096 | A character who depicts nobody can now be created, and costs more |
