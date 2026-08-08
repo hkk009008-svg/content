@@ -99,10 +99,10 @@ def _endpoints():
             # The path the shipped code uses (phase_c_ffmpeg.py:2541). My first
             # probe prefixed "fal-ai/" and got a 404 — reading the
             # endpoint out of the code beats reconstructing it.
-            "endpoint": "bytedance/seedance-2.0/reference-to-video",
+            "endpoint": "bytedance/seedance-2.5/reference-to-video",
             "engine": "SEEDANCE",
             "unit_usd": API_COST_USD["SEEDANCE"],
-            "code_sends": 9,          # keyframe + [:8]
+            "code_sends": 9,          # keyframe + [:8]; 2.5 since ADR-102
             "counts": [9, 5, 3, 2],
             "build": lambda urls: {
                 # Mirrors phase_c_ffmpeg.py:2528-2542 exactly. duration is an

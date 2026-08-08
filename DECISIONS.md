@@ -5585,3 +5585,69 @@ reported success: Kontext rejecting >4 images, the cascade absorbing that into a
 unconditioned text-to-image fallback, and Gemini dropping every real photograph
 of the subject. None was visible from the code. All three were found by issuing
 real requests and reading what came back.
+
+---
+
+## ADR-102 — Seedance moves to 2.5; two native engines are excluded on no evidence
+
+Date: 2026-08-09
+
+Status: Accepted for the Seedance upgrade. The cascade-ordering question is
+RAISED WITH EVIDENCE and left for the operator, not decided here.
+
+Operator directive: prefer a provider's own API; use fal only where it is the
+only option.
+
+SEEDANCE 2.0 -> 2.5, and it was never a version-hygiene question. Measured:
+
+    2.0, real-person references, counts 9 / 5 / 3 / 2 -> ALL REJECTED
+         content_policy_violation: "The images or videos provided may contain
+         likenesses of real people or other private information that cannot be
+         processed."
+    2.5, the IDENTICAL images                         -> ACCEPTED
+         reference-to-video AND image-to-video both
+    2.5 reference cap                                 -> 9 accepted, matching
+         the code's keyframe + [:8]
+
+A real person's likeness is this pipeline's premise, so on 2.0 this engine could
+only consume a cascade slot and fail — from SECOND position, at $1.51 a call,
+the most expensive engine present. Both 2.5 paths were confirmed to EXIST before
+the switch at zero cost: an empty `arguments` dict cannot generate, but the
+error still separates "path not found" from "field required". 3.0 does not exist.
+
+Note the cap: three provider caps have now been measured and only two were
+wrong. Seedance's [:8] was right. The lesson is to measure, not to assume the
+code is wrong either.
+
+A CORRECTION I OWE THE RECORD. I told the operator that GEMINI_OMNI and
+SORA_NATIVE are excluded from `DEFAULT_VIDEO_CASCADE` by a "deliberate
+product-support policy". THAT IS FALSE. The policy blocks
+{NOT_IMPLEMENTED, DISCONNECTED, KNOWN_BROKEN, UNSUPPORTED}. Both are `limited` —
+and so are VEO_NATIVE and RUNWAY_GEN4, which are IN the cascade, one of them
+first. There is no comment on the list, no ADR, and no rationale anywhere in the
+repository. A test pins their absence, which preserves the status quo without
+justifying it. I inferred a considered policy from a test's name containing the
+word "unsafe" and reported the inference as fact.
+
+MEASURED READINESS (`scripts/probe_native_engines.py`, free — nothing generated):
+
+    VEO_NATIVE    in cascade      google (Vertex)      REACHABLE
+    RUNWAY_GEN4   in cascade      runway               REACHABLE
+    GEMINI_OMNI   NOT in cascade  google_gemini_api    REACHABLE
+    SORA_NATIVE   NOT in cascade  openai               REACHABLE
+
+So two native engines with working credentials are unreachable by default while
+a fal proxy holds a slot — the inversion of the directive. Whether they belong
+in the cascade is a QUALITY decision, and no quality measurement exists for
+either; this ADR records that they are reachable and that their exclusion has no
+evidence behind it, and stops there.
+
+KLING IS THE EXCEPTION AND STAYS ON fal. `KLING_NATIVE` is catalogued as "Kling
+Native (legacy v1.6) — deprecated explicit-only kling-v1-6 JWT compatibility
+route; automatic Kling uses KLING_3_0". Preferring native there would downgrade
+two model generations, so fal genuinely is the only route to current Kling and
+the directive is already satisfied.
+
+STILL UNADDRESSED: the operator holds a direct ByteDance key and no client or
+config field exists for it, so Seedance remains fal-only. That is the one place
+the directive cannot currently be honoured at all.

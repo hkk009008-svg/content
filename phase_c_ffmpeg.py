@@ -83,6 +83,30 @@ PORTRAIT_CAPABLE = PORTRAIT_CAPABLE_VIDEO_ENGINES
 # otherwise under-record by 38% (money-gate review 2026-07-11).
 SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
 
+_SEEDANCE_REFERENCE_ENDPOINT = "bytedance/seedance-2.5/reference-to-video"
+_SEEDANCE_IMAGE_ENDPOINT = "bytedance/seedance-2.5/image-to-video"
+"""Seedance 2.5, not 2.0. MEASURED against the live endpoints 2026-08-09.
+
+2.0 REFUSES a real person's likeness, at EVERY reference count tried (9, 5, 3
+and 2), with the same reply each time::
+
+    content_policy_violation: "The images or videos provided may contain
+    likenesses of real people or other private information that cannot be
+    processed."
+
+That is this pipeline's entire premise, so on 2.0 this engine could only consume
+a cascade slot and fail — at $1.51 a call, the most expensive engine here, from
+the SECOND position in DEFAULT_VIDEO_CASCADE. 2.5 accepts the identical images
+on both reference-to-video and image-to-video.
+
+Both paths verified to EXIST before the switch, at zero generation cost: an
+empty `arguments` dict cannot generate anything, but the error still separates
+"path not found" from "field required". 3.0 does not exist.
+
+Kept as named constants because the version is now a measured decision rather
+than a string someone typed, and the next probe should be able to find it."""
+
+
 
 def _subject_preservation_clause(character_id: str, subject_ref: str = "") -> str:
     """What the motion prompt should ask to be held still.
@@ -2538,10 +2562,10 @@ def _execute_admitted_video_chain(
                     "generate_audio": False,
                 }
                 if ref_urls:
-                    endpoint = "bytedance/seedance-2.0/reference-to-video"
+                    endpoint = _SEEDANCE_REFERENCE_ENDPOINT
                     arguments["image_urls"] = [keyframe_url] + ref_urls  # keyframe first; ≤9 total
                 else:
-                    endpoint = "bytedance/seedance-2.0/image-to-video"
+                    endpoint = _SEEDANCE_IMAGE_ENDPOINT
                     arguments["image_url"] = keyframe_url
 
                 logger.info(

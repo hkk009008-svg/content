@@ -2,7 +2,7 @@
 
 The SEEDANCE branch moved from an inline requests.post to the hallucinated
 ``api.seedance.ai`` REST surface (with a hardcoded 16:9 aspect) onto fal.ai:
-``bytedance/seedance-2.0/image-to-video`` for keyframe animation and
+``bytedance/seedance-2.5/image-to-video`` for keyframe animation and
 ``.../reference-to-video`` when multi-angle identity refs exist. The old
 null-task_id guard (D1) died with the poll loop — fal_client.subscribe owns
 polling/timeouts now (bounded by FAL_TIMEOUT_VIDEO_S).
@@ -104,10 +104,11 @@ class TestSeedanceEndpointSelection:
     def test_no_refs_uses_image_to_video_with_singular_image_url(self):
         """Keyframe-only shot → i2v endpoint; payload must carry image_url
         (singular) and no image_urls."""
+        import phase_c_ffmpeg
         stub_fal, _ = _run_seedance(multi_angle_refs=None)
         assert stub_fal.subscribe.call_count == 1
         call = stub_fal.subscribe.call_args
-        assert call.args and call.args[0] == "bytedance/seedance-2.0/image-to-video", (
+        assert call.args and call.args[0] == phase_c_ffmpeg._SEEDANCE_IMAGE_ENDPOINT, (
             f"Wrong fal endpoint; got positional args: {call.args}"
         )
         arguments = call.kwargs.get("arguments", {})
@@ -118,9 +119,10 @@ class TestSeedanceEndpointSelection:
     def test_refs_use_reference_to_video_keyframe_first(self):
         """Multi-angle refs → r2v endpoint; image_urls has the keyframe FIRST
         then the refs, ≤9 total."""
+        import phase_c_ffmpeg
         stub_fal, _ = _run_seedance(multi_angle_refs=["/tmp/ref_a.png", "/tmp/ref_b.png"])
         call = stub_fal.subscribe.call_args
-        assert call.args and call.args[0] == "bytedance/seedance-2.0/reference-to-video", (
+        assert call.args and call.args[0] == phase_c_ffmpeg._SEEDANCE_REFERENCE_ENDPOINT, (
             f"Wrong fal endpoint; got positional args: {call.args}"
         )
         arguments = call.kwargs.get("arguments", {})
