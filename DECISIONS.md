@@ -5270,3 +5270,73 @@ when there is no one to resemble.
 
 Three end-to-end pins were confirmed to FAIL under reversion of either half of
 the wiring (the domain kwarg, and the fingerprint key).
+
+---
+
+## ADR-097 — The previous shot now travels with the next one, at the cost of one face slot
+
+Date: 2026-08-08
+
+Status: Accepted. Closes the finding recorded and deliberately not fixed in
+ADR-094.
+
+Context. `continuity_reference` is the approved keyframe of shot N-1 in the SAME
+scene (`_resolve_previous_approved_keyframe`), so it carries that scene's
+rendered lighting, colour temperature, palette, set dressing and wardrobe. It
+reached no hosted provider. Inside `phase_c_assembly.py` the name appeared
+exactly three times — the parameter, its docstring, and one
+`allocate_flux2_references` call whose result feeds only the local FLUX.2
+worker — and neither hosted route could accept it (runtime `inspect.signature`,
+not grep). The default backend is `gemini_multiref`, so for most users
+shot-to-shot continuity within a scene rode on the prompt and the seed alone:
+every shot after the first re-invented the room from prose.
+
+Decision, and the one place in this programme where a subject displaces another.
+
+**Single-character Kontext: the anchor takes the LAST slot of the budget.** A
+saturated face set gives up its sixth reference. Elsewhere the rule has been
+"fill only slots no face was using"; here it is not, and the reason is
+asymmetry rather than a measurement. Identity already has coverage-ordered
+references, a reference sheet, a scorer, a threshold table and a whole lab.
+Scene continuity had NO delivery on this route at all. Zero-to-one is a larger
+change than six-to-five. Position six is also the weakest face slot by
+construction: `order_for_coverage` spends the early slots on the canonical and
+one reference per unseen facet, so the tail is the least differentiated image in
+the set.
+
+**Multi-character Kontext: spare capacity only.** Fixed shares reach the ceiling
+at three characters (3+2+1 = 6), so a crowded shot carries no anchor rather than
+dropping a person.
+
+**Gemini: the tail of the reference list.** That provider truncates its combined
+budget from the front, so the anchor is the first thing dropped when a shot is
+crowded and a face is never dropped for it.
+
+**The prompt names it, on every route.** Kontext is an EDITING model: an
+unlabelled extra image is something it may try to reproduce, and the previous
+shot is the one image in the set that must NOT be reproduced, because adjacent
+shots differ in framing by definition. The block says both halves — match the
+lighting, palette, set dressing and wardrobe; do not copy the framing, camera
+angle, subject placement or pose — and it is placed after the identity
+constraints (a rendered frame must not outrank a reference photograph) and
+before the QUALITY tokens (where a model stops reading instructions).
+
+**Delivery is recorded, not assumed.** `ImageGenResult.continuity_delivered` and
+`take.metadata.continuity_delivered` say whether the anchor actually went. It
+can be dropped without failing the call — crowded shot, failed upload, or a
+text-to-image route that takes no references at all — and a scene that drifts is
+otherwise indistinguishable from one that was never told. `ContinuityDeliveryNote`
+surfaces only the negative case; success is silent, because a banner on every
+correct shot is the noise that hides the one meaningful banner.
+
+Also fixed in passing: the Gemini paid fingerprint hashed the bare prompt while
+the augmented prompt was what got sent. Two materially different requests would
+have fingerprinted identically and a resume could have restored the wrong one.
+
+UNMEASURED, and stated as such. Nothing here establishes that one scene anchor
+beats one more facial angle in a saturated set. The experiment that would settle
+it is the Identity Lab protocol run on a MULTI-SHOT scene rather than a single
+still: same character, same scene, shots 2-5, arms = {6 faces} vs {5 faces + the
+anchor}, judged on inter-shot appearance consistency rather than on GhostFaceNet
+— which per ADR-092 cannot rank off-angle results and has no opinion about rooms
+at all. Until that runs, this is a reasoned default, not a measured one.

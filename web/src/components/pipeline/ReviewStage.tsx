@@ -5,6 +5,7 @@ import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 import IterationPanel from './IterationPanel'
 import IdentityVerdictCard from './IdentityVerdictCard'
+import ContinuityDeliveryNote from './ContinuityDeliveryNote'
 import DrivingVideoUploadControl from './DrivingVideoUploadControl'
 import { usePageOptional } from '../../context/PageContext'
 import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
@@ -1296,6 +1297,18 @@ function ClipCard({
                 ))}
               </div>
             ) : null}
+
+            {(() => {
+              const activeTake = activeTakeId
+                ? findTake([...keyframeTakes, ...finalTakes], activeTakeId)
+                : null
+              return (
+                <ContinuityDeliveryNote
+                  continuityReference={activeTake?.metadata?.continuity_reference}
+                  delivered={activeTake?.metadata?.continuity_delivered}
+                />
+              )
+            })()}
 
             {/* What the identity gate established, and what it did not.
                 Replaces a card headed "Identity Remediation Advisory" that

@@ -75,7 +75,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 299,
+        "line": 300,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       },
       "transport_id": null,
@@ -1075,7 +1075,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 544,
+        "line": 545,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       },
       "transport_id": "frontend-transport:c84443ed93a0cc0d",
@@ -2044,7 +2044,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 298,
+        "line": 299,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       },
       "transport_id": null,
@@ -2095,7 +2095,7 @@
       "query_keys": [],
       "route_match": "unknown",
       "source": {
-        "line": 383,
+        "line": 384,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       },
       "transport_id": null,
@@ -2649,7 +2649,7 @@
       "query_keys": [],
       "route_match": "matched",
       "source": {
-        "line": 544,
+        "line": 545,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       },
       "url_expression": "`${API}/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shot.id)}/keyframes/recovery/resolve`",
@@ -4603,7 +4603,7 @@
       "owner": "canResumeDeferredProviderJob",
       "reason": "imported wrapper call",
       "source": {
-        "line": 383,
+        "line": 384,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       }
     },
@@ -4783,7 +4783,7 @@
       "owner": "usePageOptional",
       "reason": "imported wrapper call",
       "source": {
-        "line": 298,
+        "line": 299,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       }
     },
@@ -5011,7 +5011,7 @@
       "owner": "shotRequiresLipsync",
       "reason": "imported wrapper call",
       "source": {
-        "line": 299,
+        "line": 300,
         "path": "web/src/components/pipeline/ReviewStage.tsx"
       }
     },

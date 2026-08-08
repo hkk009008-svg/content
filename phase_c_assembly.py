@@ -43,11 +43,21 @@ class ImageGenResult(NamedTuple):
     valid. The caller (``cinema/shots/controller.py``) records each entry
     against cost_tracker with ``operation="image_generation_rejected"`` next
     to the winner-keyed ``keyframe_generation`` record.
+
+    ``continuity_delivered`` says whether the previous shot's approved keyframe
+    actually reached the provider. It can be dropped without failing the call —
+    a crowded multi-character shot fills the budget with faces, an upload can
+    fail, and the text-to-image routes take no references at all — so a
+    continuity regression must be traceable to "the anchor was not sent" rather
+    than guessed at from the picture. Defaults to ``False``, which keeps every
+    existing 2- and 3-positional construction valid and, more importantly, keeps
+    the honest reading for backends that never carried it.
     """
 
     path: str
     api_name: str
     billed_rejects: tuple = ()
+    continuity_delivered: bool = False
 
 
 def _download_generated_jpeg(url: str, output_filename: str):
@@ -396,9 +406,30 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             gemini_secondary_refs = [
                 sc.get("reference") for sc in (secondary_char_refs or []) if sc.get("reference")
             ]
+            # Gemini truncates its combined budget from the front, so the anchor
+            # rides at the TAIL of the secondary list: it is the first thing
+            # dropped when a crowded shot exceeds the budget, and a face is never
+            # dropped for it. The prompt names it, because Gemini's references
+            # carry no slot labels and an unexplained frame of the previous shot
+            # is an invitation to render the previous shot again.
+            gemini_continuity = (
+                continuity_reference
+                if continuity_reference and os.path.exists(continuity_reference)
+                else ""
+            )
+            gemini_prompt = prompt
+            if gemini_continuity:
+                gemini_secondary_refs = [*gemini_secondary_refs, gemini_continuity]
+                gemini_prompt = (
+                    f"{prompt}\n\nCONTINUITY: the FINAL reference image is the "
+                    "previous shot of this same scene. Match its lighting, colour "
+                    "temperature, palette, set dressing and wardrobe exactly. Do "
+                    "not copy its framing, camera angle or subject placement."
+                )
+
             def _generate_gemini_image():
                 return GeminiImageAPI().generate_image(
-                    prompt,
+                    gemini_prompt,
                     output_filename,
                     character_image=character_image,
                     multi_angle_refs=multi_angle_refs,
@@ -430,7 +461,11 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 )
                 stable_request = request_fingerprint(
                     "gemini-image",
-                    prompt,
+                    # The prompt ACTUALLY sent, which carries the continuity
+                    # block when an anchor is attached. Hashing the bare prompt
+                    # would give two materially different requests the same
+                    # fingerprint, and a resume would then restore the wrong one.
+                    gemini_prompt,
                     negative_prompt,
                     aspect_ratio,
                     [file_fingerprint(path) for path in ref_paths],
@@ -554,7 +589,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                           f"check (score={id_result.overall_score}): '{prompt[:60]}...'")
                     if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
                         _recovery_out["_winner_paid_cost_recorded"] = True
-                    return ImageGenResult(output_filename, "GEMINI_IMAGE")
+                    return ImageGenResult(
+                        output_filename, "GEMINI_IMAGE",
+                        continuity_delivered=bool(gemini_continuity),
+                    )
                 print(f"   [GEMINI-IMAGE] Identity check failed (score={id_result.overall_score}); "
                       f"falling back to the remaining provider cascade")
                 retained = _retain_rejected_gemini(
@@ -607,7 +645,11 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 identity_anchor=identity_anchor,
                 aspect_ratio=aspect_ratio,
                 secondary_char_refs=secondary_char_refs,
+                continuity_reference=continuity_reference,
             ))
+        # No character reference: this branch reaches the text-to-image route,
+        # which takes no reference images at all. Forwarding the anchor here
+        # would be a parameter the destination cannot use.
         return _with_rejects(_fal_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
@@ -825,7 +867,15 @@ def _parse_structured_prompt(prompt: str) -> dict:
     return sections
 
 
-def _allocate_ref_slots(primary_refs, secondary_chars, cap=6):
+_MULTICHAR_REF_CAP = 6
+"""The Kontext image_urls budget, named once so the two paths cannot drift.
+
+Was a bare `6` in `_allocate_ref_slots`'s default and a second bare `6` in the
+single-character slice; the continuity anchor has to subtract from the same
+number both times, and two literals would have made that a coin flip."""
+
+
+def _allocate_ref_slots(primary_refs, secondary_chars, cap=_MULTICHAR_REF_CAP):
     """Partition the Kontext image_urls budget across characters (P1-1 spec §3a).
 
     FIXED shares, CONTIGUOUS slots: primary takes up to 3 (up to `cap` when no
@@ -890,9 +940,34 @@ def _build_multichar_kontext_prompt(sections, char_blocks):
     return " ".join(parts)
 
 
+CONTINUITY_SLOT_BUDGET = 1
+"""Reference slots the previous approved keyframe may occupy. See
+:func:`_continuity_prompt_block` for what it buys and what it costs."""
+
+
+def _continuity_prompt_block(slot: int) -> str:
+    """Tell the model what the continuity image IS, because it cannot tell.
+
+    Kontext is an EDITING model. An unlabelled extra image is something it may
+    try to reproduce, and the previous shot is the one image in the set that
+    must NOT be reproduced — adjacent shots differ in framing by definition.
+    Naming its slot and stating both halves (match the look, not the layout) is
+    what separates "carry the scene forward" from "render the same shot twice".
+    """
+
+    return (
+        f"CONTINUITY: @Image{slot} is the PREVIOUS SHOT of this same scene. "
+        f"Match its lighting direction, colour temperature, palette, set "
+        f"dressing and wardrobe exactly. Do NOT copy its framing, camera angle, "
+        f"subject placement or pose — this is a different shot of the same "
+        f"moment, not a repeat of it."
+    )
+
+
 def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                        multi_angle_refs=None, identity_anchor="", aspect_ratio=None,
-                       secondary_char_refs=None, cost_tracker=None,
+                       secondary_char_refs=None, continuity_reference=None,
+                       cost_tracker=None,
                        shot_id="", video_id="", _recovery_out=None):
     """
     Image generator using FAL.ai FLUX Kontext Max Multi for identity preservation.
@@ -902,6 +977,14 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
     - Build Kontext prompt: identity anchor FIRST, then scene + outfit changes only
     - NEVER pass raw character descriptions to Kontext (they compete with face ref)
     - Use Kontext Max Multi with up to 9 reference images (AuraFace embeddings)
+
+    ``continuity_reference`` is the previous shot's approved keyframe from the
+    SAME scene. It reached no hosted provider before this: the name appeared
+    three times in this module — the parameter, a docstring, and one
+    ``allocate_flux2_references`` call feeding only the local FLUX.2 worker —
+    and neither this function nor ``GeminiImageAPI.generate_image`` could accept
+    it. The default backend is ``gemini_multiref``, so shot-to-shot continuity
+    within a scene rode on the prompt and the seed alone.
     """
     fal_key = settings.fal_key
     if not fal_key:
@@ -910,6 +993,12 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
 
     try:
         import fal_client
+
+        # Whether the scene anchor actually reached the provider. Recorded
+        # rather than assumed: it can be dropped by a crowded multi-character
+        # shot or a failed upload, and a continuity regression that cannot be
+        # traced to "the anchor was not sent" is a regression nobody can debug.
+        delivered_continuity = False
 
         local_ref_paths = []
         for candidate in [character_image, *(multi_angle_refs or [])]:
@@ -1069,6 +1158,25 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                             for e in uploaded_secondaries if e["char_id"] in slot_map
                         ]
                         kontext_prompt = _build_multichar_kontext_prompt(sections, char_blocks)
+                        # Spare capacity only on this path. Fixed shares already
+                        # reach the ceiling at three characters (3+2+1), so a
+                        # crowded shot keeps every face and simply carries no
+                        # scene anchor. Nothing here displaces a person.
+                        if (
+                            continuity_reference
+                            and os.path.exists(continuity_reference)
+                            and len(image_urls) < _MULTICHAR_REF_CAP
+                        ):
+                            try:
+                                image_urls.append(
+                                    fal_client.upload_file(continuity_reference)
+                                )
+                                kontext_prompt += " " + _continuity_prompt_block(
+                                    len(image_urls)
+                                )
+                                delivered_continuity = True
+                            except Exception:
+                                pass  # Upload failed — the shot proceeds without the anchor
                         print(f"   [KONTEXT] Multi-char ({len(image_urls)} refs, "
                               f"{len(char_blocks)} identities)")
                     else:
@@ -1109,7 +1217,26 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     # Move both budgets together, after a live probe recorded as
                     # a logs/ artifact. Tracked in
                     # docs/PLAN-reference-sets-2026-08-08.md.
-                    for ref_path in refs_to_upload[:6]:
+                    #
+                    # The continuity anchor takes the LAST slot of that budget,
+                    # so a saturated face set gives up its sixth reference. This
+                    # is the one place in the reference work where a subject
+                    # displaces another, and it is a decision, not an oversight:
+                    # identity already has coverage-ordered references, a scorer,
+                    # a sheet and a lab, while scene continuity had NO delivery
+                    # at all on this route. Zero to one beats six to five. It is
+                    # also the weakest face slot by construction — order_for_coverage
+                    # spends the early slots on the canonical and one reference per
+                    # unseen facet, so position six is the tail.
+                    face_budget = _MULTICHAR_REF_CAP
+                    anchor = (
+                        continuity_reference
+                        if continuity_reference and os.path.exists(continuity_reference)
+                        else ""
+                    )
+                    if anchor:
+                        face_budget -= CONTINUITY_SLOT_BUDGET
+                    for ref_path in refs_to_upload[:face_budget]:
                         try:
                             image_urls.append(fal_client.upload_file(ref_path))
                         except Exception:
@@ -1117,6 +1244,13 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
 
                     if not image_urls:
                         image_urls = [fal_client.upload_file(character_image)]
+                        anchor = ""  # the degradation guard owns the whole budget
+
+                    if anchor:
+                        try:
+                            image_urls.append(fal_client.upload_file(anchor))
+                        except Exception:
+                            anchor = ""  # upload failed — no slot, and no prompt block
 
                     # Parse structured sections from the prompt
                     sections = _parse_structured_prompt(prompt)
@@ -1159,6 +1293,16 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         "The face in the output MUST match @Image1 exactly."
                     )
 
+                    # BLOCK 3b: CONTINUITY — placed after the identity
+                    # constraints and before QUALITY. It must not outrank the
+                    # face blocks (the previous shot is a rendered frame, not a
+                    # reference photograph, and letting it lead would teach the
+                    # model to copy a copy), but it must precede the perceptual
+                    # tokens, which is where a model stops reading instructions.
+                    if anchor:
+                        parts.append(_continuity_prompt_block(len(image_urls)))
+                        delivered_continuity = True
+
                     # BLOCK 4: QUALITY (perceptual tokens FLUX actually understands)
                     parts.append(
                         "QUALITY: Photorealistic, visible skin pores and subsurface scattering, "
@@ -1188,7 +1332,10 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 print(f"      [OK] FLUX Kontext image: {output_filename}")
                 if isinstance(_recovery_out, dict) and has_paid_attempt_authority(cost_tracker):
                     _recovery_out["_winner_paid_cost_recorded"] = True
-                return ImageGenResult(output_filename, "FLUX_KONTEXT")
+                return ImageGenResult(
+                    output_filename, "FLUX_KONTEXT",
+                    continuity_delivered=delivered_continuity,
+                )
             except _ImagePaidCascadeStop:
                 return None
             except Exception as e_kontext:

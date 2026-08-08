@@ -1962,6 +1962,20 @@ class ShotController:
             # primary-only at the api_name level.
             actual = "GEMINI_IMAGE_MULTI_CHAR"
         take["metadata"]["mechanism_actually_used"] = actual
+        # Whether the previous shot's approved keyframe actually reached the
+        # provider. It is dropped without failing the call when a crowded
+        # multi-character shot fills the budget, when an upload fails, and on
+        # every text-to-image route — so a scene that drifts must be traceable
+        # to "the anchor was not sent" rather than argued about from the frame.
+        # Recorded even when False: the absence is the diagnostic.
+        take["metadata"]["continuity_delivered"] = bool(
+            getattr(result, "continuity_delivered", False)
+        )
+        take["metadata"]["continuity_reference"] = (
+            self._to_project_relative(generation_continuity_ref)
+            if generation_continuity_ref
+            else ""
+        )
 
         identity_score = 0.0
         if identity_validation_ref:
