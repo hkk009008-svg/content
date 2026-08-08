@@ -7,6 +7,7 @@ import PostRunSummary from './console/PostRunSummary'
 import SetupPage from './pages/SetupPage'
 import EditPage from './pages/EditPage'
 import RunPage from './pages/RunPage'
+import ReferenceSheetPage from './pages/ReferenceSheetPage'
 import IdentityLabPage from './pages/IdentityLabPage'
 import CapabilityPage from './pages/CapabilityPage'
 
@@ -99,6 +100,10 @@ const TABS: { id: Page; glyph: string; label: string }[] = [
   { id: 'setup', glyph: '◧', label: 'Setup' },
   { id: 'edit', glyph: '✂', label: 'Edit' },
   { id: 'run', glyph: '▷', label: 'Run' },
+  // Sits before Identity deliberately: the reference SET is what a video model
+  // copies from, and Identity Lab measures the result of that set. Reading them
+  // in the other order invites tuning the measurement instead of the input.
+  { id: 'references', glyph: '▦', label: 'References' },
   { id: 'identity', glyph: '◉', label: 'Identity' },
   { id: 'capability', glyph: '▤', label: 'Capability' },
 ]
@@ -278,6 +283,14 @@ export default function AppShell({
             onReassemble={onReassemble}
             pipelineError={pipelineError}
             pipelineLoadingLabel={pipelineLoadingLabel}
+          />
+        )
+      case 'references':
+        return (
+          <ReferenceSheetPage
+            project={project}
+            apiBase={apiBase}
+            onRefresh={onRefreshProject}
           />
         )
       case 'identity':

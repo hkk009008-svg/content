@@ -4,7 +4,9 @@ import TakeStrip, { LipsyncStatusBadge } from '../console/TakeStrip'
 import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 import IterationPanel from './IterationPanel'
+import IdentityVerdictCard from './IdentityVerdictCard'
 import DrivingVideoUploadControl from './DrivingVideoUploadControl'
+import { usePageOptional } from '../../context/PageContext'
 import { shotRequiresLipsync } from '../../lib/lipsyncEvidence'
 import { canResumeDeferredProviderJob } from '../../lib/providerRecovery'
 
@@ -288,6 +290,12 @@ function ClipCard({
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_constraints || '')
   const [showRegenForm, setShowRegenForm] = useState(false)
   const [keyframeRecoveryError, setKeyframeRecoveryError] = useState<string | null>(null)
+  // A gate that cannot judge a pose is usually saying the reference SET lacks
+  // that pose, which is the fixable half — so the verdict card can offer to go
+  // there. OPTIONAL on purpose: this is a cross-link, not a dependency, and a
+  // throwing hook here would make every ReviewStage test wrap a router it has
+  // no other use for.
+  const pageRouter = usePageOptional()
   const requiresLipsync = shotRequiresLipsync(shot)
   const [rejectReason, setRejectReason] = useState(shot.plan_rejection_reason || '')
   const [rejectAutoApproveGate, setRejectAutoApproveGate] = useState<'plan' | 'image' | 'motion' | 'final' | null>(null)
@@ -1289,21 +1297,30 @@ function ClipCard({
               </div>
             ) : null}
 
-            {/* Remediation advisory — shown on identity failure, from diagnose result or inline take metadata */}
+            {/* What the identity gate established, and what it did not.
+                Replaces a card headed "Identity Remediation Advisory" that
+                printed the raw failure reason as a diagnosis — see
+                IdentityVerdictCard for why each of those reasons is weaker
+                than it reads. */}
             {(() => {
               const activeTake = activeTakeId
                 ? findTake([...keyframeTakes, ...finalTakes], activeTakeId)
                 : null
               const advisory = diagnosis?.remediation_advisory ?? activeTake?.metadata?.remediation_advisory
               if (!advisory) return null
+              // The reference the gate actually held up against the frame. The
+              // strategy record is the only place it survives, and naming it is
+              // what makes "one frontal image" concrete rather than a claim.
+              const comparedAgainst: string | null =
+                activeTake?.metadata?.identity_strategy?.conditioned_chars?.[0]?.reference ?? null
               return (
-                <div className="mt-3 rounded border border-warn/30 bg-warn/5 px-3 py-3 text-xs space-y-2">
-                  <div className="font-semibold uppercase tracking-wide text-warn text-eyebrow-lg">
-                    Identity Remediation Advisory
-                  </div>
-                  {advisory.failure_reason && (
-                    <div className="text-mut">{advisory.failure_reason}</div>
-                  )}
+                <IdentityVerdictCard
+                  failureReason={advisory.failure_reason}
+                  comparedAgainst={comparedAgainst}
+                  onOpenReferenceSheet={
+                    pageRouter ? () => pageRouter.setPage('references') : undefined
+                  }
+                >
                   {advisory.suggested_negative_prompt && (
                     <div className="space-y-1">
                       <div className="text-mut uppercase text-eyebrow tracking-wide">Suggested negative prompt</div>
@@ -1318,7 +1335,7 @@ function ClipCard({
                       </button>
                     </div>
                   )}
-                </div>
+                </IdentityVerdictCard>
               )
             })()}
 

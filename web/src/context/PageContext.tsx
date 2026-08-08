@@ -11,7 +11,13 @@ import { createContext, useCallback, useContext, useState, type ReactNode } from
  * not touch the provider again.
  */
 
-export type Page = 'setup' | 'edit' | 'run' | 'identity' | 'capability'
+export type Page =
+  | 'setup'
+  | 'edit'
+  | 'run'
+  | 'references'
+  | 'identity'
+  | 'capability'
 
 export interface PageContextValue {
   page: Page
@@ -52,4 +58,20 @@ export function usePage(): PageContextValue {
     throw new Error('usePage must be used within a <PageProvider>')
   }
   return ctx
+}
+
+/** The same context, for a component that OFFERS navigation rather than
+ *  depending on it.
+ *
+ *  `usePage` throwing is right for a page: a page rendered outside the router
+ *  is a wiring bug and should say so loudly. It is wrong for a deep component
+ *  that merely wants to add a "go here" affordance — making that component
+ *  throw turns an optional convenience into a hard dependency, and every test
+ *  that renders it must then wrap a provider it does not otherwise need. When
+ *  this was not distinguished, adding one cross-link to `ReviewStage` broke 19
+ *  unrelated tests at once.
+ *
+ *  Returns null outside a provider; the caller hides the affordance. */
+export function usePageOptional(): PageContextValue | null {
+  return useContext(PageContext)
 }

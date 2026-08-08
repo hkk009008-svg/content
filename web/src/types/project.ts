@@ -15,7 +15,63 @@ export interface Character {
   voice_id?: string
   physical_traits?: string
   embedding_cache?: string
+  /** The ONLY field any video provider reads. Every consumer truncates it from
+   *  the front at a different cut, so its ORDER is load-bearing: slot 0 is
+   *  uploaded as Kling's frontal image. */
   multi_angle_refs?: string[]
+  /** `real` — photographs pose the character, and generation only varies at
+   *  geometry that was photographed. `described` — the first generated image
+   *  DEFINES them, so self-consistency is the only requirement. */
+  creation_kind?: 'real' | 'described'
+  identity_refs?: IdentityReference[]
+}
+
+/** How a reference came to exist. The distinction is the lesson, not
+ *  bookkeeping (`domain/reference_set.py`):
+ *
+ *  - `photo`    a real photograph of the subject.
+ *  - `defined`  a described character's FIRST generated image, which defines
+ *               who they are; there is nothing earlier to be faithful to.
+ *  - `derived`  generated from a source that CONTAINED the requested geometry
+ *               (a lighting variant made from the subject's real profile).
+ *  - `invented` generated from a source that did NOT — a "profile" asked of a
+ *               frontal photograph. The model had no information about the side
+ *               of the head and produced a plausible stranger. Not a weaker
+ *               reference: a different person, and feeding one to a video model
+ *               teaches it the wrong face.
+ *  - `unknown`  a migrated legacy reference with no recorded source.
+ */
+export type ReferenceOrigin = 'photo' | 'defined' | 'derived' | 'invented' | 'unknown'
+
+export type ReferenceJudgement = 'keep' | 'reject' | 'unjudged'
+
+/** One labelled reference. Facets are orthogonal — each answers a different
+ *  question about what the image SHOWS — so a set can be assessed for coverage
+ *  along each axis independently. */
+export interface IdentityReference {
+  path: string
+  yaw: string
+  expression: string
+  light: string
+  framing: string
+  origin: ReferenceOrigin
+  /** The image this one was generated FROM. Empty for a photograph. */
+  source_path: string
+  judged: ReferenceJudgement
+  reason: string
+  roles: string[]
+}
+
+/** Per-axis value counts, as the references route returns them. */
+export type ReferenceCoverage = Record<string, Record<string, number>>
+
+/** What each consumer will actually receive. Providers truncate from the front
+ *  at different cuts, so this is the only honest answer to "is the reference I
+ *  just added being used?" */
+export interface ReferenceDelivery {
+  kling_frontal: string | null
+  veo_or_fal_first_4: string[]
+  reference_to_video_first_8: string[]
 }
 
 export interface Location {

@@ -5111,3 +5111,86 @@ plates extends that reach to product and establishing shots, which previously
 had no references and so never qualified. The mismatch over-reserves rather than
 under-reserves, and closing it would require the pre-spend gate to probe worker
 readiness before pricing. Recorded so it is not rediscovered as a new defect.
+
+---
+
+## ADR-095 — The Reference Sheet shows provenance and delivery, never a score
+
+Date: 2026-08-08
+
+Status: Accepted. Implements Phase 5's Reference Sheet page and Phase 0.3's
+identity verdict card.
+
+Context. Everything measured this session pointed at one gap: the reference SET
+is the identity lever, and no surface in the product showed what was in it. A
+user could upload ten photographs, see a grid of ten thumbnails, and have no way
+to learn that two of them reached no provider, that one was a generated stranger,
+or that slot 0 — uploaded as Kling's frontal image — held a left profile.
+
+Decision, in three refusals.
+
+**It shows no identity score.** ADR-092 measured that the scorer inverts rank
+off-angle: the subject's real profile photograph scored 0.556 and "failed" the
+0.70 gate while a generated panel he confirmed was NOT him scored 0.570. A
+number that ranks a stranger above the subject is worse than no number, because
+it looks authoritative. The page shows PROVENANCE instead — photo / defined /
+derived / invented / unknown — which is a fact about where an image came from
+rather than an estimate of what it depicts. An `invented` reference gets an
+explicit warning naming the measurement behind it.
+
+**It does not pretend every reference is used.** A delivery strip renders the
+set against each consumer's actual cut — 1 for Kling's frontal slot, 4 on the
+fal/Veo path, 6 through Kontext, 8 for Gemini and for Seedance beside its
+keyframe — and names, per slot, which providers read it. References past every
+cut are labelled as reaching nothing.
+
+**It does not treat order as cosmetic.** A reorder is held as a draft and saved
+deliberately. This surfaced a real defect in the route the page was built on:
+`api_patch_character_references` rebuilt the set by iterating the RECORD's order
+and looking each path up, so a client sending patches in a new order got a 200,
+an unchanged `multi_angle_refs`, and no way to tell. "Save order" would have been
+a button that did nothing while reporting success.
+
+`order` is therefore its own field and TOTAL — an exact permutation or a 400.
+Partial ordering through the patch list would let a reorder delete references by
+omission, and a patch list that happened to omit one would reorder by accident.
+
+**Changing the canonical is a separate act, because it is a bigger one.** Two
+rules met at slot 0: `derive_legacy_fields` forces the canonical to the front
+(slot 0 is Kling's frontal image), which would have silently overruled any
+`order` that moved something else there. Rather than weaken that rule with a
+hidden "curated" flag, moving slot 0 is its own `canonical` field with the
+consequence stated in the UI: `canonical_reference` is ALSO the
+identity-validation anchor (`get_reference_image`), and per ADR-092 a turned
+canonical would compare every frame against a view the embedder cannot read, so
+correct footage would fail.
+
+The identity verdict card (Phase 0.3) applies the same standard at review time.
+It replaces a card headed "Identity Remediation Advisory" that printed the raw
+failure reason as a diagnosis. Each reason is weaker than it reads:
+
+- `no_face_detected` on a turned shot is the DETECTOR's limit — the largest
+  detection in the subject's real profile photograph was 96x96, 0.076% of frame.
+- `face_angle_extreme` comes from the detection box's width/height ratio
+  (`validator.py:1310-1322`), the only pose signal here and a crude one; and it
+  lands in exactly the band where the scorer has no ordering.
+- `poor_lighting` is the classifier's ELSE-BRANCH (`validator.py:1308, 1341`),
+  returned when no other test matched. Rendering it as a lighting measurement
+  asserts something nobody measured.
+
+So the card separates `unjudged` from `suspect` from `broken`, says plainly
+"nothing here says the take is bad" for the first, names the single image the
+gate compared against, links to the Reference sheet (a gate that cannot judge a
+pose is usually reporting that the SET lacks that pose), and prices the
+regenerate before the click and lists it last.
+
+Correction to this plan's own premise: it asserted "no head-pose estimator
+exists in the repo". `_estimate_face_angle` does exist and is independent of
+similarity. It is aspect-ratio arithmetic, not pose estimation, and the card
+says so rather than either suppressing it or dressing it up.
+
+Incident recorded. Wiring the card's cross-link through the THROWING `usePage`
+broke 19 unrelated `ReviewStage` tests in one step, because a convenience link
+became a hard dependency on `<PageProvider>`. Fixed with `usePageOptional`,
+which returns null outside a provider so the affordance hides; the strict hook
+is unchanged and still throws for pages, with a control test pinning both halves.

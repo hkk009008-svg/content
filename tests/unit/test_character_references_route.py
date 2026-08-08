@@ -124,3 +124,143 @@ def test_a_missing_character_is_404(client) -> None:
         "/api/projects/proj_ref/characters/nobody/references", json={"references": []}
     )
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# `order` — the field that actually changes what a provider receives
+# ---------------------------------------------------------------------------
+
+def test_a_patch_list_alone_does_not_reorder(client) -> None:
+    """The defect this field exists to fix.
+
+    The route rebuilds the set by iterating the RECORD's order and looking each
+    path up, so a client that sent its patches in a new order got a 200, an
+    unchanged `multi_angle_refs`, and no way to tell. A Reference Sheet page
+    offering "Save order" on top of that would have been a button that did
+    nothing while reporting success.
+    """
+
+    response = _patch(client, {"references": [
+        {"path": "characters/profile.jpg"},
+        {"path": "characters/canon.jpg"},
+    ]})
+    assert response.status_code == 200
+    assert response.get_json()["delivered"]["veo_or_fal_first_4"] == [
+        "characters/canon.jpg", "characters/profile.jpg",
+    ]
+
+
+def test_order_reorders_the_set_and_the_canonical_still_leads_delivery(client) -> None:
+    """Two rules meet at slot 0 and only one can win.
+
+    `derive_legacy_fields` forces the canonical to the front of
+    `multi_angle_refs`, because slot 0 is uploaded as Kling's FRONTAL image
+    (phase_c_ffmpeg.py:2245). An `order` that moved something else there would
+    be silently overruled by that projection — a button reporting success and
+    changing nothing. So `order` owns the sequence of the SET, and moving the
+    frontal image is its own act (below).
+    """
+
+    response = _patch(client, {
+        "order": ["characters/profile.jpg", "characters/canon.jpg"],
+    })
+    assert response.status_code == 200
+    body = response.get_json()
+    assert [ref["path"] for ref in body["identity_refs"]] == [
+        "characters/profile.jpg", "characters/canon.jpg",
+    ]
+    assert body["delivered"]["kling_frontal"] == "characters/canon.jpg"
+
+
+def test_naming_a_new_canonical_changes_what_kling_gets(client) -> None:
+    """The one act that moves slot 0, deliberately separate from a reorder.
+
+    `canonical_reference` is ALSO the identity-validation anchor
+    (`get_reference_image`), and ADR-092 measured that the scorer floors and
+    inverts rank off-angle. A profile canonical would compare every frame
+    against a view the embedder cannot read, so correct footage would fail. That
+    consequence is too large to fall out of dragging a thumbnail.
+    """
+
+    response = _patch(client, {"canonical": "characters/profile.jpg"})
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["delivered"]["kling_frontal"] == "characters/profile.jpg"
+    assert [
+        ref["path"] for ref in body["identity_refs"]
+        if "canonical" in (ref.get("roles") or [])
+    ] == ["characters/profile.jpg"]
+
+
+def test_a_canonical_outside_the_set_is_refused(client) -> None:
+    response = _patch(client, {"canonical": "characters/nope.jpg"})
+    assert response.status_code == 400
+    assert "canonical must name one" in response.get_json()["error"]
+
+
+def test_a_malformed_canonical_is_refused_before_any_mutation(client) -> None:
+    response = _patch(client, {"canonical": ["characters/canon.jpg"]})
+    assert response.status_code == 400
+    assert "canonical must be a path" in response.get_json()["error"]
+
+
+def test_a_short_order_is_refused_rather_than_deleting_by_omission(client) -> None:
+    """An order that names fewer paths would silently DROP the rest.
+
+    Dropping a reference is a paid asset leaving the set; it must never be a
+    side effect of a reorder that forgot one.
+    """
+
+    response = _patch(client, {"order": ["characters/canon.jpg"]})
+    assert response.status_code == 400
+    assert "exact permutation" in response.get_json()["error"]
+    # And nothing moved.
+    after = _patch(client, {})
+    assert after.get_json()["delivered"]["kling_frontal"] == "characters/canon.jpg"
+
+
+def test_an_order_naming_an_unknown_path_is_refused(client) -> None:
+    response = _patch(client, {
+        "order": ["characters/canon.jpg", "characters/nope.jpg"],
+    })
+    assert response.status_code == 400
+    assert "exact permutation" in response.get_json()["error"]
+
+
+def test_a_malformed_order_is_refused_before_any_mutation(client) -> None:
+    for bad in ("characters/canon.jpg", [7], {"a": 1}):
+        response = _patch(client, {"order": bad})
+        assert response.status_code == 400, bad
+        assert "order must be a list of paths" in response.get_json()["error"]
+
+
+def test_order_facets_and_canonical_apply_in_one_call(client) -> None:
+    """The page sends them together; none may cancel another."""
+
+    response = _patch(client, {
+        "order": ["characters/profile.jpg", "characters/canon.jpg"],
+        "canonical": "characters/profile.jpg",
+        "references": [
+            {"path": "characters/profile.jpg", "yaw": "profile", "origin": "photo"},
+        ],
+    })
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["delivered"]["kling_frontal"] == "characters/profile.jpg"
+    assert body["coverage"]["yaw"]["profile"] == 1
+    assert [ref["path"] for ref in body["identity_refs"]] == [
+        "characters/profile.jpg", "characters/canon.jpg",
+    ]
+
+
+def test_reorder_for_coverage_still_wins_over_an_explicit_order(client) -> None:
+    """Both in one request is a contradiction; the coverage sort is the later,
+    louder instruction and the response shows which one applied."""
+
+    response = _patch(client, {
+        "order": ["characters/profile.jpg", "characters/canon.jpg"],
+        "reorder_for_coverage": True,
+    })
+    assert response.status_code == 200
+    # order_for_coverage puts the canonical back at slot 0, always.
+    assert response.get_json()["delivered"]["kling_frontal"] == "characters/canon.jpg"

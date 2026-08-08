@@ -3278,11 +3278,21 @@ def api_patch_character_references(pid, cid):
       {"references": [{"path": str, "yaw"?: str, "expression"?: str,
                        "light"?: str, "framing"?: str, "origin"?: str,
                        "source_path"?: str, "judged"?: str, "reason"?: str}],
+       "order"?: [str, ...],
+       "canonical"?: str,
        "reorder_for_coverage"?: bool}
 
     Every patch must name a path already in the set. Unknown paths are refused
     rather than silently ignored, because a typo would otherwise read as
     success while changing nothing.
+
+    `order` is a SEPARATE field from `references`, and total rather than
+    partial: it must be an exact permutation of the set's paths or the request
+    is refused. Order is the part of this record that reaches providers — slot 0
+    is uploaded as Kling's frontal image — so an ordering expressed by a partial
+    patch list would be a way to drop references by omission. Making it its own
+    all-or-nothing field means a reorder cannot lose an image, and a patch that
+    forgets to mention one cannot silently reorder.
     """
 
     if not request.is_json:
@@ -3291,6 +3301,15 @@ def api_patch_character_references(pid, cid):
     patches = data.get("references")
     if patches is not None and not isinstance(patches, list):
         return jsonify({"error": "references must be a list"}), 400
+    order = data.get("order")
+    if order is not None and (
+        not isinstance(order, list)
+        or not all(isinstance(path, str) for path in order)
+    ):
+        return jsonify({"error": "order must be a list of paths"}), 400
+    canonical = data.get("canonical")
+    if canonical is not None and not isinstance(canonical, str):
+        return jsonify({"error": "canonical must be a path"}), 400
     reorder = bool(data.get("reorder_for_coverage"))
 
     project = load_project(pid)
@@ -3345,6 +3364,41 @@ def api_patch_character_references(pid, cid):
             return {"__error__": f"unknown reference paths: {sorted(set(unknown))}"}
 
         updated = [by_path[r["path"]] for r in refs if r.get("path") in by_path]
+        if order is not None:
+            # Total, not partial. Anything other than an exact permutation is
+            # refused: a short list would silently DELETE references and a list
+            # with an extra path would silently invent one, and both would look
+            # like a successful reorder.
+            if sorted(order) != sorted(entry["path"] for entry in updated):
+                return {"__error__": (
+                    "order must be an exact permutation of this character's "
+                    "reference paths"
+                )}
+            position = {path: index for index, path in enumerate(order)}
+            updated.sort(key=lambda entry: position[entry["path"]])
+        if canonical is not None:
+            # Reassigning the canonical is its own act, not a consequence of
+            # reordering. `derive_legacy_fields` forces the canonical to slot 0
+            # because slot 0 is uploaded as Kling's FRONTAL image, so an `order`
+            # that moved something else to the front would be silently overruled
+            # — a button that reports success and changes nothing.
+            #
+            # It is separate from `order` because it is a bigger act than a
+            # reorder. `canonical_reference` is ALSO the identity-validation
+            # anchor (get_reference_image), and ADR-092 measured that the scorer
+            # floors and inverts rank off-angle: a profile canonical would make
+            # every frame compare against a view the embedder cannot read, and
+            # the correct footage would fail. The caller therefore has to say so
+            # deliberately.
+            if canonical not in {entry["path"] for entry in updated}:
+                return {"__error__": (
+                    "canonical must name one of this character's references"
+                )}
+            for entry in updated:
+                roles = [role for role in (entry.get("roles") or ()) if role != "canonical"]
+                if entry["path"] == canonical:
+                    roles.insert(0, "canonical")
+                entry["roles"] = roles
         if reorder:
             updated = order_for_coverage(updated)
 
