@@ -14,7 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 
 import phase_c_assembly as pca
-from phase_c_assembly import _allocate_ref_slots, _build_multichar_kontext_prompt
+from phase_c_assembly import (
+    _MULTICHAR_REF_CAP,
+    _allocate_ref_slots,
+    _build_multichar_kontext_prompt,
+)
 from tests.unit.test_kontext_prompt_snapshot import GOLDEN_SINGLE_CHAR_PROMPT
 
 
@@ -54,17 +58,32 @@ def fal_capture(monkeypatch, tmp_path):
     return captured
 
 
-def test_two_char_allocation_3_2():
+def test_two_char_allocation_fits_the_provider_ceiling():
+    """Was `test_two_char_allocation_3_2`, and it pinned an IMPOSSIBLE request.
+
+    MEASURED 2026-08-09: fal-ai/flux-pro/kontext/max/multi returns 422,
+    "Value error, image_urls must be between 1 and 4". The old fixed shares
+    (primary 3 / first secondary 2 / second 1) total SIX. This test asserted
+    five and its sibling asserted six, so both encoded payloads the provider
+    rejects — and they passed for months, because they checked the allocator's
+    arithmetic and never that the result could be sent.
+    """
     paths, slot_map = _allocate_ref_slots(
         primary_refs=["/a/1.jpg", "/a/2.jpg", "/a/3.jpg", "/a/4.jpg"],
         secondary_chars=[{"char_id": "char_b", "reference": "/b/c.jpg",
                           "multi_angle_refs": ["/b/1.jpg", "/b/2.jpg"]}],
     )
-    assert paths == ["/a/1.jpg", "/a/2.jpg", "/a/3.jpg", "/b/c.jpg", "/b/1.jpg"]
-    assert slot_map == {"primary": [1, 2, 3], "char_b": [4, 5]}
+    assert len(paths) <= _MULTICHAR_REF_CAP
+    assert slot_map == {"primary": [1, 2, 3], "char_b": [4]}
+    assert paths == ["/a/1.jpg", "/a/2.jpg", "/a/3.jpg", "/b/c.jpg"]
 
 
-def test_three_char_allocation_3_2_1_and_six_cap():
+def test_three_char_allocation_still_gives_everyone_a_slot():
+    """The ceiling is four and there are three people; nobody may be dropped.
+
+    A character silently allocated zero references would be generated from the
+    prompt alone while the prompt claims @ImageN is them.
+    """
     paths, slot_map = _allocate_ref_slots(
         primary_refs=["/a/1.jpg", "/a/2.jpg", "/a/3.jpg"],
         secondary_chars=[
@@ -74,8 +93,8 @@ def test_three_char_allocation_3_2_1_and_six_cap():
              "multi_angle_refs": ["/c/1.jpg", "/c/2.jpg"]},
         ],
     )
-    assert len(paths) == 6
-    assert slot_map == {"primary": [1, 2, 3], "char_b": [4, 5], "char_c": [6]}
+    assert len(paths) == _MULTICHAR_REF_CAP
+    assert slot_map == {"primary": [1, 2], "char_b": [3], "char_c": [4]}
 
 
 def test_thin_secondary_does_not_inflate_primary():
@@ -86,17 +105,40 @@ def test_thin_secondary_does_not_inflate_primary():
         secondary_chars=[{"char_id": "char_b", "reference": "/b/c.jpg",
                           "multi_angle_refs": []}],
     )
-    assert slot_map["primary"] == [1, 2, 3]   # fixed at 3 when secondaries exist
+    assert slot_map["primary"] == [1, 2, 3]   # cap(4) minus one reserved secondary
     assert slot_map["char_b"] == [4]          # canonical only — nothing to fill with
     assert len(paths) == 4                    # cap is a ceiling, not a quota
 
 
-def test_single_char_alone_keeps_all_six():
+def test_single_char_alone_keeps_the_whole_reachable_budget():
+    """Was `test_single_char_alone_keeps_all_six`. Six is not sendable.
+
+    This is the case that broke real work: a single character with more than
+    four references produced a 422, the cascade fell past Kontext into
+    FLUX_PRO/FLUX_SCHNELL — text-to-image with NO reference conditioning — and
+    the keyframe came back as a stranger. The failure SCALED WITH REFERENCE
+    COUNT, so adding good photographs of the subject is what broke it.
+    """
     paths, slot_map = _allocate_ref_slots(
         primary_refs=[f"/a/{i}.jpg" for i in range(8)], secondary_chars=[],
     )
-    assert slot_map == {"primary": [1, 2, 3, 4, 5, 6]}
-    assert len(paths) == 6
+    assert slot_map == {"primary": [1, 2, 3, 4]}
+    assert len(paths) == _MULTICHAR_REF_CAP
+
+
+def test_no_allocation_can_exceed_the_measured_ceiling():
+    """The property the old fixed shares had no way to guarantee."""
+    for n_sec in range(4):
+        paths, slot_map = _allocate_ref_slots(
+            primary_refs=[f"/a/{i}.jpg" for i in range(9)],
+            secondary_chars=[
+                {"char_id": f"c{j}", "reference": f"/c{j}/0.jpg",
+                 "multi_angle_refs": [f"/c{j}/{k}.jpg" for k in range(1, 4)]}
+                for j in range(n_sec)
+            ],
+        )
+        assert len(paths) <= _MULTICHAR_REF_CAP, (n_sec, paths)
+        assert all(slot_map[key] for key in slot_map), (n_sec, slot_map)
 
 
 def test_multichar_prompt_addresses_each_slot():

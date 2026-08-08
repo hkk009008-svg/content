@@ -5463,3 +5463,67 @@ Here an image was not merely unhelpful, it was fatal, and no measurement in this
 repository would have predicted the cliff. Every other provider cap in the code
 (`[:6]` Kontext, `[:8]` Seedance, 8 for Gemini) is still an unverified figure of
 the same kind, and each deserves the same probe before it is trusted.
+
+---
+
+## ADR-100 — Kontext accepts four images, not six; adding references broke identity
+
+Date: 2026-08-09
+
+Status: Accepted. This is the root cause of the identity failures that motivated
+the whole reference-set programme, and part of it was caused BY that programme.
+
+MEASURED against the live `fal-ai/flux-pro/kontext/max/multi` endpoint:
+
+    6 images -> 422, "Value error, image_urls must be between 1 and 4"
+    4 images -> succeeds
+    2 images -> succeeds
+
+Unlike VEO's soft `no_media_generated` (ADR-099), this is an explicit schema
+rejection. It was always visible to anyone who sent six images and read the
+response.
+
+THE FULL CHAIN, and why the symptom looked like an identity-model problem:
+
+1. Gemini generates a keyframe from the character's references.
+2. The identity gate scores it ~0.55 and REJECTS it.
+3. The cascade falls to Kontext — the reference-conditioned fallback — which
+   HARD-FAILS on more than four images.
+4. The cascade falls again to FLUX_PRO / FLUX_SCHNELL: text-to-image, with NO
+   reference conditioning of any kind.
+5. The keyframe that comes back is a person nobody has ever seen.
+
+Observed end to end on 2026-08-09: a keyframe for a male subject came back as a
+woman, and both arms of an unrelated experiment silently landed on FLUX_SCHNELL
+and FLUX_PRO.
+
+THE FAILURE SCALED WITH REFERENCE COUNT, WHICH INVERTS THE OBVIOUS REMEDY. A
+character with two references worked. Adding good photographs of the same person
+broke it. Every instinct — photograph more angles, curate a better sheet — made
+the output worse, which is exactly the shape of a problem that resists six
+months of effort.
+
+And this session caused part of it. Phase 2 wired `multi_angle_refs` from two
+entries to ten and reported that as the headline quality improvement. Two was
+under the ceiling; ten is sliced to six and hard-fails. The change was made on a
+reading of the code, with no probe of what the provider accepts, and the
+regression it introduced is precisely the symptom it was meant to fix.
+
+Decision. `_MULTICHAR_REF_CAP = 4`, measured, with the response text recorded at
+the constant. `_allocate_ref_slots` no longer uses fixed shares (primary 3 /
+secondary 2 / secondary 1 = six, unreachable): it reserves one slot per
+secondary, gives the primary the remainder, and returns at most `cap`. Every
+character keeps at least one reference — a character allocated zero would be
+generated from prose while the prompt asserts @ImageN is them.
+
+Three tests asserted the unreachable contract by name —
+`test_two_char_allocation_3_2`, `test_three_char_allocation_3_2_1_and_six_cap`,
+`test_single_char_alone_keeps_all_six`. They passed for months because they
+checked the allocator's arithmetic and never that the result could be sent.
+A test that pins a payload without pinning its acceptability pins nothing.
+
+GENERAL LESSON, now measured twice. Two provider caps read from code, both
+wrong, both found only by issuing a real request: VEO 4→3, Kontext 6→4. Every
+remaining cap in this repository (`[:8]` Seedance, 8 for Gemini, Kling's
+`valid_refs[1:4]`) is an unverified figure of the same kind, and each can fail
+in the same silent, cascade-absorbed way.

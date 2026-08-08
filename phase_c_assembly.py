@@ -867,12 +867,27 @@ def _parse_structured_prompt(prompt: str) -> dict:
     return sections
 
 
-_MULTICHAR_REF_CAP = 6
-"""The Kontext image_urls budget, named once so the two paths cannot drift.
+_MULTICHAR_REF_CAP = 4
+"""The Kontext image_urls budget. MEASURED against the live endpoint 2026-08-09.
 
-Was a bare `6` in `_allocate_ref_slots`'s default and a second bare `6` in the
-single-character slice; the continuity anchor has to subtract from the same
-number both times, and two literals would have made that a coin flip."""
+    6 images -> 422, "Value error, image_urls must be between 1 and 4"
+    4 images -> succeeds
+    2 images -> succeeds
+
+The `6` this replaces was never reachable, and the consequence was severe rather
+than cosmetic. Kontext is the reference-conditioned fallback the cascade reaches
+when Gemini's output is rejected by the identity gate. With more than four
+references it HARD-FAILS, so the cascade fell past it into FLUX_PRO /
+FLUX_SCHNELL — text-to-image with NO reference conditioning at all. The keyframe
+that came back was a person nobody had ever seen.
+
+The failure scaled with reference count, which is the cruel part: a character
+with two references worked, and adding good photographs of the same person broke
+it. This project's character has ten.
+
+Unlike VEO's soft `no_media_generated` (ADR-099), this one is an explicit schema
+rejection — it was always going to be visible to anyone who sent six images and
+read the response. Nobody had."""
 
 
 def _allocate_ref_slots(primary_refs, secondary_chars, cap=_MULTICHAR_REF_CAP):
@@ -885,18 +900,27 @@ def _allocate_ref_slots(primary_refs, secondary_chars, cap=_MULTICHAR_REF_CAP):
     @ImageN indices must stay 1..k). Returns (ordered file paths, slot_map)
     with 1-based @ImageN indices per char_id ('primary' for the primary).
     """
+    # The old scheme took FIXED shares — primary 3, first secondary 2, second 1 —
+    # which totals SIX and the provider accepts FOUR. The shares were a quota
+    # with no ceiling, so a three-character shot built a request that could not
+    # succeed. Reserve one slot per secondary FIRST, give the primary the rest,
+    # then hand any remainder back in order: every character keeps at least one
+    # reference, the primary keeps the most, and the total cannot exceed `cap`.
     n_secondary = len(secondary_chars)
-    primary_take = min(len(primary_refs), 3 if n_secondary else cap)
+    primary_take = min(len(primary_refs), max(1, cap - n_secondary))
     paths = list(primary_refs[:primary_take])
     slot_map = {"primary": list(range(1, len(paths) + 1))}
     for i, entry in enumerate(secondary_chars):
-        share = 2 if i == 0 else 1
-        char_paths = ([entry["reference"]]
-                      + list(entry.get("multi_angle_refs") or []))[:share]
+        available = [entry["reference"], *(entry.get("multi_angle_refs") or [])]
+        # One guaranteed, plus a second only if the budget genuinely has room
+        # after every remaining secondary has been reserved its one.
+        still_to_reserve = n_secondary - i - 1
+        room = cap - len(paths) - still_to_reserve
+        char_paths = available[:max(0, min(2 if i == 0 else 1, room))]
         start = len(paths) + 1
         paths.extend(char_paths)
         slot_map[entry["char_id"]] = list(range(start, start + len(char_paths)))
-    return paths, slot_map
+    return paths[:cap], slot_map
 
 
 def _build_multichar_kontext_prompt(sections, char_blocks):

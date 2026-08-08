@@ -237,11 +237,17 @@ def _secondary(tmp_path, char_id, count=1):
     }
 
 
-def test_two_characters_leave_room_and_the_anchor_takes_it(
+def test_two_characters_now_fill_the_budget_and_the_anchor_yields(
     tmp_path, fal_capture
 ) -> None:
-    """Fixed shares give primary 3 + first secondary 2 = 5 of 6. The spare slot
-    is the anchor's, and no face gives anything up."""
+    """The no-contest rule, re-measured against the REAL ceiling.
+
+    This test previously asserted the opposite, and it was right at the time:
+    with the old cap of six, primary 3 + secondary 2 left a spare slot for the
+    anchor. Measurement moved the ceiling to FOUR (ADR-100), so two characters
+    now consume the whole budget and the anchor yields rather than displacing a
+    face. The rule is unchanged; the arithmetic under it moved.
+    """
 
     primary = _refs(tmp_path, 3, prefix="a_face")
     _fal_flux_fallback(
@@ -252,11 +258,11 @@ def test_two_characters_leave_room_and_the_anchor_takes_it(
         continuity_reference=_anchor(tmp_path),
     )
     urls = fal_capture["arguments"]["image_urls"]
-    assert urls[-1] == "url://prev_shot.jpg"
-    assert len(urls) == 6
+    assert len(urls) == _MULTICHAR_REF_CAP
+    assert all(url != "url://prev_shot.jpg" for url in urls)
     prompt = fal_capture["arguments"]["prompt"]
-    assert "@Image6 is the PREVIOUS SHOT" in prompt
-    # The identity blocks are untouched — both faces still addressed.
+    assert "PREVIOUS SHOT" not in prompt
+    # Both faces still addressed — a person is never dropped for the anchor.
     assert "The person from @Image1 is Alice" in prompt
     assert "@Image4 is Char_B" in prompt
 
