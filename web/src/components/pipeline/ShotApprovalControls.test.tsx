@@ -70,6 +70,40 @@ describe('ShotApprovalControls -- truthful reject (Slice 8b requirement 5)', () 
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it('never recommends rejecting a shot on a client-side identity threshold', async () => {
+    // ADR-092: this component used to print "recommend reject" for any score
+    // below a hardcoded 0.7. That threshold ignored identity_strictness and the
+    // shot-typed table (wide standard is 0.55), and the scorer INVERTS RANK
+    // off-angle -- a real photograph of the subject in profile scores 0.556.
+    // Every shot where a character turns landed here, so the banner
+    // recommended rejecting correct footage, and rejection costs a re-render.
+    vi.stubGlobal('fetch', vi.fn(async () => response({})))
+
+    render(<ShotApprovalControls shot={{ identity_score: 0.556 }} shotId="s" projectId="p" onAction={vi.fn()} />)
+
+    expect(screen.queryByText(/recommend reject/i)).toBeNull()
+    expect(screen.getByText(/cannot be judged for a turned pose/i)).toBeInTheDocument()
+    expect(screen.getByText(/56%/)).toBeInTheDocument()
+  })
+
+  it('shows a frontal-band score without a warning tone or a verdict', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({})))
+
+    render(<ShotApprovalControls shot={{ identity_score: 0.79 }} shotId="s" projectId="p" onAction={vi.fn()} />)
+
+    expect(screen.getByText(/79%/)).toBeInTheDocument()
+    expect(screen.queryByText(/cannot be judged/i)).toBeNull()
+    expect(screen.queryByText(/recommend/i)).toBeNull()
+  })
+
+  it('renders no identity line at all when the server sent no score', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({})))
+
+    render(<ShotApprovalControls shot={{}} shotId="s" projectId="p" onAction={vi.fn()} />)
+
+    expect(screen.queryByText(/identity similarity/i)).toBeNull()
+  })
+
   it('a non-2xx approve surfaces an error without crashing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ error: 'Shot not found' }, false, 404)))
     const onAction = vi.fn()

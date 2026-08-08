@@ -2419,6 +2419,12 @@ def _execute_admitted_video_chain(
                 # keyframe start frame, tightest temporal continuity).
                 ref_urls = []
                 if multi_angle_refs:
+                    # 8, NOT 9. The header above cites the provider's figure of
+                    # 9 image_urls TOTAL, and the keyframe occupies the first
+                    # slot — so 8 angle refs is exactly the documented capacity,
+                    # not one below it. tests/unit/test_seedance_dispatch.py
+                    # ::test_refs_capped_at_nine_total pins keyframe+8=9 and
+                    # caught a change to 9 here on 2026-08-08.
                     for ref_path in multi_angle_refs[:8]:
                         if os.path.exists(ref_path):
                             try:

@@ -4687,3 +4687,262 @@ the wrong component, and `??`/` M` status rather than `!!` all still fail the
 guard. Reversion control: removing the tolerance fails
 `test_published_lora_adapter_does_not_brick_the_next_worker_start`.
 Full suite 5589 passed, 4 skipped in 404.54s.
+
+## ADR-091 — ADR-089's default is right where it was measured, and only there
+
+Date: 2026-08-08
+
+Status: Accepted. Amends the scope of ADR-089; does not reverse it.
+
+Context. ADR-089 defaulted the local FLUX.2 graph to one reference per
+character on the Identity Lab's five-cell result. That measurement used a
+single prompt, and a generous one: `BENCHMARK_PROMPT` contains "the same
+person", "preserve exact facial identity", and "realistic skin texture". The
+Windows seat then rendered a director-style shot and reported the face as
+recognizably adjacent but visibly wrong — "him, at a flattering angle, fifteen
+pounds lighter" — with the hypothesis that a frontal canonical cannot carry an
+off-angle target pose.
+
+`scripts/adr089_prompt_battery.py` tested that: six prompts ordered easiest to
+hardest, each rendered at one reference and at the pre-ADR-089 behaviour, all
+scored by the validator the Identity Lab used (GhostFaceNet, 0.70 gate, seed 0,
+16:9). `logs/` is untracked, so the numbers are recorded here.
+
+| case | 1 ref | 3 refs | verdict |
+| --- | --- | --- | --- |
+| anchor (the lab's own prompt) | **0.791** | 0.772 | both PASS |
+| neutral_portrait | **0.761** | 0.738 | both PASS |
+| medium_action | 0.648 | **0.679** | both FAIL |
+| wide_small_face | **0.576** | 0.562 | both FAIL |
+| profile_angled | 0.569 | **0.609** | both FAIL |
+| low_light_motion | 0.562 | **0.564** | both FAIL |
+
+The anchor returned 0.790768838726396 against the lab's stored
+0.790768838726396 — identical to fifteen decimal places, so the run is
+comparable and the instrument is validated before any other row is read.
+
+Findings.
+
+1. **ADR-089 holds where it was measured.** One reference wins both frontal
+   portrait cases, and both pass the gate. The 0.499 four-reference failure and
+   the decision that followed it remain correct for frontal targets.
+
+2. **The generalisation past that was unearned.** Three cases favour the older
+   behaviour: medium_action (+0.031) and profile_angled (+0.040) are real;
+   low_light_motion (+0.002) is noise and is not counted as a reversal. The
+   pattern matches the Windows seat's hypothesis exactly — reference
+   conditioning holds identity when the target pose matches the reference pose
+   and loses grip when it does not.
+
+3. **The reference count is second-order.** The one-versus-many argument is a
+   +/-0.04 dispute, smaller than the effect of framing (finding 5) and far
+   smaller than the effect of pose match (finding 2).
+
+CORRECTION, made before this ADR was pushed. The first draft of this section
+claimed "every non-portrait case fails the 0.70 gate in BOTH arms". That was an
+instrument error, not a result: the harness scored every case with
+`shot_type="portrait"`, while `identity/types.py` already calibrates the gate
+per shot type — portrait 0.70, medium 0.65, action 0.60, wide 0.55. Re-scored
+against the gate each prompt actually describes, the same raw numbers read very
+differently:
+
+| case | shot type | gate | 1 ref | verdict |
+| --- | --- | --- | --- | --- |
+| anchor | portrait | 0.70 | 0.791 | PASS |
+| neutral_portrait | portrait | 0.70 | 0.761 | PASS |
+| medium_action | medium | 0.65 | 0.648 | fail by 0.002 |
+| wide_small_face | wide | 0.55 | 0.576 | PASS |
+| profile_angled | portrait | 0.70 | 0.569 | fail |
+| low_light_motion | action | 0.60 | 0.562 | fail |
+
+Three of six pass rather than two, and the wide shot — the case that looked
+worst on a raw score — comfortably clears the gate written for it. The raw
+scores were never wrong; the verdicts were, because the instrument was set to
+one threshold for every shot type.
+
+4. **The character LoRA does not rescue the off-angle case, and the hypothesis
+   that it would is falsified.** `scripts/adr089_lora_arm_probe.py` ran three
+   arms — one reference, the trained adapter, and the same trigger-token prompt
+   with the adapter removed — all at 1024x1024, seed 0, four steps. The anchor
+   row reproduced the lab's published LoRA numbers (0.676 adapter, 0.513
+   control against 0.6759…/0.5125…), so the probe is calibrated.
+
+| case | gate | 1 ref | lora | control | lora − control | 1 ref |
+| --- | --- | --- | --- | --- | --- | --- |
+| anchor | 0.70 | 0.786 | 0.676 | 0.513 | **+0.163** | PASS |
+| medium_action | 0.65 | 0.661 | 0.569 | 0.495 | +0.073 | PASS |
+| profile_angled | 0.70 | 0.597 | 0.553 | 0.583 | **−0.030** | fail |
+| low_light_motion | 0.60 | 0.664 | 0.670 | 0.539 | +0.131 | PASS |
+
+One reference beats the adapter in three of four cases; the single "win" is
++0.006 and is noise. Decisively, the adapter's own contribution is itself
+POSE-DEPENDENT: +0.163 on the frontal anchor, +0.073 at medium, and −0.030 on
+the profile, where it actively hurts against its own control. The reasoning
+that motivated this probe — that a LoRA carries identity in weights and so has
+no frontal-only limitation — was wrong. It was trained on four largely frontal
+references and learned the same frontal bias, so it fails in exactly the place
+it was hoped to rescue.
+
+5. **Framing moves identity more than either conditioning choice.** The same
+   prompts and seed at 1:1 instead of 16:9, one reference throughout:
+   medium_action 0.648 → 0.661, profile_angled 0.569 → 0.597, and
+   low_light_motion 0.562 → **0.664**. A tighter frame is worth up to +0.102 —
+   several times the +/-0.04 the reference-count debate was fighting over. Part
+   of this is genuine (more face, more signal) and part is measurement (a
+   larger crop for the scorer); this run cannot separate them, but for practical
+   purposes both point the same way.
+
+Decision. Keep `DEFAULT_PER_CHARACTER_REFERENCES = 1`. It is the best available
+default: it wins the cases that pass, and on the cases that fail it loses by
+margins far smaller than the gap to the gate. Reverting would trade a measured
+frontal win for no realistic-shot benefit.
+
+Narrow the claim. ADR-089 is a decision about FRONTAL targets. It is not
+evidence that one reference is better in general, and this ADR is the record
+that the wider reading was tested and did not hold.
+
+Consequences and open work, in priority order.
+
+- **Score against the shot type.** Any future identity gate must use
+  `get_threshold_for_shot`, not a fixed 0.70. Both harnesses here hardcoded
+  `shot_type="portrait"` and produced verdicts that were wrong for four of six
+  cases while the raw scores were right. Fix the harnesses before the next run.
+- **Pose matching is now the best-supported open design.** A three-quarter shot
+  should receive the three-quarter reference; a frontal shot the canonical.
+  `profile_angled` is the only case that fails at BOTH aspect ratios and under
+  every arm — one reference, three references, and the adapter alike — and it
+  is precisely the pose the frontal canonical cannot carry. Not built.
+- **Framing is a real and under-used lever.** Up to +0.102 from 1:1 versus 16:9
+  on the same prompt and seed. For an identity-critical shot, framing tighter
+  is currently worth more than any conditioning choice measured here.
+- `DISTILLED_STEPS = 4` is very low. Raising it requires re-pinning the
+  workflow digest, so it is a change and not a knob. Untested.
+- PuLID remains the highest identity ever measured here at 0.8779 and remains
+  unavailable: the published adapter is 4096-wide against Klein 4B's 3072.
+- The character LoRA is CLOSED as an off-angle remedy — see finding 4. It stays
+  available and demoted; it is not the answer for non-frontal shots and further
+  effort there should go to pose matching instead.
+
+Scope limits, stated so a later reader does not over-read this. One subject,
+one seed, one render per cell; the two real reversals are single measurements,
+not distributions. In a 16:9 shot the face occupies a much smaller crop than in
+the lab's portrait framing, so the scorer has less signal per pixel — some of
+the absolute drop is measurement difficulty rather than identity loss, and this
+run cannot separate the two.
+
+## ADR-092 — The identity scorer inverts rank on off-angle views; those findings are void
+
+Date: 2026-08-08
+
+Status: Accepted. VOIDS the off-angle half of ADR-091 and of the same day's LoRA
+and hosted-PuLID probes. ADR-089's frontal decision is unaffected.
+
+Context. A whole day of identity work — reference count, character LoRA,
+framing, hosted PuLID — was measured with `IdentityValidator.validate_image`
+(GhostFaceNet) and read as if the numbers meant the same thing at every head
+angle. They do not.
+
+The subject supplied four real photographs: front close-up, front wide, left
+profile, right three-quarter. Scored against his own canonical:
+
+| image | provenance | score |
+| --- | --- | --- |
+| front_wide | real photograph | 0.908 |
+| lighting_outdoor | Kontext, from the frontal | 0.922 |
+| angle_45 | Kontext, from the frontal | 0.779 |
+| expression_smile | Kontext, from the frontal | 0.667 |
+| **angle_profile** | **Kontext, from the frontal** | **0.570** |
+| right_threequarter | **real photograph** | 0.559 |
+| left_profile | **real photograph** | 0.556 |
+| profile_outdoor | Kontext, from the REAL profile | 0.539 |
+
+A real photograph of the subject in profile scores 0.556 and fails the 0.70
+portrait gate. So a low off-angle score is the instrument's floor, not a
+generation failure.
+
+Worse than a floor: the ordering reverses. The subject viewed the three profile
+images and judged `profile_outdoor` (0.539) to be him and `angle_profile`
+(0.570) NOT to be him. **The scorer ranked a stranger 0.031 above the subject.**
+
+Decision. No conclusion about off-angle identity may be drawn from a
+GhostFaceNet score. The following are VOID as evidence, though the raw numbers
+remain on record:
+
+- ADR-091's "profile_angled fails under every arm" and its reading that
+  reference conditioning "loses grip" off-angle.
+- The character LoRA's "−0.030 on profile", and with it the claim that the
+  adapter's contribution is pose-dependent. Its frontal +0.163 stands.
+- Hosted PuLID's 0.538 profile result and the deltas below ~0.03 in that run,
+  which is separately non-deterministic at fixed seed.
+- Any framing comparison whose two arms both sat below ~0.65.
+
+What survives: measurements taken well above the dead band, where the
+instrument was independently validated. ADR-089's decision — one reference beats
+four on FRONTAL targets, 0.791 versus 0.499 — stands, and the battery's anchor
+reproduced the lab's stored value to fifteen decimal places.
+
+The mechanism finding. Generation quality tracks whether the SOURCE contains the
+geometry being asked for, not the model or the prompt. Asked for a profile from
+a frontal photograph, FLUX Kontext invented a plausible stranger — a frontal
+image carries nothing about ear shape, silhouette, or jaw from the side. Given
+the subject's real profile, the same model at the same price kept him and
+changed only the light. `threequarter_smile`, generated from the real
+three-quarter, likewise holds at 0.624 with an expression that existed in no
+prior reference.
+
+Consequences.
+
+- **Generate each pose from a real photograph AT that pose.** The four real
+  photographs are generation SOURCES, not merely references. The existing
+  `_generate_multi_angle_refs` always edits from the canonical and therefore
+  cannot produce a truthful profile at all.
+- `angle_profile.jpg` is quarantined at
+  `domain/projects/<pid>/characters/_quarantine/` with a README recording why.
+  It is a stranger's face and would poison any reference set that picked it up.
+  Kept, not deleted: it is the evidence for the rank inversion.
+- Profile coverage uses `hkkperson_angle_left_profile.jpg` (real) and
+  `profile_outdoor.jpg` (generated from it, confirmed by the subject).
+- Reference SELECTION cannot be score-driven. Ranking the pool by score and
+  taking the top N returns only frontal images, discarding exactly the views a
+  reference-to-video model needs. Select for coverage — angle, expression,
+  lighting — using the pose labels the generator already writes.
+- The harnesses print these scores and will keep printing them. Each now warns
+  in-file that off-angle numbers are not evidence.
+
+Open. Whether any available scorer resolves profile identity at all is unknown
+and untested. Until one exists, off-angle reference quality is judged by the
+subject's eye, which is the only instrument demonstrated to get it right.
+
+Addendum, same day — the video gate has the same defect, and it matters more.
+
+This is a cinema pipeline; every still is a means to a shot. The single-reference
+problem therefore does not stop at measurement, it reaches the production gate:
+
+- `domain/continuity_engine.py:523` calls `IdentityValidator.validate_video`,
+  building its character configs from `get_reference_image` — which is
+  documented as "Get the canonical approved identity-reference image" and
+  returns exactly ONE image, the frontal canonical
+  (`domain/character_manager.py:1087`).
+- `cinema/shots/controller.py:1943` and `phase_c_assembly.py:535` score
+  keyframes against that same single canonical.
+
+`validate_video` samples many frames across a shot. In a film a character TURNS —
+that is what movement is. Every sampled frame where the head is away from camera
+is scored against a frontal reference, lands in the dead band established above,
+and drags the shot's identity result down. The gate therefore penalises exactly
+the shots that make footage cinematic: a head turn, a profile, a look-off, a
+walk-away. A static frontal talking head scores best, which is the opposite of
+the product's goal, and a rejected shot is retried and re-billed.
+
+The reference set is consequently needed in three places, and today reaches
+roughly one:
+
+| surface | today | should be |
+| --- | --- | --- |
+| video providers | `multi_angle_refs[:4]` and `[:8]` in phase_c_ffmpeg | as many as each provider accepts |
+| keyframe generation | 1 per character (ADR-089) | pose-matched to the shot |
+| identity validation | 1 frontal, always | best-matching pose per frame |
+
+The third is the highest-value fix and had no owner: it decides whether a shot
+passes, and it is currently biased against the footage worth keeping. Not built;
+recorded here so it is not rediscovered.

@@ -26,6 +26,19 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         # first non-Google fallback. The deprecated native kling-v1-6 adapter
         # is quarantined from automatic routing and remains explicit-only.
         "target_api": "GEMINI_OMNI",
+# VEO_NATIVE leads every cascade below and accepts ZERO reference images:
+# veo_native.py:381-392 prints the count it was given and passes
+# `reference_images=None`, because Vertex forbids image+reference_images
+# together. Its own catalog entry says so — scene_decomposer.py:69, "no
+# additional references or driving video". Identity therefore comes only from
+# the start frame on this route.
+#
+# NOT reordered here, deliberately. Whether a strong keyframe through Veo beats
+# multi-reference binding through Seedance is UNMEASURED, and Veo carries real
+# advantages (native audio, quality_score 0.85). Reordering on reasoning alone
+# is the mistake this project keeps paying for. Measure first: same shot, same
+# character, Veo start-frame versus Seedance reference-to-video, judged by eye.
+# Until then, know that a multi-reference set buys nothing on the default route.
         "video_fallbacks": ["VEO_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "SEEDANCE"],
         "description": "Close-up portrait — favor identity-capable video engines and stable facial motion.",
     },

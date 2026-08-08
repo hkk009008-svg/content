@@ -30,6 +30,22 @@ from performance._net import atomic_publish_bytes, validate_image_artifact
 # itself as not tested against the live API) — ship conservative and revisit
 # only after a live-API empirical probe recorded as a logs/ artifact per
 # R-MEASURE (CLAUDE.md).
+# LIVE RISK, opened 2026-08-08: a character's reference set now really can
+# exceed this. It previously could not — the record held 2 paths, so the budget
+# never bound and the truncation warning below never printed.
+#
+# Vendor documentation for the pinned tier states FOUR character reference
+# images (ai.google.dev/gemini-api/docs/image-generation, read 2026-08-08),
+# while gemini-3-pro-image documents five. This constant is 8. If the provider
+# REJECTS rather than truncates above its ceiling, generation now fails where it
+# used to pass.
+#
+# NOT changed here. The comment above is explicit that this number moves only
+# after a live-API probe recorded as a logs/ artifact (R-MEASURE), and a
+# documentation page is not a probe. Route by model ID when the probe happens —
+# cost_tracker.py:89 calls the flash tier "Nano Banana 2", so marketing aliases
+# cannot be trusted to identify the tier. Tracked in
+# docs/PLAN-reference-sets-2026-08-08.md.
 GEMINI_MULTIREF_MAX_REFS = 8
 _IMAGE_MIME_FORMATS = {
     "image/jpeg": "JPEG",

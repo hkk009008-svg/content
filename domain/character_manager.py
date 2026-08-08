@@ -950,12 +950,49 @@ def _has_detectable_face(image_path: str) -> bool:
         return False
 
 
+# Two floors, both measured 2026-08-08 across this project's ten reference
+# images. Without them the guard rejected the subject's own canonical photograph:
+# a 4032x3024 frame yielding a real face at 1664x1664 (22.7% of frame) AND a
+# 58x58 speck at 0.0276% — the speck detected at confidence 0.98, HIGHER than the
+# real face's 0.94, so confidence ordering separates nothing.
+#
+# The full measurement, largest detection per image as a share of frame:
+#
+#   FRONTAL, real face found     angle_45 27.3% | threequarter_smile 24.7%
+#                                canonical 22.7% | expression_smile 21.1%
+#                                lighting_outdoor 21.0% | front_wide 8.5%
+#   OFF-ANGLE, NO real face      profile_outdoor 1.06% | left_profile 0.08%
+#                                right_threequarter 0.03% | angle_back none
+#
+# The detector does not find a face in a true profile AT ALL — on a real
+# photograph of the subject in profile the largest detection is a 96x96 speck.
+# That compounds ADR-092: the recogniser cannot score a profile and the detector
+# cannot even locate one. An off-angle reference therefore yields ZERO
+# subject-sized faces, which is correct here — the guard only rejects at >= 2, so
+# it declines to judge rather than rejecting a valid reference.
+#
+# Lowest real face 8.53%, highest artifact 1.06%: an 8x gap. The absolute floor
+# sits between them with better than 2x margin on each side.
+_MIN_SUBJECT_FACE_FRAME_RATIO = 0.04
+
+# A detection far smaller than the largest in the same image is not a competing
+# subject either. This is the question the guard actually asks — is there a
+# second person whose identity could be confused with the primary's? — and a
+# genuine second person in a reference photograph is comparable in size.
+_MIN_COMPETING_FACE_AREA_RATIO = 0.25
+
+
 def _count_faces(image_path: str) -> int:
     """
-    Return the number of faces detected in image_path.
+    Return the number of SUBJECT-SIZED faces detected in image_path.
 
     Returns 0 on detection failure or when DeepFace is unavailable.
     Used for single-face enforcement at character registration time (A3).
+
+    Detections far smaller than the largest face are excluded: they are
+    background artifacts rather than competing subjects, and counting them
+    rejected valid single-person photographs. See
+    _MIN_COMPETING_FACE_AREA_RATIO for the measurement behind the threshold.
     """
     if not DEEPFACE_AVAILABLE:
         return 0  # Cannot count; caller falls back to lenient path
@@ -963,9 +1000,57 @@ def _count_faces(image_path: str) -> int:
         from identity.validator import cv2_single_thread
         with cv2_single_thread():  # determinism: serialize the OpenCV align race
             faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
-        return len(faces)
     except Exception:
         return 0
+
+    try:
+        frame_area = float(_image_pixel_area(image_path))
+    except Exception:
+        # Without the frame size the absolute floor cannot be applied. Fall back
+        # to the relative floor alone rather than skipping both — a parse
+        # failure must never make this guard lenient.
+        frame_area = 0.0
+
+    areas: List[float] = []
+    unmeasurable = 0
+    for face in faces:
+        area = face.get("facial_area") if isinstance(face, Mapping) else None
+        width = area.get("w") if isinstance(area, Mapping) else None
+        height = area.get("h") if isinstance(area, Mapping) else None
+        if (
+            isinstance(width, (int, float))
+            and isinstance(height, (int, float))
+            and not isinstance(width, bool)
+            and not isinstance(height, bool)
+        ):
+            areas.append(float(width) * float(height))
+        else:
+            # Unexpected shape: count it rather than silently dropping a face.
+            # Held apart from the measured areas so it cannot distort the
+            # largest-face comparison — this guard must never become lenient
+            # through a parse failure, nor stricter through one.
+            unmeasurable += 1
+
+    if frame_area > 0:
+        areas = [a for a in areas if a >= frame_area * _MIN_SUBJECT_FACE_FRAME_RATIO]
+    if not areas:
+        return unmeasurable
+    largest = max(areas)
+    if largest <= 0:
+        return len(areas) + unmeasurable
+    competing = sum(
+        1 for area in areas if area >= largest * _MIN_COMPETING_FACE_AREA_RATIO
+    )
+    return competing + unmeasurable
+
+
+def _image_pixel_area(image_path: str) -> int:
+    """Width * height of an image, without decoding its pixels."""
+    from PIL import Image
+
+    with Image.open(image_path) as handle:
+        width, height = handle.size
+    return int(width) * int(height)
 
 
 def compute_face_embedding(image_path: str) -> Optional[np.ndarray]:
