@@ -1092,7 +1092,24 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     else:
                         refs_to_upload = [character_image]
 
-                    for ref_path in refs_to_upload[:6]:  # Up to 6 refs for max identity
+                    # LEFT AT 6, deliberately. This function's docstring says
+                    # "up to 9 reference images", but _allocate_ref_slots above
+                    # carries an INDEPENDENT budget of cap=6 for the
+                    # multi-character path, citing "P1-1 spec §3a". Two specs
+                    # disagree and the code has consistently followed 6.
+                    #
+                    # Raising only this one would split the two paths, and the
+                    # provider's real ceiling for fal-ai/flux-pro/kontext/max/
+                    # multi is UNVERIFIED here. A change to 9 was made and
+                    # reverted on 2026-08-08 after the same reasoning produced a
+                    # wrong Seedance change that a test caught — there, the
+                    # documented "9" counted the KEYFRAME too, so the existing
+                    # slice was already exactly at capacity.
+                    #
+                    # Move both budgets together, after a live probe recorded as
+                    # a logs/ artifact. Tracked in
+                    # docs/PLAN-reference-sets-2026-08-08.md.
+                    for ref_path in refs_to_upload[:6]:
                         try:
                             image_urls.append(fal_client.upload_file(ref_path))
                         except Exception:

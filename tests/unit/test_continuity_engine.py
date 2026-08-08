@@ -61,12 +61,22 @@ def test_primary_and_secondary_reference_assets_are_explicit(engine_two_chars):
 
     assert config["primary_character"] == "char_a"
     assert config["primary_reference"] == "/ref/char_a.jpg"
-    assert config["multi_angle_refs"] == ["/angles/char_a-profile.jpg"]
+    # The canonical now LEADS the video reference set. It previously did not
+    # appear in it at all: phase_c_ffmpeg.py iterates `multi_angle_refs[:N]`
+    # with no prepend and uploads `valid_refs[0]` as Kling's frontal image, so
+    # the frontal slot was filled by whatever angle happened to come first.
+    assert config["multi_angle_refs"] == [
+        "/ref/char_a.jpg",
+        "/angles/char_a-profile.jpg",
+    ]
     assert config["secondary_chars"] == [
         {
             "char_id": "char_b",
             "reference": "/ref/char_b.jpg",
-            "multi_angle_refs": ["/angles/char_b-profile.jpg"],
+            "multi_angle_refs": [
+                "/ref/char_b.jpg",
+                "/angles/char_b-profile.jpg",
+            ],
             "identity_anchor": "Bob",
         }
     ]
@@ -192,3 +202,67 @@ def test_missing_location_seed_uses_stable_fallback(engine_two_chars):
     assert enhanced["continuity_config"]["scene_seed"] == _stable_scene_seed(
         scene["id"]
     )
+
+
+# ---------------------------------------------------------------------------
+# canonical_first — slot 0 carries a semantic role downstream
+# ---------------------------------------------------------------------------
+
+def test_canonical_leads_the_reference_set() -> None:
+    """Slot 0 is Kling's FRONTAL image, and nothing else establishes it.
+
+    `phase_c_ffmpeg.py` iterates `multi_angle_refs[:N]` with no canonical
+    prepended, then uploads `valid_refs[0]` as `frontal_image_url`. Before this
+    normalisation slot 0 was whatever the character record happened to list
+    first — on this project a left profile, so Kling was told a profile was the
+    frontal view.
+    """
+
+    from domain.continuity_engine import canonical_first
+
+    assert canonical_first("canon.jpg", ["profile.jpg", "3q.jpg"]) == [
+        "canon.jpg", "profile.jpg", "3q.jpg",
+    ]
+
+
+def test_canonical_first_is_idempotent_and_never_duplicates() -> None:
+    """A record already ordered canonical-first must be left alone.
+
+    The character record for this project lists the canonical at slot 0. If
+    this helper appended rather than deduplicated, that record would spend two
+    of a provider's four slots on the same image.
+    """
+
+    from domain.continuity_engine import canonical_first
+
+    already = ["canon.jpg", "profile.jpg"]
+    assert canonical_first("canon.jpg", already) == already
+    assert canonical_first("canon.jpg", ["profile.jpg", "canon.jpg", "3q.jpg"]) == [
+        "canon.jpg", "profile.jpg", "3q.jpg",
+    ]
+
+
+def test_canonical_first_tolerates_a_missing_canonical_and_empty_entries() -> None:
+    """A character with no canonical still yields a usable ordered set."""
+
+    from domain.continuity_engine import canonical_first
+
+    assert canonical_first(None, ["profile.jpg"]) == ["profile.jpg"]
+    assert canonical_first("", ["profile.jpg"]) == ["profile.jpg"]
+    assert canonical_first("canon.jpg", ["", "profile.jpg", None]) == [
+        "canon.jpg", "profile.jpg",
+    ]
+
+
+def test_enhanced_shot_puts_the_canonical_at_slot_zero() -> None:
+    """End to end: a record listing a profile first still yields canonical-first."""
+
+    from domain.continuity_engine import canonical_first
+
+    # The record's own order, as this project's looked before it was rewritten.
+    record_order = ["/ref/left_profile.jpg", "/ref/three_quarter.jpg"]
+    ordered = canonical_first("/ref/canonical.jpg", record_order)
+
+    assert ordered[0] == "/ref/canonical.jpg"
+    # And the coverage that follows it is preserved, not reshuffled.
+    assert ordered[1:] == record_order

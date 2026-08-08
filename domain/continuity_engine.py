@@ -12,7 +12,7 @@ Subsystems:
 
 import os
 import numpy as np
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Sequence
 
 from domain.project_manager import get_character, get_location
 from domain.character_manager import (
@@ -26,6 +26,27 @@ try:
     DEEPFACE_AVAILABLE = True
 except ImportError:
     DEEPFACE_AVAILABLE = False
+
+
+def canonical_first(canonical: Optional[str], refs: Sequence[str]) -> List[str]:
+    """Return *refs* with *canonical* leading, exactly once, order preserved.
+
+    Slot 0 of a reference list carries a SEMANTIC ROLE downstream and nothing
+    else establishes it. `phase_c_ffmpeg.py` iterates `multi_angle_refs[:N]`
+    with no canonical prepended, and uploads `valid_refs[0]` as Kling's FRONTAL
+    IMAGE. Before this normalisation, slot 0 was whatever the character record
+    happened to list first — on this project, a left profile, so Kling was told
+    a profile was the frontal view.
+
+    Normalising in one place means the record's own ordering stops being
+    load-bearing, and a reordering elsewhere can no longer mislabel a frontal.
+    Idempotent: a list that already leads with the canonical is unchanged.
+    """
+
+    ordered = [ref for ref in refs if ref]
+    if not canonical:
+        return ordered
+    return [canonical] + [ref for ref in ordered if ref != canonical]
 
 
 # ---------------------------------------------------------------------------
@@ -460,8 +481,9 @@ class ContinuityEngine:
             continuity_config["primary_reference"] = (
                 self.character_tracker.get_reference_image(primary_char)
             )
-            continuity_config["multi_angle_refs"] = (
-                self.character_tracker.get_multi_angle_refs(primary_char)
+            continuity_config["multi_angle_refs"] = canonical_first(
+                continuity_config["primary_reference"],
+                self.character_tracker.get_multi_angle_refs(primary_char),
             )
             continuity_config["identity_anchor"] = (
                 get_identity_anchor(self.project, primary_char)
@@ -477,7 +499,9 @@ class ContinuityEngine:
             continuity_config["secondary_chars"].append({
                 "char_id": cid,
                 "reference": ref,
-                "multi_angle_refs": self.character_tracker.get_multi_angle_refs(cid),
+                "multi_angle_refs": canonical_first(
+                    ref, self.character_tracker.get_multi_angle_refs(cid)
+                ),
                 "identity_anchor": get_identity_anchor(self.project, cid),
             })
 
