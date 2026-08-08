@@ -4829,3 +4829,120 @@ not distributions. In a 16:9 shot the face occupies a much smaller crop than in
 the lab's portrait framing, so the scorer has less signal per pixel — some of
 the absolute drop is measurement difficulty rather than identity loss, and this
 run cannot separate the two.
+
+## ADR-092 — The identity scorer inverts rank on off-angle views; those findings are void
+
+Date: 2026-08-08
+
+Status: Accepted. VOIDS the off-angle half of ADR-091 and of the same day's LoRA
+and hosted-PuLID probes. ADR-089's frontal decision is unaffected.
+
+Context. A whole day of identity work — reference count, character LoRA,
+framing, hosted PuLID — was measured with `IdentityValidator.validate_image`
+(GhostFaceNet) and read as if the numbers meant the same thing at every head
+angle. They do not.
+
+The subject supplied four real photographs: front close-up, front wide, left
+profile, right three-quarter. Scored against his own canonical:
+
+| image | provenance | score |
+| --- | --- | --- |
+| front_wide | real photograph | 0.908 |
+| lighting_outdoor | Kontext, from the frontal | 0.922 |
+| angle_45 | Kontext, from the frontal | 0.779 |
+| expression_smile | Kontext, from the frontal | 0.667 |
+| **angle_profile** | **Kontext, from the frontal** | **0.570** |
+| right_threequarter | **real photograph** | 0.559 |
+| left_profile | **real photograph** | 0.556 |
+| profile_outdoor | Kontext, from the REAL profile | 0.539 |
+
+A real photograph of the subject in profile scores 0.556 and fails the 0.70
+portrait gate. So a low off-angle score is the instrument's floor, not a
+generation failure.
+
+Worse than a floor: the ordering reverses. The subject viewed the three profile
+images and judged `profile_outdoor` (0.539) to be him and `angle_profile`
+(0.570) NOT to be him. **The scorer ranked a stranger 0.031 above the subject.**
+
+Decision. No conclusion about off-angle identity may be drawn from a
+GhostFaceNet score. The following are VOID as evidence, though the raw numbers
+remain on record:
+
+- ADR-091's "profile_angled fails under every arm" and its reading that
+  reference conditioning "loses grip" off-angle.
+- The character LoRA's "−0.030 on profile", and with it the claim that the
+  adapter's contribution is pose-dependent. Its frontal +0.163 stands.
+- Hosted PuLID's 0.538 profile result and the deltas below ~0.03 in that run,
+  which is separately non-deterministic at fixed seed.
+- Any framing comparison whose two arms both sat below ~0.65.
+
+What survives: measurements taken well above the dead band, where the
+instrument was independently validated. ADR-089's decision — one reference beats
+four on FRONTAL targets, 0.791 versus 0.499 — stands, and the battery's anchor
+reproduced the lab's stored value to fifteen decimal places.
+
+The mechanism finding. Generation quality tracks whether the SOURCE contains the
+geometry being asked for, not the model or the prompt. Asked for a profile from
+a frontal photograph, FLUX Kontext invented a plausible stranger — a frontal
+image carries nothing about ear shape, silhouette, or jaw from the side. Given
+the subject's real profile, the same model at the same price kept him and
+changed only the light. `threequarter_smile`, generated from the real
+three-quarter, likewise holds at 0.624 with an expression that existed in no
+prior reference.
+
+Consequences.
+
+- **Generate each pose from a real photograph AT that pose.** The four real
+  photographs are generation SOURCES, not merely references. The existing
+  `_generate_multi_angle_refs` always edits from the canonical and therefore
+  cannot produce a truthful profile at all.
+- `angle_profile.jpg` is quarantined at
+  `domain/projects/<pid>/characters/_quarantine/` with a README recording why.
+  It is a stranger's face and would poison any reference set that picked it up.
+  Kept, not deleted: it is the evidence for the rank inversion.
+- Profile coverage uses `hkkperson_angle_left_profile.jpg` (real) and
+  `profile_outdoor.jpg` (generated from it, confirmed by the subject).
+- Reference SELECTION cannot be score-driven. Ranking the pool by score and
+  taking the top N returns only frontal images, discarding exactly the views a
+  reference-to-video model needs. Select for coverage — angle, expression,
+  lighting — using the pose labels the generator already writes.
+- The harnesses print these scores and will keep printing them. Each now warns
+  in-file that off-angle numbers are not evidence.
+
+Open. Whether any available scorer resolves profile identity at all is unknown
+and untested. Until one exists, off-angle reference quality is judged by the
+subject's eye, which is the only instrument demonstrated to get it right.
+
+Addendum, same day — the video gate has the same defect, and it matters more.
+
+This is a cinema pipeline; every still is a means to a shot. The single-reference
+problem therefore does not stop at measurement, it reaches the production gate:
+
+- `domain/continuity_engine.py:523` calls `IdentityValidator.validate_video`,
+  building its character configs from `get_reference_image` — which is
+  documented as "Get the canonical approved identity-reference image" and
+  returns exactly ONE image, the frontal canonical
+  (`domain/character_manager.py:1087`).
+- `cinema/shots/controller.py:1943` and `phase_c_assembly.py:535` score
+  keyframes against that same single canonical.
+
+`validate_video` samples many frames across a shot. In a film a character TURNS —
+that is what movement is. Every sampled frame where the head is away from camera
+is scored against a frontal reference, lands in the dead band established above,
+and drags the shot's identity result down. The gate therefore penalises exactly
+the shots that make footage cinematic: a head turn, a profile, a look-off, a
+walk-away. A static frontal talking head scores best, which is the opposite of
+the product's goal, and a rejected shot is retried and re-billed.
+
+The reference set is consequently needed in three places, and today reaches
+roughly one:
+
+| surface | today | should be |
+| --- | --- | --- |
+| video providers | `multi_angle_refs[:4]` and `[:8]` in phase_c_ffmpeg | as many as each provider accepts |
+| keyframe generation | 1 per character (ADR-089) | pose-matched to the shot |
+| identity validation | 1 frontal, always | best-matching pose per frame |
+
+The third is the highest-value fix and had no owner: it decides whether a shot
+passes, and it is currently biased against the footage worth keeping. Not built;
+recorded here so it is not rediscovered.

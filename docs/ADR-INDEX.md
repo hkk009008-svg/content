@@ -97,3 +97,4 @@ Regenerate with `env -u GIT_INDEX_FILE .venv/bin/python scripts/gen_doc_index.py
 | ADR-089 | One reference per character is the measured FLUX.2 default |
 | ADR-090 | The published LoRA adapter is expected inside the ComfyUI checkout |
 | ADR-091 | ADR-089's default is right where it was measured, and only there |
+| ADR-092 | The identity scorer inverts rank on off-angle views; those findings are void |

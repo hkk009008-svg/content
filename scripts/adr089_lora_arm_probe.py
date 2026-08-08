@@ -16,6 +16,22 @@ has never been measured off-angle. If it holds near 0.65-0.70 where reference
 conditioning sits at 0.56, the correct rule becomes "one reference for frontal
 close-ups, LoRA elsewhere".
 
+OFF-ANGLE SCORES FROM THIS HARNESS ARE NOT EVIDENCE (ADR-092)
+-------------------------------------------------------------
+GhostFaceNet does not resolve identity on turned-away views, and in that band it
+does not merely lose precision -- it INVERTS RANK. Measured 2026-08-08: the
+subject's own real profile photograph scored 0.556, while a Kontext panel the
+subject confirmed is NOT him scored 0.570. A stranger outranked the subject by
+0.031.
+
+So: any score below roughly 0.65 on a non-frontal shot carries no information
+about identity. Do not compare two such numbers, do not call the higher one
+better, and do not select references by score -- ranking the pool returns only
+frontal images and discards the very views a video model needs.
+
+Frontal measurements well above the band remain usable; that is where this
+harness's anchor reproduces the lab's stored value to fifteen decimals.
+
 DESIGN
 ------
 Three arms per case, all at 1024x1024, seed 0, four steps -- identical

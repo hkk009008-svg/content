@@ -17,6 +17,22 @@ something, low light, motion. This harness renders a battery of director-style
 prompts at BOTH the new default (1 reference) and the old behaviour (4), scores
 each with the same validator the lab used, and writes them side by side.
 
+OFF-ANGLE SCORES FROM THIS HARNESS ARE NOT EVIDENCE (ADR-092)
+-------------------------------------------------------------
+GhostFaceNet does not resolve identity on turned-away views, and in that band it
+does not merely lose precision -- it INVERTS RANK. Measured 2026-08-08: the
+subject's own real profile photograph scored 0.556, while a Kontext panel the
+subject confirmed is NOT him scored 0.570. A stranger outranked the subject by
+0.031.
+
+So: any score below roughly 0.65 on a non-frontal shot carries no information
+about identity. Do not compare two such numbers, do not call the higher one
+better, and do not select references by score -- ranking the pool returns only
+frontal images and discards the very views a video model needs.
+
+Frontal measurements well above the band remain usable; that is where this
+harness's anchor reproduces the lab's stored value to fifteen decimals.
+
 It is deliberately a probe, not a gate. Six prompts times two arms is a small
 sample on one subject; treat a reversal on one cell as a lead, not a verdict.
 Read the images -- a score above the gate on a face that looks wrong is still a
