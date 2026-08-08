@@ -80,6 +80,12 @@ from domain.evidence_metrics import palette_match, structure_match  # noqa: E402
 # Two shots of one scene. Deliberately ordinary director prose: the claim is
 # about plumbing, and a prompt that begged for composition fidelity would help
 # the withheld arm cheat.
+#: VEO 3.1 reference-to-video accepts ONLY this value — a "4s" reconstruction
+#: was rejected outright by the provider. It matches the shipped default at
+#: phase_c_ffmpeg.py:264, which matters twice: the arms must agree, and the
+#: control must reproduce the real call rather than a plausible-looking one.
+_VEO_DURATION = "8s"
+
 SHOTS = [
     {
         "id": "h4_shot_a",
@@ -214,7 +220,7 @@ def _reconstructed_pre_fix_veo_call(fal_client, keyframe, refs, prompt, out_mp4)
             "prompt": prompt,
             "image_urls": image_urls,
             "aspect_ratio": "16:9",
-            "duration": "4s",
+            "duration": _VEO_DURATION,
             "resolution": "720p",
             "generate_audio": False,
         },
@@ -270,6 +276,14 @@ def render_and_measure(project_id: str, out_dir: Path, *, dry_run: bool) -> dict
     keyframes: dict[str, str] = {}
     for shot in SHOTS:
         keyframe = str(out_dir / f"{shot['id']}_keyframe.jpg")
+        if os.path.exists(keyframe) and os.path.getsize(keyframe) > 0:
+            # Already paid for on an earlier attempt. Reusing it is not just
+            # thrift: a retry that regenerates the keyframe changes the very
+            # thing both arms are measured against, so the numbers would not be
+            # comparable with the attempt that produced it.
+            print(f"   [H4] reusing existing keyframe: {keyframe}")
+            keyframes[shot["id"]] = keyframe
+            continue
         # ONE keyframe per shot, shared by both arms. Generating one per arm
         # would confound the thing under test with generation variance.
         result = generate_ai_broll(
@@ -289,11 +303,21 @@ def render_and_measure(project_id: str, out_dir: Path, *, dry_run: bool) -> dict
         other = keyframes[next(s["id"] for s in SHOTS if s["id"] != shot["id"])]
 
         led_mp4 = str(out_dir / f"{shot['id']}_led.mp4")
-        generate_ai_video(
+        produced = generate_ai_video(
             keyframe, shot["camera"], "VEO", led_mp4,
             character_id=character["id"], multi_angle_refs=refs,
             shot_type="medium", video_fallbacks=["VEO"],
+            duration=_VEO_DURATION,
         )
+        # generate_ai_video returns None on failure rather than raising. The
+        # return was ignored in the first version, so a silently failed arm
+        # walked on and the run died later in the OTHER arm — pointing at the
+        # wrong code. An unchecked return is how a failure gets misattributed.
+        if not produced or not os.path.exists(led_mp4):
+            raise RuntimeError(
+                f"keyframe-led VEO arm produced no clip for {shot['id']}; "
+                "see the provider cascade output above"
+            )
         withheld_mp4 = str(out_dir / f"{shot['id']}_withheld.mp4")
         _reconstructed_pre_fix_veo_call(
             fal_client, keyframe, refs, shot["prompt"], withheld_mp4,

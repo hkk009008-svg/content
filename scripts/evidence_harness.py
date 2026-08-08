@@ -224,13 +224,14 @@ Kept explicit so `--run H3` refuses loudly instead of silently doing nothing and
 exiting 0, which reads exactly like a run that happened."""
 
 
-def _execute(selected: set[str], project_id: str, *, dry_run: bool) -> int:
+def _execute(selected: set[str], project_id: str, *, dry_run: bool,
+             reuse_run: str = "") -> int:
     """Render the selected wired cells and write a citable artifact."""
 
     import time as _time
     from evidence_cells import h4_veo_keyframe
 
-    run_id = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime())
+    run_id = reuse_run or _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime())
     out_dir = REPO / "logs" / "evidence" / run_id
     print(f"\nrun id : {run_id}")
     print(f"output : {out_dir.relative_to(REPO)}")
@@ -314,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="must equal the planned total for the selected ids")
     parser.add_argument("--project", default="42c74e230519",
                         help="project id supplying the character and references")
+    parser.add_argument("--reuse-run", default="",
+                        help="run id whose already-paid keyframes should be "
+                             "reused instead of re-rendered")
     parser.add_argument("--dry-run", action="store_true",
                         help="resolve assets and print what WOULD render; spends nothing")
     parser.add_argument("--skip-instrument-check", action="store_true",
@@ -355,7 +359,8 @@ def main(argv: list[str] | None = None) -> int:
               f"{sorted(_WIRED)}. Nothing was spent.")
         return 3
 
-    return _execute(selected, args.project, dry_run=args.dry_run)
+    return _execute(selected, args.project, dry_run=args.dry_run,
+                    reuse_run=args.reuse_run)
 
 
 if __name__ == "__main__":
