@@ -25,6 +25,8 @@ from domain.location_manager import (
 )
 
 try:
+    from identity.tf_preload import preload_tensorflow
+    preload_tensorflow()  # MUST precede the deepface import
     from deepface import DeepFace
     DEEPFACE_AVAILABLE = True
 except ImportError:

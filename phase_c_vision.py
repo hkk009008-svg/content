@@ -9,6 +9,8 @@ from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 from llm.image_encoding import encode_image_for_llm
 from performance._net import safe_download, validate_video_artifact
 try:
+    from identity.tf_preload import preload_tensorflow
+    preload_tensorflow()  # MUST precede the deepface import
     from deepface import DeepFace
     VISION_AVAILABLE = True
 except ImportError:

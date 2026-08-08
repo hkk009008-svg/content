@@ -111,6 +111,8 @@ def assert_ready() -> None:
 def _extract_faces(img_path: str, enforce_detection: bool, align: bool = True) -> List[Dict]:
     """Same detection stack as the DeepFace represent path (module-level so
     tests can monkeypatch detection without loading TF)."""
+    from identity.tf_preload import preload_tensorflow
+    preload_tensorflow()  # MUST precede the deepface import
     from deepface import DeepFace
 
     return DeepFace.extract_faces(
