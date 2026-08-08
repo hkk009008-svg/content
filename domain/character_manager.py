@@ -763,6 +763,103 @@ def _find_canonical_from_uploads(character: dict, char_path: str) -> Optional[st
     return canonical
 
 
+_TEXT_TO_IMAGE_APPLICATION = "fal-ai/flux-pro/v1.1-ultra"
+_TEXT_TO_IMAGE_ENGINE = "FLUX_PRO"
+_TEXT_TO_IMAGE_OPERATION = "character_canonical"
+
+
+def generate_canonical_from_description(
+    description: str,
+    char_path: str,
+    *,
+    cost_tracker=None,
+    video_id: str = "",
+    character_id: str = "",
+    seed: int = 0,
+) -> str:
+    """Generate the DEFINING image of a described character, from text alone.
+
+    This is the one generation in the pipeline with no image source. For a
+    described character it is not a likeness of anything — it IS the character,
+    and every later panel is an edit of it. `_generate_multi_angle_refs` then
+    works unchanged, because those panels are already image-conditioned edits;
+    the gap was only ever panel 1.
+
+    REFUSED for a real person, by the caller passing the right kind. A real
+    character generated from text has nothing about the subject informing it —
+    `classify_generated_origin` labels exactly this case "invented", and an
+    invented reference is a different person's face.
+
+    Paid: reserved through the durable attempt ledger before submission, so an
+    interrupted run resumes its request ID instead of paying twice.
+    """
+
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("a described character needs a description to generate from")
+    if not FAL_AVAILABLE or not settings.fal_key:
+        raise RuntimeError("FAL is unavailable; cannot generate a canonical")
+    if not has_paid_attempt_authority(cost_tracker):
+        raise TypeError(
+            "canonical generation requires the project shared paid-attempt tracker"
+        )
+
+    prompt = (
+        "Photorealistic portrait photograph of a person. "
+        f"{description.strip()} "
+        "Neutral expression, facing the camera directly, even studio lighting, "
+        "plain background, sharp focus on the face, 8K."
+    )
+    recipe = {
+        "prompt": prompt,
+        "aspect_ratio": "3:4",
+        "output_format": "jpeg",
+        "seed": seed,
+        "num_inference_steps": 32,
+        "guidance_scale": 3.5,
+    }
+    logical_character_id = character_id or os.path.basename(os.path.abspath(char_path))
+    fingerprint = request_fingerprint(
+        "character-canonical-v1", _TEXT_TO_IMAGE_APPLICATION, recipe
+    )
+    attempt_id = paid_attempt_id(
+        "character-canonical", video_id, logical_character_id, fingerprint
+    )
+
+    result = run_durable_fal_job(
+        application=_TEXT_TO_IMAGE_APPLICATION,
+        arguments=recipe,
+        attempt_id=attempt_id,
+        engine=_TEXT_TO_IMAGE_ENGINE,
+        operation=_TEXT_TO_IMAGE_OPERATION,
+        estimated_cost_usd=API_COST_USD[_TEXT_TO_IMAGE_ENGINE],
+        request_fingerprint_value=fingerprint,
+        cost_tracker=cost_tracker,
+        shot_id=logical_character_id,
+        video_id=video_id,
+        poll_timeout_s=FAL_TIMEOUT_IMAGE_S,
+    )
+    images = result.get("images") if isinstance(result, Mapping) else None
+    image = images[0] if isinstance(images, list) and images else None
+    img_url = image.get("url") if isinstance(image, Mapping) else None
+    if not isinstance(img_url, str) or not img_url:
+        raise RuntimeError("text-to-image result omitted its generated image URL")
+
+    out_path = os.path.join(char_path, "canonical_defined.jpg")
+    downloaded = safe_download(
+        img_url,
+        out_path,
+        max_bytes=64 * 1024 * 1024,
+        allowed_content_types=("image/jpeg",),
+        content_validator=lambda path: validate_image_artifact(
+            path, expected_formats=("JPEG",)
+        ),
+    )
+    if downloaded is None:
+        raise RuntimeError("generated canonical failed download validation")
+    print(f"   [CANONICAL] Defined from description: {out_path}")
+    return out_path
+
+
 def _generate_multi_angle_refs(
     canonical_path: str,
     char_path: str,
