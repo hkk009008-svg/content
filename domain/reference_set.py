@@ -55,7 +55,13 @@ YAW_CLASSES = ("front", "three_quarter", "profile", "back", "unknown")
 EXPRESSION_CLASSES = ("neutral", "smile", "speaking", "unknown")
 LIGHT_CLASSES = ("studio", "daylight", "low", "unknown")
 FRAMING_CLASSES = ("close", "medium", "wide", "unknown")
-ORIGIN_KINDS = ("photo", "derived", "invented", "unknown")
+# "defined" is the canonical of a DESCRIBED character: generated from text, so
+# it has no image source at all. It is not `derived` (nothing was edited) and
+# certainly not `invented` (there is no ground truth for it to depart from) —
+# it IS the ground truth, the panel every later one is measured against. Giving
+# it its own kind keeps `derived` meaning exactly one thing: an edit of an image
+# that already carried the requested geometry.
+ORIGIN_KINDS = ("photo", "defined", "derived", "invented", "unknown")
 
 # A human verdict, because off-angle references cannot be judged by score.
 JUDGEMENTS = ("keep", "reject", "unjudged")
@@ -178,7 +184,18 @@ def classify_generated_origin(
     """
 
     if creation_kind == "described":
+        # No source image at all: this panel is being generated from text and
+        # therefore DEFINES the character rather than editing anything.
+        if not source_yaw:
+            return "defined"
         return "derived"
+    if not source_yaw:
+        # A real person, generated from NO source image at all — text only.
+        # Nothing about the subject informed it, so it is a stranger by
+        # construction. This is stronger than "unknown" and deliberately so:
+        # a real character must never acquire a text-generated reference under
+        # any label that reads as legitimate.
+        return "invented"
     requested = _facet(requested_yaw, YAW_CLASSES)
     source = _facet(source_yaw, YAW_CLASSES)
     if requested == "unknown" or source == "unknown":
@@ -187,6 +204,41 @@ def classify_generated_origin(
         # this field exists to prevent.
         return "unknown"
     return "derived" if requested == source else "invented"
+
+
+def consent_conflict(
+    creation_kind: str, identity_refs: Sequence[Mapping[str, Any]]
+) -> str:
+    """Return why a set contradicts its declared kind, or "" if consistent.
+
+    The risk worth guarding is the INVERSE of the obvious one. Training a LoRA
+    on synthetic images of a fictional character under a consent flag asserted
+    for nobody is harmless — there is no person. The harm runs the other way: a
+    REAL person's photograph sitting inside a set declared "described", where
+    nothing would prompt anyone to think about biometric consent at all.
+
+    Consent itself is already bound to bytes — the experiment route requires a
+    SHA-256 `reference_fingerprint` over the selected references, so a changed
+    set forces fresh consent. What that binding cannot see is WHOSE face the
+    bytes show. This can, because `origin: photo` records exactly that.
+    """
+
+    if creation_kind != "described":
+        return ""
+    photographs = [
+        str(ref.get("path"))
+        for ref in identity_refs
+        if isinstance(ref, Mapping)
+        and ref.get("origin") == "photo"
+        and ref.get("judged") != "reject"
+    ]
+    if not photographs:
+        return ""
+    return (
+        "a character declared 'described' carries real photographs "
+        f"({', '.join(sorted(photographs))}); either the kind is wrong or a "
+        "real person's images need the consent path for a real subject"
+    )
 
 
 def facets_for_panel(panel_name: str) -> dict[str, str]:

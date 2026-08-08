@@ -374,3 +374,87 @@ def test_normalize_records_creation_kind_and_is_idempotent() -> None:
     normalize_project_schema(project)
     assert project["characters"][0]["creation_kind"] == "real"
     assert normalize_project_schema(project) is False
+
+
+# --- consent semantics for the two kinds -----------------------------------
+
+
+def test_a_described_character_carrying_real_photographs_is_a_conflict() -> None:
+    """The risk runs the opposite way to the obvious one.
+
+    Training on synthetic images of a fictional character under a consent flag
+    asserted for nobody is harmless — there is no person. The harm is a REAL
+    person's photograph sitting inside a set declared "described", where
+    nothing prompts anyone to think about biometric consent at all.
+
+    Consent is already bound to BYTES by a SHA-256 reference_fingerprint, so a
+    changed set forces fresh consent. What that binding cannot see is whose
+    face the bytes show; `origin: photo` records exactly that.
+    """
+
+    from domain.reference_set import consent_conflict
+
+    conflict = consent_conflict("described", [_ref("c/me.jpg", origin="photo")])
+    assert "c/me.jpg" in conflict
+
+
+def test_a_described_character_of_generated_panels_is_consistent() -> None:
+    from domain.reference_set import consent_conflict
+
+    assert consent_conflict("described", [_ref("c/gen.jpg", origin="derived")]) == ""
+
+
+def test_a_real_character_with_photographs_is_never_a_conflict() -> None:
+    """Photographs are exactly what a real character is supposed to carry."""
+
+    from domain.reference_set import consent_conflict
+
+    assert consent_conflict("real", [_ref("c/me.jpg", origin="photo")]) == ""
+
+
+def test_a_rejected_photograph_does_not_raise_a_conflict() -> None:
+    """A rejected reference reaches no provider, so it trains nothing."""
+
+    from domain.reference_set import consent_conflict
+
+    refs = [_ref("c/me.jpg", origin="photo", judged="reject")]
+    assert consent_conflict("described", refs) == ""
+
+
+def test_a_text_generated_canonical_defines_a_described_character() -> None:
+    """It is not derived — nothing was edited — and not invented.
+
+    It IS the ground truth every later panel is measured against, which is why
+    it gets its own origin kind rather than being squeezed into one that
+    already means something else.
+    """
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "described", requested_yaw="front", source_yaw=""
+    ) == "defined"
+
+
+def test_a_real_character_can_never_gain_a_text_generated_reference() -> None:
+    """Text-only generation for a real person is a stranger by construction.
+
+    Nothing about the subject informed the image. "invented" rather than
+    "unknown" deliberately: this must never carry a label that reads as
+    legitimate to a later reader or a UI.
+    """
+
+    from domain.reference_set import classify_generated_origin
+
+    assert classify_generated_origin(
+        "real", requested_yaw="front", source_yaw=""
+    ) == "invented"
+
+
+def test_a_defined_canonical_raises_no_consent_conflict() -> None:
+    """A described character's own canonical is not a real person's photograph."""
+
+    from domain.reference_set import consent_conflict
+
+    refs = [_ref("c/panel1.jpg", origin="defined", roles=["canonical"])]
+    assert consent_conflict("described", refs) == ""

@@ -40,6 +40,7 @@ from identity.lora_training import (
     LoraTrainingError,
     current_lora_candidate_sha256,
 )
+from domain.reference_set import consent_conflict
 from identity.protocols import BENCHMARK_PROMPT, METHOD_CATALOG, SUPPORTED_PROTOCOL_ID
 from performance.comfyui_endpoint import resolve_performance_comfyui
 from pipeline_jobs import safe_error_summary
@@ -425,6 +426,22 @@ def api_create_identity_experiment(pid: str):
         return jsonify({"error": "Character not found"}), 404
     if body.get("lora_consent") is not True:
         return jsonify({"error": "Character LoRA training consent is required"}), 400
+    # Consent is already bound to BYTES below, via a SHA-256
+    # `reference_fingerprint` over the selected references — a changed set
+    # forces fresh consent. What that binding cannot see is WHOSE face the
+    # bytes show. A character declared "described" that carries real
+    # photographs would train on a real person under a consent flow written for
+    # a fictional one, and nothing in the request would reveal it.
+    conflict = consent_conflict(
+        character.get("creation_kind", "real"),
+        character.get("identity_refs") or [],
+    )
+    if conflict:
+        return jsonify({
+            "error": f"Reference set contradicts the character kind: {conflict}",
+            "code": "creation_kind_conflict",
+            "retryable": False,
+        }), 409
     submitted_fingerprint = body.get("reference_fingerprint")
     if not isinstance(submitted_fingerprint, str) or not _SHA256_RE.fullmatch(
         submitted_fingerprint
